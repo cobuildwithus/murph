@@ -698,6 +698,24 @@ export class HostedUserRunner {
     };
   }
 
+  async recordActiveInvocationContainerStopped(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    stoppedAt?: string | null;
+    userId: string;
+  }): Promise<{ recorded: boolean }> {
+    const result = await this.stateStore.recordActiveInvocationContainerStopped(input);
+    if (!result.recorded) {
+      return { recorded: false };
+    }
+    if (this.invocationLock === null) {
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: new Date().toISOString(),
+      });
+    }
+    return { recorded: true };
+  }
+
   async recordActiveInvocationWorkspaceCheckpoint(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -1292,7 +1310,7 @@ export class HostedUserRunner {
   private logStaleInvocationLeaseCleared(
     attemptId: string | null,
     userId: string,
-    reason: "expired" | "worker_version_mismatch",
+    reason: "container_stopped" | "expired" | "worker_version_mismatch",
   ): void {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1302,6 +1320,8 @@ export class HostedUserRunner {
       level: "warn",
       message: reason === "worker_version_mismatch"
         ? "Hosted workspace invocation belonged to a previous worker version; clearing stale in-flight state."
+        : reason === "container_stopped"
+        ? "Hosted workspace invocation container stopped; clearing stale in-flight state."
         : "Hosted workspace invocation lease expired; clearing stale in-flight state.",
       phase: "wake.running",
       userId,

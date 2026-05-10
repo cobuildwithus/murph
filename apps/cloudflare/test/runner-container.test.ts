@@ -592,6 +592,8 @@ describe("RunnerContainer", () => {
       markRunnerRequestStarted = resolve;
     });
     const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    const recordActiveInvocationContainerStopped = vi.fn(async () => ({ recorded: true }));
+    const waitUntilTasks: Promise<unknown>[] = [];
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
@@ -607,6 +609,18 @@ describe("RunnerContainer", () => {
     });
     const { container, destroy, setOutboundByHosts } = createContainerDouble({
       containerFetch,
+      env: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({
+            recordActiveInvocationContainerStopped,
+          })),
+        },
+      },
+      state: {
+        waitUntil: (promise: Promise<unknown>) => {
+          waitUntilTasks.push(promise);
+        },
+      },
     });
 
     const invocation = container.invoke({
@@ -622,6 +636,13 @@ describe("RunnerContainer", () => {
     container.onStop({ exitCode: 0, reason: "exit" });
 
     await expect(invocation).rejects.toThrow("workspace invocation container stopped");
+    await Promise.all(waitUntilTasks);
+    expect(recordActiveInvocationContainerStopped).toHaveBeenCalledWith({
+      attemptId: "attempt_evt_container_stop_during_work",
+      leaseGeneration: "11",
+      stoppedAt: expect.any(String),
+      userId: "member_123",
+    });
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -633,6 +654,80 @@ describe("RunnerContainer", () => {
         }),
         level: "warn",
         message: "Hosted execution container stopped during active work.",
+        phase: "failed",
+      }),
+    );
+  });
+
+  it("fails active workspace invocations when the container lifecycle errors", async () => {
+    let markRunnerRequestStarted!: () => void;
+    const runnerRequestStarted = new Promise<void>((resolve) => {
+      markRunnerRequestStarted = resolve;
+    });
+    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    const recordActiveInvocationContainerStopped = vi.fn(async () => ({ recorded: true }));
+    const waitUntilTasks: Promise<unknown>[] = [];
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      markRunnerRequestStarted();
+      return await hangingRunnerResponse;
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+      env: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({
+            recordActiveInvocationContainerStopped,
+          })),
+        },
+      },
+      state: {
+        waitUntil: (promise: Promise<unknown>) => {
+          waitUntilTasks.push(promise);
+        },
+      },
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_container_error_during_work"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted;
+
+    expect(() => container.onError(new Error("runtime signalled the container to exit"))).toThrow(
+      "runtime signalled the container to exit",
+    );
+
+    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
+    await Promise.all(waitUntilTasks);
+    expect(recordActiveInvocationContainerStopped).toHaveBeenCalledWith({
+      attemptId: "attempt_evt_container_error_during_work",
+      leaseGeneration: "11",
+      stoppedAt: expect.any(String),
+      userId: "member_123",
+    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          activeWorkspaceInvocationAborted: true,
+          lifecycleStage: "onError",
+        }),
+        message: "Hosted execution container lifecycle hook reported an error.",
         phase: "failed",
       }),
     );

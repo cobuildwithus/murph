@@ -393,6 +393,15 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordActiveInvocationHeartbeat(input);
   }
 
+  async recordActiveInvocationContainerStopped(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    stoppedAt?: string | null;
+    userId: string;
+  }): ReturnType<HostedUserRunner["recordActiveInvocationContainerStopped"]> {
+    return this.runner.recordActiveInvocationContainerStopped(input);
+  }
+
   async recordActiveInvocationWorkspaceCheckpoint(input: {
     attemptId: string;
     leaseGeneration: string;
