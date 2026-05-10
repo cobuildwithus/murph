@@ -1,6 +1,6 @@
 I did one more pass against `main` and tightened the plan. The biggest correction is this: **do not delete transcript persistence wholesale.** Transcripts currently support accepted-turn input refs, audit, receipts, and active-turn bookkeeping. The clean cut is to remove **transcript replay as model continuity**, not to delete transcript storage.
 
-This guide incorporates your three uploaded architecture notes and the final `main` review.   
+This guide incorporates your three uploaded architecture notes and the final `main` review.
 
 # Final migration guide: Codex owns continuity; Murph owns routing and runtime side effects
 
@@ -27,7 +27,7 @@ Murph must not own:
   - alternate Murph-side conversation memory
 ```
 
-The architecture doc already points in this direction: assistant runtime state is non-canonical execution residue, session persistence stores one Codex App Server target plus separate resume metadata, and provider-native resume state is the continuity authority when present. 
+The architecture doc already points in this direction: assistant runtime state is non-canonical execution residue, session persistence stores one Codex App Server target plus separate resume metadata, and provider-native resume state is the continuity authority when present.
 
 The durable assistant record should eventually be boring:
 
@@ -70,11 +70,11 @@ threadInstructionsFingerprint // remove from ordinary resume path
 
 # Current `main` facts that shaped the final plan
 
-`main` is already Codex-only in substance. `target-runtime.ts` only exposes `codex-app-server` and `codex-thread`; non-Codex runtime targets throw.  The provider config layer only accepts `codex-cli`, normalizes everything into a Codex target, and resolves Codex runtime capability/continuity from that target.  The registry is a generic-looking wrapper around Codex execution and asserts that the provider is Codex. 
+`main` is already Codex-only in substance. `target-runtime.ts` only exposes `codex-app-server` and `codex-thread`; non-Codex runtime targets throw.  The provider config layer only accepts `codex-cli`, normalizes everything into a Codex target, and resolves Codex runtime capability/continuity from that target.  The registry is a generic-looking wrapper around Codex execution and asserts that the provider is Codex.
 
-The real resume path is Codex-native. `providers/codex-cli.ts` passes `resumeSessionId` to `executeCodexAppServerTurn`, and returns `providerSessionId` plus `codexRolloutRelativePath` from the Codex result. It also has fresh-thread fallback on stale/invalid resume failures.  `assistant-codex.ts` starts/resumes Codex threads and derives the rollout relative path from Codex home and the returned thread path. 
+The real resume path is Codex-native. `providers/codex-cli.ts` passes `resumeSessionId` to `executeCodexAppServerTurn`, and returns `providerSessionId` plus `codexRolloutRelativePath` from the Codex result. It also has fresh-thread fallback on stale/invalid resume failures.  `assistant-codex.ts` starts/resumes Codex threads and derives the rollout relative path from Codex home and the returned thread path.
 
-Murph still owns useful non-Codex state. `resolveAssistantSession` currently resolves by explicit session id, alias, and conversation key; creates a durable local record with target, binding, timestamps, turn count, and resume state; and maintains session/index/transcript state.  Binding logic is real product logic: it computes conversation keys, prevents binding isolation conflicts, infers delivery routes, and builds route context lines. Codex cannot replace this. 
+Murph still owns useful non-Codex state. `resolveAssistantSession` currently resolves by explicit session id, alias, and conversation key; creates a durable local record with target, binding, timestamps, turn count, and resume state; and maintains session/index/transcript state.  Binding logic is real product logic: it computes conversation keys, prevents binding isolation conflicts, infers delivery routes, and builds route context lines. Codex cannot replace this.
 
 Transcripts are not only historical replay. The local service appends transcript entries to create transcript refs for accepted-turn inputs and active-turn continuations.  The accepted-turn input journal requires stable transcript coordinates when transcript refs are updated.  So transcript persistence stays, but it stops being a continuity source.
 
@@ -84,7 +84,7 @@ Transcripts are not only historical replay. The local service appends transcript
 
 ## 1. Remove `AssistantExecutionPlan.resumeState`
 
-This is a pure leftover. `resolveAssistantExecutionPlan` accepts/returns `resumeState`, but route construction uses target/provider config, not resume state.  `service-turn-routes.ts` passes `resolved.session.resumeState` into `resolveAssistantExecutionPlan` and only uses `.codexRoute`. 
+This is a pure leftover. `resolveAssistantExecutionPlan` accepts/returns `resumeState`, but route construction uses target/provider config, not resume state.  `service-turn-routes.ts` passes `resolved.session.resumeState` into `resolveAssistantExecutionPlan` and only uses `.codexRoute`.
 
 Cut:
 
@@ -98,7 +98,7 @@ Do not change actual resume behavior yet; that happens later in turn planning.
 
 ## 2. Remove `continuityContext`
 
-`provider-turn/planning.ts` returns `continuityContext: null`.  It is still present in service/provider types and forwarded through execution.  
+`provider-turn/planning.ts` returns `continuityContext: null`.  It is still present in service/provider types and forwarded through execution.
 
 Cut it from:
 
@@ -117,7 +117,7 @@ This removes the last generic “Murph-supplied continuity blob” concept. Resu
 
 ## 3. Delete stale duplicate service-contract planning types
 
-`service-contracts.ts` defines `AssistantRouteTurnPlan`, `AssistantProviderTurnExecutionPlan`, and `AssistantProviderAttemptPlan`, while `provider-turn/planning.ts` defines the real richer versions used by the runner. Search only finds the service-contracts definitions and the provider-turn versions.  
+`service-contracts.ts` defines `AssistantRouteTurnPlan`, `AssistantProviderTurnExecutionPlan`, and `AssistantProviderAttemptPlan`, while `provider-turn/planning.ts` defines the real richer versions used by the runner. Search only finds the service-contracts definitions and the provider-turn versions.
 
 After removing `continuityContext`, delete the stale service-contracts versions unless a direct import proves they are still needed.
 
@@ -129,7 +129,7 @@ After removing `continuityContext`, delete the stale service-contracts versions 
 
 Right now the resume-state shape is normalized in two places.
 
-`assistant-cli-contracts.ts` defines `assistantSessionResumeStateSchema`, validates `providerSessionId`, `resumeRouteId`, `codexRolloutRelativePath`, and `threadInstructionsFingerprint`, and normalizes resume state without a provider session id to null.  `provider-state.ts` duplicates the rollout regex, thread-instructions fingerprint regex, and helper normalization logic. 
+`assistant-cli-contracts.ts` defines `assistantSessionResumeStateSchema`, validates `providerSessionId`, `resumeRouteId`, `codexRolloutRelativePath`, and `threadInstructionsFingerprint`, and normalizes resume state without a provider session id to null.  `provider-state.ts` duplicates the rollout regex, thread-instructions fingerprint regex, and helper normalization logic.
 
 Create one owner:
 
@@ -193,7 +193,7 @@ Keep the persisted v1 parser tolerant:
 
 ## 6. Keep the route safety guard
 
-Do **not** remove this. `provider-route.ts` hashes Codex command, model, model provider, reasoning effort, sandbox, approval policy, profile, OSS mode, normalized Codex home, and resume kind into `routeId`.  `provider-binding.ts` only resumes when the stored route id exactly matches the current route id, specifically to avoid resuming the wrong upstream thread after target changes. 
+Do **not** remove this. `provider-route.ts` hashes Codex command, model, model provider, reasoning effort, sandbox, approval policy, profile, OSS mode, normalized Codex home, and resume kind into `routeId`.  `provider-binding.ts` only resumes when the stored route id exactly matches the current route id, specifically to avoid resuming the wrong upstream thread after target changes.
 
 Rename it; do not delete it.
 
@@ -230,7 +230,7 @@ session.turnCount > 0
 threadScope === session-thread
 ```
 
-It then selects up to 12 replay messages from Murph transcripts. 
+It then selects up to 12 replay messages from Murph transcripts.
 
 Remove:
 
@@ -241,7 +241,7 @@ toAssistantReplayMessage
 conversationMessages from historical Murph transcript fallback
 ```
 
-Then remove `conversationMessages` from Codex prompt input unless it is still needed only for active-turn in-memory history. The active-turn path has a separate `activeTurnMessages`/`activeTurnHistory` mechanism and should not depend on durable transcript replay. 
+Then remove `conversationMessages` from Codex prompt input unless it is still needed only for active-turn in-memory history. The active-turn path has a separate `activeTurnMessages`/`activeTurnHistory` mechanism and should not depend on durable transcript replay.
 
 New behavior:
 
@@ -262,7 +262,7 @@ Do **not** remove `appendAssistantTranscriptEntries`, transcript files, or trans
 
 Reasons:
 
-`local-service.ts` persists user prompts and accepted active-turn inputs to transcript files, then stores transcript refs in accepted-turn input journals.  `active-turn-input-journal.ts` validates that transcript refs use the original session id and materialized entry coordinates. 
+`local-service.ts` persists user prompts and accepted active-turn inputs to transcript files, then stores transcript refs in accepted-turn input journals.  `active-turn-input-journal.ts` validates that transcript refs use the original session id and materialized entry coordinates.
 
 Rename intent:
 
@@ -291,7 +291,7 @@ Do not keep “replay” in names.
 
 ## 10. Stop refreshing thread instructions by default on resume
 
-`assistant-codex/app-server-requests.ts` sends `developerInstructions` on `thread/resume` unless `refreshThreadInstructions === false`.  Planning computes `threadInstructionsFingerprint`, compares it with stored state, and may request refresh. 
+`assistant-codex/app-server-requests.ts` sends `developerInstructions` on `thread/resume` unless `refreshThreadInstructions === false`.  Planning computes `threadInstructionsFingerprint`, compares it with stored state, and may request refresh.
 
 Clean behavior:
 
@@ -308,11 +308,11 @@ explicit migration/debug mode:
 
 So remove `threadInstructionsFingerprint` from persisted resume state, or leave it only as a temporary v1 field ignored by ordinary resume.
 
-This aligns with the architecture doc’s rule that provider-native resume is the continuity authority and bootstrap/system instructions should not be repeatedly injected as resumed-turn user content. 
+This aligns with the architecture doc’s rule that provider-native resume is the continuity authority and bootstrap/system instructions should not be repeatedly injected as resumed-turn user content.
 
 ## 11. Keep bootstrap injection for new threads
 
-Do not delete bootstrap context, CLI surface bootstrap, vault overview, active experiment context, binding context, or onboarding guidance. Planning still needs to construct first-turn context for new Codex threads. 
+Do not delete bootstrap context, CLI surface bootstrap, vault overview, active experiment context, binding context, or onboarding guidance. Planning still needs to construct first-turn context for new Codex threads.
 
 Only remove the “recompute and refresh persisted thread instructions on ordinary resume” behavior.
 
@@ -390,7 +390,7 @@ provider-turn-runner.ts
 providers/registry.ts
 ```
 
-But only `codex-cli` is supported in contracts and runtime.  
+But only `codex-cli` is supported in contracts and runtime.
 
 Recommended internal names:
 
@@ -408,7 +408,7 @@ provider-turn-runner.ts              -> codex-turn-runner.ts
 providers/codex-cli.ts               -> codex-app-server-provider.ts
 ```
 
-Keep public compatibility wrappers temporarily if CLI/API callers still import provider-shaped types. `service.ts` and the CLI wrapper still expose `openAssistantConversation`, `sendAssistantMessage`, and `updateAssistantSessionOptions`.  
+Keep public compatibility wrappers temporarily if CLI/API callers still import provider-shaped types. `service.ts` and the CLI wrapper still expose `openAssistantConversation`, `sendAssistantMessage`, and `updateAssistantSessionOptions`.
 
 ## 15. Collapse registry wrappers only after names settle
 
@@ -444,7 +444,7 @@ manual aliases
 conversation lookup keys
 ```
 
-`runtime-state-service.ts` exposes sessions, transcripts, outbox, status, diagnostics, and turns as one vault-bound facade.  The local service depends on the session id across receipts, accepted-input journals, delivery, active-turn input, and finalization. 
+`runtime-state-service.ts` exposes sessions, transcripts, outbox, status, diagnostics, and turns as one vault-bound facade.  The local service depends on the session id across receipts, accepted-input journals, delivery, active-turn input, and finalization.
 
 So the migration should be a schema/meaning change, not a blind deletion.
 
@@ -519,7 +519,7 @@ diagnostics
 status snapshots
 ```
 
-This avoids breaking the active-turn transcript-ref invariant in `active-turn-input-journal.ts`. 
+This avoids breaking the active-turn transcript-ref invariant in `active-turn-input-journal.ts`.
 
 ## 19. Stop pre-creating provider-continuity on open
 
@@ -559,7 +559,7 @@ Do this after v2 schema exists, not before.
 
 ## 20. Keep `codexRolloutRelativePath` for now
 
-Do not remove rollout paths yet. Hosted snapshots include only Codex rollout JSONL files explicitly referenced by live assistant session resume state, and foreground turns rely on normal workspace snapshotting for provider-native continuity.  `runtime-state/hosted-bundles.ts` has explicit hosted Codex continuity collection/diagnostics around prepared thread ids and rollout relative paths. 
+Do not remove rollout paths yet. Hosted snapshots include only Codex rollout JSONL files explicitly referenced by live assistant session resume state, and foreground turns rely on normal workspace snapshotting for provider-native continuity.  `runtime-state/hosted-bundles.ts` has explicit hosted Codex continuity collection/diagnostics around prepared thread ids and rollout relative paths.
 
 Remove `codexRolloutRelativePath` only if hosted snapshotting can prove continuity another way.
 
@@ -652,7 +652,7 @@ session/conversation store must not persist it on failure
 
 ## Notification / cron / isolated thread
 
-`notification-turn.ts` uses a notification-decision profile and still persists provider resume if a provider session id returns.  `provider-turn/planning.ts` currently isolates automation-cron and notification-decision unless explicitly overridden in profile rules. 
+`notification-turn.ts` uses a notification-decision profile and still persists provider resume if a provider session id returns.  `provider-turn/planning.ts` currently isolates automation-cron and notification-decision unless explicitly overridden in profile rules.
 
 Expected:
 
@@ -676,7 +676,7 @@ do not use durable transcript replay for next-turn model continuity
 
 ## Rich user message content
 
-Provider runner filters unsupported rich content by Codex target capability. Tests assert unsupported file/PDF parts are dropped while images pass through. 
+Provider runner filters unsupported rich content by Codex target capability. Tests assert unsupported file/PDF parts are dropped while images pass through.
 
 Expected:
 
@@ -717,7 +717,7 @@ threadInstructionsFingerprint refreshes ordinary resumed threads
 provider-state.ts owns independent normalization
 ```
 
-Update tests that construct `AssistantRouteTurnPlan` and currently include `continuityContext`, `threadInstructionsFingerprint`, or provider-generic names. Existing provider final coverage tests construct route plans with `continuityContext: null` and `threadInstructionsFingerprint`. 
+Update tests that construct `AssistantRouteTurnPlan` and currently include `continuityContext`, `threadInstructionsFingerprint`, or provider-generic names. Existing provider final coverage tests construct route plans with `continuityContext: null` and `threadInstructionsFingerprint`.
 
 ## New unit tests
 
