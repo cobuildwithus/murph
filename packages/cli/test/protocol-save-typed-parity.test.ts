@@ -71,6 +71,10 @@ function assertCompactSavedEntity(entity: SavedEntitySnapshot) {
   }
 }
 
+function savedEntityLinkIds(entity: SavedEntitySnapshot): string[] {
+  return entity.links.map((link) => String(link.id)).sort();
+}
+
 function createRegimenSaveCli() {
   const cli = Cli.create("vault-cli", {
     description: "regimen typed save parity test cli",
@@ -283,6 +287,12 @@ test("regimen save persists typed product metadata and primary ingredient fields
       "--no-ingredient-active",
       "--group",
       "supplement",
+      "--related-goal-id",
+      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+      "--related-condition-id",
+      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--related-regimen-id",
+      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
       "--vault",
       vaultRoot,
     ]);
@@ -306,6 +316,20 @@ test("regimen save persists typed product metadata and primary ingredient fields
     assert.equal(savedRegimen.entity.data.schedule, "with breakfast");
     assert.equal(savedRegimen.entity.data.dose, 1);
     assert.equal(savedRegimen.entity.data.unit, "packet");
+    assert.deepEqual(savedRegimen.entity.data.relatedGoalIds, [
+      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+    ]);
+    assert.deepEqual(savedRegimen.entity.data.relatedConditionIds, [
+      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    ]);
+    assert.deepEqual(savedRegimen.entity.data.relatedRegimenIds, [
+      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
+    ]);
+    assert.deepEqual(savedEntityLinkIds(savedRegimen.entity), [
+      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
+    ]);
     assert.deepEqual(savedRegimen.entity.data.ingredients, [
       {
         compound: "Vitamin C",
