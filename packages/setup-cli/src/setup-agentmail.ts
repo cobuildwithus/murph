@@ -4,6 +4,7 @@ import {
   listAllAgentmailInboxes,
   matchesAgentmailHttpError,
   resolveAgentmailApiKey,
+  resolveAgentmailBaseUrl,
   type AgentmailApiClient,
   type AgentmailInbox,
 } from '@murphai/operator-config/agentmail-runtime'
@@ -32,6 +33,7 @@ export type SetupAgentmailSelectionResolver = (input: {
 interface SetupAgentmailSelectionResolverDependencies {
   createClient?: (input: {
     apiKey: string
+    baseUrl?: string
   }) => AgentmailApiClient
   prompter?: SetupAgentmailPrompter
 }
@@ -41,7 +43,8 @@ export function createSetupAgentmailSelectionResolver(
 ): SetupAgentmailSelectionResolver {
   const createClient =
     dependencies.createClient ??
-    ((input: { apiKey: string }) => createAgentmailApiClient(input.apiKey))
+    ((input: { apiKey: string; baseUrl?: string }) =>
+      createAgentmailApiClient(input.apiKey, { baseUrl: input.baseUrl }))
   const prompter = dependencies.prompter ?? createSetupAgentmailPrompter()
 
   return async (input) => {
@@ -49,9 +52,11 @@ export function createSetupAgentmailSelectionResolver(
     if (!apiKey) {
       return null
     }
+    const baseUrl = resolveAgentmailBaseUrl(input.env)
 
     const client = createClient({
       apiKey,
+      ...(baseUrl ? { baseUrl } : {}),
     })
 
     try {

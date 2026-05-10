@@ -1,0 +1,96 @@
+import { describe, expect, it } from "vitest";
+
+import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
+import { buildHealthCommonsWebBiomarkerResearch } from "../src/biomarker-web-artifacts.ts";
+
+const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
+const TEST_CATALOG_HASH = `sha256:${"2".repeat(64)}`;
+const SOURCE_KEY = "source_artifact:test-source";
+
+describe("@murphai/health-commons biomarker web artifacts", () => {
+  it("omits unsafe biomarker source urls from research links", () => {
+    const unsafeUrls = [
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "file:///etc/passwd",
+      "//example.test/source",
+      "https://user:password@example.test/source",
+    ];
+
+    for (const unsafeUrl of unsafeUrls) {
+      const research = buildResearchWithSourceUrl(unsafeUrl);
+
+      expect(research.sourceHighlights[0]?.externalUrl).toBeNull();
+      expect(research.claims[0]?.sources[0]?.externalUrl).toBeNull();
+    }
+  });
+
+  it("keeps safe biomarker source urls in research links", () => {
+    const research = buildResearchWithSourceUrl(" https://example.test/source ");
+
+    expect(research.sourceHighlights[0]?.externalUrl).toBe("https://example.test/source");
+    expect(research.claims[0]?.sources[0]?.externalUrl).toBe("https://example.test/source");
+  });
+});
+
+function buildResearchWithSourceUrl(url: string) {
+  const biomarker = createBiomarkerEntity();
+  const source = createSourceEntity(url);
+  const entitiesByKey = new Map<string, HealthCommonsCatalogEntity>([
+    [biomarker.key, biomarker],
+    [source.key, source],
+  ]);
+
+  return buildHealthCommonsWebBiomarkerResearch({
+    biomarker,
+    catalogHash: TEST_CATALOG_HASH,
+    entitiesByKey,
+    routeAliases: [],
+    routeId: "test-biomarker",
+    routeIdByEntityKey: new Map([[biomarker.key, "test-biomarker"]]),
+  });
+}
+
+function createBiomarkerEntity() {
+  return {
+    schemaVersion: "murph.commons.page.v1",
+    entityType: "biomarker",
+    key: "biomarker:test-biomarker",
+    slug: "biomarkers/test-biomarker",
+    title: "Test biomarker",
+    body: "Test biomarker body.",
+    claims: [
+      {
+        claimId: "test-claim",
+        type: "evidence_scope",
+        text: "Test claim.",
+        strength: "moderate",
+        sourceKeys: [SOURCE_KEY],
+      },
+    ],
+    relativePath: "biomarkers/test-biomarker.md",
+    revision: {
+      pageRevisionId: TEST_PAGE_REVISION_ID,
+    },
+  } satisfies HealthCommonsCatalogEntity & { entityType: "biomarker" };
+}
+
+function createSourceEntity(url: string) {
+  return {
+    schemaVersion: "murph.commons.page.v1",
+    entityType: "source_artifact",
+    key: SOURCE_KEY,
+    slug: "sources/test-source",
+    title: "Test source",
+    body: "Test source body.",
+    source: {
+      kind: "web_page",
+      title: "Test source",
+      url,
+    },
+    relativePath: "sources/test-source.md",
+    revision: {
+      pageRevisionId: TEST_PAGE_REVISION_ID,
+    },
+  } satisfies HealthCommonsCatalogEntity;
+}
