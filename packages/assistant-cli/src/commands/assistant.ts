@@ -28,7 +28,7 @@ import {
   runAssistantChat,
   sendAssistantMessage,
   stopAssistantAutomation,
-} from '../assistant/runtime.js'
+} from '../assistant-runtime.js'
 import {
   assertAssistantInkInteractiveInputAvailable,
 } from '../assistant-chat-ink.js'

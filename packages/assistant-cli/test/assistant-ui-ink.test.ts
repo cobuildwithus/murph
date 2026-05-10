@@ -305,7 +305,7 @@ test('Ink input adapter closes the fallback file descriptor when a TTY stream st
   }
 })
 
-test('runAssistantChatWithInk resolves a redacted result after Ink unmounts and the package barrel re-exports it', async () => {
+test('runAssistantChatWithInk resolves a redacted result after Ink unmounts', async () => {
   const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
   const stdin = createInkTestInput()
   Object.defineProperty(process, 'stdin', {

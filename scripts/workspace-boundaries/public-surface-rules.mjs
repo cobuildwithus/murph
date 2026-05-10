@@ -86,6 +86,11 @@ export async function verifyFocusedOwnerSourceSurfaces(failures) {
         "packages/cloudflare-hosted-control/src/index.ts exists; cloudflare-hosted-control is subpath-only and must not revive a package-root barrel beside its explicit client and route entrypoints.",
     },
     {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "index.ts"),
+      message:
+        "packages/operator-config/src/index.ts exists; operator-config is subpath-only and must not revive a package-root barrel beside its explicit config and runtime entrypoints.",
+    },
+    {
       path: path.join(repoRoot, "packages", "operator-config", "src", "knowledge-contracts.ts"),
       message:
         "packages/operator-config/src/knowledge-contracts.ts exists; knowledge result contracts are owned by @murphai/query and must not return through an operator-config compatibility shim.",
@@ -107,17 +112,6 @@ export async function verifyFocusedOwnerSourceSurfaces(failures) {
     },
   ];
   const sourceChecks = [
-    {
-      path: path.join(repoRoot, "packages", "operator-config", "src", "index.ts"),
-      failures: [
-        {
-          specifier: "./knowledge-contracts.js",
-          message:
-            "packages/operator-config/src/index.ts mentions ./knowledge-contracts.js; knowledge result contracts are owned by @murphai/query and should not leak through the operator-config umbrella barrel.",
-        },
-      ],
-      predicate: sourceMentionsSpecifier,
-    },
     {
       path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "documents.ts"),
       failures: [
