@@ -30,6 +30,7 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
+  attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
   denyUnsupportedCodexServerRequest,
@@ -37,6 +38,7 @@ import {
   readCodexRpcServerRequestId,
   rejectPendingCodexRpcRequests,
   resolvePendingCodexRpcRequest,
+  signalCodexAppServerChild,
   stopCodexAppServerChild,
   stripUndefinedRpcParams,
   tryParseJsonLine,
@@ -288,6 +290,10 @@ async function runCodexAppServerTurn(
     env: input.env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
+  const processGroupPid = useProcessGroup ? child.pid ?? null : null
+  const cleanupProcessExitListener = attachCodexAppServerProcessExitCleanup({
+    processGroupPid,
+  })
 
   let stdout = ''
   let stderr = ''
@@ -489,7 +495,11 @@ async function runCodexAppServerTurn(
         })
         nextRequestId += 1
       }
-      child.kill('SIGINT')
+      signalCodexAppServerChild({
+        child,
+        processGroupPid,
+        signal: 'SIGINT',
+      })
     },
   })
 
@@ -825,7 +835,7 @@ async function runCodexAppServerTurn(
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
-      processGroupPid: useProcessGroup ? child.pid ?? null : null,
+      processGroupPid,
     })
     emitAppServerTimingTrace('shutdown')
     if (stdinFailure) {
@@ -838,12 +848,13 @@ async function runCodexAppServerTurn(
     await stopCodexAppServerChild({
       child,
       closeStdin: tryCloseCodexStdin,
-      processGroupPid: useProcessGroup ? child.pid ?? null : null,
+      processGroupPid,
     }).catch(() => undefined)
     throw error
   } finally {
     closeLiveTurn()
     cleanupAbortListener()
+    cleanupProcessExitListener()
   }
 
   const finalMessage =

@@ -346,11 +346,13 @@ export async function runCommand(
     });
     child.on("close", (code, signal) => {
       if (failureError) {
+        killChildProcessTree("SIGKILL");
         finishReject(failureError);
         return;
       }
 
       if (signal) {
+        killChildProcessTree("SIGKILL");
         finishReject(
           new Error(
             `Command failed (${path.basename(command)}): signal ${signal}`,
@@ -360,6 +362,7 @@ export async function runCommand(
       }
 
       if (code === null) {
+        killChildProcessTree("SIGKILL");
         finishReject(
           new Error(
             `Command failed (${path.basename(command)}): exit unknown`,
@@ -370,6 +373,7 @@ export async function runCommand(
 
       const exitCode = code;
       if (exitCode !== 0) {
+        killChildProcessTree("SIGKILL");
         finishReject(
           new Error(`Command failed (${path.basename(command)}): ${redactSensitiveText(stderr.trim() || stdout.trim() || `exit ${exitCode}`)}`),
         );

@@ -975,6 +975,30 @@ test("shared parser helpers cover vault path guards, markdown shaping, and recur
     await runCommand(successfulWrapperWithDescendant, [successfulDescendantMarkerPath]);
     await new Promise((resolve) => setTimeout(resolve, 800));
     await assert.rejects(fs.access(successfulDescendantMarkerPath));
+
+    const failingDescendantMarkerPath = path.join(
+      commandDirectory,
+      "failing-descendant-survived.txt",
+    );
+    const failingWrapperWithDescendant = await writeExecutable(
+      commandDirectory,
+      "spawn-failing-descendant-command",
+      [
+        "#!/usr/bin/env node",
+        "const { spawn } = require('node:child_process');",
+        "const markerPath = process.argv[2];",
+        "const childScript = \"const markerPath = process.argv[1]; setTimeout(() => require('node:fs').writeFileSync(markerPath, 'alive'), 500); setInterval(() => {}, 1000);\";",
+        "spawn(process.execPath, ['-e', childScript, markerPath], { stdio: 'ignore' }).unref();",
+        "process.stderr.write('failed');",
+        "process.exit(2);",
+      ].join("\n"),
+    );
+    await assert.rejects(
+      runCommand(failingWrapperWithDescendant, [failingDescendantMarkerPath]),
+      /failed/u,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await assert.rejects(fs.access(failingDescendantMarkerPath));
   }
 
   const aborted = new AbortController();

@@ -139,11 +139,24 @@ function loadThreadHistoryFromRollout(threadId) {
     });
 }
 
-function readTextInput(params) {
+function readInputItems(params) {
   const input = params && Array.isArray(params.input) ? params.input : [];
   return input
-    .flatMap((item) => item && item.type === "text" && typeof item.text === "string" ? [item.text] : [])
-    .join("\\n\\n");
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      if (item.type === "text" && typeof item.text === "string") {
+        return [{ type: "text", text: item.text }];
+      }
+      if (item.type === "image" && isSafeDataImageUrl(item.url)) {
+        return [{ type: "image", url: item.url }];
+      }
+      if (item.type === "localImage" && typeof item.path === "string") {
+        return [{ type: "localImage", path: item.path }];
+      }
+      return [];
+    });
 }
 
 function readThreadAssistantHistory(threadId) {
@@ -167,8 +180,142 @@ function appendThreadAssistantMessage(threadId, text) {
   });
 }
 
-function buildTurnPrompt(turn) {
-  return turn.prompts.filter(Boolean).join("\\n\\n");
+function buildThreadHistoryPrompt(threadId) {
+  const history = readThreadAssistantHistory(threadId);
+  if (history.length === 0) {
+    return "";
+  }
+
+  return "Conversation so far:\\n"
+    + history.map((text) => "Assistant:\\n" + text).join("\\n\\n");
+}
+
+function inferImageMimeType(imagePath) {
+  const extension = path.extname(imagePath).toLowerCase();
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  if (extension === ".gif") {
+    return "image/gif";
+  }
+  return "image/png";
+}
+
+function isSafeDataImageUrl(value) {
+  return typeof value === "string" && /^data:image\\/[a-z0-9.+-]+;base64,/iu.test(value);
+}
+
+function pushImageContent(content, imageUrl, imageIndex) {
+  content.push({
+    type: "input_text",
+    text: "<image name=[Image #" + imageIndex + "]>",
+  });
+  content.push({
+    detail: "auto",
+    image_url: imageUrl,
+    type: "input_image",
+  });
+  content.push({
+    type: "input_text",
+    text: "</image>",
+  });
+}
+
+function pushUnreadableImageContent(content, imageIndex) {
+  content.push({
+    type: "input_text",
+    text: "<image name=[Image #" + imageIndex + "]>",
+  });
+  content.push({
+    type: "input_text",
+    text: "Codex could not read a local image attachment.",
+  });
+  content.push({
+    type: "input_text",
+    text: "</image>",
+  });
+}
+
+function buildProviderContentFromInputItems(items) {
+  const content = [];
+  let imageIndex = 0;
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    if (item.type === "text" && typeof item.text === "string") {
+      content.push({
+        type: "input_text",
+        text: item.text,
+      });
+      continue;
+    }
+
+    if (item.type === "image" && typeof item.url === "string") {
+      imageIndex += 1;
+      pushImageContent(content, item.url, imageIndex);
+      continue;
+    }
+
+    if (item.type === "localImage" && typeof item.path === "string") {
+      imageIndex += 1;
+      try {
+        const bytes = fs.readFileSync(item.path);
+        const mimeType = inferImageMimeType(item.path);
+        pushImageContent(
+          content,
+          "data:" + mimeType + ";base64," + bytes.toString("base64"),
+          imageIndex,
+        );
+      } catch {
+        pushUnreadableImageContent(content, imageIndex);
+      }
+    }
+  }
+
+  return content;
+}
+
+function buildTurnProviderInput(turn) {
+  const content = [];
+  const historyPrompt = buildThreadHistoryPrompt(turn.threadId);
+  if (historyPrompt) {
+    content.push({
+      type: "input_text",
+      text: historyPrompt,
+    });
+  }
+
+  for (const items of turn.inputs) {
+    const nextContent = buildProviderContentFromInputItems(items);
+    if (nextContent.length === 0) {
+      continue;
+    }
+    if (content.length > 0) {
+      content.push({
+        type: "input_text",
+        text: "\\n\\n",
+      });
+    }
+    content.push(...nextContent);
+  }
+
+  if (content.length === 0) {
+    content.push({
+      type: "input_text",
+      text: "",
+    });
+  }
+
+  return [{
+    content,
+    role: "user",
+  }];
 }
 
 function extractResponseText(payload) {
@@ -185,10 +332,10 @@ function extractResponseText(payload) {
   throw new Error("assistant provider stub response did not contain output text");
 }
 
-async function fetchAssistantResponse(prompt) {
+async function fetchAssistantResponse(providerInput) {
   const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
     body: JSON.stringify({
-      input: prompt,
+      input: providerInput,
       model: "hosted-e2e-codex-shim",
     }),
     headers: {
@@ -199,7 +346,7 @@ async function fetchAssistantResponse(prompt) {
   const rawBody = await response.text();
 
   if (!response.ok) {
-    throw new Error("assistant provider stub failed with HTTP " + response.status + ": " + rawBody);
+    throw new Error("assistant provider stub failed with HTTP " + response.status);
   }
 
   return extractResponseText(JSON.parse(rawBody));
@@ -212,8 +359,8 @@ async function completeTurn(turn) {
   turn.completed = true;
 
   try {
-    const prompt = buildTurnPrompt(turn);
-    const text = await fetchAssistantResponse(prompt);
+    const providerInput = buildTurnProviderInput(turn);
+    const text = await fetchAssistantResponse(providerInput);
     appendThreadAssistantMessage(turn.threadId, text);
     writeRpc({
       type: "item.completed",
@@ -310,7 +457,7 @@ async function handleRpc(message) {
     const turnId = "turn_hosted_local_" + (++turnCounter);
     const turn = {
       completed: false,
-      prompts: [readTextInput(params)],
+      inputs: [readInputItems(params)],
       threadId,
       turnId,
     };
@@ -340,7 +487,7 @@ async function handleRpc(message) {
       writeRpcError(id, "hosted E2E Codex shim does not have an active turn");
       return;
     }
-    activeTurn.prompts.push(readTextInput(params));
+    activeTurn.inputs.push(readInputItems(params));
     writeRpc({
       id,
       result: {

@@ -37,6 +37,7 @@ import {
   type CodexAppServerInputItem,
 } from '../src/assistant-codex/app-server-requests.ts'
 import {
+  attachCodexAppServerProcessExitCleanup,
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
@@ -1671,7 +1672,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and kills the child with SIGINT', async () => {
+  it('treats abort-race stdin EPIPE as interrupted, sends turn/interrupt, and signals the child group', async () => {
     const workingDirectory = await createTempDir('assistant-codex-abort-')
     const controller = new AbortController()
     let child: MockChildProcess | null = null
@@ -1679,6 +1680,15 @@ describe('assistant codex runtime', () => {
     codexMocks.spawn.mockImplementation(() => {
       const spawnedChild = new MockChildProcess()
       child = spawnedChild
+      vi.mocked(process.kill).mockImplementation((pid, signal) => {
+        if (pid === -spawnedChild.pid && signal === 'SIGINT') {
+          queueMicrotask(() => {
+            spawnedChild.emit('exit', null, signal)
+            spawnedChild.emit('close', null, signal)
+          })
+        }
+        return true
+      })
       spawnedChild.stdin.onWrite = (write) => {
         const message = asRecord(JSON.parse(write))
         if (message.method !== 'turn/interrupt') {
@@ -1761,7 +1771,8 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-abort',
       },
     })
-    expect(spawnedChild.kill).toHaveBeenCalledWith('SIGINT')
+    expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGINT')
+    expect(spawnedChild.kill).not.toHaveBeenCalledWith('SIGINT')
   })
 
   it('terminates Codex app-server process groups during shutdown', async () => {
@@ -1786,6 +1797,31 @@ describe('assistant codex runtime', () => {
     expect(killSpy).toHaveBeenCalledWith(-424_242, 'SIGTERM')
     expect(killSpy).toHaveBeenCalledWith(-424_242, 'SIGKILL')
     expect(child.kill).not.toHaveBeenCalled()
+  })
+
+  it('registers parent-exit and signal cleanup for detached Codex app-server groups', () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const killSpy = vi.mocked(process.kill)
+    const onceSpy = vi.spyOn(process, 'once')
+    const offSpy = vi.spyOn(process, 'off')
+    const cleanup = attachCodexAppServerProcessExitCleanup({
+      processGroupPid: 515_151,
+    })
+    const exitListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'exit')?.[1]
+    const sigtermListener = onceSpy.mock.calls.find(([eventName]) => eventName === 'SIGTERM')?.[1]
+    expect(exitListener).toBeTypeOf('function')
+    expect(sigtermListener).toBeTypeOf('function')
+
+    ;(sigtermListener as () => void)()
+    cleanup()
+
+    expect(killSpy).toHaveBeenCalledWith(-515_151, 'SIGKILL')
+    expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM')
+    expect(offSpy).toHaveBeenCalledWith('exit', exitListener)
+    expect(offSpy).toHaveBeenCalledWith('SIGTERM', sigtermListener)
   })
 })
 

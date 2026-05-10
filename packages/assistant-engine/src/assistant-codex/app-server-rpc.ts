@@ -51,6 +51,48 @@ export function attachCodexAbortListener(input: {
   }
 }
 
+export function attachCodexAppServerProcessExitCleanup(input: {
+  processGroupPid?: number | null
+}): () => void {
+  const processGroupPid = normalizeCodexProcessGroupPid(input.processGroupPid)
+  if (processGroupPid === null) {
+    return () => {}
+  }
+
+  const signalHandlers = new Map<NodeJS.Signals, () => void>()
+
+  const cleanup = () => {
+    killCodexProcessGroupBestEffort(processGroupPid, 'SIGKILL')
+  }
+  const removeListeners = () => {
+    process.off('exit', cleanup)
+    for (const [signal, handler] of signalHandlers) {
+      process.off(signal, handler)
+    }
+    signalHandlers.clear()
+  }
+  const forwardSignalAfterCleanup = (signal: NodeJS.Signals) => {
+    cleanup()
+    removeListeners()
+    try {
+      process.kill(process.pid, signal)
+    } catch {
+      process.exit(resolveSignalExitCode(signal))
+    }
+  }
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const handler = () => {
+      forwardSignalAfterCleanup(signal)
+    }
+    signalHandlers.set(signal, handler)
+    process.once(signal, handler)
+  }
+
+  process.once('exit', cleanup)
+  return removeListeners
+}
+
 export function writeCodexRpcMessage(
   child: ChildProcessWithoutNullStreams,
   payload: Record<string, unknown>,
@@ -90,6 +132,18 @@ export async function waitForCodexSpawn(
     child.once('spawn', handleSpawn)
     child.once('error', handleError)
   })
+}
+
+export function signalCodexAppServerChild(input: {
+  child: StoppableCodexAppServerChild
+  processGroupPid?: number | null
+  signal: NodeJS.Signals
+}): void {
+  terminateCodexAppServerChild(
+    input.child,
+    normalizeCodexProcessGroupPid(input.processGroupPid),
+    input.signal,
+  )
 }
 
 export async function stopCodexAppServerChild(input: {
@@ -168,6 +222,17 @@ function killCodexProcessGroupBestEffort(
 
 function isNodeErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === 'object' && 'code' in error)
+}
+
+function resolveSignalExitCode(signal: NodeJS.Signals): number {
+  switch (signal) {
+    case 'SIGINT':
+      return 130
+    case 'SIGTERM':
+      return 143
+    default:
+      return 1
+  }
 }
 
 export async function waitForCodexChildExit(
