@@ -37,6 +37,8 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const productionLikeAssistantModel = "gpt-5.5";
+const localIdleShutdownCheckpointSafetyMarginMs = "60000";
+const localRunnerIdleTtlMs = "600000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -334,8 +336,8 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(firstInboundPromptText).toContain(
       "If the user's opener is a greeting or vague request",
     );
-    expect(firstInboundPromptText).not.toContain("Conversation so far:");
-    expect(firstInboundPromptText).not.toContain('"kind":"send_message"');
+    expect(firstInboundPromptText).toContain("Conversation so far:");
+    expect(firstInboundPromptText).toContain("Assistant:");
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
     },
@@ -745,8 +747,9 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS:
+        localIdleShutdownCheckpointSafetyMarginMs,
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,

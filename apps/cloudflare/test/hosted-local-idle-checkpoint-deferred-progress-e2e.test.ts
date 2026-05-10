@@ -37,6 +37,8 @@ const firstUserText = "idle checkpoint deferred first input";
 const secondUserText = "idle checkpoint deferred second input";
 const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
+const localIdleShutdownCheckpointSafetyMarginMs = "2000";
+const localRunnerIdleTtlMs = "6000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -159,8 +161,9 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
-      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS:
+        localIdleShutdownCheckpointSafetyMarginMs,
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,

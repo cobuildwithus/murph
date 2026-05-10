@@ -3242,11 +3242,9 @@ function resolveIdleShutdownCheckpointDelayMs(input: {
   idleTtlMs: number;
   safetyMarginMs: number;
 }): number {
-  const boundedMarginMs = Math.min(
-    Math.max(0, Math.floor(input.safetyMarginMs)),
-    Math.max(0, Math.floor(input.idleTtlMs / 2)),
-  );
-  return Math.max(1_000, input.idleTtlMs - boundedMarginMs);
+  const idleTtlMs = Math.max(0, Math.floor(input.idleTtlMs));
+  const safetyMarginMs = Math.max(0, Math.floor(input.safetyMarginMs));
+  return Math.max(1_000, idleTtlMs - safetyMarginMs);
 }
 
 function earliestIsoDate(left: string | null, right: string | null): string | null {
