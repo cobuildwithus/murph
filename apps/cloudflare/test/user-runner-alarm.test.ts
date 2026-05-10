@@ -36,6 +36,7 @@ import {
 } from "../src/storage-paths.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestHostedRuntimeCryptoContext } from "./hosted-runtime-crypto-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -277,7 +278,7 @@ describe("HostedUserRunner alarm routing", () => {
     );
   });
 
-  it("throttles immediate nudge retry after the one-attempt cap is exhausted", async () => {
+  it("keeps immediate nudge retry on the short fallback path after the generic cap is exhausted", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
@@ -295,8 +296,8 @@ describe("HostedUserRunner alarm routing", () => {
 
     expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
     const retryAlarm = alarms.at(-1);
-    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeGreaterThanOrEqual(300_000);
-    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(301_000);
+    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeGreaterThanOrEqual(1_000);
+    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(1_100);
     expect(
       sql.exec(
         "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
@@ -311,7 +312,7 @@ describe("HostedUserRunner alarm routing", () => {
         component: "hosted.runner",
         details: expect.objectContaining({
           reason: "nudge",
-          retryDelayMs: 300_000,
+          retryDelayMs: 1000,
         }),
         message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
       }),
@@ -3201,6 +3202,173 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("re-reads pending nudges that arrive while an invocation failure is being persisted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        throw new Error("workspace invocation container stopped during active work");
+      }
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+    const stateStore = getRunnerStateStoreForTest(runner);
+    const originalFailInvocation = stateStore.failInvocation.bind(stateStore);
+    stateStore.failInvocation = async (input) => {
+      const result = await originalFailInvocation(input);
+      sql.exec(
+        `UPDATE runner_meta
+         SET next_wake_at = ?,
+             pending_nudge = 1,
+             pending_work = 1,
+             retry_failure_count = 2
+         WHERE user_id = ?`,
+        "2026-04-27T00:05:00.000Z",
+        "member_123",
+      );
+      return {
+        ...result,
+        record: {
+          ...result.record,
+          nextWakeAt: null,
+          pendingNudge: false,
+          pendingWork: false,
+        },
+      };
+    };
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).rejects.toThrow(
+      "workspace invocation container stopped during active work",
+    );
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await flushDetachedRunnerDrive();
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms).not.toContain("2026-04-27T00:00:30.000Z");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]);
+  });
+
+  it("keeps alarm failure retry scheduling from overwriting pending nudge recovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const nudgeInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        throw new Error("workspace invocation container stopped during alarm work");
+      }
+      if (invoke.mock.calls.length === 2) {
+        return nudgeInvocation.promise;
+      }
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      maxEventAttempts: 2,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 0,
+           pending_work = 0,
+           retry_failure_count = 1
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+    const stateStore = getRunnerStateStoreForTest(runner);
+    const originalFailInvocation = stateStore.failInvocation.bind(stateStore);
+    stateStore.failInvocation = async (input) => {
+      const result = await originalFailInvocation(input);
+      sql.exec(
+        `UPDATE runner_meta
+         SET next_wake_at = ?,
+             pending_nudge = 1,
+             pending_work = 1,
+             retry_failure_count = 2
+         WHERE user_id = ?`,
+        "2026-04-27T00:05:00.000Z",
+        "member_123",
+      );
+      return {
+        ...result,
+        record: {
+          ...result.record,
+          nextWakeAt: null,
+          pendingNudge: false,
+          pendingWork: false,
+        },
+      };
+    };
+
+    await runner.alarm();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("alarm");
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms).not.toContain("2026-04-27T00:00:30.000Z");
+    expect(alarms).not.toContain("2026-04-27T00:05:00.000Z");
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runner retry attempts exhausted; waiting for a fresh nudge before retrying.",
+      }),
+    );
+
+    nudgeInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      next_wake_at: null,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]));
+  });
+
   it("keeps failed pending nudge retries on the nudge path instead of exhausting", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -3302,7 +3470,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("throttles exhausted pending nudge retries without clearing pending work", async () => {
+  it("keeps exhausted pending nudge retries on the nudge path without clearing pending work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
@@ -3328,7 +3496,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:00:02.000Z");
     expect(
       sql.exec(
         `SELECT next_wake_at,
@@ -3339,22 +3507,14 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      next_wake_at: "2026-04-27T00:05:00.000Z",
+      next_wake_at: "2026-04-27T00:00:02.000Z",
       pending_nudge: 1,
       pending_work: 1,
       retry_failure_count: 2,
     }]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        component: "hosted.runner",
-        details: expect.objectContaining({
-          maxEventAttempts: 2,
-          retryDelayMs: 300_000,
-          retryFailureCount: 2,
-        }),
         message: "Hosted runner pending nudge retry attempts exhausted; throttling retry while waiting for a fresh nudge.",
-        phase: "failed",
-        userId: "member_123",
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
@@ -3364,7 +3524,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("caps direct nudge failure throttling even when the configured retry delay is higher", async () => {
+  it("caps direct nudge failure retry to the quick nudge backoff even when configured retry delay is higher", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
@@ -3392,7 +3552,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:00:02.000Z");
     expect(
       sql.exec(
         `SELECT next_wake_at,
@@ -3403,24 +3563,102 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      next_wake_at: "2026-04-27T00:05:00.000Z",
+      next_wake_at: "2026-04-27T00:00:02.000Z",
       pending_nudge: 1,
       pending_work: 1,
       retry_failure_count: 2,
     }]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        component: "hosted.runner",
-        details: expect.objectContaining({
-          maxEventAttempts: 2,
-          retryDelayMs: 300_000,
-          retryFailureCount: 2,
-        }),
         message: "Hosted runner pending nudge retry attempts exhausted; throttling retry while waiting for a fresh nudge.",
-        phase: "failed",
-        userId: "member_123",
       }),
     );
+  });
+
+  it("caps repeated nudge failure retry below generic-scale delays", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("workspace invocation container stopped during active work");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      maxEventAttempts: 10,
+      retryDelayMs: 600_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 1,
+           pending_work = 1,
+           retry_failure_count = 8
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toThrow(
+      "workspace invocation container stopped during active work",
+    );
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toContain("2026-04-27T00:00:08.000Z");
+    expect(
+      sql.exec(
+        `SELECT next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:08.000Z",
+      pending_nudge: 1,
+      pending_work: 1,
+      retry_failure_count: 9,
+    }]);
+  });
+
+  it("shortens stale persisted pending-nudge retry alarms to the bounded nudge wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      maxEventAttempts: 10,
+      retryDelayMs: 600_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 1,
+           pending_work = 1,
+           retry_failure_count = 8
+       WHERE user_id = ?`,
+      "2026-04-27T00:05:00.000Z",
+      "member_123",
+    );
+
+    await preservePendingNudgeRetryAfterFailureForTest(runner);
+
+    expect(alarms).toContain("2026-04-27T00:00:08.000Z");
+    expect(alarms).not.toContain("2026-04-27T00:05:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT next_wake_at,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:08.000Z",
+      pending_nudge: 1,
+      pending_work: 1,
+      retry_failure_count: 8,
+    }]);
   });
 
   it("logs metadata-only diagnostics for invalid runner invocation requests", async () => {
@@ -5957,6 +6195,29 @@ function createRunnerCryptoContextHarness(
     },
     sql,
   };
+}
+
+function getRunnerStateStoreForTest(runner: HostedUserRunner): RunnerStateStore {
+  const value = Reflect.get(runner, "stateStore");
+  if (!(value instanceof RunnerStateStore)) {
+    throw new Error("Hosted user runner state store was unavailable for test.");
+  }
+  return value;
+}
+
+async function preservePendingNudgeRetryAfterFailureForTest(
+  runner: HostedUserRunner,
+): Promise<void> {
+  const value = Reflect.get(runner, "preservePendingNudgeRetryAfterFailure");
+  if (typeof value !== "function") {
+    throw new Error("Hosted pending nudge retry helper was unavailable for test.");
+  }
+
+  const result = Reflect.apply(value, runner, []);
+  if (!(result instanceof Promise)) {
+    throw new Error("Hosted pending nudge retry helper did not return a promise.");
+  }
+  await result;
 }
 
 function mockRuntimeCryptoContextWebControl(status: number): void {

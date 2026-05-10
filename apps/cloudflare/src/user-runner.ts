@@ -77,9 +77,6 @@ import type {
   RunnerStateRecord,
 } from "./user-runner/types.js";
 import {
-  RETRY_MAX_DELAY_MS,
-} from "./user-runner/types.js";
-import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
@@ -91,6 +88,7 @@ const DEFERRED_CHECKPOINT_DRAIN_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
+const NUDGE_FAILURE_RETRY_MAX_DELAY_MS = 8_000;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -1011,9 +1009,10 @@ export class HostedUserRunner {
           reason: input.reason,
           retryFailureCount: failure.record.retryFailureCount,
         });
-        if (failure.record.pendingNudge) {
+        const latestRecord = await this.stateStore.readState();
+        if (latestRecord.pendingNudge) {
           await this.queuePendingNudgeContinuationAfterInvocation({
-            record: failure.record,
+            record: latestRecord,
             userId: initialRecord.userId,
           });
         } else if (input.reason === "nudge") {
@@ -1030,7 +1029,7 @@ export class HostedUserRunner {
           });
           if (!retryScheduled) {
             await this.runtimeAlarmScheduler.syncNextWake({
-              preferredWakeAt: failure.record.nextWakeAt,
+              preferredWakeAt: latestRecord.nextWakeAt,
             });
           }
         } else {
@@ -1144,36 +1143,26 @@ export class HostedUserRunner {
   } = {}): Promise<void> {
     const record = await this.tryReadStateForRetryScheduling();
     const retryFailureCount = record?.retryFailureCount ?? 0;
-    const retryAttemptsExhausted = retryFailureCount >= this.env.maxEventAttempts;
-    if (record?.pendingNudge && record.nextWakeAt && !retryAttemptsExhausted) {
+    const pendingNudgeRetryDelayMs = resolvePendingNudgeFailureRetryDelayMs({
+      defaultRetryDelayMs: this.env.retryDelayMs,
+      retryFailureCount,
+    });
+    const retryDelayMs = Math.min(
+      input.retryDelayMs ?? pendingNudgeRetryDelayMs,
+      pendingNudgeRetryDelayMs,
+    );
+    const retryWakeAt = new Date(Date.now() + retryDelayMs).toISOString();
+    if (
+      record?.pendingNudge
+      && record.nextWakeAt
+      && isHostedRunnerWakeAtNoLaterThan(record.nextWakeAt, retryWakeAt)
+    ) {
       await this.runtimeAlarmScheduler.syncStoredAlarm();
       return;
     }
 
-    const pendingNudgeRetryDelayMs = resolvePendingNudgeFailureRetryDelayMs({
-      defaultRetryDelayMs: this.env.retryDelayMs,
-      maxEventAttempts: this.env.maxEventAttempts,
-      retryFailureCount,
-    });
-    const retryDelayMs = retryAttemptsExhausted
-      ? pendingNudgeRetryDelayMs
-      : input.retryDelayMs ?? pendingNudgeRetryDelayMs;
-    if (retryAttemptsExhausted) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          maxEventAttempts: this.env.maxEventAttempts,
-          retryDelayMs,
-          retryFailureCount,
-        },
-        level: "warn",
-        message: "Hosted runner pending nudge retry attempts exhausted; throttling retry while waiting for a fresh nudge.",
-        phase: "failed",
-        userId: record?.userId ?? null,
-      });
-    }
     await this.markPendingNudgeAndApplyAlarm({
-      preferredWakeAt: new Date(Date.now() + retryDelayMs).toISOString(),
+      preferredWakeAt: retryWakeAt,
     });
   }
 
@@ -2108,9 +2097,16 @@ export class HostedUserRunner {
     retryDelayMs?: number;
     userId?: string | null;
   } = {}): Promise<boolean> {
+    const record = input.respectMaxAttempts === true
+      ? await this.stateStore.readState()
+      : await this.tryReadStateForRetryScheduling();
+    if (record && (record.pendingNudge || record.inFlight)) {
+      await this.syncPendingWorkRecoveryAfterFailure(record);
+      return true;
+    }
+
     if (input.respectMaxAttempts === true) {
-      const record = await this.stateStore.readState();
-      if (record.retryFailureCount >= this.env.maxEventAttempts) {
+      if (record && record.retryFailureCount >= this.env.maxEventAttempts) {
         if (record.nextWakeAt !== null) {
           await this.runtimeAlarmScheduler.syncNextWake({
             preferredWakeAt: null,
@@ -2232,7 +2228,6 @@ export class HostedUserRunner {
         const retryDelayMs = input.reason === "nudge"
           ? resolvePendingNudgeFailureRetryDelayMs({
               defaultRetryDelayMs: this.env.retryDelayMs,
-              maxEventAttempts: this.env.maxEventAttempts,
               retryFailureCount,
             })
           : resolveHostedRunnerFailureRetryDelayMs({
@@ -2707,18 +2702,26 @@ function resolveHostedRunnerFailureRetryDelayMs(input: {
   const backoffStep = Math.max(0, retryFailureCount - 1);
   const exponentialDelay = IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS
     * (NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER ** backoffStep);
-  return Math.min(input.defaultRetryDelayMs, exponentialDelay);
+  return Math.min(
+    input.defaultRetryDelayMs,
+    exponentialDelay,
+    NUDGE_FAILURE_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function isHostedRunnerWakeAtNoLaterThan(
+  left: string,
+  right: string,
+): boolean {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  return Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs <= rightMs;
 }
 
 function resolvePendingNudgeFailureRetryDelayMs(input: {
   defaultRetryDelayMs: number;
-  maxEventAttempts: number;
   retryFailureCount: number;
 }): number {
-  if (input.retryFailureCount >= input.maxEventAttempts) {
-    return RETRY_MAX_DELAY_MS;
-  }
-
   return resolveHostedRunnerFailureRetryDelayMs({
     defaultRetryDelayMs: input.defaultRetryDelayMs,
     reason: "nudge",
