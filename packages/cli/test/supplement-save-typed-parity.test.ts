@@ -26,6 +26,21 @@ interface CommandSchemaEnvelope {
     properties: Record<string, unknown>
     required?: string[]
   }
+  output?: {
+    properties: Record<string, unknown>
+    required?: string[]
+  }
+}
+
+interface SavedEntitySnapshot {
+  id: string
+  kind: string
+  title: string | null
+  occurredAt: string | null
+  path: string | null
+  data: Record<string, unknown>
+  links: Array<Record<string, unknown>>
+  markdown?: never
 }
 
 interface SupplementSaveResult {
@@ -34,6 +49,14 @@ interface SupplementSaveResult {
   lookupId: string
   path?: string
   created: boolean
+  entity: SavedEntitySnapshot
+}
+
+function assertCompactSavedEntity(entity: SavedEntitySnapshot) {
+  assert.equal('markdown' in entity, false)
+  for (const field of ['body', 'markdown', 'path', 'relativePath']) {
+    assert.equal(field in entity.data, false, field)
+  }
 }
 
 function createSupplementCli() {
@@ -94,6 +117,8 @@ test('supplement save schema exposes typed top-level dose fields and ingredient 
   assert.deepEqual(schema.args.required, ['title'])
   assert.equal('input' in schema.options.properties, false)
   assert.equal(schema.options.required?.includes('input') ?? false, false)
+  assert.equal(schema.output?.required?.includes('entity') ?? false, true)
+  assert.equal(schema.output ? 'entity' in schema.output.properties : false, true)
 
   for (const field of [
     'group',
@@ -147,6 +172,8 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
       'mg',
       '--brand',
       'Test Brand',
+      '--manufacturer',
+      'Test Maker',
       '--serving-size',
       '2 capsules',
       '--compound',
@@ -164,9 +191,32 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
 
     assert.equal(saveResult.exitCode, null)
     const saved = requireData(saveResult.envelope)
+    assert.equal(saved.vault, vaultRoot)
     assert.equal(saved.created, true)
+    assert.equal(saved.lookupId, saved.regimenId)
     const relativePath = requireSavedPath(saved)
     assert.match(relativePath, /^bank\/regimens\/sleep\/supplements\/.+\.md$/u)
+    assert.equal(saved.entity.id, saved.regimenId)
+    assert.equal(saved.entity.kind, 'supplement')
+    assert.equal(saved.entity.title, 'Magnesium glycinate')
+    assert.equal(saved.entity.occurredAt, null)
+    assert.equal(saved.entity.path, relativePath)
+    assertCompactSavedEntity(saved.entity)
+    assert.equal(saved.entity.data.brand, 'Test Brand')
+    assert.equal(saved.entity.data.manufacturer, 'Test Maker')
+    assert.equal(saved.entity.data.schedule, 'before bed')
+    assert.equal(saved.entity.data.dose, 200)
+    assert.equal(saved.entity.data.unit, 'mg')
+    assert.equal(saved.entity.data.servingSize, '2 capsules')
+    assert.deepEqual(saved.entity.data.ingredients, [
+      {
+        compound: 'Magnesium',
+        label: 'Magnesium glycinate',
+        amount: 200,
+        unit: 'mg',
+        active: false,
+      },
+    ])
 
     const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
     const document = parseFrontmatterDocument(markdown)
@@ -178,6 +228,9 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
     assert.equal(document.attributes.substance, 'Magnesium glycinate')
     assert.equal(document.attributes.dose, 200)
     assert.equal(document.attributes.unit, 'mg')
+    assert.equal(document.attributes.brand, 'Test Brand')
+    assert.equal(document.attributes.manufacturer, 'Test Maker')
+    assert.equal(document.attributes.servingSize, '2 capsules')
     assert.deepEqual(document.attributes.ingredients, [
       {
         compound: 'Magnesium',
@@ -185,6 +238,100 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
         amount: 200,
         unit: 'mg',
         active: false,
+      },
+    ])
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
+test('supplement save update returns compact entity and preserves omitted product fields', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-supplement-save-preserve-',
+  )
+
+  try {
+    const cli = createSupplementCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const createResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Magnesium glycinate',
+      '--slug',
+      'magnesium-glycinate',
+      '--status',
+      'active',
+      '--started-on',
+      '2026-04-01',
+      '--schedule',
+      'before bed',
+      '--brand',
+      'Test Brand',
+      '--manufacturer',
+      'Test Maker',
+      '--serving-size',
+      '2 capsules',
+      '--compound',
+      'Magnesium',
+      '--ingredient-label',
+      'Magnesium glycinate',
+      '--amount',
+      '200',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(createResult.exitCode, null)
+    const created = requireData(createResult.envelope)
+
+    const updateResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Magnesium glycinate',
+      '--id',
+      created.regimenId,
+      '--schedule',
+      'after lunch',
+      '--dose',
+      '300',
+      '--dose-unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(updateResult.exitCode, null)
+    const updated = requireData(updateResult.envelope)
+    assert.equal(updated.vault, vaultRoot)
+    assert.equal(updated.created, false)
+    assert.equal(updated.lookupId, created.regimenId)
+    assert.equal(updated.entity.id, created.regimenId)
+    assert.equal(updated.entity.kind, 'supplement')
+    assert.equal(updated.entity.path, requireSavedPath(updated))
+    assertCompactSavedEntity(updated.entity)
+    assert.equal(updated.entity.data.brand, 'Test Brand')
+    assert.equal(updated.entity.data.manufacturer, 'Test Maker')
+    assert.equal(updated.entity.data.servingSize, '2 capsules')
+    assert.equal(updated.entity.data.schedule, 'after lunch')
+    assert.equal(updated.entity.data.dose, 300)
+    assert.equal(updated.entity.data.unit, 'mg')
+    assert.deepEqual(updated.entity.data.ingredients, [
+      {
+        compound: 'Magnesium',
+        label: 'Magnesium glycinate',
+        amount: 200,
+        unit: 'mg',
       },
     ])
   } finally {

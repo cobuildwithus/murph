@@ -7,6 +7,8 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   VAULT_LAYOUT,
   healthEntityDefinitions,
+  jsonObjectSchema,
+  safeParseContract,
   type RawImportManifest,
   type JsonObject,
 } from "@murphai/contracts"
@@ -144,6 +146,68 @@ function isProviderLookupId(id: string) {
 
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function stripUndefinedJsonFields(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUndefinedJsonFields(entry))
+      .filter((entry) => entry !== undefined)
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, entry]) => [key, stripUndefinedJsonFields(entry)] as const)
+        .filter(([, entry]) => entry !== undefined),
+    )
+  }
+
+  return value
+}
+
+export function toKeyedRecord(value: object): JsonObject {
+  const result = safeParseContract(
+    jsonObjectSchema,
+    stripUndefinedJsonFields(value),
+  )
+  if (!result.success) {
+    throw new VaultCliError("contract_invalid", "Expected a JSON-compatible object.", {
+      issues: result.errors,
+    })
+  }
+
+  return result.data
+}
+
+export function firstRawString(
+  record: object,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = Reflect.get(record, key)
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
+    }
+  }
+
+  return null
+}
+
+export function readRegistryRecordEntity(record: object): Record<string, unknown> {
+  const entity = Reflect.get(record, "entity")
+  return typeof entity === "object" && entity !== null && !Array.isArray(entity)
+    ? toKeyedRecord(entity)
+    : toKeyedRecord(record)
+}
+
+export function readRegistryRecordDocument(record: object): Record<string, unknown> {
+  const document = Reflect.get(record, "document")
+  return typeof document === "object" && document !== null && !Array.isArray(document)
+    ? toKeyedRecord(document)
+    : toKeyedRecord(record)
 }
 
 const RESERVED_PAYLOAD_KEYS = new Set([

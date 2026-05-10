@@ -1,27 +1,24 @@
 import { Cli, z } from "incur"
 import { REGIMEN_STATUSES } from "@murphai/contracts"
-import {
-  upsertRegimen,
-} from "@murphai/core"
-import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import { requestIdFromOptions, withBaseOptions } from "@murphai/operator-config/command-helpers"
 import {
   healthListResultSchema,
   healthShowResultSchema,
-  normalizeRepeatableFlagOption,
 } from "@murphai/vault-usecases"
 import {
   commonListLimitOptionSchema,
   suggestedCommandsCta,
 } from "./command-factory-primitives.js"
-import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts"
+import {
+  localDateSchema,
+  pathSchema,
+  savedEntitySnapshotSchema,
+} from "@murphai/operator-config/vault-cli-contracts"
 import type { VaultServices } from "@murphai/vault-usecases"
 
 const supplementSlugSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
-type RegimenUpsertInput = Parameters<typeof upsertRegimen>[0]
-type SupplementIngredientRecord = NonNullable<RegimenUpsertInput["ingredients"]>[number]
 
 const supplementStatusSchema = z.enum(REGIMEN_STATUSES)
 const statusOptionSchema = z
@@ -41,6 +38,7 @@ const supplementUpsertResultSchema = z.object({
   lookupId: z.string().min(1),
   path: pathSchema.optional(),
   created: z.boolean(),
+  entity: savedEntitySnapshotSchema,
 })
 
 const stopResultSchema = z.object({
@@ -101,160 +99,6 @@ const compoundListResultSchema = z.object({
 
 function repeatedRelationOptionSchema(description: string) {
   return z.array(z.string().min(1)).optional().describe(description)
-}
-
-function buildSupplementIngredient(options: {
-  amount?: number
-  compound?: string
-  ingredientActive?: boolean
-  ingredientLabel?: string
-  note?: string
-  unit?: string
-}): SupplementIngredientRecord[] | undefined {
-  if (!options.compound) {
-    if (
-      options.amount !== undefined ||
-      options.ingredientActive !== undefined ||
-      options.ingredientLabel !== undefined ||
-      options.note !== undefined ||
-      options.unit !== undefined
-    ) {
-      throw new VaultCliError(
-        'invalid_option',
-        '--compound is required when ingredient fields are provided.',
-      )
-    }
-
-    return undefined
-  }
-
-  return [
-    {
-      compound: options.compound,
-      label: options.ingredientLabel,
-      amount: options.amount,
-      unit: options.unit,
-      active: options.ingredientActive,
-      note: options.note,
-    },
-  ]
-}
-
-function normalizeComparableText(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase()
-  return normalized && normalized.length > 0 ? normalized : undefined
-}
-
-function namesCouldReferToSameDose(input: {
-  compound?: string
-  substance?: string
-}): boolean {
-  const substance = normalizeComparableText(input.substance)
-  const compound = normalizeComparableText(input.compound)
-
-  return substance === undefined || compound === undefined || substance === compound
-}
-
-function validateSupplementSaveInput(input: {
-  amount?: number
-  compound?: string
-  dose?: number
-  doseUnit?: string
-  substance?: string
-  unit?: string
-}) {
-  if (input.doseUnit !== undefined && input.dose === undefined) {
-    throw new VaultCliError('invalid_option', '--dose-unit requires --dose.')
-  }
-
-  if (
-    input.dose !== undefined &&
-    input.amount !== undefined &&
-    input.dose === input.amount &&
-    input.doseUnit !== undefined &&
-    input.unit !== undefined &&
-    normalizeComparableText(input.doseUnit) !== normalizeComparableText(input.unit) &&
-    namesCouldReferToSameDose(input)
-  ) {
-    throw new VaultCliError(
-      'invalid_option',
-      '--dose-unit and --unit describe the same numeric dose but use different units. Use --dose-unit for the top-level dose and --unit for the ingredient amount.',
-    )
-  }
-}
-
-function buildSupplementSaveInput(input: {
-  amount?: number
-  brand?: string
-  compound?: string
-  dose?: number
-  doseUnit?: string
-  group?: string
-  ingredientActive?: boolean
-  ingredientLabel?: string
-  manufacturer?: string
-  note?: string
-  regimenId?: string
-  relatedConditionId?: string[]
-  relatedGoalId?: string[]
-  relatedRegimenId?: string[]
-  schedule?: string
-  servingSize?: string
-  slug?: string
-  startedOn?: string
-  status?: z.infer<typeof supplementStatusSchema>
-  stoppedOn?: string
-  substance?: string
-  title: string
-  unit?: string
-  vault: string
-}): RegimenUpsertInput {
-  validateSupplementSaveInput(input)
-
-  return {
-    vaultRoot: input.vault,
-    regimenId: input.regimenId,
-    slug: input.slug,
-    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
-    title: input.title,
-    kind: 'supplement',
-    status: input.status,
-    startedOn: input.startedOn,
-    stoppedOn: input.stoppedOn,
-    substance: input.substance,
-    dose: input.dose,
-    unit: input.doseUnit,
-    schedule: input.schedule,
-    brand: input.brand,
-    manufacturer: input.manufacturer,
-    servingSize: input.servingSize,
-    ingredients: buildSupplementIngredient(input),
-    relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, 'related-goal-id'),
-    relatedConditionIds: normalizeRepeatableFlagOption(
-      input.relatedConditionId,
-      'related-condition-id',
-    ),
-    relatedRegimenIds: normalizeRepeatableFlagOption(
-      input.relatedRegimenId,
-      'related-regimen-id',
-    ),
-    group: input.group ?? 'supplement',
-  }
-}
-
-function toSupplementUpsertResult(
-  vault: string,
-  result: Awaited<ReturnType<typeof upsertRegimen>>,
-) {
-  const regimenId = String(result.record.entity.regimenId)
-
-  return {
-    vault,
-    regimenId,
-    lookupId: regimenId,
-    path: result.record.document.relativePath,
-    created: Boolean(result.created),
-  }
 }
 
 export function registerSupplementCommands(
@@ -515,35 +359,33 @@ export function registerSupplementCommands(
     }),
     output: supplementUpsertResultSchema,
     async run(context) {
-      const result = await upsertRegimen(
-        buildSupplementSaveInput({
-          regimenId: context.options.id,
-          title: context.args.title,
-          slug: context.options.slug,
-          status: context.options.status,
-          startedOn: context.options.startedOn,
-          stoppedOn: context.options.stoppedOn,
-          schedule: context.options.schedule,
-          group: context.options.group,
-          substance: context.options.substance,
-          dose: context.options.dose,
-          doseUnit: context.options.doseUnit,
-          brand: context.options.brand,
-          manufacturer: context.options.manufacturer,
-          servingSize: context.options.servingSize,
-          compound: context.options.compound,
-          ingredientActive: context.options.ingredientActive,
-          ingredientLabel: context.options.ingredientLabel,
-          amount: context.options.amount,
-          unit: context.options.unit,
-          note: context.options.note,
-          relatedGoalId: context.options.relatedGoalId,
-          relatedConditionId: context.options.relatedConditionId,
-          relatedRegimenId: context.options.relatedRegimenId,
-          vault: context.options.vault,
-        }),
-      )
-      const saved = toSupplementUpsertResult(context.options.vault, result)
+      const saved = await services.core.saveSupplement({
+        amount: context.options.amount,
+        brand: context.options.brand,
+        compound: context.options.compound,
+        dose: context.options.dose,
+        doseUnit: context.options.doseUnit,
+        group: context.options.group,
+        ingredientActive: context.options.ingredientActive,
+        ingredientLabel: context.options.ingredientLabel,
+        manufacturer: context.options.manufacturer,
+        note: context.options.note,
+        regimenId: context.options.id,
+        relatedConditionId: context.options.relatedConditionId,
+        relatedGoalId: context.options.relatedGoalId,
+        relatedRegimenId: context.options.relatedRegimenId,
+        requestId: requestIdFromOptions(context.options),
+        schedule: context.options.schedule,
+        servingSize: context.options.servingSize,
+        slug: context.options.slug,
+        startedOn: context.options.startedOn,
+        status: context.options.status,
+        stoppedOn: context.options.stoppedOn,
+        substance: context.options.substance,
+        title: context.args.title,
+        unit: context.options.unit,
+        vault: context.options.vault,
+      })
 
       return context.ok(saved, {
         cta: suggestedCommandsCta([
