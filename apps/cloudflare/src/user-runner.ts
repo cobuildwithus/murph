@@ -89,6 +89,10 @@ const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const NUDGE_FAILURE_RETRY_MAX_DELAY_MS = 8_000;
+const BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY = "runner:pending-browser-vault-refresh:v1";
+const BROWSER_VAULT_REFRESH_INTENT_SCHEMA = "murph.hosted-runner.browser-vault-refresh-intent.v1";
+const BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
+const BROWSER_VAULT_REFRESH_RETRY_MAX_DELAY_MS = 5 * 60_000;
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -132,6 +136,42 @@ interface ActiveWorkspaceInvocationAbort {
   userId: string;
 }
 
+type BrowserVaultRefreshIntentReason = "external_request" | "idle_checkpoint_committed";
+
+interface BrowserVaultRefreshIntent {
+  failureCount: number;
+  lastErrorCode: string | null;
+  nextAttemptAt: string;
+  pendingSince: string;
+  reason: BrowserVaultRefreshIntentReason;
+  schema: typeof BROWSER_VAULT_REFRESH_INTENT_SCHEMA;
+  updatedAt: string;
+  userId: string;
+}
+
+type BackgroundBrowserVaultRefreshOutcome =
+  | {
+      kind: "completed";
+      status:
+        | "already_fresh"
+        | "publish_conflict"
+        | "published"
+        | "refresh_failed_too_large"
+        | "refresh_skipped_no_source";
+    }
+  | {
+      kind: "deferred";
+      nextAttemptAt: string | null;
+      reason: "foreground_work";
+    }
+  | {
+      kind: "retryable";
+      status:
+        | "refresh_failed_empty_source"
+        | "stale_source"
+        | "workspace_missing";
+    };
+
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
   nextWakeAt: string | null;
@@ -172,7 +212,11 @@ export class HostedUserRunner {
   ) {
     this.runnerContainerNamespace = runnerContainerNamespace;
     this.stateStore = new RunnerStateStore(state);
-    this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
+    this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(
+      this.stateStore,
+      state,
+      () => this.readPendingBrowserVaultRefreshWakeAt(),
+    );
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -245,8 +289,6 @@ export class HostedUserRunner {
       return;
     }
 
-    const dueAlarm = await this.stateStore.consumeDueRunnerAlarm(Date.now());
-    record = dueAlarm.record;
     if (!record.userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -258,6 +300,13 @@ export class HostedUserRunner {
       await this.scheduleHostedWakeRetryAlarm();
       return;
     }
+
+    if (await this.runPendingBrowserVaultRefreshBeforeFutureRunnerAlarm(record)) {
+      return;
+    }
+
+    const dueAlarm = await this.stateStore.consumeDueRunnerAlarm(Date.now());
+    record = dueAlarm.record;
 
     if (dueAlarm.kind === "idle_checkpoint" && !this.env.idleShutdownCheckpointsEnabled) {
       await this.stateStore.clearIdleShutdownCheckpoint();
@@ -281,6 +330,9 @@ export class HostedUserRunner {
         await this.runUntilIdleOrBudget({
           reason: "alarm",
         });
+        return;
+      }
+      if (await this.runDuePendingBrowserVaultRefreshFromAlarm(record.userId)) {
         return;
       }
       await this.runtimeAlarmScheduler.syncStoredAlarm();
@@ -444,6 +496,7 @@ export class HostedUserRunner {
       await this.stateStore.assertStateForUser(userId);
       const runnerCleanup = await this.stopRunnerBeforeUserDataDeletion(userId);
       const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
+      await this.state.storage.delete(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY);
       const stateDeletion = await this.stateStore.deleteStateForUser(userId);
       const deleteAlarm = this.state.storage.deleteAlarm;
       const alarmCleared = typeof deleteAlarm === "function";
@@ -650,7 +703,7 @@ export class HostedUserRunner {
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
-    this.scheduleBrowserVaultRefreshBestEffort({
+    await this.scheduleBrowserVaultRefreshBestEffort({
       reason: "external_request",
       userId: input.userId,
     });
@@ -1611,10 +1664,10 @@ export class HostedUserRunner {
     });
   }
 
-  private scheduleBrowserVaultRefreshBestEffort(input: {
+  private async scheduleBrowserVaultRefreshBestEffort(input: {
     reason: "external_request" | "idle_checkpoint_committed";
     userId: string;
-  }): void {
+  }): Promise<void> {
     if (this.shouldSkipBackgroundBrowserVaultRefresh()) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1628,19 +1681,11 @@ export class HostedUserRunner {
       return;
     }
 
-    const refresh = this.runBackgroundBrowserVaultRefresh({
+    await this.upsertPendingBrowserVaultRefreshIntent(input);
+    const refresh = this.drivePendingBrowserVaultRefresh({
+      trigger: "detached",
       userId: input.userId,
-    })
-      .catch((error) => {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-          level: "warn",
-          message: "Hosted runner background browser-vault refresh failed.",
-          phase: "failed",
-          userId: input.userId,
-        });
-      });
+    });
 
     try {
       this.state.waitUntil?.(refresh);
@@ -1653,8 +1698,197 @@ export class HostedUserRunner {
         phase: "scheduled",
         userId: input.userId,
       });
+      void this.runtimeAlarmScheduler.syncStoredAlarm().catch(() => undefined);
     }
     void refresh;
+  }
+
+  private async runDuePendingBrowserVaultRefreshFromAlarm(userId: string): Promise<boolean> {
+    const intent = await this.readPendingBrowserVaultRefreshIntent();
+    if (!intent || intent.userId !== userId) {
+      return false;
+    }
+
+    const nextAttemptAtMs = Date.parse(intent.nextAttemptAt);
+    if (Number.isFinite(nextAttemptAtMs) && nextAttemptAtMs > Date.now()) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return false;
+    }
+
+    await this.drivePendingBrowserVaultRefresh({
+      trigger: "alarm",
+      userId,
+    });
+    return true;
+  }
+
+  private async runPendingBrowserVaultRefreshBeforeFutureRunnerAlarm(
+    record: RunnerStateRecord,
+  ): Promise<boolean> {
+    if (record.inFlight || record.alarm?.kind !== "work") {
+      return false;
+    }
+
+    const runnerAlarmDueAtMs = Date.parse(record.alarm.dueAt);
+    if (!Number.isFinite(runnerAlarmDueAtMs) || runnerAlarmDueAtMs <= Date.now()) {
+      return false;
+    }
+
+    return await this.runDuePendingBrowserVaultRefreshFromAlarm(record.userId);
+  }
+
+  private async drivePendingBrowserVaultRefresh(input: {
+    trigger: "alarm" | "detached";
+    userId: string;
+  }): Promise<void> {
+    const intent = await this.readPendingBrowserVaultRefreshIntent();
+    if (!intent || intent.userId !== input.userId) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return;
+    }
+
+    const nextAttemptAtMs = Date.parse(intent.nextAttemptAt);
+    if (Number.isFinite(nextAttemptAtMs) && nextAttemptAtMs > Date.now()) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return;
+    }
+
+    try {
+      const outcome = await this.runBackgroundBrowserVaultRefresh({
+        userId: input.userId,
+      });
+      if (outcome.kind === "completed") {
+        await this.clearPendingBrowserVaultRefreshIntent({
+          syncAlarm: input.trigger === "alarm",
+        });
+        return;
+      }
+
+      if (outcome.kind === "deferred") {
+        await this.deferPendingBrowserVaultRefreshIntent({
+          errorCode: outcome.reason,
+          nextAttemptAt: resolveBrowserVaultRefreshDeferredWakeAt(outcome),
+          userId: input.userId,
+        });
+        return;
+      }
+
+      await this.retryPendingBrowserVaultRefreshIntent({
+        errorCode: outcome.status,
+        userId: input.userId,
+      });
+    } catch (error) {
+      await this.retryPendingBrowserVaultRefreshIntent({
+        error,
+        userId: input.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          trigger: input.trigger,
+        },
+        level: "warn",
+        message: "Hosted runner background browser-vault refresh failed.",
+        phase: "failed",
+        userId: input.userId,
+      });
+    }
+  }
+
+  private async upsertPendingBrowserVaultRefreshIntent(input: {
+    reason: BrowserVaultRefreshIntentReason;
+    userId: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    const existing = await this.readPendingBrowserVaultRefreshIntent();
+    const existingForUser = existing?.userId === input.userId ? existing : null;
+    const existingNextAttemptAtMs = existingForUser
+      ? Date.parse(existingForUser.nextAttemptAt)
+      : Number.NaN;
+    const intent: BrowserVaultRefreshIntent = {
+      failureCount: existingForUser ? existingForUser.failureCount : 0,
+      lastErrorCode: existingForUser ? existingForUser.lastErrorCode : null,
+      nextAttemptAt: existingForUser
+        && Number.isFinite(existingNextAttemptAtMs)
+        && existingNextAttemptAtMs > nowMs
+        ? existingForUser.nextAttemptAt
+        : now,
+      pendingSince: existingForUser ? existingForUser.pendingSince : now,
+      reason: input.reason,
+      schema: BROWSER_VAULT_REFRESH_INTENT_SCHEMA,
+      updatedAt: now,
+      userId: input.userId,
+    };
+    await this.state.storage.put(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY, intent);
+  }
+
+  private async deferPendingBrowserVaultRefreshIntent(input: {
+    errorCode: string;
+    nextAttemptAt: string;
+    userId: string;
+  }): Promise<void> {
+    const intent = await this.readPendingBrowserVaultRefreshIntent();
+    if (!intent || intent.userId !== input.userId) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await this.state.storage.put(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY, {
+      ...intent,
+      lastErrorCode: input.errorCode,
+      nextAttemptAt: input.nextAttemptAt,
+      updatedAt: now,
+    } satisfies BrowserVaultRefreshIntent);
+    await this.runtimeAlarmScheduler.syncStoredAlarm();
+  }
+
+  private async retryPendingBrowserVaultRefreshIntent(input: {
+    error?: unknown;
+    errorCode?: string;
+    userId: string;
+  }): Promise<void> {
+    const intent = await this.readPendingBrowserVaultRefreshIntent();
+    if (!intent || intent.userId !== input.userId) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return;
+    }
+
+    const failureCount = intent.failureCount + 1;
+    const retryDelayMs = resolveBrowserVaultRefreshRetryDelayMs({
+      baseDelayMs: this.env.retryDelayMs,
+      failureCount,
+    });
+    const now = new Date().toISOString();
+    await this.state.storage.put(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY, {
+      ...intent,
+      failureCount,
+      lastErrorCode: input.errorCode ?? readHostedExecutionSafeErrorCode(input.error) ?? null,
+      nextAttemptAt: new Date(Date.now() + retryDelayMs).toISOString(),
+      updatedAt: now,
+    } satisfies BrowserVaultRefreshIntent);
+    await this.runtimeAlarmScheduler.syncStoredAlarm();
+  }
+
+  private async clearPendingBrowserVaultRefreshIntent(input: {
+    syncAlarm: boolean;
+  }): Promise<void> {
+    await this.state.storage.delete(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY);
+    if (input.syncAlarm) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+    }
+  }
+
+  private async readPendingBrowserVaultRefreshWakeAt(): Promise<string | null> {
+    return (await this.readPendingBrowserVaultRefreshIntent())?.nextAttemptAt ?? null;
+  }
+
+  private async readPendingBrowserVaultRefreshIntent(): Promise<BrowserVaultRefreshIntent | null> {
+    return parseBrowserVaultRefreshIntent(
+      await this.state.storage.get<unknown>(BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY),
+    );
   }
 
   private shouldSkipBackgroundBrowserVaultRefresh(): boolean {
@@ -1949,7 +2183,7 @@ export class HostedUserRunner {
         preferredWakeAt: null,
         userId: input.userId,
       });
-      this.scheduleBrowserVaultRefreshBestEffort({
+      await this.scheduleBrowserVaultRefreshBestEffort({
         reason: "idle_checkpoint_committed",
         userId: input.userId,
       });
@@ -1963,7 +2197,7 @@ export class HostedUserRunner {
         preferredWakeAt: input.result.nextWakeAt ?? null,
         userId: input.userId,
       });
-      this.scheduleBrowserVaultRefreshBestEffort({
+      await this.scheduleBrowserVaultRefreshBestEffort({
         reason: "idle_checkpoint_committed",
         userId: input.userId,
       });
@@ -2193,10 +2427,14 @@ export class HostedUserRunner {
 
   private async runBackgroundBrowserVaultRefresh(input: {
     userId: string;
-  }): Promise<void> {
+  }): Promise<BackgroundBrowserVaultRefreshOutcome> {
     let record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
-      return;
+      return {
+        kind: "deferred",
+        nextAttemptAt: resolveBrowserVaultRefreshForegroundWakeAt(record),
+        reason: "foreground_work",
+      };
     }
 
     if (!this.runnerContainerNamespace) {
@@ -2221,7 +2459,11 @@ export class HostedUserRunner {
 
     record = await this.stateStore.readState();
     if (record.pendingNudge || record.inFlight) {
-      return;
+      return {
+        kind: "deferred",
+        nextAttemptAt: resolveBrowserVaultRefreshForegroundWakeAt(record),
+        reason: "foreground_work",
+      };
     }
 
     const abortController = new AbortController();
@@ -2246,7 +2488,10 @@ export class HostedUserRunner {
         phase: "scheduled",
         userId: input.userId,
       });
-      return;
+      return {
+        kind: "completed",
+        status: generated.status,
+      };
     }
 
     if (generated.status === "publish_conflict") {
@@ -2257,12 +2502,60 @@ export class HostedUserRunner {
         phase: "scheduled",
         userId: input.userId,
       });
-      return;
+      return {
+        kind: "completed",
+        status: generated.status,
+      };
+    }
+
+    if (generated.status === "refresh_skipped_no_source") {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        message: "Hosted runner skipped browser-vault refresh because the restored workspace has no canonical source.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return {
+        kind: "completed",
+        status: generated.status,
+      };
+    }
+
+    if (generated.status === "refresh_failed_empty_source") {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        level: "warn",
+        message: "Hosted runner browser-vault refresh produced no private content from restored source.",
+        phase: "failed",
+        userId: input.userId,
+      });
+      return {
+        kind: "retryable",
+        status: generated.status,
+      };
+    }
+
+    if (
+      generated.status === "stale_source"
+      || generated.status === "workspace_missing"
+    ) {
+      return {
+        kind: "retryable",
+        status: generated.status,
+      };
     }
 
     if (generated.status !== "published") {
-      return;
+      return {
+        kind: "completed",
+        status: generated.status,
+      };
     }
+
+    return {
+      kind: "completed",
+      status: "published",
+    };
   }
 
   private startDetachedRunnerDrive(input: {
@@ -2764,6 +3057,82 @@ function resolvePreemptingIdleShutdownCheckpointDueAt(input: {
   }
 
   return new Date(Math.max(input.nowMs, nextWakeAtMs - 1)).toISOString();
+}
+
+function resolveBrowserVaultRefreshRetryDelayMs(input: {
+  baseDelayMs: number;
+  failureCount: number;
+}): number {
+  return Math.min(
+    BROWSER_VAULT_REFRESH_RETRY_MAX_DELAY_MS,
+    input.baseDelayMs * (2 ** Math.max(0, input.failureCount - 1)),
+  );
+}
+
+function resolveBrowserVaultRefreshForegroundWakeAt(record: RunnerStateRecord): string | null {
+  return record.alarm?.kind === "work" ? record.alarm.dueAt : null;
+}
+
+function resolveBrowserVaultRefreshDeferredWakeAt(input: {
+  nextAttemptAt: string | null;
+}): string {
+  if (input.nextAttemptAt) {
+    const nextAttemptAtMs = Date.parse(input.nextAttemptAt);
+    if (Number.isFinite(nextAttemptAtMs) && nextAttemptAtMs > Date.now()) {
+      return input.nextAttemptAt;
+    }
+  }
+
+  return new Date(Date.now() + BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS).toISOString();
+}
+
+function readHostedExecutionSafeErrorCode(error: unknown): string | null {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  return typeof diagnostics?.errorCode === "string" ? diagnostics.errorCode : null;
+}
+
+function parseBrowserVaultRefreshIntent(value: unknown): BrowserVaultRefreshIntent | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Partial<BrowserVaultRefreshIntent>;
+  if (
+    record.schema !== BROWSER_VAULT_REFRESH_INTENT_SCHEMA
+    || !isBrowserVaultRefreshIntentReason(record.reason)
+    || typeof record.userId !== "string"
+    || record.userId.length === 0
+    || typeof record.pendingSince !== "string"
+    || typeof record.nextAttemptAt !== "string"
+    || typeof record.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    failureCount: normalizeNonNegativeInteger(record.failureCount),
+    lastErrorCode: typeof record.lastErrorCode === "string" && record.lastErrorCode
+      ? record.lastErrorCode
+      : null,
+    nextAttemptAt: record.nextAttemptAt,
+    pendingSince: record.pendingSince,
+    reason: record.reason,
+    schema: BROWSER_VAULT_REFRESH_INTENT_SCHEMA,
+    updatedAt: record.updatedAt,
+    userId: record.userId,
+  };
+}
+
+function isBrowserVaultRefreshIntentReason(
+  value: unknown,
+): value is BrowserVaultRefreshIntentReason {
+  return value === "external_request" || value === "idle_checkpoint_committed";
+}
+
+function normalizeNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
 }
 
 function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {

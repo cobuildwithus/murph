@@ -94,10 +94,18 @@ export {
   parseHostedRuntimeChildResult,
 } from "./hosted-runtime/child-result.ts";
 export {
+  createHostedBrowserVaultReplicaRefreshFromWorkspace,
   createHostedBrowserVaultReplicaForSourceState,
   clearHostedBrowserVaultWarmSourceStateHash,
   readHostedBrowserVaultWarmSourceStateHash,
+  summarizeHostedBrowserVaultReplicaContent,
   writeHostedBrowserVaultWarmSourceStateHashBestEffort,
+} from "./hosted-runtime/browser-vault-replica.ts";
+export type {
+  HostedBrowserVaultReplicaContentSummary,
+  HostedBrowserVaultReplicaRefreshPreparation,
+  HostedBrowserVaultReplicaRestoreSummary,
+  HostedBrowserVaultReplicaSourceSummary,
 } from "./hosted-runtime/browser-vault-replica.ts";
 
 export type {

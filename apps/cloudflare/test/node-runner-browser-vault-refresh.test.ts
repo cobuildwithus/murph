@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createReplica: vi.fn(),
   measureReplicaBytes: vi.fn((replica: unknown) => JSON.stringify(replica).length),
+  prepareReplica: vi.fn(),
   publishReplica: vi.fn(),
+  readWorkspace: vi.fn(),
   warmVaultRoot: vi.fn(),
   writeReplica: vi.fn(),
 }));
@@ -15,18 +16,14 @@ vi.mock("@murphai/assistant-runtime", async () => {
 
   return {
     ...actual,
-    createHostedBrowserVaultReplicaForSourceState: mocks.createReplica,
+    createHostedBrowserVaultReplicaRefreshFromWorkspace: mocks.prepareReplica,
   };
 });
 
-vi.mock("../src/node-runner-isolated.ts", async () => {
-  const actual = await vi.importActual<typeof import("../src/node-runner-isolated.ts")>(
-    "../src/node-runner-isolated.ts",
-  );
-
+vi.mock("../src/node-runner-isolated.ts", () => {
   return {
-    ...actual,
     resolveHostedRunnerWarmWorkspaceVaultRoot: mocks.warmVaultRoot,
+    runHostedWorkspaceInvocationIsolatedDetailed: vi.fn(),
   };
 });
 
@@ -54,6 +51,9 @@ vi.mock("../src/runtime-platform.ts", async () => {
         publishRef: mocks.publishReplica,
         write: mocks.writeReplica,
       },
+      workspacePort: {
+        read: mocks.readWorkspace,
+      },
     })),
   };
 });
@@ -64,10 +64,14 @@ describe("refreshHostedBrowserVaultReplica", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    mocks.createReplica.mockImplementation(async (input: {
+    mocks.prepareReplica.mockImplementation(async (input: {
       sourceStateHash: string;
-    }) => createReplica(input.sourceStateHash));
+    }) => createPreparation(input.sourceStateHash));
     mocks.measureReplicaBytes.mockImplementation(() => 256);
+    mocks.readWorkspace.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      workspace: createWorkspace(),
+    });
     mocks.warmVaultRoot.mockReturnValue("/warm/vault");
     mocks.writeReplica.mockImplementation(async (input: {
       replica: ReturnType<typeof createReplica>;
@@ -85,7 +89,7 @@ describe("refreshHostedBrowserVaultReplica", () => {
     vi.useRealTimers();
   });
 
-  it("generates from the live warm vault and publishes the latest replica ref", async () => {
+  it("restores the live workspace before building and publishing the latest replica ref", async () => {
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
     const result = await refreshHostedBrowserVaultReplica({
       runtime: {
@@ -103,11 +107,18 @@ describe("refreshHostedBrowserVaultReplica", () => {
       replicaRef: createReplicaRef(sourceStateHash),
       status: "published",
     });
-    expect(mocks.createReplica).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.prepareReplica).toHaveBeenCalledWith(expect.objectContaining({
       generatedAt: FIXED_NOW,
+      platform: expect.objectContaining({
+        workspacePort: expect.objectContaining({
+          read: mocks.readWorkspace,
+        }),
+      }),
       sourceStateHash,
       vaultRoot: "/warm/vault",
+      workspace: createWorkspace(),
     }));
+    expect(mocks.readWorkspace).toHaveBeenCalledOnce();
     expect(sourceStateHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(mocks.publishReplica).toHaveBeenCalledWith({
       replicaRef: createReplicaRef(sourceStateHash),
@@ -129,7 +140,10 @@ describe("refreshHostedBrowserVaultReplica", () => {
 
     expect(result).toEqual({
       byteLength: 257,
+      content: createContentSummary(),
       maxBytes: 256,
+      restore: createRestoreSummary(),
+      source: createSourceSummary(),
       status: "refresh_failed_too_large",
     });
     expect(mocks.writeReplica).not.toHaveBeenCalled();
@@ -164,9 +178,9 @@ describe("refreshHostedBrowserVaultReplica", () => {
   });
 
   it("does not write or publish when refresh is aborted before publish", async () => {
-    const replicaReady = createDeferred<ReturnType<typeof createReplica>>();
+    const replicaReady = createDeferred<ReturnType<typeof createPreparation>>();
     const abortController = new AbortController();
-    mocks.createReplica.mockImplementation(async () => await replicaReady.promise);
+    mocks.prepareReplica.mockImplementation(async () => await replicaReady.promise);
 
     const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
     const refresh = refreshHostedBrowserVaultReplica({
@@ -179,16 +193,165 @@ describe("refreshHostedBrowserVaultReplica", () => {
     }, {
       signal: abortController.signal,
     });
-    await vi.waitFor(() => expect(mocks.createReplica).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(mocks.prepareReplica).toHaveBeenCalledOnce());
 
     abortController.abort(new Error("foreground_invocation"));
-    replicaReady.resolve(createReplica("f".repeat(64)));
+    replicaReady.resolve(createPreparation("f".repeat(64)));
 
     await expect(refresh).rejects.toThrow("foreground_invocation");
     expect(mocks.writeReplica).not.toHaveBeenCalled();
     expect(mocks.publishReplica).not.toHaveBeenCalled();
   });
+
+  it("publishes after a successful write even if the refresh is preempted", async () => {
+    const abortController = new AbortController();
+    mocks.writeReplica.mockImplementationOnce(async (input: {
+      replica: ReturnType<typeof createReplica>;
+    }) => {
+      abortController.abort(new Error("foreground_invocation"));
+      return createReplicaRef(input.replica.source.sourceBundleHash);
+    });
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const result = await refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      userId: "member_123",
+    }, {
+      signal: abortController.signal,
+    });
+
+    expect(result.status).toBe("published");
+    expect(mocks.writeReplica).toHaveBeenCalledOnce();
+    expect(mocks.publishReplica).toHaveBeenCalledOnce();
+  });
+
+  it("does not publish when restored source exists but the replica has no private content", async () => {
+    mocks.prepareReplica.mockResolvedValueOnce({
+      ...createPreparation("f".repeat(64)),
+      content: createContentSummary({ hasPrivateContent: false }),
+    });
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const result = await refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      status: "refresh_failed_empty_source",
+    });
+    expect(mocks.writeReplica).not.toHaveBeenCalled();
+    expect(mocks.publishReplica).not.toHaveBeenCalled();
+  });
+
+  it("does not publish an empty null-bootstrap workspace", async () => {
+    mocks.prepareReplica.mockResolvedValueOnce({
+      ...createPreparation("f".repeat(64)),
+      content: createContentSummary({ hasPrivateContent: false }),
+      source: createSourceSummary({ fileCount: 0, totalBytes: 0 }),
+    });
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const result = await refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({
+      status: "refresh_skipped_no_source",
+    });
+    expect(mocks.writeReplica).not.toHaveBeenCalled();
+    expect(mocks.publishReplica).not.toHaveBeenCalled();
+  });
+
+  it("keeps a missing web workspace retryable without building an empty replica", async () => {
+    mocks.readWorkspace.mockResolvedValueOnce({
+      fetchedAt: FIXED_NOW,
+      workspace: null,
+    });
+
+    const { refreshHostedBrowserVaultReplica } = await import("../src/node-runner.ts");
+    const result = await refreshHostedBrowserVaultReplica({
+      runtime: {
+        forwardedEnv: {},
+        platformEnv: {},
+        userEnv: {},
+      },
+      userId: "member_123",
+    });
+
+    expect(result).toEqual({
+      status: "workspace_missing",
+    });
+    expect(mocks.prepareReplica).not.toHaveBeenCalled();
+    expect(mocks.writeReplica).not.toHaveBeenCalled();
+    expect(mocks.publishReplica).not.toHaveBeenCalled();
+  });
 });
+
+function createWorkspace() {
+  return {
+    createdAt: "2026-05-07T00:00:00.000Z",
+    snapshotRef: null,
+    updatedAt: "2026-05-07T00:00:00.000Z",
+    userId: "member_123",
+    version: "workspace-1",
+  };
+}
+
+function createPreparation(sourceStateHash: string) {
+  return {
+    content: createContentSummary(),
+    replica: createReplica(sourceStateHash),
+    restore: createRestoreSummary(),
+    source: createSourceSummary(),
+  };
+}
+
+function createContentSummary(input: {
+  hasPrivateContent?: boolean;
+} = {}) {
+  return {
+    entities: input.hasPrivateContent === false ? 0 : 1,
+    hasPrivateContent: input.hasPrivateContent ?? true,
+    metricGoalProgressRows: 0,
+    metricRows: 0,
+    metricSelectionRows: 24,
+    searchRows: input.hasPrivateContent === false ? 0 : 1,
+    sourceHealthRows: 0,
+    timelineRows: 0,
+    weeklySampleSummaries: 0,
+  };
+}
+
+function createRestoreSummary() {
+  return {
+    mode: "snapshot",
+    restoreWasCold: true,
+  };
+}
+
+function createSourceSummary(input: {
+  fileCount?: number;
+  totalBytes?: number;
+} = {}) {
+  return {
+    fileCount: input.fileCount ?? 1,
+    totalBytes: input.totalBytes ?? 128,
+  };
+}
 
 function createReplica(sourceStateHash: string) {
   return {

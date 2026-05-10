@@ -5,6 +5,7 @@ export class RunnerRuntimeAlarmScheduler {
   constructor(
     private readonly stateStore: RunnerStateStore,
     private readonly state: DurableObjectStateLike,
+    private readonly readExtraWakeAt: () => Promise<string | null> | string | null = () => null,
   ) {}
 
   async syncNextWake(input: {
@@ -24,8 +25,12 @@ export class RunnerRuntimeAlarmScheduler {
   }
 
   private async applyAlarm(nextWakeAt: string | null): Promise<void> {
-    if (nextWakeAt) {
-      await this.state.storage.setAlarm(new Date(nextWakeAt));
+    const effectiveWakeAt = earliestIsoDate(
+      nextWakeAt,
+      await this.readExtraWakeAt(),
+    );
+    if (effectiveWakeAt) {
+      await this.state.storage.setAlarm(new Date(effectiveWakeAt));
       return;
     }
 
@@ -35,4 +40,14 @@ export class RunnerRuntimeAlarmScheduler {
 
 function readEarliestRunnerAlarmAt(record: RunnerStateRecord): string | null {
   return record.alarm?.dueAt ?? null;
+}
+
+function earliestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) return right;
+  if (!Number.isFinite(rightMs)) return left;
+  return leftMs <= rightMs ? left : right;
 }

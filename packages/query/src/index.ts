@@ -21,6 +21,12 @@ export {
   readVault,
   readVaultTolerant,
 } from "./vault-reader.ts";
+export {
+  listCanonicalSourceManifest,
+} from "./vault-source.ts";
+export type {
+  QuerySourceManifestEntry,
+} from "./vault-source.ts";
 export type {
   EntityFilter,
   ExperimentFilter,

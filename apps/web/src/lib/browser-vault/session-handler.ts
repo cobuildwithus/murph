@@ -106,6 +106,9 @@ export function createBrowserVaultSessionRoute(input: {
       );
     } catch (error) {
       if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
+        scheduleAfterResponseOrFireAndForget(() =>
+          scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
+        );
         return emptyBrowserVaultSession({
           refreshPending: true,
           workspaceVersion,

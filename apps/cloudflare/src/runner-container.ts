@@ -111,9 +111,13 @@ type HostedExecutionContainerBrowserVaultRefreshResult =
       status: "refresh_failed_too_large";
     }
   | {
+      status: "refresh_failed_empty_source" | "refresh_skipped_no_source";
+    }
+  | {
       // Deploy-skew compatibility for older container shells. New live
-      // refreshes emit only published, refresh_failed_too_large, or
-      // publish_conflict.
+      // refreshes emit only published, refresh_failed_too_large,
+      // refresh_failed_empty_source, refresh_skipped_no_source, publish_conflict,
+      // or workspace_missing.
       status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
     };
 
@@ -2089,6 +2093,8 @@ function parseHostedBrowserVaultRefreshContainerResult(
   if (
     status === "already_fresh"
     || status === "publish_conflict"
+    || status === "refresh_failed_empty_source"
+    || status === "refresh_skipped_no_source"
     || status === "stale_source"
     || status === "workspace_missing"
   ) {
@@ -2098,7 +2104,7 @@ function parseHostedBrowserVaultRefreshContainerResult(
   }
 
   throw new TypeError(
-    "Hosted browser-vault refresh container result.status must be published, refresh_failed_too_large, already_fresh, publish_conflict, stale_source, or workspace_missing.",
+    "Hosted browser-vault refresh container result.status must be published, refresh_failed_too_large, refresh_failed_empty_source, refresh_skipped_no_source, already_fresh, publish_conflict, stale_source, or workspace_missing.",
   );
 }
 

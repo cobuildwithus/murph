@@ -3429,6 +3429,45 @@ describe("RunnerContainer", () => {
     expect(abortBrowserVaultRefresh).not.toHaveBeenCalled();
   });
 
+  it("passes through empty-source browser-vault refresh container statuses", async () => {
+    const statuses = [
+      "refresh_failed_empty_source",
+      "refresh_skipped_no_source",
+    ] as const;
+
+    for (const status of statuses) {
+      const refreshBrowserVaultReplica = vi.fn<
+        NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+      >(async () => ({ status }));
+      const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+        async destroyInstance() {},
+        async invoke() {
+          return createRunnerResult();
+        },
+        async ownsInternalWorkerProxyToken() {
+          return false;
+        },
+        refreshBrowserVaultReplica,
+        async smokeHealth() {
+          return {
+            ok: true,
+            runnerBundle: null,
+            service: "cloudflare-hosted-runner-node",
+            status: 200,
+          };
+        },
+      }));
+
+      await expect(refreshHostedExecutionContainerBrowserVaultReplica({
+        runnerContainerNamespace: { getByName },
+        runtime: {},
+        timeoutMs: 45_000,
+        userId: "member_123",
+      })).resolves.toEqual({ status });
+      expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    }
+  });
+
   it("does not start browser-vault refresh RPC when the local wait is already aborted", async () => {
     const refreshBrowserVaultReplica = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
