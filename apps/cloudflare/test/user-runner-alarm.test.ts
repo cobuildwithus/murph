@@ -1498,6 +1498,88 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]));
   });
 
+  it("keeps pending nudge follow-up when mailbox lag status is unknown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      redactedStatus: Record<string, string>;
+      status: "idle";
+    }>();
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "41",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      snapshotRef: createLayeredSnapshotRef("stale-pending-nudge-unknown-status"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    firstInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "42",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]));
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message: "Hosted runner could not verify pending nudge mailbox lag before follow-up.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
   it("keeps a newer pending nudge that arrives during drained-lag verification", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
