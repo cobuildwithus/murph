@@ -1264,8 +1264,9 @@ https://join.example.test/join/code_first_text`);
       }),
       "sent",
       expect.objectContaining({
+        directRunnerNudgeAccepted: true,
+        directRunnerNudgeDeferred: false,
         responseReason: "wake-appended-active-member",
-        runnerNudgeAccepted: true,
         wakeHandoffReason: "workflow-start-failed",
         wakeHandoffStarted: false,
         wakeHandoffWorkflowStarted: false,

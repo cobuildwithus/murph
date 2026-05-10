@@ -77,9 +77,12 @@ Done:
 - Follow-up audit found two latency blockers before deploy: idle-checkpoint pending nudges could still fall back to alarm-only continuation, and hosted-web webhook success could still wait on the optional direct runner nudge.
 - Patched pending-nudge checkpoint handoff to queue the same continuation drive in the current isolate and changed hosted-web webhook success to return after durable workflow handoff while observing direct runner nudge asynchronously.
 - Focused Cloudflare/web regressions, full Cloudflare verify, full hosted-web verify, assistant-runtime typecheck/test, diff hygiene, and privacy scans passed for the audit-blocker follow-up.
+- Pushed the audit-blocker follow-up to main, then received a Pro simplification target: success-path handoff results should not report `runnerNudgeAccepted: false` when the optional direct nudge is merely deferred.
+- Renamed the handoff/read-receipt contract to explicit direct-runner nudge metadata, using `directRunnerNudgeAccepted: null` plus `directRunnerNudgeDeferred: true` for success-path deferred observation.
+- Focused hosted-web handoff/Linq dispatch regressions and assistant-runtime typecheck passed for the Pro simplification follow-up.
 
 Now:
-- Commit/push the verified audit-blocker follow-up to main, then retry Pro review in the open ChatGPT thread.
+- Commit/push the verified Pro simplification follow-up to main, then run another concise Pro review pass on the latest commit.
 
 Next:
 - Deploy immediately after Pro review, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
