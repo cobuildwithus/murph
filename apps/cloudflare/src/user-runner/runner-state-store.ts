@@ -123,7 +123,7 @@ export function resolveActiveInvocationRecoveryDecision(input: {
   containerStopped?: boolean | null;
   currentWorkerVersionId?: string | null;
   expiresAt?: string | null;
-  heartbeatStaleMs?: number | null;
+  heartbeatStaleMs: number;
   lastHeartbeatAt?: string | null;
   nowMs: number;
   readyTimeoutMs: number;
@@ -136,9 +136,8 @@ export function resolveActiveInvocationRecoveryDecision(input: {
     ? Date.parse(input.lastHeartbeatAt)
     : Number.NaN;
   const hasHeartbeat = Number.isFinite(lastHeartbeatAtMs);
-  const heartbeatStaleMs = input.heartbeatStaleMs ?? null;
-  const hasRecentHeartbeat = heartbeatStaleMs !== null
-    && hasHeartbeat
+  const heartbeatStaleMs = Math.max(0, Math.floor(input.heartbeatStaleMs));
+  const hasRecentHeartbeat = hasHeartbeat
     && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
 
   if (input.containerStopped === true) {
@@ -173,7 +172,7 @@ export function resolveActiveInvocationRecoveryDecision(input: {
   const startupDeadlineMs = !hasHeartbeat && Number.isFinite(startedAtMs)
     ? startedAtMs + Math.max(0, Math.floor(input.readyTimeoutMs))
     : Number.POSITIVE_INFINITY;
-  const heartbeatDeadlineMs = hasHeartbeat && heartbeatStaleMs !== null
+  const heartbeatDeadlineMs = hasHeartbeat
     ? lastHeartbeatAtMs + heartbeatStaleMs
     : Number.POSITIVE_INFINITY;
   const nextDeadlineMs = Math.min(
@@ -856,7 +855,7 @@ export class RunnerStateStore {
 
   async clearStaleInvocationIfExpired(input: {
     currentWorkerVersionId?: string | null;
-    heartbeatStaleMs?: number | null;
+    heartbeatStaleMs: number;
     nowMs: number;
     readyTimeoutMs: number;
     timeoutMs: number;
@@ -879,7 +878,7 @@ export class RunnerStateStore {
       containerStopped: meta.active_invocation_container_stopped_at !== null,
       currentWorkerVersionId: input.currentWorkerVersionId ?? null,
       expiresAt: meta.active_invocation_expires_at,
-      heartbeatStaleMs: input.heartbeatStaleMs ?? null,
+      heartbeatStaleMs: input.heartbeatStaleMs,
       lastHeartbeatAt: meta.active_invocation_last_heartbeat_at,
       nowMs: input.nowMs,
       readyTimeoutMs: input.readyTimeoutMs,
