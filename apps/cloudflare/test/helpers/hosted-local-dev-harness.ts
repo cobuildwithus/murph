@@ -5,7 +5,10 @@ import path from "node:path";
 
 import { buildCloudflareHostedControlUserStatusPath } from "@murphai/cloudflare-hosted-control/routes";
 import { parseHostedRunnerStatusResponse } from "@murphai/hosted-execution/parsers";
-import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRunnerStatusResponse,
+  HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { repoRoot } from "../../vitest.shared.js";
 import { resolveHostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/config.ts";
@@ -27,7 +30,9 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
-  startStuckInvocationForTest(userId: string): Promise<{
+  startStuckInvocationForTest(userId: string, input?: {
+    reason?: HostedWorkspaceInvocationReason;
+  }): Promise<{
     attemptId: string;
     nextWakeAt: string | null;
     ok: true;
@@ -165,17 +170,25 @@ export async function startHostedLocalDevHarness(input: {
           },
         );
       },
-      startStuckInvocationForTest: async (userId: string): Promise<{
+      startStuckInvocationForTest: async (
+        userId: string,
+        stuckInput?: { reason?: HostedWorkspaceInvocationReason },
+      ): Promise<{
         attemptId: string;
         nextWakeAt: string | null;
         ok: true;
       }> => {
+        const searchParams = new URLSearchParams();
+        if (stuckInput?.reason) {
+          searchParams.set("reason", stuckInput.reason);
+        }
+        const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
         return await requestJsonForRuntime<{
           attemptId: string;
           nextWakeAt: string | null;
           ok: true;
         }>(
-          `/__test/users/${encodeURIComponent(userId)}/stuck-invocation`,
+          `/__test/users/${encodeURIComponent(userId)}/stuck-invocation${suffix}`,
           {
             headers: statusHeaders(userId),
             method: "POST",

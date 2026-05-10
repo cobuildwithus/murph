@@ -142,6 +142,11 @@ interface ActiveWorkspaceInvocationAbort {
   userId: string;
 }
 
+interface RegisteredActiveWorkspaceInvocationAbort {
+  release(): void;
+  signal: AbortSignal;
+}
+
 type LocalActiveInvocationRecovery =
   | {
     kind: "live";
@@ -676,31 +681,38 @@ export class HostedUserRunner {
           reason: "nudge",
           retryFailureCount,
         })).toISOString();
-    const record = await this.markPendingNudgeAndApplyAlarm({
+    let record = await this.markPendingNudgeAndApplyAlarm({
       preferredWakeAt,
       resetRetryFailureCount,
     });
     let preemptedActiveInvocation = false;
     let preemptedPersistedActiveInvocation = false;
-    let preemptedPersistedActiveInvocationContainerDestroyed:
-      | Awaited<ReturnType<typeof destroyHostedExecutionContainer>>
-      | null = null;
+    let preemptedPersistedActiveInvocationContainerDestroyScheduled = false;
     let immediateDriveStarted = false;
     if (activeInThisIsolate) {
-      immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
-        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-        reason: "nudge",
-        userId: record.userId,
-      });
       if (activeIdleShutdownCheckpoint) {
-        preemptedActiveInvocation = this.abortActiveWorkspaceInvocation(
-          {
-            attemptId: activeIdleShutdownCheckpoint.attemptId,
-            leaseGeneration: runningRecord.leaseGeneration.toString(),
-            userId: runningRecord.userId,
-          },
-          new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
-        );
+        const preemption = await this.preemptActiveIdleShutdownCheckpointForPendingNudge({
+          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+          logMessage: "Hosted runner aborted idle-shutdown checkpoint after foreground nudge.",
+          record,
+          userId: record.userId,
+        });
+        if (preemption.preempted) {
+          preemptedActiveInvocation = preemption.activeWorkspaceInvocationAborted;
+          record = preemption.record;
+        } else {
+          immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+            reason: "nudge",
+            userId: record.userId,
+          });
+        }
+      } else {
+        immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+          reason: "nudge",
+          userId: record.userId,
+        });
       }
     } else if (activeIdleShutdownCheckpoint) {
       const preemption = await this.stateStore.clearActiveIdleShutdownCheckpointForForegroundNudge(
@@ -708,20 +720,13 @@ export class HostedUserRunner {
       );
       preemptedPersistedActiveInvocation = preemption.cleared;
       if (preemption.cleared) {
-        preemptedPersistedActiveInvocationContainerDestroyed =
-          await destroyHostedExecutionContainer({
-            runnerContainerName: resolveHostedExecutionRunnerContainerName({
-              source: this.runnerRuntimeEnvSource,
-              userId: runningRecord.userId,
-            }),
-            runnerContainerNamespace: this.runnerContainerNamespace,
-            userId: runningRecord.userId,
-          });
         immediateDriveStarted = this.startDetachedRunnerDrive({
           aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
           reason: "nudge",
           userId: record.userId,
         });
+        preemptedPersistedActiveInvocationContainerDestroyScheduled =
+          this.destroyPreemptedActiveInvocationContainerInBackground(runningRecord.userId);
       }
     } else if (!alreadyRunning) {
       immediateDriveStarted = this.startDetachedRunnerDrive({
@@ -738,10 +743,7 @@ export class HostedUserRunner {
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
         preemptedPersistedActiveInvocation,
-        preemptedPersistedActiveInvocationContainerDestroyAttempted:
-          preemptedPersistedActiveInvocationContainerDestroyed?.attempted ?? false,
-        preemptedPersistedActiveInvocationContainerDestroyOk:
-          preemptedPersistedActiveInvocationContainerDestroyed?.ok ?? true,
+        preemptedPersistedActiveInvocationContainerDestroyScheduled,
         preemptedActiveInvocation,
         retryFailureCountReset: resetRetryFailureCount,
       },
@@ -831,6 +833,20 @@ export class HostedUserRunner {
       };
     }
 
+    const preemption = await this.preemptActiveIdleShutdownCheckpointForPendingNudge({
+      logMessage: "Hosted runner aborted idle-shutdown checkpoint after foreground input became available.",
+      record: result.record,
+      userId: input.userId,
+    });
+    if (preemption.preempted) {
+      return {
+        inputAvailable: true,
+        nextAlarmAt: preemption.record.nextWakeAt,
+        ok: true,
+        pendingNudge: preemption.record.pendingNudge,
+      };
+    }
+
     const record = await this.reschedulePendingNudgeAfterInvocationLiveness(result.record)
       ?? result.record;
     return {
@@ -839,6 +855,120 @@ export class HostedUserRunner {
       ok: true,
       pendingNudge: record.pendingNudge,
     };
+  }
+
+  private async preemptActiveIdleShutdownCheckpointForPendingNudge(input: {
+    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
+    logMessage: string;
+    record: RunnerStateRecord;
+    userId: string;
+  }): Promise<
+    | {
+      preempted: false;
+      record: RunnerStateRecord;
+    }
+    | {
+      activeWorkspaceInvocationAborted: boolean;
+      preempted: true;
+      record: RunnerStateRecord;
+    }
+  > {
+    const activeInvocation = input.record.workspaceInvocation;
+    if (
+      !input.record.pendingNudge
+      || activeInvocation?.reason !== "idle_shutdown_checkpoint"
+    ) {
+      return {
+        preempted: false,
+        record: input.record,
+      };
+    }
+
+    const aborted = this.abortActiveWorkspaceInvocation(
+      {
+        attemptId: activeInvocation.attemptId,
+        leaseGeneration: input.record.leaseGeneration.toString(),
+        userId: input.record.userId,
+      },
+      new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
+    );
+    const record = await this.queuePendingNudgeContinuationAfterInvocation({
+      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+      record: input.record,
+      userId: input.userId,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        activeWorkspaceInvocationAborted: aborted,
+        pendingNudge: record.pendingNudge,
+        workspaceAttemptId: activeInvocation.attemptId,
+      },
+      message: input.logMessage,
+      phase: "scheduled",
+      userId: input.userId,
+    });
+
+    return {
+      activeWorkspaceInvocationAborted: aborted,
+      preempted: true,
+      record,
+    };
+  }
+
+  private destroyPreemptedActiveInvocationContainerInBackground(userId: string): boolean {
+    if (!this.runnerContainerNamespace) {
+      return false;
+    }
+
+    const cleanup = destroyHostedExecutionContainer({
+      runnerContainerName: resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId,
+      }),
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      userId,
+    })
+      .then((result) => {
+        if (!result.ok) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              destroyAttempted: result.attempted,
+              destroyErrorCode: result.errorCode,
+            },
+            level: "warn",
+            message: "Hosted runner preempted idle-checkpoint container cleanup failed after foreground drive started.",
+            phase: "failed",
+            userId,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted runner preempted idle-checkpoint container cleanup threw after foreground drive started.",
+          phase: "failed",
+          userId,
+        });
+      });
+
+    try {
+      this.state.waitUntil?.(cleanup);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner preempted idle-checkpoint cleanup could not be registered with Durable Object waitUntil.",
+        phase: "scheduled",
+        userId,
+      });
+    }
+    void cleanup;
+    return true;
   }
 
   async recordActiveInvocationContainerStopped(input: {
@@ -930,7 +1060,31 @@ export class HostedUserRunner {
     const record = await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: new Date().toISOString(),
     });
-    this.invocationLock = new Promise<void>(() => undefined);
+    const registeredInvocation = this.registerActiveWorkspaceInvocationAbort({
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.leaseGeneration,
+      userId: input.userId,
+    });
+    let releaseLock!: () => void;
+    const lock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const releaseAfterAbort = () => {
+      queueMicrotask(() => {
+        registeredInvocation.release();
+        releaseLock();
+        if (this.invocationLock === lock) {
+          this.invocationLock = null;
+        }
+        this.drainQueuedRunnerDriveAfterInvocation();
+      });
+    };
+    registeredInvocation.signal.addEventListener(
+      "abort",
+      releaseAfterAbort,
+      { once: true },
+    );
+    this.invocationLock = lock;
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -1448,13 +1602,14 @@ export class HostedUserRunner {
   }
 
   private async queuePendingNudgeContinuationAfterInvocation(input: {
+    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     record: RunnerStateRecord;
     userId: string;
   }): Promise<RunnerStateRecord> {
     const { record } = input;
 
     this.pendingRunnerDriveAfterInvocation = {
-      aiUsageAllowDecision: null,
+      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       reason: "nudge",
       userId: input.userId,
     };
@@ -1586,6 +1741,37 @@ export class HostedUserRunner {
 
     active.controller.abort(reason);
     return true;
+  }
+
+  private registerActiveWorkspaceInvocationAbort(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): RegisteredActiveWorkspaceInvocationAbort {
+    const timeoutSignal = AbortSignal.timeout(this.env.runnerTimeoutMs);
+    const activeAbort = createHostedRunnerActiveInvocationAbort({
+      attemptId: input.attemptId,
+      leaseGeneration: input.leaseGeneration,
+      timeoutSignal,
+      userId: input.userId,
+    });
+    this.activeWorkspaceInvocationAbort = activeAbort.active;
+
+    let released = false;
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+
+        released = true;
+        activeAbort.unlinkTimeout();
+        if (this.activeWorkspaceInvocationAbort === activeAbort.active) {
+          this.activeWorkspaceInvocationAbort = null;
+        }
+      },
+      signal: activeAbort.active.controller.signal,
+    };
   }
 
   private abortActiveWorkspaceInvocationAfterContainerStop(input: {
@@ -1754,29 +1940,23 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    const timeoutSignal = AbortSignal.timeout(this.env.runnerTimeoutMs);
-    const activeAbort = createHostedRunnerActiveInvocationAbort({
+    const registeredInvocation = this.registerActiveWorkspaceInvocationAbort({
       attemptId: input.lease.attemptId,
       leaseGeneration: input.lease.leaseGeneration,
-      timeoutSignal,
       userId: input.userId,
     });
-    this.activeWorkspaceInvocationAbort = activeAbort.active;
 
     try {
       return await invokeHostedExecutionContainerRunner({
         job,
         runnerContainerName,
         runnerContainerNamespace: this.runnerContainerNamespace,
-        signal: activeAbort.active.controller.signal,
+        signal: registeredInvocation.signal,
         timeoutMs: this.env.runnerTimeoutMs,
         userId: input.userId,
       });
     } finally {
-      activeAbort.unlinkTimeout();
-      if (this.activeWorkspaceInvocationAbort === activeAbort.active) {
-        this.activeWorkspaceInvocationAbort = null;
-      }
+      registeredInvocation.release();
     }
   }
 
@@ -2852,6 +3032,19 @@ export class HostedUserRunner {
     return started;
   }
 
+  private drainQueuedRunnerDriveAfterInvocation(): void {
+    const pendingDrive = this.pendingRunnerDriveAfterInvocation;
+
+    if (pendingDrive && this.invocationLock === null) {
+      this.pendingRunnerDriveAfterInvocation = null;
+
+      const started = this.startDetachedRunnerDrive(pendingDrive);
+      if (!started) {
+        this.pendingRunnerDriveAfterInvocation = pendingDrive;
+      }
+    }
+  }
+
   private async tryReadStateForRetryScheduling(): Promise<RunnerStateRecord | null> {
     try {
       return await this.stateStore.readState();
@@ -2920,16 +3113,7 @@ export class HostedUserRunner {
         run,
       );
     } finally {
-      const pendingDrive = this.pendingRunnerDriveAfterInvocation;
-
-      if (pendingDrive && this.invocationLock === null) {
-        this.pendingRunnerDriveAfterInvocation = null;
-
-        const started = this.startDetachedRunnerDrive(pendingDrive);
-        if (!started) {
-          this.pendingRunnerDriveAfterInvocation = pendingDrive;
-        }
-      }
+      this.drainQueuedRunnerDriveAfterInvocation();
     }
   }
 

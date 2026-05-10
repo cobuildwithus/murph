@@ -87,9 +87,13 @@ Updated: 2026-05-11
 
 ## Current evidence
 
-- Local hosted Linq/iMessage full-stack E2E reproduces before provider ingress: the suite times out in `beforeAll` while Wrangler prepares/reloads container images, so the observed local failure is startup/control-plane harness setup rather than Linq webhook delivery.
-- Focused Cloudflare unit verification passed for the changed runner/container surfaces: `apps/cloudflare/test/user-runner-alarm.test.ts` plus `apps/cloudflare/test/runner-container.test.ts`.
-- `apps/cloudflare typecheck` passed.
-- Full `pnpm typecheck` is blocked by an unrelated CLI test double missing `getAttachment`.
-- `pnpm test:diff ...` reached the Cloudflare verify lane but was blocked by a pre-existing hosted-local `stuck-invocation-recovery` runner-bundle lock.
-- `review:gpt` was invoked with the simplification prompt; response capture timed out with only a partial, non-actionable response.
+- Local hosted Linq/iMessage full-stack E2E reproduced the production-shaped stall before the fix: a real signed Linq webhook appended conversation input while an active runner invocation had not imported the new mailbox row, and no outbound message was sent until stale recovery.
+- The fix keeps recovery in the Cloudflare runner scheduling layer: when a foreground nudge becomes visible during an `idle_shutdown_checkpoint` invocation, the runner aborts that maintenance invocation and queues the pending foreground drive.
+- The E2E also reproduced a second foreground-blocking path: persisted idle-checkpoint preemption waited for container destroy, and a local destroy timeout kept the real webhook input queued with conversation mailbox lag. Persisted idle-checkpoint preemption now clears the durable active invocation, starts the foreground drive immediately, and runs container cleanup as redacted best-effort background work.
+- The test-only stuck invocation route now supports an explicit workspace invocation reason and uses the same abortable active-invocation plumbing as real runner work, so foreground preemption can be exercised without waiting for the production stale timeout.
+- `pnpm hosted-local e2e stuck-invocation-recovery --no-bundle` passed after the fix, covering real signed Linq webhook ingress, persisted/container-cleanup preemption, foreground nudge preemption of an active idle-shutdown checkpoint, mailbox drain, one assistant provider request, and one outbound reply.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir apps/cloudflare test user-runner-alarm.test.ts` passed all 142 tests.
+- `pnpm typecheck` passed.
+- `pnpm test:diff` passed the affected `apps/cloudflare` verify lane: 71 test files and 1015 tests.
+- `git diff --check` passed.
