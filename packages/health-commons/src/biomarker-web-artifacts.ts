@@ -411,13 +411,34 @@ function toBiomarkerSourceModel(sourceEntity: HealthCommonsCatalogEntity): Healt
     citation: source?.citation ?? null,
     evidenceLabel: sourceEntity.researchEvidence?.designLabel
       ?? formatSourceKind(source?.kind ?? sourceEntity.entityType),
-    externalUrl: source?.url ?? null,
+    externalUrl: safeExternalHttpUrl(source?.url),
     key: sourceEntity.key,
     summary: resolveBiomarkerSourceSummary(sourceEntity),
     title: source?.title ?? sourceEntity.title,
     typeLabel: formatSourceKind(source?.kind ?? sourceEntity.entityType),
     year: source?.year ?? null,
   };
+}
+
+function safeExternalHttpUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
+      return null;
+    }
+    return trimmed;
+  } catch {
+    return null;
+  }
 }
 
 function compareBiomarkerSourceEntities(

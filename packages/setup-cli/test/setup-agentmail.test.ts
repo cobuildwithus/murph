@@ -39,8 +39,8 @@ test('setup agentmail selection returns null when the API key is absent', async 
   assert.equal(createClientCalls, 0)
 })
 
-test('setup agentmail selection discovers a single inbox and ignores env base URL overrides', async () => {
-  let observedClientInputKeys: string[] = []
+test('setup agentmail selection discovers a single inbox and honors env base URL overrides', async () => {
+  let observedClientInput: { apiKey: string; baseUrl?: string } | null = null
   const inboxes: AgentmailInbox[] = [
     {
       inbox_id: 'inbox-1',
@@ -51,7 +51,7 @@ test('setup agentmail selection discovers a single inbox and ignores env base UR
 
   const resolveSelection = createSetupAgentmailSelectionResolver({
     createClient(input) {
-      observedClientInputKeys = Object.keys(input)
+      observedClientInput = input
       return createAgentmailClientStub(async () => ({
         count: inboxes.length,
         inboxes,
@@ -74,7 +74,10 @@ test('setup agentmail selection discovers a single inbox and ignores env base UR
     emailAddress: 'user@example.com',
     mode: 'discovered',
   })
-  assert.deepEqual(observedClientInputKeys, ['apiKey'])
+  assert.deepEqual(observedClientInput, {
+    apiKey: 'agentmail-api-key',
+    baseUrl: 'https://api.agentmail.test/v0/',
+  })
 })
 
 test('setup agentmail selection lets the user choose from multiple inboxes', async () => {

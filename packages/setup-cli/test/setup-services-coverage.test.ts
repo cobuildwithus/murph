@@ -2175,7 +2175,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
   }
 })
 
-test('createSetupServices keeps assistant provider keys out of provisioning subprocess envs', async () => {
+test('createSetupServices keeps prompted provider credentials out of provisioning subprocess envs', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-provider-env-'))
   const cwd = path.join(root, 'workspace')
   const homeDirectory = path.join(root, 'home')
@@ -2203,11 +2203,29 @@ test('createSetupServices keeps assistant provider keys out of provisioning subp
   await writeFile(whisperModelPath, 'model', 'utf8')
 
   const commandEnvs: NodeJS.ProcessEnv[] = []
+  const setupCredentialEnv: NodeJS.ProcessEnv = {
+    AGENTMAIL_API_KEY: 'agentmail_key_SENTINEL',
+    JUNCTION_API_KEY: 'junction_key_SENTINEL',
+    JUNCTION_CLIENT_USER_ID_SECRET: 'junction_user_secret_SENTINEL',
+    OURA_CLIENT_ID: 'oura_client_id_SENTINEL',
+    OURA_CLIENT_SECRET: 'oura_client_secret_SENTINEL',
+    STRAVA_CLIENT_ID: 'strava_client_id_SENTINEL',
+    STRAVA_CLIENT_SECRET: 'strava_client_secret_SENTINEL',
+    TELEGRAM_BOT_TOKEN: 'telegram_token_SENTINEL',
+    WHOOP_CLIENT_ID: 'whoop_client_id_SENTINEL',
+    WHOOP_CLIENT_SECRET: 'whoop_client_secret_SENTINEL',
+  }
+  const setupNonCredentialEnv: NodeJS.ProcessEnv = {
+    JUNCTION_ENV: 'sandbox',
+    JUNCTION_REGION: 'us',
+  }
 
   try {
     const services = createSetupServices({
       arch: () => 'x64',
       env: () => ({
+        ...setupNonCredentialEnv,
+        ...setupCredentialEnv,
         OPENAI_API_KEY: 'openai_secret_SENTINEL',
         PATH: binDirectory,
         VENICE_API_KEY: 'venice_secret_SENTINEL',
@@ -2254,12 +2272,19 @@ test('createSetupServices keeps assistant provider keys out of provisioning subp
       },
       channels: [],
       dryRun: false,
+      envOverrides: {
+        ...setupNonCredentialEnv,
+        ...setupCredentialEnv,
+      },
       localEnvOverrides: {
+        ...setupNonCredentialEnv,
+        ...setupCredentialEnv,
         VENICE_API_KEY: 'venice_secret_SENTINEL',
       },
       strict: false,
       toolchainRoot,
       vault: './vault',
+      wearables: ['oura', 'whoop', 'strava', 'garmin'],
     })
 
     assert.ok(commandEnvs.length > 0)
@@ -2267,11 +2292,30 @@ test('createSetupServices keeps assistant provider keys out of provisioning subp
       assert.equal(env.OPENAI_API_KEY, undefined)
       assert.equal(env.VENICE_API_KEY, undefined)
       assert.equal(env.VERCEL_AI_API_KEY, undefined)
+      for (const key of Object.keys(setupCredentialEnv)) {
+        assert.equal(env[key], undefined)
+      }
     }
     assert.equal(JSON.stringify(result).includes('venice_secret_SENTINEL'), false)
+    for (const value of Object.values(setupCredentialEnv)) {
+      assert.equal(JSON.stringify(result).includes(value ?? ''), false)
+    }
+    assert.deepEqual(
+      result.wearables.map((wearable) => [wearable.wearable, wearable.ready]),
+      [
+        ['garmin', true],
+        ['oura', true],
+        ['strava', true],
+        ['whoop', true],
+      ],
+    )
     assert.match(
       await readFile(path.join(cwd, '.env.local'), 'utf8'),
       /VENICE_API_KEY="venice_secret_SENTINEL"/u,
+    )
+    assert.match(
+      await readFile(path.join(cwd, '.env.local'), 'utf8'),
+      /AGENTMAIL_API_KEY="agentmail_key_SENTINEL"/u,
     )
   } finally {
     await rm(root, { recursive: true, force: true })

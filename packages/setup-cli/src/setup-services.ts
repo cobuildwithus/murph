@@ -66,6 +66,19 @@ import {
   provisionHostToolchain,
 } from './setup-services/tool-provisioning.js'
 
+const SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS = [
+  'AGENTMAIL_API_KEY',
+  'JUNCTION_API_KEY',
+  'JUNCTION_CLIENT_USER_ID_SECRET',
+  'OURA_CLIENT_ID',
+  'OURA_CLIENT_SECRET',
+  'STRAVA_CLIENT_ID',
+  'STRAVA_CLIENT_SECRET',
+  'TELEGRAM_BOT_TOKEN',
+  'WHOOP_CLIENT_ID',
+  'WHOOP_CLIENT_SECRET',
+] as const
+
 interface SetupInput {
   vault: string
   assistant?: SetupConfiguredAssistant | null
@@ -172,6 +185,9 @@ export function createSetupServices(
     const effectiveEnv = scrubAssistantProviderEnv({
       env: rawEffectiveEnv,
     })
+    const toolProvisioningEnv = scrubSetupToolProvisioningCredentialEnv({
+      env: effectiveEnv,
+    })
     const persistedEnv = {
       ...rawEffectiveEnv,
       ...(input.localEnvOverrides ?? input.envOverrides ?? {}),
@@ -197,7 +213,7 @@ export function createSetupServices(
       arch,
       downloadFile,
       dryRun,
-      env: effectiveEnv,
+      env: toolProvisioningEnv,
       fileExists,
       log,
       notes,
@@ -207,7 +223,10 @@ export function createSetupServices(
       toolchainRoot,
       whisperModel,
     })
-    const toolchainEnv = provisioning.env
+    const toolchainEnv = {
+      ...effectiveEnv,
+      ...provisioning.env,
+    }
     const tools = provisioning.tools
 
     let bootstrap: InboxBootstrapResult | null = null
@@ -412,6 +431,16 @@ function scrubAssistantProviderEnv(input: {
   const next = { ...input.env }
   for (const config of ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS) {
     delete next[config.envKey]
+  }
+  return next
+}
+
+function scrubSetupToolProvisioningCredentialEnv(input: {
+  env: NodeJS.ProcessEnv
+}): NodeJS.ProcessEnv {
+  const next = { ...input.env }
+  for (const key of SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS) {
+    delete next[key]
   }
   return next
 }
