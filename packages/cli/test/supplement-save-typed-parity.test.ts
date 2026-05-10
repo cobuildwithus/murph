@@ -59,6 +59,10 @@ function assertCompactSavedEntity(entity: SavedEntitySnapshot) {
   }
 }
 
+function savedEntityLinkIds(entity: SavedEntitySnapshot): string[] {
+  return entity.links.map((link) => String(link.id)).sort()
+}
+
 function createSupplementCli() {
   const cli = Cli.create('vault-cli', {
     description: 'supplement typed save parity test cli',
@@ -185,6 +189,12 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
       '--unit',
       'mg',
       '--no-ingredient-active',
+      '--related-goal-id',
+      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+      '--related-condition-id',
+      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+      '--related-regimen-id',
+      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
       '--vault',
       vaultRoot,
     ])
@@ -208,6 +218,20 @@ test('supplement save persists top-level dose fields and one typed ingredient ac
     assert.equal(saved.entity.data.dose, 200)
     assert.equal(saved.entity.data.unit, 'mg')
     assert.equal(saved.entity.data.servingSize, '2 capsules')
+    assert.deepEqual(saved.entity.data.relatedGoalIds, [
+      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+    ])
+    assert.deepEqual(saved.entity.data.relatedConditionIds, [
+      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+    ])
+    assert.deepEqual(saved.entity.data.relatedRegimenIds, [
+      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
+    ])
+    assert.deepEqual(savedEntityLinkIds(saved.entity), [
+      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
+    ])
     assert.deepEqual(saved.entity.data.ingredients, [
       {
         compound: 'Magnesium',
