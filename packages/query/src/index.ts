@@ -356,14 +356,27 @@ export async function selectMetric(input: {
   return mod.selectMetricRuntime(input);
 }
 
-export type { CalculateMurphAgeForVaultInput } from "./murph-age.ts";
-export { metricPointFiltersForMurphAgeModel } from "./murph-age.ts";
+export type {
+  CalculateMurphAgeForVaultInput,
+  CalculateMurphAgeFromVaultInputBundleInput,
+} from "./murph-age.ts";
+export {
+  metricPointFiltersForMurphAgeInputBundle,
+  metricPointFiltersForMurphAgeModel,
+} from "./murph-age.ts";
 
 export async function calculateMurphAgeForVault(
   input: import("./murph-age.ts").CalculateMurphAgeForVaultInput,
 ): Promise<import("@murphai/health-metrics").MurphAgeResult> {
   const mod = await import("./murph-age.ts");
   return mod.calculateMurphAgeForVault(input);
+}
+
+export async function calculateMurphAgeFromVaultInputBundle(
+  input: import("./murph-age.ts").CalculateMurphAgeFromVaultInputBundleInput,
+): Promise<import("@murphai/health-metrics").MurphAgeCalculatorOutput> {
+  const mod = await import("./murph-age.ts");
+  return mod.calculateMurphAgeFromVaultInputBundle(input);
 }
 
 export async function listMetricTargets(

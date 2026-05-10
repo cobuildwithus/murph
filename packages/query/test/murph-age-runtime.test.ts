@@ -14,12 +14,14 @@ import {
 import { test } from "vitest";
 
 import {
+  calculateMurphAgeFromVaultInputBundle,
   calculateMurphAgeForVault,
+  metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   rebuildQueryProjection,
 } from "../src/index.ts";
 
-test("calculateMurphAgeForVault scores a supplied model from stored lab and wearable MetricPoints", async () => {
+test("calculateMurphAgeForVault scores a low-level supplied model from stored MetricPoints", async () => {
   const vaultRoot = await createProjectionVault();
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -104,6 +106,273 @@ test("calculateMurphAgeForVault scores a supplied model from stored lab and wear
   }
 });
 
+test("calculateMurphAgeForVault preserves flexible asOf compatibility", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      metricPoint({
+        biomarkerKey: "biomarker:apob",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:apob:2026-05-01:lab:0",
+        metricKey: "apob",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_apob",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 110,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:steps:2026-05-08:wearable:0",
+        metricKey: "steps",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_steps",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 10_000,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:rhr:2026-05-08:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_rhr",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 62,
+      }),
+    ]);
+
+    const dateOnlyResult = await calculateMurphAgeForVault({
+      asOf: "2026-05-10",
+      chronologicalAgeYears: 45,
+      model: fixtureMurphAgeModel(),
+      sex: "male",
+      vaultRoot,
+    });
+    const offsetResult = await calculateMurphAgeForVault({
+      asOf: "2026-05-10T08:00:00+08:00",
+      chronologicalAgeYears: 45,
+      model: fixtureMurphAgeModel(),
+      sex: "male",
+      vaultRoot,
+    });
+
+    assert.equal(dateOnlyResult.status, "ready");
+    assert.equal(offsetResult.status, "ready");
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but abstains in product mode", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+
+    const filters = metricPointFiltersForMurphAgeInputBundle("2026-05-10T00:00:00.000Z");
+    assert.equal(filters.every((filter) => filter.to === "2026-05-10"), true);
+    assert.equal(filters.every((filter) => filter.limit === null), true);
+    assert.equal(filters.some((filter) => filter.metricKey === "albumin"), true);
+    assert.equal(filters.some((filter) => filter.metricKey === "steps"), true);
+    assert.equal(filters.some((filter) => filter.metricKey === "hrv-rmssd"), true);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "abstain");
+    assert.equal(output.mode, "product");
+    assert.equal(output.result, null);
+    assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
+    assert.equal(output.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:albumin:2026-05-01:lab:0"), true);
+    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without wearable score-bearing features", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "ready");
+    assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
+    assert.equal(output.result?.status, "ready");
+    assert.equal(output.result?.modelId, "fixture-lab9-research-model");
+    assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(
+      output.result?.featureAttributions.find((feature) => feature.featureKey === "albumin")?.selectedPointIds[0],
+      "metric-point:albumin:2026-05-01:lab:0",
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle treats wearable-only inputs as context-only", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, wearableContextMetricPoints());
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(output.bundleAssessment.bundleId, "wearable-context");
+    assert.equal(output.cardPolicy?.cardId, "wearable_context_no_risk");
+    assert.equal(output.result, null);
+    assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary wearable context", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      wearablePoint("steps", null, 10_000, "count", "activity-summary"),
+      wearablePoint("total-sleep-minutes", null, 450, "minutes", "sleep-summary"),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(output.bundleAssessment.bundleId, "wearable-context");
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("steps"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("total-sleep-minutes"), true);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle ignores sample-derived clinical metrics", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      labPoint("creatinine", "biomarker:creatinine", 0.9, "mg/dL"),
+      labPoint("hdl-c", "biomarker:hdl-c", 62, "mg/dL"),
+      labPoint("triglycerides", "biomarker:triglycerides", 90, "mg/dL"),
+      measurementPoint("systolic-blood-pressure", "biomarker:systolic-blood-pressure", 118, "mmHg"),
+      measurementPoint("diastolic-blood-pressure", "biomarker:diastolic-blood-pressure", 74, "mmHg"),
+      metricPoint({
+        biomarkerKey: "biomarker:blood-glucose",
+        effectiveDate: "2026-05-08",
+        id: "metric-point:glucose:2026-05-08:sample-summary:0",
+        metricKey: "glucose",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "sample_summary_glucose",
+        sourceKind: "sample-summary",
+        unit: "mg/dL",
+        value: 95,
+      }),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "abstain");
+    assert.equal(output.bundleAssessment.bundleId, "insufficient");
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("glucose"), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle requires a valid asOf timestamp before reading the vault", async () => {
+  const output = await calculateMurphAgeFromVaultInputBundle({
+    asOf: "not-a-date",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  });
+
+  assert.equal(output.status, "abstain");
+  assert.equal(output.result, null);
+  assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
+  assert.equal(output.bundleAssessment.bundleId, "insufficient");
+});
+
+test("calculateMurphAgeFromVaultInputBundle rejects impossible asOf dates before reading the vault", async () => {
+  const output = await calculateMurphAgeFromVaultInputBundle({
+    asOf: "2026-02-30T00:00:00.000Z",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  });
+
+  assert.equal(output.status, "abstain");
+  assert.equal(output.result, null);
+  assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
+});
+
+test("calculateMurphAgeFromVaultInputBundle rejects invalid runtime modes before reading the vault", async () => {
+  const output = await Reflect.apply(calculateMurphAgeFromVaultInputBundle, null, [{
+    asOf: "2026-05-10T00:00:00.000Z",
+    chronologicalAgeYears: 45,
+    mode: "debug",
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  }]);
+
+  assert.equal(output.status, "abstain");
+  assert.equal(output.result, null);
+  assert.equal(output.mode, "product");
+  assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
+});
+
 test("calculateMurphAgeForVault abstains on invalid models before reading the vault", async () => {
   const result = await calculateMurphAgeForVault({
     asOf: "2026-05-10T00:00:00.000Z",
@@ -133,6 +402,19 @@ test("calculateMurphAgeForVault requires a valid asOf timestamp before reading t
   assert.equal(result.status, "abstain");
   assert.equal(result.warnings[0]?.code, "INVALID_INPUT");
   assert.equal(result.warnings[0]?.message, "Murph Age query runtime requires a valid asOf timestamp.");
+});
+
+test("calculateMurphAgeForVault rejects impossible asOf dates before reading the vault", async () => {
+  const result = await calculateMurphAgeForVault({
+    asOf: "2026-02-30T00:00:00.000Z",
+    chronologicalAgeYears: 45,
+    model: fixtureMurphAgeModel(),
+    sex: "female",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  });
+
+  assert.equal(result.status, "abstain");
+  assert.equal(result.warnings[0]?.code, "INVALID_INPUT");
 });
 
 async function createProjectionVault(): Promise<string> {
@@ -273,6 +555,84 @@ function metricPoint(input: {
   };
 }
 
+function lab9BpBodyMetricPoints(): MetricPoint[] {
+  return [
+    labPoint("albumin", "biomarker:albumin", 4.4, "g/dL"),
+    labPoint("creatinine", "biomarker:creatinine", 0.9, "mg/dL"),
+    labPoint("hba1c", "biomarker:hba1c", 5.1, "percent"),
+    labPoint("alkaline-phosphatase", "biomarker:alkaline-phosphatase", 70, "U/L"),
+    labPoint("white-blood-cell-count", "biomarker:white-blood-cell-count", 5.6, "10^3/uL"),
+    labPoint("lymphocyte-percentage", "biomarker:lymphocyte-percentage", 32, "percent"),
+    labPoint("red-cell-distribution-width", "biomarker:red-cell-distribution-width", 12.6, "percent"),
+    labPoint("hdl-c", "biomarker:hdl-c", 62, "mg/dL"),
+    labPoint("triglycerides", "biomarker:triglycerides", 90, "mg/dL"),
+    measurementPoint("systolic-blood-pressure", "biomarker:systolic-blood-pressure", 118, "mmHg"),
+    measurementPoint("diastolic-blood-pressure", "biomarker:diastolic-blood-pressure", 74, "mmHg"),
+    measurementPoint("bmi", null, 23.5, "kg/m^2"),
+  ];
+}
+
+function wearableContextMetricPoints(): MetricPoint[] {
+  return [
+    wearablePoint("steps", null, 10_000, "count"),
+    wearablePoint("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm"),
+    wearablePoint("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms"),
+  ];
+}
+
+function labPoint(metricKey: string, biomarkerKey: string, value: number, unit: string): MetricPoint {
+  return metricPoint({
+    biomarkerKey,
+    effectiveDate: "2026-05-01",
+    id: `metric-point:${metricKey}:2026-05-01:lab:0`,
+    metricKey,
+    observedAt: "2026-05-01T08:00:00.000Z",
+    recordId: `lab_${metricKey.replaceAll("-", "_")}`,
+    sourceKind: "test-result",
+    unit,
+    value,
+  });
+}
+
+function measurementPoint(
+  metricKey: string,
+  biomarkerKey: string | null,
+  value: number,
+  unit: string,
+): MetricPoint {
+  return metricPoint({
+    biomarkerKey,
+    effectiveDate: "2026-05-08",
+    id: `metric-point:${metricKey}:2026-05-08:measurement:0`,
+    metricKey,
+    observedAt: "2026-05-08T08:00:00.000Z",
+    recordId: `measurement_${metricKey.replaceAll("-", "_")}`,
+    sourceKind: "measurement",
+    unit,
+    value,
+  });
+}
+
+function wearablePoint(
+  metricKey: string,
+  biomarkerKey: string | null,
+  value: number,
+  unit: string,
+  sourceKind: MetricPoint["source"]["kind"] = "wearable-summary",
+): MetricPoint {
+  return metricPoint({
+    biomarkerKey,
+    effectiveDate: "2026-05-08",
+    id: `metric-point:${metricKey}:2026-05-08:wearable:0`,
+    metricKey,
+    observedAt: "2026-05-08T08:00:00.000Z",
+    recordId: `wearable_${metricKey.replaceAll("-", "_")}`,
+    sourceKind,
+    unit,
+    value,
+  });
+}
+
 function fixtureMurphAgeModel(): MurphAgeRiskModel {
   return {
     endpoint: "10-year all-cause mortality",
@@ -332,5 +692,79 @@ function fixtureMurphAgeModel(): MurphAgeRiskModel {
       baseYears: 1.5,
       perMissingOptionalFeatureYears: 2,
     },
+  };
+}
+
+function fixtureLab9ResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      { coefficient: 0.055, key: "age", kind: "chronological-age", label: "Age" },
+      { coefficient: 0.12, key: "male", kind: "sex", label: "Male", sex: "male" },
+      labFeature("albumin", "Albumin", "albumin", -0.16, 4.2, 0.3, "g/dL"),
+      labFeature("creatinine", "Creatinine", "creatinine", 0.08, 0.9, 0.2, "mg/dL"),
+      labFeature("hba1c", "HbA1c", "hba1c", 0.12, 5.4, 0.5, "percent"),
+      labFeature("alkaline-phosphatase", "Alkaline phosphatase", "alkaline-phosphatase", 0.08, 70, 20, "U/L"),
+      labFeature("white-blood-cell-count", "White blood cells", "white-blood-cell-count", 0.08, 6, 1.5, "10^3/uL"),
+      labFeature("lymphocyte-percentage", "Lymphocytes", "lymphocyte-percentage", -0.06, 30, 8, "percent"),
+      labFeature("red-cell-distribution-width", "RDW", "red-cell-distribution-width", 0.12, 13, 1, "percent"),
+      labFeature("hdl-c", "HDL-C", "hdl-c", -0.08, 55, 15, "mg/dL"),
+      labFeature("triglycerides", "Triglycerides", "triglycerides", 0.08, 120, 50, "mg/dL"),
+      labFeature("systolic-blood-pressure", "Systolic blood pressure", "systolic-blood-pressure", 0.1, 120, 15, "mmHg"),
+      labFeature("diastolic-blood-pressure", "Diastolic blood pressure", "diastolic-blood-pressure", 0.04, 75, 10, "mmHg"),
+      labFeature("bmi", "BMI", "bmi", 0.08, 25, 4, "kg/m^2"),
+    ],
+    horizonYears: 10,
+    intercept: -6.1,
+    modelId: "fixture-lab9-research-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture adult lab reference curve",
+    referenceRiskCurve: [
+      { ageYears: 20, riskProbability: 0.005 },
+      { ageYears: 40, riskProbability: 0.025 },
+      { ageYears: 60, riskProbability: 0.1 },
+      { ageYears: 80, riskProbability: 0.28 },
+    ],
+    uncertainty: {
+      baseYears: 2,
+      perMissingOptionalFeatureYears: 2,
+    },
+  };
+}
+
+function fixtureLab5ResearchModel(): MurphAgeRiskModel {
+  return {
+    ...fixtureLab9ResearchModel(),
+    features: [
+      { coefficient: 0.055, key: "age", kind: "chronological-age", label: "Age" },
+      { coefficient: 0.12, key: "male", kind: "sex", label: "Male", sex: "male" },
+      labFeature("creatinine", "Creatinine", "creatinine", 0.08, 0.9, 0.2, "mg/dL"),
+      labFeature("hba1c", "HbA1c", "hba1c", 0.12, 5.4, 0.5, "percent"),
+      labFeature("hdl-c", "HDL-C", "hdl-c", -0.08, 55, 15, "mg/dL"),
+      labFeature("triglycerides", "Triglycerides", "triglycerides", 0.08, 120, 50, "mg/dL"),
+      labFeature("systolic-blood-pressure", "Systolic blood pressure", "systolic-blood-pressure", 0.1, 120, 15, "mmHg"),
+    ],
+    modelId: "fixture-lab5-research-model",
+  };
+}
+
+function labFeature(
+  key: string,
+  label: string,
+  metricKey: string,
+  coefficient: number,
+  mean: number,
+  standardDeviation: number,
+  expectedUnit: string,
+): MurphAgeRiskModel["features"][number] {
+  return {
+    coefficient,
+    expectedUnit,
+    key,
+    kind: "metric",
+    label,
+    metricKey,
+    moduleId: "clinical",
+    transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean, standardDeviation },
   };
 }
