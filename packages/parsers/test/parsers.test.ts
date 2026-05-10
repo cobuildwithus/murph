@@ -2667,6 +2667,10 @@ test("daemon with parsers drains pending jobs before connector watch work begins
 
   const daemonRuntime = await openInboxRuntime({ vaultRoot });
   const controller = new AbortController();
+  let resolveWatchStarted: (() => void) | null = null;
+  const watchStarted = new Promise<void>((resolve) => {
+    resolveWatchStarted = resolve;
+  });
   const connector: PollConnector = {
     id: "noop-telegram",
     source: "telegram",
@@ -2687,6 +2691,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
         return;
       }
 
+      resolveWatchStarted?.();
       await new Promise<void>((resolve) => {
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
@@ -2724,7 +2729,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
     signal: controller.signal,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await watchStarted;
   controller.abort();
   await running;
 
@@ -2816,7 +2821,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
   assert.equal(closeCount, 1);
 });
 
-test("daemon with parsers stops startup drain after abort between jobs", async () => {
+test("daemon with parsers leaves startup drain jobs pending when abort arrives before finalization", async () => {
   const vaultRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-vault");
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -2911,7 +2916,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
 
   const refreshedRuntime = await openInboxRuntime({ vaultRoot });
   try {
-    assert.equal(refreshedRuntime.getCapture(first.captureId)?.attachments[0]?.parseState, "succeeded");
+    assert.equal(refreshedRuntime.getCapture(first.captureId)?.attachments[0]?.parseState, "pending");
     assert.equal(refreshedRuntime.getCapture(second.captureId)?.attachments[0]?.parseState, "pending");
   } finally {
     refreshedRuntime.close();

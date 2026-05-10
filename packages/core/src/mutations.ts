@@ -53,6 +53,8 @@ import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { buildEventSpineLifecycle, eventSpineRevision } from "./history/event-spine.ts";
+import { loadEventLedgerShardsById, selectLatestMatchedEvent } from "./domains/events/ledger.ts";
 import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
@@ -789,6 +791,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
 function buildEventContractInput<K extends EventKind>(
   seed: NormalizedEventSeed<K>,
   recordId?: string,
+  lifecycle?: EventRecord["lifecycle"],
 ): UnknownRecord {
   return compactRecord({
     schemaVersion: EVENT_SCHEMA_VERSION,
@@ -806,6 +809,7 @@ function buildEventContractInput<K extends EventKind>(
     rawRefs: seed.rawRefs,
     externalRef: seed.externalRef,
     dataOrigin: seed.dataOrigin,
+    lifecycle,
     ...seed.fields,
   });
 }
@@ -822,8 +826,9 @@ function validateEventSeed<K extends EventKind>(seed: NormalizedEventSeed<K>): v
 function buildStoredEventRecord<K extends EventKind>(
   seed: NormalizedEventSeed<K>,
   recordId: string,
+  lifecycle?: EventRecord["lifecycle"],
 ): EventRecordByKind<K> {
-  const record = buildEventContractInput(seed, recordId);
+  const record = buildEventContractInput(seed, recordId, lifecycle);
 
   assertContractShape(
     eventRecordSchema,
@@ -838,8 +843,9 @@ function buildStoredEventRecord<K extends EventKind>(
 function prepareStoredEventLedgerEntry<K extends EventKind>(
   seed: NormalizedEventSeed<K>,
   recordId: string,
+  lifecycle?: EventRecord["lifecycle"],
 ): PreparedJsonlEntry<EventRecordByKind<K>> {
-  const record = buildStoredEventRecord(seed, recordId);
+  const record = buildStoredEventRecord(seed, recordId, lifecycle);
 
   return {
     relativePath: toMonthlyShardRelativePath(
@@ -849,6 +855,28 @@ function prepareStoredEventLedgerEntry<K extends EventKind>(
     ),
     record,
   };
+}
+
+async function resolveExplicitEventLifecycle(input: {
+  eventId: string;
+  kind: EventKind;
+  vaultRoot: string;
+}): Promise<EventRecord["lifecycle"] | undefined> {
+  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, input.eventId);
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+
+  if (!latestMatchedEvent) {
+    return undefined;
+  }
+
+  if (latestMatchedEvent.record.kind !== input.kind) {
+    throw new VaultError(
+      "EVENT_KIND_MISMATCH",
+      `Event "${input.eventId}" is already kind "${latestMatchedEvent.record.kind}" and cannot be rewritten as "${input.kind}".`,
+    );
+  }
+
+  return buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1);
 }
 
 function prepareEventLedgerEntry<K extends EventKind>({
@@ -1613,6 +1641,13 @@ export async function addMeal({
     generateRecordId(ID_PREFIXES.meal);
   const eventId = normalizeOptionalContractId(requestedEventId, ID_PREFIXES.event, "eventId") ??
     generateRecordId(ID_PREFIXES.event);
+  const eventLifecycle = requestedEventId
+    ? await resolveExplicitEventLifecycle({
+        eventId,
+        kind: "meal",
+        vaultRoot,
+      })
+    : undefined;
   const preparedAttachments = prepareEventAttachments({
     ownerKind: "meal",
     ownerId: mealId,
@@ -1731,6 +1766,7 @@ export async function addMeal({
           },
         },
         eventId,
+        eventLifecycle,
       );
       await stageJsonlRecord(batch, event.relativePath, event.record);
       const touchedFiles = [photo?.relativePath, audio?.relativePath, manifestPath, event.relativePath].filter(

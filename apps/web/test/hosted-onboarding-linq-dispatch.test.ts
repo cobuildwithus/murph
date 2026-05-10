@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
     claimHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
+    releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
+    releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
     createHostedAiUsageAllowDecision: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
@@ -161,6 +163,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
     incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
+    releaseHostedLinqOnboardingLinkNoticeClaim: mocks.releaseHostedLinqOnboardingLinkNoticeClaim,
+    releaseHostedLinqQuotaReplyNoticeClaim: mocks.releaseHostedLinqQuotaReplyNoticeClaim,
     resolveHostedLinqDayUtc: vi.fn(),
   };
 });
@@ -357,6 +361,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
+    mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.createHostedAiUsageAllowDecision.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -1749,8 +1755,8 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0],
+    expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
@@ -2851,7 +2857,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("sends signup links before marking the one-shot notice sent", async () => {
+  it("skips signup link delivery when another request already claimed the one-shot notice", async () => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState());
@@ -2910,15 +2916,12 @@ https://join.example.test/join/code_first_text`);
       reason: "sent-signup-link",
     });
     expect(hostedInviteCreate).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0],
-    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
@@ -2967,8 +2970,8 @@ https://join.example.test/join/code_first_text`);
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0],
+    expect(mocks.claimHostedLinqQuotaReplyNotice.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -3031,7 +3034,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("does not mark the daily quota notice sent when the inline active-member quota reply fails", async () => {
+  it("releases the daily quota notice claim when inline active-member quota delivery fails", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 151,
     }));
@@ -3067,7 +3070,16 @@ https://join.example.test/join/code_first_text`);
       timestamp: null,
     })).rejects.toThrow("linq send failed");
 
-    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
     expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();

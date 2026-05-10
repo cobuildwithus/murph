@@ -258,10 +258,11 @@ function parseMeasurementQualifierEntries(
   if (!entries) return qualifiers;
 
   for (const entry of entries) {
-    const targetSeparatorIndex = measurementCount === 1 ? -1 : entry.indexOf(":");
-    const targetIndex =
-      targetSeparatorIndex === -1 ? 0 : Number(entry.slice(0, targetSeparatorIndex)) - 1;
-    const pair = targetSeparatorIndex === -1 ? entry : entry.slice(targetSeparatorIndex + 1);
+    const targetSeparatorIndex = entry.indexOf(":");
+    const hasExplicitTarget =
+      targetSeparatorIndex > 0 && /^\d+$/u.test(entry.slice(0, targetSeparatorIndex));
+    const targetIndex = hasExplicitTarget ? Number(entry.slice(0, targetSeparatorIndex)) - 1 : 0;
+    const pair = hasExplicitTarget ? entry.slice(targetSeparatorIndex + 1) : entry;
     const pairSeparatorIndex = pair.indexOf("=");
     const key = pair.slice(0, pairSeparatorIndex).trim();
     const rawValue = pair.slice(pairSeparatorIndex + 1).trim();
@@ -270,6 +271,7 @@ function parseMeasurementQualifierEntries(
       !Number.isInteger(targetIndex) ||
       targetIndex < 0 ||
       targetIndex >= measurementCount ||
+      (measurementCount > 1 && !hasExplicitTarget) ||
       pairSeparatorIndex <= 0 ||
       pairSeparatorIndex === pair.length - 1 ||
       key.length === 0 ||

@@ -119,6 +119,7 @@ export function createPopplerPdfProvider(
       const pdfInfo = await runCommand(pdfInfoCommand, [request.inputPath], {
         maxStderrBytes: PDFINFO_MAX_OUTPUT_BYTES,
         maxStdoutBytes: PDFINFO_MAX_OUTPUT_BYTES,
+        signal: request.signal,
         timeoutMs: limits.commandTimeoutMs,
       });
       const pageCount = parsePdfInfoPageCount(pdfInfo.stdout);
@@ -138,6 +139,7 @@ export function createPopplerPdfProvider(
       ], {
         maxStderrBytes: PDFINFO_MAX_OUTPUT_BYTES,
         maxStdoutBytes: limits.maxOutputBytes,
+        signal: request.signal,
         timeoutMs: limits.commandTimeoutMs,
       });
 

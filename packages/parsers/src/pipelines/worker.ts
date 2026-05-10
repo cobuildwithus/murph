@@ -97,13 +97,30 @@ async function runAttachmentParseJobAttempt(
       registry: input.registry,
       scratchRoot: input.scratchRoot ?? path.join(input.vaultRoot, ".runtime", "parsers"),
       ffmpeg: input.ffmpeg,
+      signal: input.signal,
     });
+    if (input.signal?.aborted) {
+      input.runtime.requeueAttachmentParseJobs({
+        attachmentId: job.attachmentId,
+        captureId: job.captureId,
+        state: "running",
+      });
+      return null;
+    }
     const published = await writeParserArtifacts({
       attempt: job.attempts,
       vaultRoot: input.vaultRoot,
       output: parsed.output,
     });
     publishedAttemptDirectoryPath = published.attemptDirectoryPath;
+    if (input.signal?.aborted) {
+      input.runtime.requeueAttachmentParseJobs({
+        attachmentId: job.attachmentId,
+        captureId: job.captureId,
+        state: "running",
+      });
+      return null;
+    }
     const transcriptOnly = isTranscriptOnlyArtifact(artifact.kind);
     const completedJob = input.runtime.completeAttachmentParseJob({
       attempt: job.attempts,

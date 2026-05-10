@@ -637,6 +637,8 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
       if (
         !isSha256(raw.appendSha256) ||
         !isNonNegativeInteger(raw.appendByteLength) ||
+        !isSha256(raw.baseSha256) ||
+        !isNonNegativeInteger(raw.baseByteLength) ||
         (raw.originalSize !== null && !isNonNegativeInteger(raw.originalSize))
       ) {
         throw new Error("Hosted canonical JSONL append receipt action is invalid.");
@@ -647,6 +649,8 @@ function parseHostedCanonicalWriteReceiptActionForRestore(
         targetRelativePath: raw.targetRelativePath,
         appendSha256: raw.appendSha256,
         appendByteLength: raw.appendByteLength,
+        baseSha256: raw.baseSha256,
+        baseByteLength: raw.baseByteLength,
         originalSize: raw.originalSize,
         ...(contentRef ? { contentRef } : {}),
       };

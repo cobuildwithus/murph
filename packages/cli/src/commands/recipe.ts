@@ -128,6 +128,23 @@ function normalizeRecipeLinksOption(value: string[] | undefined): RecipeLink[] |
   return entries?.map(parseRecipeLinkOption)
 }
 
+function appendRecipeLinkRelationSets(target: string[], links: readonly RecipeLink[]) {
+  appendTypedSet(
+    target,
+    'relatedGoalIds',
+    links
+      .filter((link) => link.type === 'supports_goal')
+      .map((link) => link.targetId),
+  )
+  appendTypedSet(
+    target,
+    'relatedConditionIds',
+    links
+      .filter((link) => link.type === 'addresses_condition')
+      .map((link) => link.targetId),
+  )
+}
+
 function buildRecipeSaveInput(input: {
   cookTimeMinutes?: number
   cuisine?: string
@@ -306,9 +323,9 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
           appendTypedSet(set, 'steps', stringArrayOption(options.step))
           appendTypedSet(set, 'relatedGoalIds', stringArrayOption(options.relatedGoalId))
           appendTypedSet(set, 'relatedConditionIds', stringArrayOption(options.relatedConditionId))
-          const linkEntries = stringArrayOption(options.link)
+          const linkEntries = normalizeRecipeLinksOption(stringArrayOption(options.link))
           if (linkEntries !== undefined) {
-            appendTypedSet(set, 'links', linkEntries.map(parseRecipeLinkOption))
+            appendRecipeLinkRelationSets(set, linkEntries)
           }
           appendTypedClear(clear, 'summary', options.clearSummary === true)
           appendTypedClear(clear, 'cuisine', options.clearCuisine === true)
@@ -323,7 +340,8 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
           appendTypedClear(clear, 'steps', options.clearSteps === true)
           appendTypedClear(clear, 'relatedGoalIds', options.clearRelatedGoalIds === true)
           appendTypedClear(clear, 'relatedConditionIds', options.clearRelatedConditionIds === true)
-          appendTypedClear(clear, 'links', options.clearLinks === true)
+          appendTypedClear(clear, 'relatedGoalIds', options.clearLinks === true)
+          appendTypedClear(clear, 'relatedConditionIds', options.clearLinks === true)
           return {
             ...input,
             set: emptyToUndefined(set),

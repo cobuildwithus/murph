@@ -7,6 +7,8 @@ import {
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
+import { defaultTimeZone, toLocalDayKey } from "../time.ts";
+import { loadVault } from "../vault.ts";
 import {
   canonicalLogicalResource,
   withCanonicalResourceLocks,
@@ -413,6 +415,11 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
   const existingEntity = existingRecord?.entity;
   const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   const existingWindow = existingEntity?.window;
+  let startAt = input.window?.startAt ?? existingWindow?.startAt;
+  if (startAt === undefined) {
+    const vault = await loadVault({ vaultRoot: input.vaultRoot });
+    startAt = toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "window.startAt");
+  }
   return goalRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
     existingRecord,
@@ -451,7 +458,7 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
           priority: resolveRequiredUpsertValue(input.priority, existingEntity?.priority, 5, normalizePriority),
           window: normalizeGoalWindow(
             {
-              startAt: input.window?.startAt ?? existingWindow?.startAt ?? new Date(),
+              startAt,
               targetAt:
                 input.window?.targetAt === undefined ? existingWindow?.targetAt : input.window.targetAt,
             },

@@ -506,6 +506,63 @@ test("scheduled-log save rejects malformed typed measurements before writing", a
   }
 });
 
+test("scheduled-log save rejects ambiguous qualifiers for multiple measurements", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-ambiguous-qualifier-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Ambiguous measurement schedule",
+      "--slug",
+      "ambiguous-measurement-schedule",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--measurement-metric",
+      "glucose",
+      "--measurement-value",
+      "95",
+      "--measurement-unit",
+      "mg/dL",
+      "--measurement-qualifier",
+      "fasting=true",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.match(result.envelope.error.message ?? "", /N:key=value/u);
+    }
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFiles, []);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("scheduled-log save rejects sub-minute every schedules before writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-save-subminute-",

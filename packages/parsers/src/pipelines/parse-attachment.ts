@@ -29,6 +29,7 @@ export interface ParseAttachmentInput {
   registry: ParserRegistry;
   scratchRoot: string;
   ffmpeg?: FfmpegToolOptions;
+  signal?: AbortSignal;
 }
 
 export interface ParseAttachmentResult {
@@ -59,6 +60,7 @@ const PARSE_BLOCK_KINDS = new Set<ParseBlockKind>([
 ]);
 
 export async function parseAttachment(input: ParseAttachmentInput): Promise<ParseAttachmentResult> {
+  throwIfParseAborted(input.signal);
   const artifact = normalizeParserArtifactIdentity(input.artifact);
   const scratchRoot = path.resolve(input.scratchRoot);
   await ensureDirectory(scratchRoot);
@@ -69,13 +71,16 @@ export async function parseAttachment(input: ParseAttachmentInput): Promise<Pars
       artifact,
       scratchDirectory,
       ffmpeg: input.ffmpeg,
+      signal: input.signal,
     });
+    throwIfParseAborted(input.signal);
     const request: ParseRequest = {
       intent: "attachment_text",
       artifact,
       inputPath: preparedMedia.inputPath,
       preparedKind: preparedMedia.preparedKind,
       scratchDirectory,
+      signal: input.signal,
     };
     const { selection, result } = await input.registry.run(request);
     const output = normalizeParserOutput({
@@ -90,6 +95,12 @@ export async function parseAttachment(input: ParseAttachmentInput): Promise<Pars
     };
   } finally {
     await removeDirectoryIfExists(scratchDirectory);
+  }
+}
+
+function throwIfParseAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error("Parser attachment parse aborted.");
   }
 }
 

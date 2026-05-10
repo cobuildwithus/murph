@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import {
   buildScheduledLogMarkdownPreview,
+  deleteEvent,
   executeScheduledLogOccurrence,
   findEventByExternalRef,
   initializeVault,
@@ -399,6 +400,62 @@ test("scheduled log execution inherits food details and is idempotent per occurr
       sourceDetail: 'Copied from saved food "Recovery Smoothie".',
     },
   });
+});
+
+test("scheduled meal occurrences can be re-logged after deletion", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-logs-meal-relog");
+  await initializeVault({ vaultRoot });
+
+  const scheduledLog = await upsertScheduledLog({
+    vaultRoot,
+    scheduledLogId: "slog_01JX8V4QY2M5ZBV64ZP4N1DRC4",
+    title: "Evening protein",
+    slug: "evening-protein",
+    status: "active",
+    schedule: {
+      kind: "dailyLocal",
+      localTime: "19:00",
+    },
+    action: {
+      kind: "meal.add",
+      ingredients: ["yogurt"],
+      note: "Scheduled evening protein.",
+    },
+    body: "Write the evening protein meal event.",
+  });
+
+  const occurrenceAt = "2026-04-22T19:00:00.000Z";
+  const firstRun = await executeScheduledLogOccurrence({
+    vaultRoot,
+    scheduledLogId: scheduledLog.record.scheduledLogId,
+    occurrenceAt,
+  });
+  const eventId = firstRun.eventId;
+  assert.ok(eventId);
+
+  await deleteEvent({
+    vaultRoot,
+    eventId,
+  });
+
+  const secondRun = await executeScheduledLogOccurrence({
+    vaultRoot,
+    scheduledLogId: scheduledLog.record.scheduledLogId,
+    occurrenceAt,
+  });
+  const mealEvent = await findEventByExternalRef({
+    vaultRoot,
+    system: "murph-scheduled-log",
+    resourceType: "occurrence",
+    resourceId: `${scheduledLog.record.scheduledLogId}:${occurrenceAt}`,
+  });
+
+  assert.equal(secondRun.idempotent, false);
+  assert.equal(secondRun.skipped, false);
+  assert.equal(secondRun.eventId, eventId);
+  assert.ok(mealEvent);
+  assert.equal(mealEvent?.kind, "meal");
+  assert.equal(mealEvent?.lifecycle?.revision, 3);
 });
 
 test("scheduled log execution covers activity, intervention, measurement, and inactive branches", async () => {

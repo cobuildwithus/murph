@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, test, vi } from "vitest";
@@ -462,6 +462,23 @@ describe("runtime-state versioned JSON helpers", () => {
         value: { count: 3 },
       },
     );
+  });
+
+  test("cleans up versioned JSON temp files when atomic replacement fails", async () => {
+    const tempRoot = await createTempRoot("runtime-state-versioned-json-atomic-failure-");
+    const filePath = path.join(tempRoot, "state.json");
+    await mkdir(filePath);
+
+    await assert.rejects(
+      writeVersionedJsonStateFile({
+        filePath,
+        schema: "test.schema",
+        schemaVersion: 1,
+        value: { count: 3 },
+      }),
+    );
+
+    assert.deepEqual(await readdir(tempRoot), ["state.json"]);
   });
 
   test("uses injected read and write dependencies for versioned state files", async () => {
