@@ -574,7 +574,10 @@ test("hosted Codex rollout snapshot restores thread-id resume without SQLite", a
 
     assert.equal(secondResult.finalMessage, "second restored reply");
     assert.equal(secondResult.threadId, firstResult.threadId);
-    assert.doesNotMatch(readResponsesRequestInput(requests[1]!), /first restored reply/u);
+    assert.match(
+      readResponsesRequestInput(requests[1]!),
+      /Conversation so far:\\nAssistant:\\nfirst restored reply/u,
+    );
     assert.match(readResponsesRequestInput(requests[1]!), /second prompt after restore/u);
   } finally {
     await closeHttpServer(server);
