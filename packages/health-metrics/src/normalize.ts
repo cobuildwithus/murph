@@ -18,6 +18,8 @@ export function normalizeMetricValue(input: {
       return normalizeAlbumin(input.value, unit);
     case "body-weight":
       return normalizeWeight(input.value, unit);
+    case "waist-circumference":
+      return normalizeLengthCentimeters(input.value, unit, definition.displayName);
     case "body-fat-percentage":
     case "hba1c":
     case "lymphocyte-percentage":
@@ -81,6 +83,14 @@ export function normalizeUnit(value: string | null): string | null {
     kg: "kg",
     kilogram: "kg",
     kilograms: "kg",
+    cm: "cm",
+    centimeter: "cm",
+    centimeters: "cm",
+    in: "in",
+    inch: "in",
+    inches: "in",
+    "kg/m2": "kg/m^2",
+    "kg/m^2": "kg/m^2",
     lb: "lb",
     lbs: "lb",
     pound: "lb",
@@ -89,6 +99,9 @@ export function normalizeUnit(value: string | null): string | null {
     "mg/dl": "mg/dL",
     mg_l: "mg/L",
     "mg/l": "mg/L",
+    mm_hg: "mmHg",
+    "mm hg": "mmHg",
+    mmhg: "mmHg",
     "ml/kg/min": "mL/kg/min",
     mmol_l: "mmol/L",
     "mmol/l": "mmol/L",
@@ -131,6 +144,16 @@ function normalizeWeight(value: number, unit: string | null): MetricValueNormali
     return { canonicalUnit: "kg", canonicalValue: Number((value * 0.45359237).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Body weight", unit, "kg")] };
+}
+
+function normalizeLengthCentimeters(value: number, unit: string | null, label: string): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "cm")) {
+    return { canonicalUnit: "cm", canonicalValue: value, unit: unit ?? "cm", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "in")) {
+    return { canonicalUnit: "cm", canonicalValue: Number((value * 2.54).toFixed(4)), unit, warnings: [] };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "cm")] };
 }
 
 function normalizeAlbumin(value: number, unit: string | null): MetricValueNormalization {

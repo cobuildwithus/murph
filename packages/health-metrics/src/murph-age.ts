@@ -1,4 +1,4 @@
-import { resolveMetricDefinition, resolveMetricInputKey } from "./catalog.ts";
+import { resolveMetricDefinition, resolveMetricInputKey, uniqueStrings } from "./catalog.ts";
 import { normalizeUnit, unitsEquivalent } from "./normalize.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
@@ -10,9 +10,16 @@ import type {
 } from "./types.ts";
 
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v1" as const;
+export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
+export type MurphAgeInputBundleStatus = "abstain" | "context-only" | "ready";
+export type MurphAgeInputBundleId =
+  | "insufficient"
+  | "lab5-bp-bmi"
+  | "lab9-bp-body"
+  | "wearable-context";
 
 export type MurphAgeWarningCode =
   | "BLOCKED_MODEL_FEATURE"
@@ -89,6 +96,40 @@ export interface MurphAgeCalculationInput {
   sex: MurphAgeSex;
 }
 
+export interface MurphAgeInputBundleAssessmentInput {
+  asOf?: string;
+  points: readonly MetricPoint[];
+}
+
+export interface MurphAgeInputBundleFeatureStatus {
+  featureKey: string;
+  label: string;
+  metricKeys: string[];
+  requiredFor: "lab5-fallback" | "lab9-mainline" | "optional-context" | "wearable-context";
+  selectedMetricKey: string | null;
+  selectedPointIds: string[];
+  status: "missing" | "ready";
+  unit: string | null;
+  value: number | null;
+}
+
+export interface MurphAgeInputBundleAssessment {
+  availableFeatureKeys: string[];
+  bundleId: MurphAgeInputBundleId;
+  featureStatuses: MurphAgeInputBundleFeatureStatus[];
+  missingFeatureKeys: string[];
+  recommendedCardId:
+    | "lab5_bp_bmi_transport_research"
+    | "lab9_bp_body_10y_acm_research"
+    | "none"
+    | "wearable_context_no_risk";
+  schemaVersion: typeof MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION;
+  selectedMetricKeys: string[];
+  selectedPointIds: string[];
+  status: MurphAgeInputBundleStatus;
+  warnings: MurphAgeWarning[];
+}
+
 export interface MurphAgeRiskEstimate {
   endpoint: string;
   horizonYears: number;
@@ -145,6 +186,13 @@ interface EvaluatedFeature {
   required: boolean;
 }
 
+interface MurphAgeInputFeatureRequirement {
+  featureKey: string;
+  label: string;
+  metricKeys: readonly string[];
+  requiredFor: MurphAgeInputBundleFeatureStatus["requiredFor"];
+}
+
 const DEFAULT_BLOCKED_METRIC_KEYS = ["hs-crp"] as const;
 const DEFAULT_BLOCKED_BIOMARKER_KEYS = [
   "biomarker:c-reactive-protein",
@@ -152,6 +200,91 @@ const DEFAULT_BLOCKED_BIOMARKER_KEYS = [
   "biomarker:high-sensitivity-crp",
   "biomarker:hs-crp",
 ] as const;
+
+const MURPH_AGE_LAB9_FEATURES = [
+  { featureKey: "albumin", label: "Albumin", metricKeys: ["albumin"], requiredFor: "lab9-mainline" },
+  { featureKey: "creatinine", label: "Creatinine", metricKeys: ["creatinine"], requiredFor: "lab9-mainline" },
+  { featureKey: "glycemia", label: "Glycemia", metricKeys: ["hba1c", "glucose"], requiredFor: "lab9-mainline" },
+  {
+    featureKey: "alkaline-phosphatase",
+    label: "Alkaline phosphatase",
+    metricKeys: ["alkaline-phosphatase"],
+    requiredFor: "lab9-mainline",
+  },
+  {
+    featureKey: "white-blood-cell-count",
+    label: "White blood cells",
+    metricKeys: ["white-blood-cell-count"],
+    requiredFor: "lab9-mainline",
+  },
+  {
+    featureKey: "lymphocyte-percentage",
+    label: "Lymphocyte percentage",
+    metricKeys: ["lymphocyte-percentage"],
+    requiredFor: "lab9-mainline",
+  },
+  {
+    featureKey: "red-cell-distribution-width",
+    label: "Red cell distribution width",
+    metricKeys: ["red-cell-distribution-width"],
+    requiredFor: "lab9-mainline",
+  },
+  { featureKey: "hdl-c", label: "HDL-C", metricKeys: ["hdl-c"], requiredFor: "lab9-mainline" },
+  { featureKey: "triglycerides", label: "Triglycerides", metricKeys: ["triglycerides"], requiredFor: "lab9-mainline" },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
+const MURPH_AGE_BP_BODY_FEATURES = [
+  {
+    featureKey: "systolic-blood-pressure",
+    label: "Systolic blood pressure",
+    metricKeys: ["systolic-blood-pressure"],
+    requiredFor: "lab9-mainline",
+  },
+  {
+    featureKey: "diastolic-blood-pressure",
+    label: "Diastolic blood pressure",
+    metricKeys: ["diastolic-blood-pressure"],
+    requiredFor: "lab9-mainline",
+  },
+  { featureKey: "bmi", label: "BMI", metricKeys: ["bmi"], requiredFor: "lab9-mainline" },
+  {
+    featureKey: "waist-circumference",
+    label: "Waist circumference",
+    metricKeys: ["waist-circumference"],
+    requiredFor: "optional-context",
+  },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
+const MURPH_AGE_LAB5_FEATURES = [
+  { featureKey: "glycemia", label: "Glycemia", metricKeys: ["hba1c", "glucose"], requiredFor: "lab5-fallback" },
+  { featureKey: "hdl-c", label: "HDL-C", metricKeys: ["hdl-c"], requiredFor: "lab5-fallback" },
+  { featureKey: "triglycerides", label: "Triglycerides", metricKeys: ["triglycerides"], requiredFor: "lab5-fallback" },
+  { featureKey: "creatinine", label: "Creatinine", metricKeys: ["creatinine"], requiredFor: "lab5-fallback" },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
+const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
+  { featureKey: "steps", label: "Steps", metricKeys: ["steps"], requiredFor: "wearable-context" },
+  { featureKey: "activity-minutes", label: "Activity minutes", metricKeys: ["activity-minutes"], requiredFor: "wearable-context" },
+  {
+    featureKey: "estimated-vo2-max",
+    label: "Estimated VO2 max",
+    metricKeys: ["estimated-vo2-max"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "total-sleep-minutes",
+    label: "Total sleep",
+    metricKeys: ["total-sleep-minutes"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "resting-heart-rate",
+    label: "Resting heart rate",
+    metricKeys: ["resting-heart-rate"],
+    requiredFor: "wearable-context",
+  },
+  { featureKey: "hrv-rmssd", label: "HRV", metricKeys: ["hrv-rmssd"], requiredFor: "wearable-context" },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
 
 export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResult {
   const warnings: MurphAgeWarning[] = [];
@@ -248,6 +381,69 @@ export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResu
   };
 }
 
+export function assessMurphAgeInputBundle(
+  input: MurphAgeInputBundleAssessmentInput,
+): MurphAgeInputBundleAssessment {
+  const lab9Statuses = [
+    ...assessInputFeatureRequirements(input, MURPH_AGE_LAB9_FEATURES),
+    ...assessInputFeatureRequirements(input, MURPH_AGE_BP_BODY_FEATURES),
+  ];
+  const lab9Required = lab9Statuses.filter((status) => status.requiredFor === "lab9-mainline");
+  if (lab9Required.every((status) => status.status === "ready")) {
+    return buildInputBundleAssessment({
+      bundleId: "lab9-bp-body",
+      featureStatuses: lab9Statuses,
+      recommendedCardId: "lab9_bp_body_10y_acm_research",
+      status: "ready",
+      warnings: [],
+    });
+  }
+
+  const lab5Statuses = assessInputFeatureRequirements(input, MURPH_AGE_LAB5_FEATURES);
+  const bpBodyStatuses = assessInputFeatureRequirements(input, MURPH_AGE_BP_BODY_FEATURES);
+  const bloodPressureReady = featureReady(bpBodyStatuses, "systolic-blood-pressure")
+    && featureReady(bpBodyStatuses, "diastolic-blood-pressure");
+  const bodyContextReady = featureReady(bpBodyStatuses, "bmi");
+  if (lab5Statuses.every((status) => status.status === "ready") && (bloodPressureReady || bodyContextReady)) {
+    return buildInputBundleAssessment({
+      bundleId: "lab5-bp-bmi",
+      featureStatuses: [...lab5Statuses, ...bpBodyStatuses.filter((status) => status.status === "ready")],
+      recommendedCardId: "lab5_bp_bmi_transport_research",
+      status: "ready",
+      warnings: [],
+    });
+  }
+
+  const wearableStatuses = assessInputFeatureRequirements(input, MURPH_AGE_WEARABLE_CONTEXT_FEATURES);
+  if (wearableStatuses.some((status) => status.status === "ready")) {
+    return buildInputBundleAssessment({
+      bundleId: "wearable-context",
+      featureStatuses: wearableStatuses,
+      recommendedCardId: "wearable_context_no_risk",
+      status: "context-only",
+      warnings: [{
+        code: "MODEL_FEATURE_MISSING",
+        message: "Wearable inputs are available, but current Murph Age research cards do not score wearables without lab/BP/body validation.",
+      }],
+    });
+  }
+
+  return buildInputBundleAssessment({
+    bundleId: "insufficient",
+    featureStatuses: [
+      ...lab5Statuses,
+      ...bpBodyStatuses,
+      ...wearableStatuses,
+    ],
+    recommendedCardId: "none",
+    status: "abstain",
+    warnings: [{
+      code: "MODEL_FEATURE_MISSING",
+      message: "No current Murph Age research input bundle has enough ready metrics to score or contextualize.",
+    }],
+  });
+}
+
 export function mapRiskToReferenceAge(
   riskProbability: number,
   referenceRiskCurve: readonly MurphAgeReferenceRiskPoint[],
@@ -294,6 +490,67 @@ export function mapRiskToReferenceAge(
   }
 
   return { ageYears: last.ageYears, warnings };
+}
+
+function assessInputFeatureRequirements(
+  input: MurphAgeInputBundleAssessmentInput,
+  requirements: readonly MurphAgeInputFeatureRequirement[],
+): MurphAgeInputBundleFeatureStatus[] {
+  return requirements.map((requirement) => {
+    const selections = requirement.metricKeys.map((metricKey) =>
+      selectMetricValue({
+        metricKey,
+        now: input.asOf,
+        points: input.points,
+      })
+    );
+    const selected = selections.find((selection) =>
+      selection.status === "ready" && selection.value !== null && Number.isFinite(selection.value)
+    ) ?? null;
+
+    return {
+      featureKey: requirement.featureKey,
+      label: requirement.label,
+      metricKeys: [...requirement.metricKeys],
+      requiredFor: requirement.requiredFor,
+      selectedMetricKey: selected?.metricKey ?? null,
+      selectedPointIds: selected?.provenance.pointIds ?? [],
+      status: selected ? "ready" : "missing",
+      unit: selected?.unit ?? null,
+      value: selected?.value ?? null,
+    };
+  });
+}
+
+function buildInputBundleAssessment(input: {
+  bundleId: MurphAgeInputBundleId;
+  featureStatuses: readonly MurphAgeInputBundleFeatureStatus[];
+  recommendedCardId: MurphAgeInputBundleAssessment["recommendedCardId"];
+  status: MurphAgeInputBundleStatus;
+  warnings: readonly MurphAgeWarning[];
+}): MurphAgeInputBundleAssessment {
+  const readyFeatures = input.featureStatuses.filter((feature) => feature.status === "ready");
+  const missingFeatures = input.featureStatuses.filter((feature) => feature.status === "missing");
+  return {
+    availableFeatureKeys: readyFeatures.map((feature) => feature.featureKey),
+    bundleId: input.bundleId,
+    featureStatuses: input.featureStatuses.map((feature) => ({
+      ...feature,
+      metricKeys: [...feature.metricKeys],
+      selectedPointIds: [...feature.selectedPointIds],
+    })),
+    missingFeatureKeys: missingFeatures.map((feature) => feature.featureKey),
+    recommendedCardId: input.recommendedCardId,
+    schemaVersion: MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
+    selectedMetricKeys: uniqueStrings(readyFeatures.map((feature) => feature.selectedMetricKey)),
+    selectedPointIds: uniqueStrings(readyFeatures.flatMap((feature) => feature.selectedPointIds)),
+    status: input.status,
+    warnings: [...input.warnings],
+  };
+}
+
+function featureReady(statuses: readonly MurphAgeInputBundleFeatureStatus[], featureKey: string): boolean {
+  return statuses.some((status) => status.featureKey === featureKey && status.status === "ready");
 }
 
 function evaluateFeature(input: {
