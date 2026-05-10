@@ -213,13 +213,14 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_last_heartbeat_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_orphan_observed_at");
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_worker_version_id");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_due_at");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_workspace_version");
     expect(
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(2);
+    ).toBe(3);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {

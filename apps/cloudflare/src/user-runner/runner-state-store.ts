@@ -27,6 +27,7 @@ export interface RunnerInvocationLease {
   reason: HostedWorkspaceInvocationReason;
   startedAt: string;
   userId: string;
+  workerVersionId: string | null;
   workspaceVersion: string | null;
 }
 
@@ -80,8 +81,22 @@ export type RunnerInvocationHeartbeatResult =
       | "stale_attempt"
       | "stale_generation"
       | "wrong_user";
-      record: RunnerStateRecord;
-    };
+    record: RunnerStateRecord;
+  };
+
+export type RunnerStaleInvocationRecoveryResult =
+  | {
+    attemptId: string | null;
+    cleared: false;
+    reason: "none";
+    record: RunnerStateRecord;
+  }
+  | {
+    attemptId: string | null;
+    cleared: true;
+    reason: "expired" | "worker_version_mismatch";
+    record: RunnerStateRecord;
+  };
 
 export class RunnerStateStore {
   private userId: string | null = null;
@@ -216,6 +231,7 @@ export class RunnerStateStore {
     expiresAt?: string | null;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
+    workerVersionId?: string | null;
   }): Promise<RunnerInvocationLease> {
     await this.bindUser(input.userId);
 
@@ -238,6 +254,9 @@ export class RunnerStateStore {
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = input.reason;
     meta.active_invocation_started_at = startedAt;
+    meta.active_invocation_worker_version_id = normalizeOptionalString(
+      input.workerVersionId ?? null,
+    );
     meta.active_workspace_version = null;
     if (input.consumePendingNudge !== false) {
       meta.pending_nudge = 0;
@@ -254,6 +273,7 @@ export class RunnerStateStore {
       reason: input.reason,
       startedAt,
       userId: input.userId,
+      workerVersionId: meta.active_invocation_worker_version_id,
       workspaceVersion: null,
     };
   }
@@ -653,14 +673,11 @@ export class RunnerStateStore {
   }
 
   async clearStaleInvocationIfExpired(input: {
+    currentWorkerVersionId?: string | null;
     nowMs: number;
     orphanGraceMs?: number | null;
     timeoutMs: number;
-  }): Promise<{
-    attemptId: string | null;
-    cleared: boolean;
-    record: RunnerStateRecord;
-  }> {
+  }): Promise<RunnerStaleInvocationRecoveryResult> {
     const meta = this.requireMetaRowSync();
     const attemptId = meta.active_invocation_id;
     const startedAt = meta.active_invocation_started_at;
@@ -668,6 +685,31 @@ export class RunnerStateStore {
       return {
         attemptId,
         cleared: false,
+        reason: "none",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    const currentWorkerVersionId = normalizeOptionalString(
+      input.currentWorkerVersionId ?? null,
+    );
+    const activeWorkerVersionId = normalizeOptionalString(
+      meta.active_invocation_worker_version_id,
+    );
+    if (currentWorkerVersionId !== null && activeWorkerVersionId !== currentWorkerVersionId) {
+      this.clearActiveInvocationMetaSync(meta);
+      meta.in_flight = 0;
+      meta.last_error_at = new Date(input.nowMs).toISOString();
+      meta.last_error_code = deriveHostedExecutionErrorCode(
+        new Error("Hosted workspace invocation belonged to a previous worker version."),
+      );
+      meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+      this.writeMetaRowSync(meta);
+
+      return {
+        attemptId,
+        cleared: true,
+        reason: "worker_version_mismatch",
         record: this.readStateFromMetaSync(meta),
       };
     }
@@ -703,6 +745,7 @@ export class RunnerStateStore {
       return {
         attemptId,
         cleared: false,
+        reason: "none",
         record: this.readStateFromMetaSync(meta),
       };
     }
@@ -719,6 +762,7 @@ export class RunnerStateStore {
     return {
       attemptId,
       cleared: true,
+      reason: "expired",
       record: this.readStateFromMetaSync(meta),
     };
   }
@@ -796,6 +840,7 @@ export class RunnerStateStore {
         active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
+        active_invocation_worker_version_id,
         active_workspace_version,
         alarm_kind,
         alarm_due_at,
@@ -835,6 +880,7 @@ export class RunnerStateStore {
         active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
+        active_invocation_worker_version_id,
         active_workspace_version,
         alarm_kind,
         alarm_due_at,
@@ -852,7 +898,7 @@ export class RunnerStateStore {
         pending_nudge,
         pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -861,6 +907,7 @@ export class RunnerStateStore {
       meta.active_invocation_orphan_observed_at,
       meta.active_invocation_reason,
       meta.active_invocation_started_at,
+      meta.active_invocation_worker_version_id,
       meta.active_workspace_version,
       meta.alarm_kind,
       meta.alarm_due_at,
@@ -928,6 +975,7 @@ export class RunnerStateStore {
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = null;
     meta.active_invocation_started_at = null;
+    meta.active_invocation_worker_version_id = null;
     meta.active_workspace_version = null;
   }
 
@@ -1031,6 +1079,7 @@ export class RunnerStateStore {
       reason: meta.active_invocation_reason,
       startedAt: meta.active_invocation_started_at,
       userId: meta.user_id,
+      workerVersionId: normalizeOptionalString(meta.active_invocation_worker_version_id),
       workspaceVersion: meta.active_workspace_version,
     };
   }
@@ -1074,4 +1123,9 @@ function normalizeOptionalIsoDateString(value: string | null): string | null {
   }
 
   return normalizeIsoDateString(value);
+}
+
+function normalizeOptionalString(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }

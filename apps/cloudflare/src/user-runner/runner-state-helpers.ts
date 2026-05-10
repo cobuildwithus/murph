@@ -23,6 +23,7 @@ export interface RunnerMetaRow {
   active_invocation_orphan_observed_at: string | null;
   active_invocation_reason: string | null;
   active_invocation_started_at: string | null;
+  active_invocation_worker_version_id: string | null;
   active_workspace_version: string | null;
   alarm_checkpoint_next_wake_at: string | null;
   alarm_due_at: string | null;
@@ -55,6 +56,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_invocation_orphan_observed_at: null,
     active_invocation_reason: null,
     active_invocation_started_at: null,
+    active_invocation_worker_version_id: null,
     active_workspace_version: null,
     alarm_checkpoint_next_wake_at: null,
     alarm_due_at: null,
