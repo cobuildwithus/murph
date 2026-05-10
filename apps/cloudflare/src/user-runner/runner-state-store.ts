@@ -90,15 +90,125 @@ export type RunnerStaleInvocationRecoveryResult =
   | {
     attemptId: string | null;
     cleared: false;
+    nextRecoveryAt: string | null;
     reason: "none";
     record: RunnerStateRecord;
   }
   | {
     attemptId: string | null;
     cleared: true;
+    nextRecoveryAt: null;
     reason: "container_stopped" | "expired" | "worker_version_mismatch";
     record: RunnerStateRecord;
   };
+
+export type ActiveInvocationRecoveryDecision =
+  | {
+    kind: "live";
+    nextRecoveryAt: string | null;
+    reason: "heartbeating" | "starting";
+  }
+  | {
+    kind: "recover";
+    reason:
+      | "container_stopped"
+      | "hard_timeout"
+      | "heartbeat_stale"
+      | "startup_timeout"
+      | "worker_version_mismatch";
+  };
+
+export function resolveActiveInvocationRecoveryDecision(input: {
+  activeWorkerVersionId?: string | null;
+  containerStopped?: boolean | null;
+  currentWorkerVersionId?: string | null;
+  expiresAt?: string | null;
+  heartbeatStaleMs?: number | null;
+  lastHeartbeatAt?: string | null;
+  nowMs: number;
+  readyTimeoutMs: number;
+  startedAt?: string | null;
+  timeoutMs: number;
+}): ActiveInvocationRecoveryDecision {
+  const startedAtMs = input.startedAt ? Date.parse(input.startedAt) : Number.NaN;
+  const expiresAtMs = input.expiresAt ? Date.parse(input.expiresAt) : Number.NaN;
+  const lastHeartbeatAtMs = input.lastHeartbeatAt
+    ? Date.parse(input.lastHeartbeatAt)
+    : Number.NaN;
+  const hasHeartbeat = Number.isFinite(lastHeartbeatAtMs);
+  const heartbeatStaleMs = input.heartbeatStaleMs ?? null;
+  const hasRecentHeartbeat = heartbeatStaleMs !== null
+    && hasHeartbeat
+    && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
+
+  if (input.containerStopped === true) {
+    return {
+      kind: "recover",
+      reason: "container_stopped",
+    };
+  }
+
+  const currentWorkerVersionId = normalizeOptionalString(
+    input.currentWorkerVersionId ?? null,
+  );
+  const activeWorkerVersionId = normalizeOptionalString(
+    input.activeWorkerVersionId ?? null,
+  );
+  if (
+    currentWorkerVersionId !== null
+    && activeWorkerVersionId !== currentWorkerVersionId
+    && !hasRecentHeartbeat
+  ) {
+    return {
+      kind: "recover",
+      reason: "worker_version_mismatch",
+    };
+  }
+
+  const hardDeadlineMs = Number.isFinite(expiresAtMs)
+    ? expiresAtMs
+    : Number.isFinite(startedAtMs)
+    ? startedAtMs + input.timeoutMs
+    : 0;
+  const startupDeadlineMs = !hasHeartbeat && Number.isFinite(startedAtMs)
+    ? startedAtMs + Math.max(0, Math.floor(input.readyTimeoutMs))
+    : Number.POSITIVE_INFINITY;
+  const heartbeatDeadlineMs = hasHeartbeat && heartbeatStaleMs !== null
+    ? lastHeartbeatAtMs + heartbeatStaleMs
+    : Number.POSITIVE_INFINITY;
+  const nextDeadlineMs = Math.min(
+    startupDeadlineMs,
+    heartbeatDeadlineMs,
+    hardDeadlineMs,
+  );
+
+  if (input.nowMs < nextDeadlineMs) {
+    return {
+      kind: "live",
+      nextRecoveryAt: Number.isFinite(nextDeadlineMs)
+        ? new Date(nextDeadlineMs).toISOString()
+        : null,
+      reason: hasHeartbeat ? "heartbeating" : "starting",
+    };
+  }
+
+  if (!hasHeartbeat && input.nowMs >= startupDeadlineMs) {
+    return {
+      kind: "recover",
+      reason: "startup_timeout",
+    };
+  }
+  if (hasHeartbeat && input.nowMs >= heartbeatDeadlineMs) {
+    return {
+      kind: "recover",
+      reason: "heartbeat_stale",
+    };
+  }
+  return {
+    kind: "recover",
+    reason: "hard_timeout",
+  };
+}
 
 export class RunnerStateStore {
   private userId: string | null = null;
@@ -758,38 +868,35 @@ export class RunnerStateStore {
       return {
         attemptId,
         cleared: false,
+        nextRecoveryAt: null,
         reason: "none",
         record: this.readStateFromMetaSync(meta),
       };
     }
 
-    const currentWorkerVersionId = normalizeOptionalString(
-      input.currentWorkerVersionId ?? null,
-    );
-    const activeWorkerVersionId = normalizeOptionalString(
-      meta.active_invocation_worker_version_id,
-    );
-    const expiresAtMs = meta.active_invocation_expires_at
-      ? Date.parse(meta.active_invocation_expires_at)
-      : Number.NaN;
-    const startedAtMs = Date.parse(startedAt);
-    const isHardExpired = !Number.isFinite(startedAtMs)
-      || (Number.isFinite(expiresAtMs)
-        ? input.nowMs >= expiresAtMs
-        : input.nowMs - startedAtMs >= input.timeoutMs);
-    const heartbeatStaleMs = input.heartbeatStaleMs ?? null;
-    const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
-      ? Date.parse(meta.active_invocation_last_heartbeat_at)
-      : Number.NaN;
-    const hasRecordedHeartbeat = Number.isFinite(lastHeartbeatAtMs);
-    const hasRecentHeartbeat = heartbeatStaleMs !== null
-      && hasRecordedHeartbeat
-      && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
-    const readyTimeoutMs = Math.max(0, Math.floor(input.readyTimeoutMs));
-    const isWithinNoHeartbeatReadyWindow = !hasRecordedHeartbeat
-      && Number.isFinite(startedAtMs)
-      && input.nowMs - startedAtMs < readyTimeoutMs;
-    if (meta.active_invocation_container_stopped_at !== null) {
+    const decision = resolveActiveInvocationRecoveryDecision({
+      activeWorkerVersionId: meta.active_invocation_worker_version_id,
+      containerStopped: meta.active_invocation_container_stopped_at !== null,
+      currentWorkerVersionId: input.currentWorkerVersionId ?? null,
+      expiresAt: meta.active_invocation_expires_at,
+      heartbeatStaleMs: input.heartbeatStaleMs ?? null,
+      lastHeartbeatAt: meta.active_invocation_last_heartbeat_at,
+      nowMs: input.nowMs,
+      readyTimeoutMs: input.readyTimeoutMs,
+      startedAt,
+      timeoutMs: input.timeoutMs,
+    });
+    if (decision.kind === "live") {
+      return {
+        attemptId,
+        cleared: false,
+        nextRecoveryAt: decision.nextRecoveryAt,
+        reason: "none",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    if (decision.reason === "container_stopped") {
       preserveConsumedNudgeAfterActiveInvocationClears(meta);
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
@@ -803,15 +910,13 @@ export class RunnerStateStore {
       return {
         attemptId,
         cleared: true,
+        nextRecoveryAt: null,
         reason: "container_stopped",
         record: this.readStateFromMetaSync(meta),
       };
     }
-    if (
-      currentWorkerVersionId !== null
-      && activeWorkerVersionId !== currentWorkerVersionId
-      && !hasRecentHeartbeat
-    ) {
+
+    if (decision.reason === "worker_version_mismatch") {
       preserveConsumedNudgeAfterActiveInvocationClears(meta);
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
@@ -825,16 +930,8 @@ export class RunnerStateStore {
       return {
         attemptId,
         cleared: true,
+        nextRecoveryAt: null,
         reason: "worker_version_mismatch",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    if (!isHardExpired && (hasRecentHeartbeat || isWithinNoHeartbeatReadyWindow)) {
-      return {
-        attemptId,
-        cleared: false,
-        reason: "none",
         record: this.readStateFromMetaSync(meta),
       };
     }
@@ -852,6 +949,7 @@ export class RunnerStateStore {
     return {
       attemptId,
       cleared: true,
+      nextRecoveryAt: null,
       reason: "expired",
       record: this.readStateFromMetaSync(meta),
     };

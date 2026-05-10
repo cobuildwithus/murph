@@ -62,10 +62,12 @@ import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
 import type {
+  ActiveInvocationRecoveryDecision,
   RunnerInvocationLease,
   RunnerStaleInvocationRecoveryResult,
 } from "./user-runner/runner-state-store.js";
 import {
+  resolveActiveInvocationRecoveryDecision,
   RunnerInvocationAlreadyActiveError,
 } from "./user-runner/runner-state-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
@@ -137,6 +139,17 @@ interface ActiveWorkspaceInvocationAbort {
   leaseGeneration: string;
   userId: string;
 }
+
+type LocalActiveInvocationRecovery =
+  | {
+    kind: "live";
+    nextRecoveryAt: string | null;
+    record: RunnerStateRecord;
+  }
+  | {
+    kind: "recovered";
+    record: RunnerStateRecord;
+  };
 
 type BrowserVaultRefreshIntentReason = "external_request" | "idle_checkpoint_committed";
 
@@ -614,6 +627,7 @@ export class HostedUserRunner {
 
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
+    let activeRecoveryWakeAt: string | null = null;
     let runningRecord = await this.stateStore.readState();
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
@@ -630,6 +644,8 @@ export class HostedUserRunner {
           runningRecord.userId,
           recovery.reason,
         );
+      } else {
+        activeRecoveryWakeAt = recovery.nextRecoveryAt;
       }
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
@@ -642,6 +658,7 @@ export class HostedUserRunner {
       ? new Date(nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS).toISOString()
       : alreadyRunning
       ? resolvePendingNudgeDrainContinuationWakeAt({
+          activeRecoveryWakeAt,
           nowMs,
           record: runningRecord,
           runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
@@ -816,17 +833,18 @@ export class HostedUserRunner {
 
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
-      const recovered = await this.recoverStaleLocalActiveInvocationForPendingWork();
-      if (recovered) {
+      const localRecovery = await this.recoverStaleLocalActiveInvocationForPendingWork();
+      if (localRecovery?.kind === "recovered") {
         return {
-          nextWakeAt: recovered.nextWakeAt,
+          nextWakeAt: localRecovery.record.nextWakeAt,
           status: "scheduled",
         };
       }
 
-      const runningRecord = await this.stateStore.readState();
+      const runningRecord = localRecovery?.record ?? await this.stateStore.readState();
       const record = await this.syncInvocationRecoveryAlarm(runningRecord, {
         minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
+        preferredWakeAt: localRecovery?.nextRecoveryAt,
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -886,14 +904,20 @@ export class HostedUserRunner {
 
   private async runUntilIdleOrBudgetInternal(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     let initialRecord = await this.stateStore.readState();
+    let activeRecoveryWakeAt: string | null = null;
     if (initialRecord.inFlight) {
       if (initialRecord.workspaceInvocation) {
         const recovery = await this.clearExpiredActiveInvocationForRecovery();
         initialRecord = recovery.record;
+        if (!recovery.cleared) {
+          activeRecoveryWakeAt = recovery.nextRecoveryAt;
+        }
       }
 
       if (initialRecord.inFlight) {
-        const record = await this.syncInvocationRecoveryAlarm(initialRecord);
+        const record = await this.syncInvocationRecoveryAlarm(initialRecord, {
+          preferredWakeAt: activeRecoveryWakeAt,
+        });
         return {
           nextWakeAt: record.nextWakeAt,
           status: "scheduled",
@@ -1281,6 +1305,7 @@ export class HostedUserRunner {
     inputRecord: RunnerStateRecord,
     input: {
       minimumDelayMs?: number;
+      preferredWakeAt?: string | null;
     } = {},
   ): Promise<RunnerStateRecord> {
     const nowMs = Date.now();
@@ -1290,7 +1315,7 @@ export class HostedUserRunner {
           ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
         )
       : input.minimumDelayMs ?? 0;
-    const preferredWakeAt = resolvePendingNudgeWakeAt({
+    const preferredWakeAt = input.preferredWakeAt ?? resolvePendingNudgeWakeAt({
       nowMs,
       record: inputRecord,
       runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
@@ -1447,7 +1472,7 @@ export class HostedUserRunner {
   }
 
   private async recoverStaleLocalActiveInvocationForPendingWork(): Promise<
-    RunnerStateRecord | null
+    LocalActiveInvocationRecovery | null
   > {
     const active = this.activeWorkspaceInvocationAbort;
     if (!active) {
@@ -1455,13 +1480,17 @@ export class HostedUserRunner {
     }
 
     const record = await this.stateStore.readState();
-    if (!this.shouldRecoverStaleLocalActiveInvocation(record, active)) {
+    if (!this.hasMatchingLocalActiveInvocation(record, active)) {
       return null;
     }
 
     const recovery = await this.clearExpiredActiveInvocationForRecovery();
     if (!recovery.cleared) {
-      return null;
+      return {
+        kind: "live",
+        nextRecoveryAt: recovery.nextRecoveryAt,
+        record: recovery.record,
+      };
     }
 
     const aborted = this.abortActiveWorkspaceInvocation(
@@ -1489,14 +1518,20 @@ export class HostedUserRunner {
         phase: "scheduled",
         userId: recovery.record.userId,
       });
-      return queuedRecord;
+      return {
+        kind: "recovered",
+        record: queuedRecord,
+      };
     }
 
     await this.syncPendingWorkRecoveryAfterFailure(recovery.record);
-    return recovery.record;
+    return {
+      kind: "recovered",
+      record: recovery.record,
+    };
   }
 
-  private shouldRecoverStaleLocalActiveInvocation(
+  private hasMatchingLocalActiveInvocation(
     record: RunnerStateRecord,
     active: ActiveWorkspaceInvocationAbort,
   ): boolean {
@@ -1511,18 +1546,7 @@ export class HostedUserRunner {
     ) {
       return false;
     }
-
-    const nowMs = Date.now();
-    const lastHeartbeatAtMs = invocation.lastHeartbeatAt
-      ? Date.parse(invocation.lastHeartbeatAt)
-      : Number.NaN;
-    if (Number.isFinite(lastHeartbeatAtMs)) {
-      return nowMs - lastHeartbeatAtMs >= ACTIVE_INVOCATION_HEARTBEAT_STALE_MS;
-    }
-
-    const startedAtMs = Date.parse(invocation.startedAt);
-    return Number.isFinite(startedAtMs)
-      && nowMs - startedAtMs >= this.env.runnerReadyTimeoutMs;
+    return true;
   }
 
   private abortActiveWorkspaceInvocation(input: {
@@ -3020,38 +3044,33 @@ function resolvePendingNudgeWakeAt(input: {
   runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
 }): string {
-  const invocation = input.record.workspaceInvocation;
-  if (!invocation) {
-    return new Date(input.nowMs).toISOString();
+  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
+  if (decision.kind === "live" && decision.nextRecoveryAt) {
+    return decision.nextRecoveryAt;
   }
-
-  const startedAtMs = Date.parse(invocation.startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return new Date(input.nowMs).toISOString();
-  }
-
-  const hardDeadlineMs = startedAtMs + input.runnerTimeoutMs;
-  const lastHeartbeatAtMs = invocation.lastHeartbeatAt
-    ? Date.parse(invocation.lastHeartbeatAt)
-    : Number.NaN;
-  const livenessDeadlineMs = Number.isFinite(lastHeartbeatAtMs)
-    ? lastHeartbeatAtMs + ACTIVE_INVOCATION_HEARTBEAT_STALE_MS
-    : startedAtMs + Math.max(0, Math.floor(input.runnerReadyTimeoutMs));
-  return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, livenessDeadlineMs))).toISOString();
+  return new Date(input.nowMs).toISOString();
 }
 
 function resolvePendingNudgeDrainContinuationWakeAt(input: {
+  activeRecoveryWakeAt?: string | null;
   nowMs: number;
   record: RunnerStateRecord;
   runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
 }): string {
-  const recoveryWakeAt = resolvePendingNudgeWakeAt(input);
+  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
+  const recoveryWakeAt = input.activeRecoveryWakeAt
+    ?? (decision.kind === "live" && decision.nextRecoveryAt
+      ? decision.nextRecoveryAt
+      : new Date(input.nowMs).toISOString());
   const invocation = input.record.workspaceInvocation;
   const lastHeartbeatAtMs = invocation?.lastHeartbeatAt
     ? Date.parse(invocation.lastHeartbeatAt)
     : Number.NaN;
-  if (invocation && !Number.isFinite(lastHeartbeatAtMs)) {
+  if (input.activeRecoveryWakeAt && invocation && !Number.isFinite(lastHeartbeatAtMs)) {
+    return input.activeRecoveryWakeAt;
+  }
+  if (decision.kind === "live" && decision.reason === "starting") {
     return recoveryWakeAt;
   }
 
@@ -3059,6 +3078,29 @@ function resolvePendingNudgeDrainContinuationWakeAt(input: {
     input.nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
   ).toISOString();
   return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
+}
+
+function resolveRunnerRecordActiveInvocationRecoveryDecision(input: {
+  nowMs: number;
+  record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
+  runnerTimeoutMs: number;
+}): ActiveInvocationRecoveryDecision {
+  const invocation = input.record.workspaceInvocation;
+  const activeExpiresAt = input.record.active?.expiresAt ?? null;
+  const activeStartedAt = input.record.active?.startedAt ?? null;
+  return resolveActiveInvocationRecoveryDecision({
+    activeWorkerVersionId: null,
+    containerStopped: false,
+    currentWorkerVersionId: null,
+    expiresAt: activeExpiresAt !== activeStartedAt ? activeExpiresAt : null,
+    heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+    lastHeartbeatAt: invocation?.lastHeartbeatAt ?? null,
+    nowMs: input.nowMs,
+    readyTimeoutMs: input.runnerReadyTimeoutMs,
+    startedAt: invocation?.startedAt ?? null,
+    timeoutMs: input.runnerTimeoutMs,
+  });
 }
 
 function applyMinimumFutureWakeAt(input: {
