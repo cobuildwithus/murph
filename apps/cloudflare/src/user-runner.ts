@@ -1376,10 +1376,7 @@ export class HostedUserRunner {
     record: RunnerStateRecord;
     userId: string;
   }): Promise<RunnerStateRecord> {
-    const record = await this.clearStalePendingNudgeIfMailboxLagDrainedBestEffort(input);
-    if (!record.pendingNudge) {
-      return record;
-    }
+    const { record } = input;
 
     this.pendingRunnerDriveAfterInvocation = {
       aiUsageAllowDecision: null,
@@ -1396,59 +1393,6 @@ export class HostedUserRunner {
         Date.now() + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
       ).toISOString(),
     });
-  }
-
-  private async clearStalePendingNudgeIfMailboxLagDrainedBestEffort(input: {
-    record: RunnerStateRecord;
-    userId: string;
-  }): Promise<RunnerStateRecord> {
-    if (!input.record.pendingNudge) {
-      return input.record;
-    }
-
-    try {
-      const webStatus = await this.readHostedRuntimeStatusFromWeb(input.userId);
-      const mailboxLag = mergeHostedRunnerDeferredCheckpointMailboxLag({
-        mailboxLag: webStatus.mailboxLag,
-        redactedStatus: input.record.deferredCheckpointRequired
-          ? input.record.deferredCheckpointMailboxStatus
-          : null,
-      });
-      if (!hostedRunnerMailboxLagDrained(mailboxLag)) {
-        return input.record;
-      }
-
-      const record = await this.stateStore.clearPendingInvocationNudge({
-        expectedPendingNudgeGeneration: input.record.pendingNudgeGeneration,
-      });
-      if (record.pendingNudge) {
-        return record;
-      }
-
-      this.pendingRunnerDriveAfterInvocation = null;
-      await this.runtimeAlarmScheduler.syncStoredAlarm();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          mailboxLagDrained: true,
-          pendingNudgeCleared: true,
-        },
-        message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return record;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner could not verify pending nudge mailbox lag before follow-up.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return input.record;
-    }
   }
 
   private async clearExpiredActiveInvocationForRecovery(): Promise<

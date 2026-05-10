@@ -22,6 +22,9 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
+  bootstrapHostedMemberContext,
+} from "./context.ts";
+import {
   executeHostedMailboxEvent,
 } from "./events.ts";
 import type {
@@ -106,6 +109,10 @@ export async function enqueueHostedSystemMailboxItem(input: {
       reasonCode: "system_mailbox.unsupported_route",
       status: "deferred",
     };
+  }
+
+  if (routeAction === "apply-member-activation" && input.wake.kind === "member.activated") {
+    await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
 
   const previousState = await readHostedSystemMailboxState(input.vaultRoot);

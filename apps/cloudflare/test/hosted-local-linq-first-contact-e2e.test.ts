@@ -71,7 +71,8 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    await requireScenario().enqueueWake(buildActivationWake(userId), userId);
+    await requireScenario().runWake(buildActivationWake(userId), userId);
+    await requireScenario().waitForHostedCompletion(userId);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver signup welcome",
@@ -333,9 +334,8 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(firstInboundPromptText).toContain(
       "If the user's opener is a greeting or vague request",
     );
-    expect(firstInboundPromptText).toContain("Conversation so far:\nAssistant:");
-    expect(firstInboundPromptText).toContain('"kind":"send_message"');
-    expect(firstInboundPromptText).toContain(MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE);
+    expect(firstInboundPromptText).not.toContain("Conversation so far:");
+    expect(firstInboundPromptText).not.toContain('"kind":"send_message"');
     expect(firstInboundPromptText).toContain("User message:\nSource: linq");
     expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
     },
@@ -516,6 +516,9 @@ describe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
     await requireScenario().waitForLatestPendingWake(postAssistantReplyUserId);
+    const firstCompletionPromise = requireScenario().waitForHostedCompletion(
+      postAssistantReplyUserId,
+    );
 
     const firstReplySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeFirstReply,
@@ -526,6 +529,9 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(requireLinqStub().readObservedMessageText(firstReplySend)).toBe(
       assistantQuestionText,
     );
+    const firstCompletionStatus = await firstCompletionPromise;
+    expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
+    expect(firstCompletionStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const outboundCountBeforeSecondReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);

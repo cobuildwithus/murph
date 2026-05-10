@@ -443,7 +443,7 @@ function buildAssistantNotificationObservabilityDetails(input: {
     assistantNotificationTurnTrigger: input.input.turnTrigger ?? null,
     assistantNotificationWorkingDirectoryPresent:
       normalizeNullableString(input.input.workingDirectory) !== null,
-    executionContextHosted: input.input.executionContext?.hosted != null,
+    assistantNotificationHostedExecutionPresent: input.input.executionContext?.hosted != null,
   }
 }
 

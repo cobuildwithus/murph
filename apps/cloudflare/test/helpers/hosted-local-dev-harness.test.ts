@@ -133,6 +133,154 @@ it("fails fast when hosted completion reaches a terminal runner error", async ()
   }
 });
 
+it("keeps polling when a runner error has scheduled recovery", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const recoverableErrorStatus = {
+    inFlight: false,
+    lastErrorAt: "2026-05-10T11:55:50.119Z",
+    lastErrorCode: "runtime_error",
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    nextAlarmAt: "2999-05-10T11:55:51.119Z",
+    recentLogs: [],
+    userId: "member_scheduled_recovery",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: null,
+      createdAt: "2026-05-10T11:55:19.308Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-10T11:55:19.308Z",
+      userId: "member_scheduled_recovery",
+      version: "0",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...recoverableErrorStatus,
+    lastErrorAt: null,
+    lastErrorCode: null,
+    nextAlarmAt: null,
+    workspace: {
+      ...recoverableErrorStatus.workspace,
+      checkpointedAt: "2026-05-10T11:55:52.000Z",
+      updatedAt: "2026-05-10T11:55:52.000Z",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [recoverableErrorStatus, completedStatus];
+  const fetch = vi.fn(async () => Response.json(statuses.shift() ?? completedStatus));
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_scheduled_recovery", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      lastErrorCode: null,
+      userId: "member_scheduled_recovery",
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("nudges due scheduled recovery when the mailbox has no remaining lag", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const recoverableErrorStatus = {
+    inFlight: false,
+    lastErrorAt: "2026-05-10T11:55:50.119Z",
+    lastErrorCode: "runtime_error",
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    nextAlarmAt: "2026-05-10T11:55:51.119Z",
+    recentLogs: [],
+    userId: "member_due_recovery",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: null,
+      createdAt: "2026-05-10T11:55:19.308Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-10T11:55:19.308Z",
+      userId: "member_due_recovery",
+      version: "0",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...recoverableErrorStatus,
+    lastErrorAt: null,
+    lastErrorCode: null,
+    nextAlarmAt: null,
+    workspace: {
+      ...recoverableErrorStatus.workspace,
+      checkpointedAt: "2026-05-10T11:55:52.000Z",
+      updatedAt: "2026-05-10T11:55:52.000Z",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [recoverableErrorStatus, completedStatus];
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).includes("/nudge")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(statuses.shift() ?? completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_due_recovery", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      lastErrorCode: null,
+      userId: "member_due_recovery",
+    });
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_due_recovery/nudge"
+      && init?.method === "POST"
+    )).toBe(true);
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("keeps nudging when a runner error still has mailbox lag", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const laggedErrorStatus = {

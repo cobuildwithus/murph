@@ -210,10 +210,10 @@ const HOSTED_ASSISTANT_NOTIFICATION_CODEX_NUMBER_DETAIL_KEYS = {
 const HOSTED_ASSISTANT_NOTIFICATION_BOOLEAN_DETAIL_KEYS = [
   "assistantNotificationExplicitTargetPresent",
   "assistantNotificationIdentityIdPresent",
+  "assistantNotificationHostedExecutionPresent",
   "assistantNotificationThreadIdPresent",
   "assistantNotificationThreadIsDirect",
   "assistantNotificationWorkingDirectoryPresent",
-  "executionContextHosted",
 ] as const;
 
 export interface HostedExecutionStructuredLogInput {

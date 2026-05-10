@@ -410,6 +410,7 @@ describe("hosted execution observability", () => {
         assistantNotificationProviderModel: "gpt-4.1-mini",
         assistantNotificationRouteId: "route_primary",
         assistantNotificationStage: "provider",
+        assistantNotificationHostedExecutionPresent: true,
         assistantNotificationThreadIdPresent: true,
         assistantNotificationThreadIsDirect: true,
         assistantNotificationTurnTrigger: "automation-cron",
@@ -424,7 +425,6 @@ describe("hosted execution observability", () => {
         assistantProviderGatewayOnlyProviders: "openai",
         assistantProviderGatewayTarget: true,
         assistantProviderModel: "openai/gpt-5.4",
-        executionContextHosted: true,
         prompt: "do not keep me",
       },
     });
@@ -458,6 +458,7 @@ describe("hosted execution observability", () => {
       assistantNotificationProviderModel: "gpt-4.1-mini",
       assistantNotificationRouteId: "route_primary",
       assistantNotificationStage: "provider",
+      assistantNotificationHostedExecutionPresent: true,
       assistantNotificationThreadIdPresent: true,
       assistantNotificationThreadIsDirect: true,
       assistantNotificationTurnTrigger: "automation-cron",
@@ -472,7 +473,6 @@ describe("hosted execution observability", () => {
       assistantProviderGatewayOnlyProviders: "openai",
       assistantProviderGatewayTarget: true,
       assistantProviderModel: "openai/gpt-5.4",
-      executionContextHosted: true,
     });
   });
 
