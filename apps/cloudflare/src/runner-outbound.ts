@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
@@ -320,6 +321,10 @@ function isAllowedBrowserVaultRefreshOutboundRequest(input: {
     input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
     && input.method === "POST"
     && input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
+  ) || (
+    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+    && input.method === "GET"
+    && input.url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH
   ) || (
     input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
     && input.method === "POST"

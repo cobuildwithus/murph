@@ -1004,8 +1004,10 @@ describe("browser vault session route", () => {
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
       new Error("Hosted execution browser vault replica was not found."),
     );
+    const scheduleBrowserVaultRefresh = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
     });
 
     const response = await browserVaultSessionRoute.POST(
@@ -1020,7 +1022,11 @@ describe("browser vault session route", () => {
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: null,
+      refreshPending: true,
       state: "empty",
+    });
+    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      userId: "member_123",
     });
   });
 });

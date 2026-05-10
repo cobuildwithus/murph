@@ -181,7 +181,10 @@ export class RunnerStateStore {
     }
 
     if (alarm.kind === "work") {
-      if (!hasPendingWork && (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)) {
+      if (
+        !hasPendingWork
+        && (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)
+      ) {
         return {
           kind: "none",
           record: this.readStateFromMetaSync(meta),

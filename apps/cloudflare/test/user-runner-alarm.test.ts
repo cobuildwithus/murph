@@ -5623,7 +5623,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
 	  });
 
-  it("runs external browser-vault refresh as detached best-effort work without runner alarms", async () => {
+  it("runs external browser-vault refresh as detached best-effort work and clears its retry intent", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("external-browser-vault-refresh"),
       version: "4",
@@ -5652,10 +5652,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(waitUntil).toHaveBeenCalledOnce();
-    expect(alarms).toEqual([]);
-    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
     await Promise.all(waitUntilPromises);
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
+    expect(alarms).toEqual([]);
     expect(runnerContainerNames).toEqual([
       resolveHostedExecutionRunnerContainerName({
         source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
@@ -5716,7 +5716,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
   });
 
-  it("skips detached browser-vault refresh while foreground work is pending", async () => {
+  it("keeps detached browser-vault refresh pending while foreground work is pending", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("pending-work-browser-vault-refresh"),
       version: "4",
@@ -5751,8 +5751,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(waitUntil).toHaveBeenCalledOnce();
     await Promise.all(waitUntilPromises);
     expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
-    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
-    expect(alarms).toEqual([]);
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      failureCount: 0,
+      lastErrorCode: "foreground_work",
+      reason: "external_request",
+      userId: "member_123",
+    });
+    expect(alarms.length).toBeGreaterThan(0);
   });
 
   it("keeps background browser-vault refresh conflicts best-effort", async () => {
@@ -5795,6 +5800,187 @@ describe("HostedUserRunner runtime crypto context", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("keeps browser-vault refresh pending when restored source produces no private content", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-empty-source"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "refresh_failed_empty_source",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner } =
+      createRunnerCryptoContextHarness(workspace, {
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
+
+    await Promise.all(waitUntilPromises);
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      failureCount: 1,
+      lastErrorCode: "refresh_failed_empty_source",
+      reason: "external_request",
+      userId: "member_123",
+    });
+    expect(alarms.length).toBeGreaterThan(0);
+  });
+
+  it("coalesces repeated browser-vault refresh requests without resetting retry backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-coalesced-retry"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "refresh_failed_empty_source",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { readPendingBrowserVaultRefreshStorage, runner } =
+      createRunnerCryptoContextHarness(workspace, {
+        refreshBrowserVaultReplica,
+        retryDelayMs: 10_000,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+    const retryIntent = readPendingBrowserVaultRefreshStorage();
+    expect(retryIntent).toMatchObject({
+      failureCount: 1,
+      lastErrorCode: "refresh_failed_empty_source",
+    });
+    const nextAttemptAt = requireBrowserVaultRefreshIntentNextAttemptAt(retryIntent);
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+
+    expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
+    expect(requireBrowserVaultRefreshIntentNextAttemptAt(
+      readPendingBrowserVaultRefreshStorage(),
+    )).toBe(nextAttemptAt);
+  });
+
+  it("does not consume a future runner alarm when only browser-vault retry is due", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-future-work"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { readPendingBrowserVaultRefreshStorage, runner, sql } =
+      createRunnerCryptoContextHarness(workspace, {
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+    const runnerWakeAt = new Date(Date.parse(FIXED_NOW) + 60_000).toISOString();
+    sql.exec(
+      `UPDATE runner_meta
+       SET pending_nudge = 1,
+           pending_work = 1,
+           alarm_kind = 'work',
+           alarm_due_at = ?,
+           alarm_workspace_version = NULL,
+           alarm_checkpoint_next_wake_at = NULL
+       WHERE user_id = ?`,
+      runnerWakeAt,
+      "member_123",
+    );
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+    const pendingIntent = readPendingBrowserVaultRefreshStorage();
+    expect(requireBrowserVaultRefreshIntentNextAttemptAt(
+      pendingIntent,
+    )).toBe(runnerWakeAt);
+    setBrowserVaultRefreshIntentNextAttemptAtForTest(pendingIntent, FIXED_NOW);
+
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(sql.exec(
+      "SELECT pending_nudge, pending_work, alarm_kind, alarm_due_at FROM runner_meta WHERE user_id = ?",
+      "member_123",
+    ).toArray()).toEqual([{
+      alarm_due_at: runnerWakeAt,
+      alarm_kind: "work",
+      pending_nudge: 1,
+      pending_work: 1,
+    }]);
+  });
+
+  it("deletes pending browser-vault refresh intent during hosted user deletion", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-delete-user"),
+      version: "4",
+    });
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { readPendingBrowserVaultRefreshStorage, runner, sql } =
+      createRunnerCryptoContextHarness(workspace, {
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET pending_nudge = 1, pending_work = 1 WHERE user_id = ?",
+      "member_123",
+    );
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises);
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      ok: true,
+      userId: "member_123",
+    });
+
+    expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
   });
 
   it("schedules browser-vault refresh after a committed idle-shutdown checkpoint", async () => {
@@ -6039,6 +6225,27 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+function requireBrowserVaultRefreshIntentNextAttemptAt(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected a pending browser-vault refresh intent.");
+  }
+  const nextAttemptAt = (value as { nextAttemptAt?: unknown }).nextAttemptAt;
+  if (typeof nextAttemptAt !== "string") {
+    throw new Error("Expected pending browser-vault refresh intent nextAttemptAt.");
+  }
+  return nextAttemptAt;
+}
+
+function setBrowserVaultRefreshIntentNextAttemptAtForTest(
+  value: unknown,
+  nextAttemptAt: string,
+): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected a pending browser-vault refresh intent.");
+  }
+  Object.assign(value, { nextAttemptAt });
+}
 
 function createRunnerHarness(options: {
   bucket?: {

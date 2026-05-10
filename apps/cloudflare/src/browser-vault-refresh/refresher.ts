@@ -1,19 +1,22 @@
 import { createHash } from "node:crypto";
 
 import {
-  createHostedBrowserVaultReplicaForSourceState,
+  createHostedBrowserVaultReplicaRefreshFromWorkspace,
+  type HostedBrowserVaultReplicaContentSummary,
+  type HostedBrowserVaultReplicaRestoreSummary,
+  type HostedBrowserVaultReplicaSourceSummary,
 } from "@murphai/assistant-runtime";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedWorkspaceState,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
   measureHostedBrowserVaultReplicaBytes,
 } from "../browser-vault-limits.ts";
-import {
-  resolveHostedRunnerWarmWorkspaceVaultRoot,
-} from "../node-runner-isolated.ts";
 import type {
   buildHostedExecutionRuntimePlatform,
 } from "../runtime-platform.ts";
@@ -23,16 +26,37 @@ type HostedRuntimePlatform = ReturnType<typeof buildHostedExecutionRuntimePlatfo
 export type BrowserVaultReplicaRefreshResult =
   | {
       byteLength: number;
+      content: HostedBrowserVaultReplicaContentSummary;
       replicaRef: HostedBrowserVaultReplicaRef;
+      restore: HostedBrowserVaultReplicaRestoreSummary;
+      source: HostedBrowserVaultReplicaSourceSummary;
       status: "published";
     }
   | {
       byteLength: number;
+      content: HostedBrowserVaultReplicaContentSummary;
       maxBytes: number;
+      restore: HostedBrowserVaultReplicaRestoreSummary;
+      source: HostedBrowserVaultReplicaSourceSummary;
       status: "refresh_failed_too_large";
     }
   | {
+      content: HostedBrowserVaultReplicaContentSummary;
+      restore: HostedBrowserVaultReplicaRestoreSummary;
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "refresh_failed_empty_source";
+    }
+  | {
+      content: HostedBrowserVaultReplicaContentSummary;
+      restore: HostedBrowserVaultReplicaRestoreSummary;
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "refresh_skipped_no_source";
+    }
+  | {
       status: "publish_conflict";
+    }
+  | {
+      status: "workspace_missing";
     };
 
 export type BrowserVaultRefreshResult = BrowserVaultReplicaRefreshResult;
@@ -43,6 +67,8 @@ export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
   projectionHash: string;
   signal?: AbortSignal;
   userId: string;
+  vaultRoot: string;
+  workspace: HostedWorkspaceState | null;
 }): Promise<BrowserVaultReplicaRefreshResult> {
   if (!input.platform.browserVaultReplicaPort?.write) {
     throw new TypeError("Browser-vault refresh requires a browser-vault replica write port.");
@@ -50,32 +76,60 @@ export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
   if (!input.platform.browserVaultReplicaPort.publishRef) {
     throw new TypeError("Browser-vault refresh requires a browser-vault replica publish port.");
   }
+  if (!input.workspace) {
+    return {
+      status: "workspace_missing",
+    };
+  }
 
-  const vaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId);
   throwIfBrowserVaultRefreshAborted(input.signal);
-  const replica = await createHostedBrowserVaultReplicaForSourceState({
+  const prepared = await createHostedBrowserVaultReplicaRefreshFromWorkspace({
     generatedAt: input.generatedAt,
+    platform: input.platform,
     sourceStateHash: input.projectionHash,
-    vaultRoot,
+    vaultRoot: input.vaultRoot,
+    workspace: input.workspace,
   });
   throwIfBrowserVaultRefreshAborted(input.signal);
 
-  const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
+  if (prepared.source.fileCount === 0) {
+    return {
+      content: prepared.content,
+      restore: prepared.restore,
+      source: prepared.source,
+      status: "refresh_skipped_no_source",
+    };
+  }
+
+  if (!prepared.content.hasPrivateContent) {
+    return {
+      content: prepared.content,
+      restore: prepared.restore,
+      source: prepared.source,
+      status: "refresh_failed_empty_source",
+    };
+  }
+
+  const byteLength = measureHostedBrowserVaultReplicaBytes(prepared.replica);
   if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
     return {
       byteLength,
+      content: prepared.content,
       maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+      restore: prepared.restore,
+      source: prepared.source,
       status: "refresh_failed_too_large",
     };
   }
 
-  const replicaRef = await input.platform.browserVaultReplicaPort.write({ replica });
+  const replicaRef = await input.platform.browserVaultReplicaPort.write({
+    replica: prepared.replica,
+  });
   assertBrowserVaultReplicaWriteResult({
     byteLength,
     projectionHash: input.projectionHash,
     replicaRef,
   });
-  throwIfBrowserVaultRefreshAborted(input.signal);
 
   const publish = await input.platform.browserVaultReplicaPort.publishRef({
     replicaRef,
@@ -88,7 +142,10 @@ export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
 
   return {
     byteLength: replicaRef.byteLength,
+    content: prepared.content,
     replicaRef,
+    restore: prepared.restore,
+    source: prepared.source,
     status: "published",
   };
 }

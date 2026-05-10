@@ -20,6 +20,7 @@ import {
 } from "./runner-native-parser-toolchain.ts";
 import {
   runHostedWorkspaceInvocationIsolatedDetailed,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
@@ -255,13 +256,38 @@ export async function refreshHostedBrowserVaultReplica(
     browserVaultRefreshSourceStateHash: null,
     workspaceCheckpointBridge: null,
   });
+  const workspaceRead = await readBrowserVaultRefreshWorkspace({
+    platform,
+    userId: input.userId,
+  });
   return await refreshBrowserVaultReplicaFromLiveWorkspace({
     generatedAt,
     platform,
     projectionHash,
     signal: options?.signal,
     userId: input.userId,
+    vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId),
+    workspace: workspaceRead.workspace,
   });
+}
+
+async function readBrowserVaultRefreshWorkspace(input: {
+  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
+  userId: string;
+}) {
+  if (!input.platform.workspacePort?.read) {
+    throw new TypeError("Browser-vault refresh requires a workspace read port.");
+  }
+
+  const workspaceRead = await input.platform.workspacePort.read();
+  if (
+    workspaceRead.workspace
+    && workspaceRead.workspace.userId !== input.userId
+  ) {
+    throw new Error("Browser-vault refresh workspace user did not match the requested user.");
+  }
+
+  return workspaceRead;
 }
 
 function resolveHostedWorkspaceInProcessVaultRoot(): string {

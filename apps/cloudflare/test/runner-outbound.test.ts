@@ -2779,8 +2779,15 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects detached browser-vault refresh authority on committed workspace reads", async () => {
-    const fetchMock = vi.fn();
+  it("allows detached browser-vault refresh authority to read the committed workspace", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      Response.json({
+        fetchedAt: "2026-04-26T00:00:05.000Z",
+        workspace: null,
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
     const sourceBundleHash = "b".repeat(64);
 
@@ -2800,8 +2807,16 @@ describe("handleRunnerOutboundRequest", () => {
       },
     );
 
-    expect(response.status).toBe(401);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      workspace: null,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}`,
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
   });
 
   it("allows detached browser-vault refresh authority to publish the latest replica ref", async () => {
