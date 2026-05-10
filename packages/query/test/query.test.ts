@@ -1310,6 +1310,37 @@ test("summarizeDailySamples groups by day and stream with stable numeric aggrega
   }
 });
 
+test("summarizeDailySamples streams dense numeric groups without retaining value arrays", () => {
+  const vault = createEmptyReadModel();
+  const sampleCount = 150_000;
+  vault.samples = Array.from({ length: sampleCount }, (_, index) =>
+    createSampleRecord({
+      id: `smp_dense_${String(index).padStart(6, "0")}`,
+      occurredAt: "2026-03-10T00:00:00Z",
+      sourcePath: "ledger/samples/dense/2026/2026-03.jsonl",
+      stream: "dense",
+      data: {
+        unit: "count",
+        value: index % 1_000,
+      },
+    })
+  );
+
+  const [summary] = summarizeDailySamples(vault, {
+    from: "2026-03-10",
+    to: "2026-03-10",
+    streams: ["dense"],
+  });
+
+  assert.equal(summary?.sampleCount, sampleCount);
+  assert.equal(summary?.numericSampleCount, sampleCount);
+  assert.equal(summary?.minValue, 0);
+  assert.equal(summary?.maxValue, 999);
+  assert.equal(summary?.sumValue, 74_925_000);
+  assert.equal(summary?.averageValue, 499.5);
+  assert.deepEqual(summary?.sourcePaths, ["ledger/samples/dense/2026/2026-03.jsonl"]);
+});
+
 test("listEntities prefers stored local day keys over UTC-derived dates", () => {
   const vault = createEmptyReadModel();
   const sample = createSampleRecord({

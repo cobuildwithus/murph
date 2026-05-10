@@ -73,6 +73,7 @@ import {
   applyStripeDisputeUpdated,
   applyStripeInvoicePaid,
   applyStripeInvoicePaymentFailed,
+  applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
@@ -105,6 +106,9 @@ describe("hosted onboarding stripe billing events", () => {
       memberId: member.core.id,
     });
     mocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
       subscriptions: {
         retrieve: vi.fn(async () => makeStripeSubscription()),
       },
@@ -649,6 +653,207 @@ describe("hosted onboarding stripe billing events", () => {
     }));
   });
 
+  it("ignores pending refunds before looking up a member", async () => {
+    await applyStripeRefundCreated(
+      makeStripeRefund({ status: "pending" }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_pending",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.findMemberForStripeReversal).not.toHaveBeenCalled();
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
+  it("ignores partial refunds for the current entitlement invoice", async () => {
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_123",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+
+    await applyStripeRefundCreated(
+      makeStripeRefund({
+        amount: 2_500,
+        charge: "ch_123",
+        paymentIntent: "pi_123",
+        status: "succeeded",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_partial",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.findMemberForStripeReversal).toHaveBeenCalled();
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
+  it("suspends members for full succeeded refunds of the current entitlement invoice", async () => {
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_123",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+
+    await applyStripeRefundCreated(
+      makeStripeRefund({
+        amount: 5_000,
+        charge: "ch_123",
+        paymentIntent: "pi_123",
+        status: "succeeded",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_full",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: expect.objectContaining({
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceType: "stripe.refund.created",
+      }),
+      stripeCustomerId: "cus_123",
+    }));
+  });
+
+  it("ignores full refunds that do not match the current entitlement invoice", async () => {
+    mocks.requireHostedStripeApi.mockReturnValueOnce({
+      invoicePayments: {
+        list: vi.fn(async () => ({ data: [] })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: makeStripeInvoice({
+            amountPaid: 5_000,
+            charge: null,
+            invoicePayments: [makeStripeInvoicePayment({
+              amountPaid: 5_000,
+              paymentIntent: "pi_current",
+            })],
+            paymentIntent: null,
+          }),
+        })),
+      },
+    });
+
+    await applyStripeRefundCreated(
+      makeStripeRefund({
+        amount: 5_000,
+        charge: "ch_old",
+        paymentIntent: "pi_old",
+        status: "succeeded",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_old_invoice",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(mocks.findMemberForStripeReversal).toHaveBeenCalled();
+    expect(mocks.suspendHostedMemberForBillingReversalTx).not.toHaveBeenCalled();
+  });
+
+  it("matches full refunds against current invoice payment records", async () => {
+    const retrieveInvoice = vi.fn(async () => makeStripeInvoice({
+      amountPaid: 5_000,
+      charge: null,
+      paymentIntent: null,
+    }));
+    const listInvoicePayments = vi.fn(async () => ({
+      data: [makeStripeInvoicePayment({
+        amountPaid: 5_000,
+        paymentIntent: "pi_123",
+      })],
+    }));
+    mocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: listInvoicePayments,
+      },
+      invoices: {
+        retrieve: retrieveInvoice,
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => makeStripeSubscription({
+          latestInvoice: "in_123",
+        })),
+      },
+    });
+
+    await applyStripeRefundCreated(
+      makeStripeRefund({
+        amount: 5_000,
+        paymentIntent: "pi_123",
+        status: "succeeded",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_refund_invoice_payment",
+        sourceType: "stripe.refund.created",
+      },
+      {} as never,
+      "cus_123",
+    );
+
+    expect(retrieveInvoice).toHaveBeenCalledWith("in_123", {
+      expand: [
+        "payments.data.payment.charge",
+        "payments.data.payment.payment_intent",
+      ],
+    });
+    expect(listInvoicePayments).toHaveBeenCalledWith({
+      invoice: "in_123",
+      limit: 100,
+      status: "paid",
+      expand: [
+        "data.payment.charge",
+        "data.payment.payment_intent",
+      ],
+    });
+    expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalled();
+  });
+
   it("ignores non-adverse dispute updates", async () => {
     await applyStripeDisputeUpdated(
       makeStripeDispute({ status: "under_review" }),
@@ -758,21 +963,64 @@ function makeMemberSnapshot(input?: {
 
 function makeStripeInvoice(
   overrides?: Partial<{
+    amountPaid: number;
     billingReason: string | null;
+    charge: string | null;
     customer: string | null;
     customerEmail: string | null;
     id: string;
+    invoicePayments: Stripe.InvoicePayment[];
+    paymentIntent: string | null;
     subscription: string | null;
   }>,
 ): Stripe.Invoice {
   // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Invoice.
   return {
+    amount_paid: overrides?.amountPaid ?? 5_000,
     billing_reason: overrides?.billingReason ?? null,
+    charge: overrides?.charge ?? "ch_123",
     customer: overrides?.customer ?? "cus_123",
     customer_email: overrides?.customerEmail ?? null,
     id: overrides?.id ?? "in_123",
+    payment_intent: overrides?.paymentIntent ?? "pi_123",
+    payments: {
+      data: overrides?.invoicePayments ?? [],
+    },
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;
+}
+
+function makeStripeInvoicePayment(overrides?: Partial<{
+  amountPaid: number;
+  charge: string | null;
+  paymentIntent: string | null;
+  status: string;
+}>): Stripe.InvoicePayment {
+  return {
+    amount_paid: overrides?.amountPaid ?? 5_000,
+    id: "inpay_123",
+    object: "invoice_payment",
+    payment: {
+      ...(overrides?.charge === undefined ? {} : { charge: overrides.charge ?? undefined }),
+      ...(overrides?.paymentIntent === undefined ? { payment_intent: "pi_123" } : { payment_intent: overrides.paymentIntent ?? undefined }),
+      type: "payment_intent",
+    },
+    status: overrides?.status ?? "paid",
+  } as Stripe.InvoicePayment;
+}
+
+function makeStripeRefund(overrides?: Partial<{
+  amount: number;
+  charge: string | null;
+  paymentIntent: string | null;
+  status: Stripe.Refund["status"];
+}>): Stripe.Refund {
+  return {
+    amount: overrides?.amount ?? 5_000,
+    charge: overrides?.charge ?? "ch_123",
+    payment_intent: overrides?.paymentIntent ?? "pi_123",
+    status: overrides?.status ?? "succeeded",
+  } as Stripe.Refund;
 }
 
 function makeStripeDispute(overrides?: Partial<{
@@ -796,6 +1044,7 @@ function makeStripeSubscription(
     itemCurrentPeriodEnd: number | null;
     itemCurrentPeriodStart: number | null;
     items: string[];
+    latestInvoice: Stripe.Invoice | string | null;
     metadata: Record<string, string>;
     status: Stripe.Subscription.Status;
     trialEnd: number | null;
@@ -818,6 +1067,7 @@ function makeStripeSubscription(
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
+    ...(overrides?.latestInvoice === undefined ? {} : { latest_invoice: overrides.latestInvoice }),
     ...(currentPeriodEnd === undefined ? {} : { current_period_end: currentPeriodEnd }),
     ...(currentPeriodStart === undefined ? {} : { current_period_start: currentPeriodStart }),
     items: {

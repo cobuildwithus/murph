@@ -490,6 +490,10 @@ export async function applyStripeRefundCreated(
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
 ): Promise<void> {
+  if (!isHostedStripeSucceededRefund(refund)) {
+    return;
+  }
+
   const member = await findMemberForStripeReversal({
     chargeId: coerceStripeObjectId(refund.charge),
     customerId: customerId ?? null,
@@ -499,6 +503,13 @@ export async function applyStripeRefundCreated(
   });
 
   if (!member) {
+    return;
+  }
+
+  if (!await isHostedStripeCurrentEntitlementFullRefund({
+    member,
+    refund,
+  })) {
     return;
   }
 
@@ -516,9 +527,146 @@ export async function applyStripeRefundCreated(
     canonicalBillingStatus,
     dispatchContext,
     member: preparedMember,
-    stripeCustomerId: customerId ?? undefined,
+    stripeCustomerId: customerId ?? member.billingRef?.stripeCustomerId ?? undefined,
     tx: prisma,
   });
+}
+
+function isHostedStripeSucceededRefund(refund: Stripe.Refund): boolean {
+  return refund.status === "succeeded" && readHostedStripePositiveAmount(refund.amount) !== null;
+}
+
+async function isHostedStripeCurrentEntitlementFullRefund(input: {
+  member: HostedMemberBillingSnapshot;
+  refund: Stripe.Refund;
+}): Promise<boolean> {
+  const subscription = await readHostedMemberStripeSubscription(input.member);
+  if (!subscription || mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status) !== HostedBillingStatus.active) {
+    return false;
+  }
+
+  const invoice = await readHostedStripeSubscriptionLatestInvoice(subscription);
+  if (!invoice || !await hostedStripeRefundMatchesInvoice(input.refund, invoice)) {
+    return false;
+  }
+
+  const refundAmount = readHostedStripePositiveAmount(input.refund.amount);
+  const paidAmount = readHostedStripePositiveAmount((invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid);
+  return refundAmount !== null && paidAmount !== null && refundAmount >= paidAmount;
+}
+
+async function readHostedStripeSubscriptionLatestInvoice(
+  subscription: Stripe.Subscription,
+): Promise<Stripe.Invoice | null> {
+  const latestInvoice = (subscription as Stripe.Subscription & { latest_invoice?: unknown }).latest_invoice;
+  if (latestInvoice && typeof latestInvoice === "object") {
+    return latestInvoice as Stripe.Invoice;
+  }
+
+  const invoiceId = coerceStripeObjectId(latestInvoice);
+  if (!invoiceId) {
+    return null;
+  }
+
+  return requireHostedStripeApi().invoices.retrieve(invoiceId, {
+    expand: [
+      "payments.data.payment.charge",
+      "payments.data.payment.payment_intent",
+    ],
+  });
+}
+
+async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: Stripe.Invoice): Promise<boolean> {
+  const payments = readHostedStripeInvoicePayments(invoice);
+  if (payments.some((payment) => hostedStripeRefundMatchesInvoicePayment(refund, payment))) {
+    return true;
+  }
+
+  if (!invoice.id) {
+    return false;
+  }
+
+  const listedPayments = await requireHostedStripeApi().invoicePayments.list({
+    invoice: invoice.id,
+    limit: 100,
+    status: "paid",
+    expand: [
+      "data.payment.charge",
+      "data.payment.payment_intent",
+    ],
+  });
+  if (listedPayments.data.some((payment) => hostedStripeRefundMatchesInvoicePayment(refund, payment))) {
+    return true;
+  }
+
+  return hostedStripeRefundMatchesLegacyInvoicePaymentFields(refund, invoice);
+}
+
+function readHostedStripeInvoicePayments(invoice: Stripe.Invoice): Stripe.InvoicePayment[] {
+  const payments = (invoice as Stripe.Invoice & {
+    payments?: { data?: unknown };
+  }).payments?.data;
+  return Array.isArray(payments)
+    ? payments.filter((payment): payment is Stripe.InvoicePayment =>
+        Boolean(payment && typeof payment === "object" && !Array.isArray(payment))
+      )
+    : [];
+}
+
+function hostedStripeRefundMatchesInvoicePayment(
+  refund: Stripe.Refund,
+  invoicePayment: Stripe.InvoicePayment,
+): boolean {
+  if (invoicePayment.status !== "paid") {
+    return false;
+  }
+
+  const refundChargeId = coerceStripeObjectId(refund.charge);
+  const refundPaymentIntentId = coerceStripeObjectId(refund.payment_intent);
+  const invoiceChargeId = coerceUnknownStripeObjectId(invoicePayment.payment.charge);
+  const invoicePaymentIntentId = coerceUnknownStripeObjectId(invoicePayment.payment.payment_intent);
+  return (
+    Boolean(refundChargeId && refundChargeId === invoiceChargeId) ||
+    Boolean(refundPaymentIntentId && refundPaymentIntentId === invoicePaymentIntentId)
+  );
+}
+
+function hostedStripeRefundMatchesLegacyInvoicePaymentFields(
+  refund: Stripe.Refund,
+  invoice: Stripe.Invoice,
+): boolean {
+  const refundChargeId = coerceStripeObjectId(refund.charge);
+  const refundPaymentIntentId = coerceStripeObjectId(refund.payment_intent);
+  const invoiceChargeId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { charge?: unknown }).charge,
+  );
+  const invoicePaymentIntentId = coerceUnknownStripeObjectId(
+    (invoice as Stripe.Invoice & { payment_intent?: unknown }).payment_intent,
+  );
+  return (
+    Boolean(refundChargeId && refundChargeId === invoiceChargeId) ||
+    Boolean(refundPaymentIntentId && refundPaymentIntentId === invoicePaymentIntentId)
+  );
+}
+
+function coerceUnknownStripeObjectId(value: unknown): string | null {
+  if (
+    typeof value === "string" ||
+    value === null ||
+    value === undefined
+  ) {
+    return coerceStripeObjectId(value);
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return coerceStripeObjectId(value as { id?: unknown });
+  }
+
+  return null;
+}
+
+function readHostedStripePositiveAmount(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
 async function writeHostedStripeCheckoutEmailIfPresentTx(input: {

@@ -1,6 +1,7 @@
-import { chmod as fsChmod, writeFile as fsWriteFile } from "node:fs/promises";
+import { chmod as fsChmod } from "node:fs/promises";
 import path from "node:path";
 
+import { writeTextFileAtomic } from "./atomic-write.ts";
 import {
   ensureAssistantStateDirectory,
   resolveAssistantStateFileMode,
@@ -55,10 +56,8 @@ export async function writeVersionedJsonStateFile<T>(
     chmod: fsChmod,
     mkdir: ensureAssistantStateDirectory,
     writeFile(filePath: string, text: string) {
-      const mode = resolveAssistantStateFileMode(filePath, input.mode);
-      return fsWriteFile(filePath, text, {
-        encoding: "utf8",
-        mode,
+      return writeTextFileAtomic(filePath, text, {
+        mode: input.mode,
       });
     },
   };

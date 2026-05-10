@@ -270,6 +270,89 @@ test('recipe save persists every typed raw-payload field and updates an existing
   }
 })
 
+test('recipe edit link flags update and clear canonical recipe relations', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-recipe-edit-links-',
+  )
+
+  try {
+    const cli = createRecipeCli()
+    await initializeVault({ vaultRoot })
+
+    const saveResult = await runInProcessJsonCli<RecipeSaveResult>(cli, [
+      'recipe',
+      'save',
+      'Sheet Pan Salmon Bowls',
+      '--slug',
+      'sheet-pan-salmon-bowls',
+      '--ingredient',
+      '2 salmon fillets',
+      '--step',
+      'Roast the salmon.',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(saveResult.exitCode, null)
+    const saved = requireData(saveResult.envelope)
+
+    const linkResult = await runInProcessJsonCli(cli, [
+      'recipe',
+      'edit',
+      saved.recipeId,
+      '--link',
+      'supports_goal:goal_01JNY0B2W4VG5C2A0G9S8M7R7T',
+      '--link',
+      'addresses_condition:cond_01JNY0B2W4VG5C2A0G9S8M7R7T',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(linkResult.exitCode, null)
+    const linkedDocument = parseFrontmatterDocument(
+      await readFile(path.join(vaultRoot, saved.path), 'utf8'),
+    )
+    assert.deepEqual(linkedDocument.attributes.relatedGoalIds, [
+      'goal_01JNY0B2W4VG5C2A0G9S8M7R7T',
+    ])
+    assert.deepEqual(linkedDocument.attributes.relatedConditionIds, [
+      'cond_01JNY0B2W4VG5C2A0G9S8M7R7T',
+    ])
+    assert.deepEqual(linkedDocument.attributes.links, [
+      {
+        targetId: 'goal_01JNY0B2W4VG5C2A0G9S8M7R7T',
+        type: 'supports_goal',
+      },
+      {
+        targetId: 'cond_01JNY0B2W4VG5C2A0G9S8M7R7T',
+        type: 'addresses_condition',
+      },
+    ])
+
+    const clearResult = await runInProcessJsonCli(cli, [
+      'recipe',
+      'edit',
+      saved.recipeId,
+      '--clear-links',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(clearResult.exitCode, null)
+    const clearedDocument = parseFrontmatterDocument(
+      await readFile(path.join(vaultRoot, saved.path), 'utf8'),
+    )
+    assert.equal(clearedDocument.attributes.relatedGoalIds, undefined)
+    assert.equal(clearedDocument.attributes.relatedConditionIds, undefined)
+    assert.deepEqual(clearedDocument.attributes.links ?? [], [])
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
 test('recipe save rejects malformed repeatable typed fields without writing a record', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-recipe-save-invalid-',

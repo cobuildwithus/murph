@@ -570,6 +570,8 @@ test("write batches emit exact hosted canonical write receipts", async () => {
     targetRelativePath: "ledger/events/2026-05.jsonl",
     appendSha256: createHash("sha256").update("{\"event\":1}\n").digest("hex"),
     appendByteLength: "{\"event\":1}\n".length,
+    baseSha256: createHash("sha256").update("").digest("hex"),
+    baseByteLength: 0,
     originalSize: 0,
     contentRef: {
       sha256: createHash("sha256").update("{\"event\":1}\n").digest("hex"),
@@ -613,6 +615,87 @@ test("write batches emit exact hosted canonical write receipts", async () => {
     receiptRoot,
     sha256: createHash("sha256").update("raw scan\n").digest("hex"),
   });
+});
+
+test("WriteBatch reserves unique stage artifacts under concurrent raw staging", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-concurrent-raw-stage");
+  await initializeVault({ vaultRoot });
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "concurrent_raw_stage",
+    summary: "stage raw artifacts concurrently",
+  });
+
+  const staged = await Promise.all(
+    Array.from({ length: 16 }, (_, index) =>
+      batch.stageRawText({
+        targetRelativePath: `raw/documents/2026/05/artifact-${index}.txt`,
+        originalFileName: `artifact-${index}.txt`,
+        mediaType: "text/plain",
+        content: `artifact ${index}\n`,
+      })
+    ),
+  );
+
+  assert.equal(new Set(staged.map((entry) => entry.stagedAbsolutePath)).size, staged.length);
+  const storedOperation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  assert.equal(storedOperation.actions.length, staged.length);
+  assert.equal(
+    new Set(storedOperation.actions.map((action) =>
+      action.kind === "raw_copy" ? action.stageRelativePath : null
+    )).size,
+    staged.length,
+  );
+  await batch.commit();
+
+  await Promise.all(staged.map(async (entry, index) => {
+    const targetPath = path.join(vaultRoot, entry.relativePath);
+    assert.equal(await fs.readFile(targetPath, "utf8"), `artifact ${index}\n`);
+  }));
+});
+
+test("hosted JSONL replay rejects matching-size base content drift", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-jsonl-base-drift");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "ledger/events/2026-05.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = "first\n";
+  const appendContent = "second\n";
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, "other\n", "utf8");
+
+  await assert.rejects(
+    () =>
+      applyHostedCanonicalWriteReceipt({
+        vaultRoot,
+        readPayload: async () => Buffer.from(appendContent, "utf8"),
+        receipt: {
+          schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+          operationId: "op_hosted_jsonl_base_drift",
+          operationType: "hosted_jsonl_base_drift",
+          summary: "reject JSONL append base drift",
+          createdAt: FIXED_TIME,
+          updatedAt: FIXED_TIME,
+          occurredAt: FIXED_TIME,
+          committedAt: FIXED_TIME,
+          actions: [{
+            kind: "jsonl_append",
+            targetRelativePath,
+            appendSha256: createHash("sha256").update(appendContent).digest("hex"),
+            appendByteLength: Buffer.byteLength(appendContent),
+            baseSha256: createHash("sha256").update(baseContent).digest("hex"),
+            baseByteLength: Buffer.byteLength(baseContent),
+            originalSize: Buffer.byteLength(baseContent),
+            contentRef: {
+              sha256: createHash("sha256").update(appendContent).digest("hex"),
+              byteSize: Buffer.byteLength(appendContent),
+            },
+          }],
+        },
+      }),
+    /base content does not match/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "other\n");
 });
 
 test("hosted canonical receipt replay allows raw manifest text writes idempotently", async () => {

@@ -43,11 +43,19 @@ const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
 ]);
 const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
 const COMMAND_TERMINATION_GRACE_MS = 1_000;
+const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+const DEFAULT_COMMAND_OUTPUT_BYTES = 64 * 1024;
+const EXECUTABLE_LOOKUP_TIMEOUT_MS = 5_000;
+const EXECUTABLE_LOOKUP_OUTPUT_BYTES = 8 * 1024;
 
 export const DEFAULT_TEXT_FILE_PROVIDER_MAX_INPUT_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_IMAGE_PROVIDER_MAX_INPUT_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_AUDIO_PROVIDER_MAX_INPUT_BYTES = 512 * 1024 * 1024;
 export const DEFAULT_PARSER_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
 
 function resolvePreservedChildProcessEnvKey(key: string): string | null {
   const normalizedKey = key.toUpperCase();
@@ -192,11 +200,33 @@ export interface CommandResult {
 export async function runCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; maxStderrBytes?: number; maxStdoutBytes?: number; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    maxStderrBytes?: number;
+    maxStdoutBytes?: number;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
 ): Promise<CommandResult> {
+  if (options.signal?.aborted) {
+    throw new Error(`Command failed (${path.basename(command)}): aborted`);
+  }
+
+  const timeoutMs = typeof options.timeoutMs === "number" && options.timeoutMs > 0
+    ? options.timeoutMs
+    : DEFAULT_COMMAND_TIMEOUT_MS;
+  const maxStdoutBytes = typeof options.maxStdoutBytes === "number" && options.maxStdoutBytes > 0
+    ? options.maxStdoutBytes
+    : DEFAULT_COMMAND_OUTPUT_BYTES;
+  const maxStderrBytes = typeof options.maxStderrBytes === "number" && options.maxStderrBytes > 0
+    ? options.maxStderrBytes
+    : DEFAULT_COMMAND_OUTPUT_BYTES;
+  const useProcessGroup = process.platform !== "win32";
+
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
+      detached: useProcessGroup,
       env: sanitizeChildProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -207,8 +237,9 @@ export async function runCommand(
     let settled = false;
     let termination: NodeJS.Timeout | null = null;
     let timeout: NodeJS.Timeout | null = null;
+    let abortListener: (() => void) | null = null;
 
-    const clearTimers = (): void => {
+    const cleanup = (): void => {
       if (timeout) {
         clearTimeout(timeout);
         timeout = null;
@@ -216,6 +247,10 @@ export async function runCommand(
       if (termination) {
         clearTimeout(termination);
         termination = null;
+      }
+      if (abortListener && options.signal) {
+        options.signal.removeEventListener("abort", abortListener);
+        abortListener = null;
       }
     };
 
@@ -225,7 +260,7 @@ export async function runCommand(
       }
 
       settled = true;
-      clearTimers();
+      cleanup();
       reject(error);
     };
 
@@ -235,8 +270,23 @@ export async function runCommand(
       }
 
       settled = true;
-      clearTimers();
+      cleanup();
       resolve(value);
+    };
+
+    const killChildProcessTree = (signal: NodeJS.Signals): void => {
+      if (useProcessGroup && typeof child.pid === "number") {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch (killError) {
+          if (isErrnoException(killError) && killError.code === "ESRCH") {
+            return;
+          }
+        }
+      }
+
+      child.kill(signal);
     };
 
     const terminateWithError = (error: Error): void => {
@@ -247,18 +297,26 @@ export async function runCommand(
       failureError = error;
       child.stdout.destroy();
       child.stderr.destroy();
-      child.kill("SIGTERM");
+      killChildProcessTree("SIGTERM");
       termination = setTimeout(() => {
-        child.kill("SIGKILL");
+        killChildProcessTree("SIGKILL");
       }, COMMAND_TERMINATION_GRACE_MS);
     };
 
-    if (typeof options.timeoutMs === "number" && options.timeoutMs > 0) {
-      timeout = setTimeout(() => {
-        terminateWithError(
-          new Error(`Command failed (${path.basename(command)}): timed out after ${options.timeoutMs}ms`),
-        );
-      }, options.timeoutMs);
+    timeout = setTimeout(() => {
+      terminateWithError(
+        new Error(`Command failed (${path.basename(command)}): timed out after ${timeoutMs}ms`),
+      );
+    }, timeoutMs);
+
+    if (options.signal) {
+      abortListener = () => {
+        terminateWithError(new Error(`Command failed (${path.basename(command)}): aborted`));
+      };
+      options.signal.addEventListener("abort", abortListener, { once: true });
+      if (options.signal.aborted) {
+        abortListener();
+      }
     }
 
     child.stdout.setEncoding("utf8");
@@ -266,22 +324,20 @@ export async function runCommand(
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       if (
-        typeof options.maxStdoutBytes === "number" &&
-        Buffer.byteLength(stdout, "utf8") > options.maxStdoutBytes
+        Buffer.byteLength(stdout, "utf8") > maxStdoutBytes
       ) {
         terminateWithError(
-          new Error(`Command failed (${path.basename(command)}): stdout exceeded ${options.maxStdoutBytes} bytes`),
+          new Error(`Command failed (${path.basename(command)}): stdout exceeded ${maxStdoutBytes} bytes`),
         );
       }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
       if (
-        typeof options.maxStderrBytes === "number" &&
-        Buffer.byteLength(stderr, "utf8") > options.maxStderrBytes
+        Buffer.byteLength(stderr, "utf8") > maxStderrBytes
       ) {
         terminateWithError(
-          new Error(`Command failed (${path.basename(command)}): stderr exceeded ${options.maxStderrBytes} bytes`),
+          new Error(`Command failed (${path.basename(command)}): stderr exceeded ${maxStderrBytes} bytes`),
         );
       }
     });
@@ -338,7 +394,11 @@ export async function resolveExecutable(candidates: string[]): Promise<string | 
 
     const locator = process.platform === "win32" ? "where" : "which";
     try {
-      const result = await runCommand(locator, [candidate]);
+      const result = await runCommand(locator, [candidate], {
+        maxStderrBytes: EXECUTABLE_LOOKUP_OUTPUT_BYTES,
+        maxStdoutBytes: EXECUTABLE_LOOKUP_OUTPUT_BYTES,
+        timeoutMs: EXECUTABLE_LOOKUP_TIMEOUT_MS,
+      });
       const matches = result.stdout
         .split(/\r?\n/u)
         .map((line) => line.trim())

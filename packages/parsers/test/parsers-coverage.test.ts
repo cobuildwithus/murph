@@ -335,6 +335,67 @@ test("parseAttachment preserves explicit normalized blocks, tables, metadata, an
   });
 });
 
+test("parseAttachment stops on aborts and forwards live signals to providers", async () => {
+  const directory = await makeTempDirectory("murph-parsers-parse-attachment-signal");
+  const inputPath = await writeFile(directory, "attachment.txt", "source text");
+  const aborted = new AbortController();
+  aborted.abort();
+  let supportsCalls = 0;
+  const registry = createParserRegistry([
+    {
+      discover: async () => ({ available: true, reason: "available" }),
+      id: "signal-test-provider",
+      locality: "local",
+      openness: "open_source",
+      priority: 100,
+      run: async () => ({ metadata: {}, text: "should not run" }),
+      runtime: "node",
+      supports: async () => {
+        supportsCalls += 1;
+        return true;
+      },
+    },
+  ]);
+
+  await assert.rejects(
+    parsers.parseAttachment({
+      artifact: buildArtifact({ absolutePath: inputPath }),
+      registry,
+      scratchRoot: path.join(directory, "scratch-aborted"),
+      signal: aborted.signal,
+    }),
+    /aborted/u,
+  );
+  assert.equal(supportsCalls, 0);
+
+  const live = new AbortController();
+  let providerSawSignal = false;
+  const signalRegistry = createParserRegistry([
+    {
+      discover: async () => ({ available: true, reason: "available" }),
+      id: "signal-test-provider",
+      locality: "local",
+      openness: "open_source",
+      priority: 100,
+      run: async (request) => {
+        providerSawSignal = request.signal === live.signal;
+        return { metadata: {}, text: "parsed" };
+      },
+      runtime: "node",
+      supports: async () => true,
+    },
+  ]);
+
+  const parsed = await parsers.parseAttachment({
+    artifact: buildArtifact({ absolutePath: inputPath }),
+    registry: signalRegistry,
+    scratchRoot: path.join(directory, "scratch-live"),
+    signal: live.signal,
+  });
+  assert.equal(parsed.output.text, "parsed");
+  assert.equal(providerSawSignal, true);
+});
+
 test("parseAttachment rejects malformed provider output at normalization boundaries", async () => {
   const validBlock = {
     id: "block_1",
@@ -872,6 +933,35 @@ test("shared parser helpers cover vault path guards, markdown shaping, and recur
   await assert.rejects(
     runCommand(hangingCommand, [], { timeoutMs: 10 }),
     /timed out/u,
+  );
+
+  if (process.platform !== "win32") {
+    const descendantMarkerPath = path.join(commandDirectory, "descendant-survived.txt");
+    const wrapperWithDescendant = await writeExecutable(
+      commandDirectory,
+      "spawn-descendant-command",
+      [
+        "#!/usr/bin/env node",
+        "const { spawn } = require('node:child_process');",
+        "const markerPath = process.argv[2];",
+        "const childScript = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'alive'), 500); setInterval(() => {}, 1000);`;",
+        "spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+    await assert.rejects(
+      runCommand(wrapperWithDescendant, [descendantMarkerPath], { timeoutMs: 100 }),
+      /timed out/u,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await assert.rejects(fs.access(descendantMarkerPath));
+  }
+
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(
+    runCommand(hangingCommand, [], { signal: aborted.signal }),
+    /aborted/u,
   );
 
   const noisyCommand = await writeExecutable(

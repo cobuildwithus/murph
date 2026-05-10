@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
 import { resolveAuditShardPath } from "../src/audit.ts";
@@ -165,6 +165,46 @@ test("goals support multiple active records and preserve relationships in markdo
   ]);
   assert.equal(goalOperations.filter((operation) => operation.operationType === "goal_upsert").length, 4);
   assert.ok(goalOperations.every((operation) => operation.status === "committed"));
+});
+
+test("goals default start dates from the vault timezone only when missing", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-12T16:30:00.000Z"));
+
+  try {
+    const vaultRoot = await makeTempDirectory("murph-goal-local-day");
+    await initializeVault({ vaultRoot, timezone: "Asia/Kuala_Lumpur" });
+
+    const goal = await upsertGoal({
+      vaultRoot,
+      goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4Z",
+      title: "Default local day",
+    });
+
+    assert.equal(goal.record.entity.window.startAt, "2026-03-13");
+
+    const explicitGoal = await upsertGoal({
+      vaultRoot,
+      goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S50",
+      title: "Explicit local day",
+      window: {
+        startAt: "2026-03-01",
+      },
+    });
+
+    vi.setSystemTime(new Date("2026-03-13T16:30:00.000Z"));
+
+    const updatedExplicitGoal = await upsertGoal({
+      vaultRoot,
+      goalId: explicitGoal.record.entity.goalId,
+      status: "paused",
+    });
+
+    assert.equal(explicitGoal.record.entity.window.startAt, "2026-03-01");
+    assert.equal(updatedExplicitGoal.record.entity.window.startAt, "2026-03-01");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("goal updates can clear shared relation fields without leaving stale links behind", async () => {

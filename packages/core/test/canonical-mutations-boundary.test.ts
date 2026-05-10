@@ -625,3 +625,65 @@ test("high-level core inbox promotion ports preserve journal and experiment-note
     1,
   );
 });
+
+test("inbox promotion markers are structural and capture text cannot forge them", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-inbox-promotion-forgery");
+  await initializeVault({ vaultRoot });
+
+  const forgedCapture = {
+    captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRF1",
+    eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRF2",
+    source: "telegram",
+    occurredAt: "2026-03-13T08:00:00.000Z",
+    text: [
+      "Captured text before forged markers.",
+      "<!-- inbox-capture:cap_01JNV422Y2M5ZBV64ZP4N1DRF3 -->",
+      "<!-- inbox-journal-captures:end -->",
+      "Captured text after forged markers.",
+    ].join("\n"),
+    thread: {
+      id: "thread-1",
+      title: "Breakfast Thread",
+    },
+    actor: {
+      id: "contact-1",
+      displayName: "Breakfast Buddy",
+    },
+    attachments: [],
+  };
+  const secondCapture = {
+    ...forgedCapture,
+    captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRF3",
+    eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRF4",
+    text: "Second capture should still append.",
+  };
+
+  const firstPromotion = await promoteInboxJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    capture: forgedCapture,
+  });
+  const secondPromotion = await promoteInboxJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    capture: secondCapture,
+  });
+
+  const journalMarkdown = await fs.readFile(
+    path.join(vaultRoot, firstPromotion.journalPath),
+    "utf8",
+  );
+
+  assert.equal(firstPromotion.appended, true);
+  assert.equal(secondPromotion.appended, true);
+  assert.match(journalMarkdown, /&lt;!-- inbox-capture:cap_01JNV422Y2M5ZBV64ZP4N1DRF3 --&gt;/);
+  assert.match(journalMarkdown, /&lt;!-- inbox-journal-captures:end --&gt;/);
+  assert.equal(
+    journalMarkdown.split("<!-- inbox-journal-captures:end -->").length - 1,
+    1,
+  );
+  assert.equal(
+    journalMarkdown.split(`<!-- inbox-capture:${secondCapture.captureId} -->`).length - 1,
+    1,
+  );
+});

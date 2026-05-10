@@ -150,6 +150,14 @@ function normalizeNullableString(value: string | null | undefined): string | nul
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function promotionMarkdownValue(value: string): string {
+  return value.replaceAll("<!--", "&lt;!--").replaceAll("-->", "--&gt;");
+}
+
+function promotionMarkdownLine(label: string, value: string): string {
+  return `${label}: ${promotionMarkdownValue(value)}`;
+}
+
 function buildCapturePromotionBlock<TContext>(input: {
   capture: InboxPromotionCapture;
   marker: string;
@@ -161,21 +169,22 @@ function buildCapturePromotionBlock<TContext>(input: {
     marker,
     spec.blockHeading(capture, context),
     ...(spec.blockExtraLines?.(capture, context) ?? []),
-    `Occurred at: ${capture.occurredAt}`,
-    `Source: ${capture.source}`,
-    `Thread: ${capture.thread.title ?? capture.thread.id}`,
-    `Event: ${capture.eventId}`,
+    promotionMarkdownLine("Occurred at", capture.occurredAt),
+    promotionMarkdownLine("Source", capture.source),
+    promotionMarkdownLine("Thread", capture.thread.title ?? capture.thread.id),
+    promotionMarkdownLine("Event", capture.eventId),
   ];
 
   const actorName = normalizeNullableString(capture.actor.displayName);
   const actorId = normalizeNullableString(capture.actor.id);
   if (actorName || actorId) {
-    lines.push(`Actor: ${actorName ?? actorId ?? "unknown"}`);
+    lines.push(promotionMarkdownLine("Actor", actorName ?? actorId ?? "unknown"));
   }
 
   if (capture.attachments.length > 0) {
     lines.push("Attachments:");
     for (const attachment of capture.attachments) {
+      const attachmentId = attachment.attachmentId ?? `attachment-${attachment.ordinal}`;
       const attachmentLabel =
         attachment.fileName ??
         attachment.storedPath ??
@@ -183,17 +192,55 @@ function buildCapturePromotionBlock<TContext>(input: {
         attachment.externalId ??
         `attachment-${attachment.ordinal}`;
       lines.push(
-        `- ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`} | ${attachment.kind} | ${attachmentLabel}`,
+        `- ${promotionMarkdownValue(attachmentId)} | ${promotionMarkdownValue(attachment.kind)} | ${
+          promotionMarkdownValue(attachmentLabel)
+        }`,
       );
     }
   }
 
   const text = normalizeNullableString(capture.text);
   if (text) {
-    lines.push("", text);
+    lines.push("", promotionMarkdownValue(text));
   }
 
   return lines.join("\n");
+}
+
+function splitMarkdownLines(body: string): string[] {
+  return body.split(/\r?\n/u);
+}
+
+function findPromotionSection<TContext>(
+  lines: readonly string[],
+  spec: PromotionMarkdownTargetSpec<TContext>,
+): {
+  startIndex: number;
+  endIndex: number;
+} | null {
+  const startIndex = lines.findIndex((line) => line === spec.sectionStartMarker);
+  if (startIndex < 0) {
+    return null;
+  }
+
+  const endIndex = lines.findIndex(
+    (line, index) => index > startIndex && line === spec.sectionEndMarker,
+  );
+  return endIndex > startIndex ? { startIndex, endIndex } : null;
+}
+
+function promotionSectionContainsMarker<TContext>(
+  body: string,
+  marker: string,
+  spec: PromotionMarkdownTargetSpec<TContext>,
+): boolean {
+  const lines = splitMarkdownLines(body);
+  const section = findPromotionSection(lines, spec);
+  if (!section) {
+    return false;
+  }
+
+  return lines.slice(section.startIndex + 1, section.endIndex).includes(marker);
 }
 
 function upsertMarkdownSectionBlock<TContext>(
@@ -205,16 +252,22 @@ function upsertMarkdownSectionBlock<TContext>(
   appended: boolean;
 } {
   const normalizedBody = body.replace(/\s*$/, "");
+  const lines = normalizedBody.length > 0 ? splitMarkdownLines(normalizedBody) : [];
+  const section = findPromotionSection(lines, spec);
 
-  if (
-    normalizedBody.includes(spec.sectionStartMarker) &&
-    normalizedBody.includes(spec.sectionEndMarker)
-  ) {
+  if (section) {
+    const insertion = [
+      ...(section.endIndex > 0 && lines[section.endIndex - 1] !== "" ? [""] : []),
+      ...block.split("\n"),
+      "",
+    ];
+
     return {
-      body: normalizedBody.replace(
-        spec.sectionEndMarker,
-        `${block}\n\n${spec.sectionEndMarker}`,
-      ),
+      body: [
+        ...lines.slice(0, section.endIndex),
+        ...insertion,
+        ...lines.slice(section.endIndex),
+      ].join("\n"),
       appended: true,
     };
   }
@@ -239,7 +292,7 @@ function upsertPromotionBody<TContext>(input: {
 } {
   const { body, capture, context, spec } = input;
   const marker = `<!-- inbox-capture:${capture.captureId} -->`;
-  if (body.includes(marker)) {
+  if (promotionSectionContainsMarker(body, marker, spec)) {
     return {
       body,
       appended: false,

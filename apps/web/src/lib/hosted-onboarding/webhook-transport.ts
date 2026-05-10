@@ -10,6 +10,8 @@ import { buildHostedInviteUrl } from "./invite-service";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  releaseHostedLinqOnboardingLinkNoticeClaim,
+  releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -145,11 +147,20 @@ export async function drainHostedLinqSideEffectsDirect(input: {
   signal?: AbortSignal;
 }): Promise<void> {
   for (const effect of input.sideEffects) {
-    await sendHostedLinqSideEffect(effect, {
-      prisma: input.prisma,
-      signal: input.signal,
-    });
-    await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
+    if (!noticeClaimed) {
+      continue;
+    }
+
+    try {
+      await sendHostedLinqSideEffect(effect, {
+        prisma: input.prisma,
+        signal: input.signal,
+      });
+    } catch (error) {
+      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+      throw error;
+    }
 
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
@@ -405,30 +416,61 @@ function buildHostedWebhookLinqMessagePayload(
   }
 }
 
-async function markHostedLinqNoticeSentForSideEffect(
+async function claimHostedLinqNoticeForSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<boolean> {
+  switch (effect.payload.template) {
+    case "invite_signup":
+      return claimHostedLinqOnboardingLinkNotice({
+        memberId: effect.payload.memberId,
+        occurredAt: effect.payload.occurredAt,
+        prisma,
+      });
+    case "invite_signin":
+      return true;
+    case "ai_usage_quota":
+      return true;
+    case "daily_quota":
+      return claimHostedLinqQuotaReplyNotice({
+        memberId: effect.payload.memberId,
+        occurredAt: effect.payload.occurredAt,
+        prisma,
+      });
+    case "conversation_home_redirect":
+      return true;
+  }
+}
+
+async function releaseHostedLinqNoticeClaimForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {
-  switch (effect.payload.template) {
-    case "invite_signup":
-      await claimHostedLinqOnboardingLinkNotice({
-        memberId: effect.payload.memberId,
-        occurredAt: effect.payload.occurredAt,
-        prisma,
-      });
-      return;
-    case "invite_signin":
-      return;
-    case "ai_usage_quota":
-      return;
-    case "daily_quota":
-      await claimHostedLinqQuotaReplyNotice({
-        memberId: effect.payload.memberId,
-        occurredAt: effect.payload.occurredAt,
-        prisma,
-      });
-      return;
-    case "conversation_home_redirect":
-      return;
+  try {
+    switch (effect.payload.template) {
+      case "invite_signup":
+        await releaseHostedLinqOnboardingLinkNoticeClaim({
+          memberId: effect.payload.memberId,
+          occurredAt: effect.payload.occurredAt,
+          prisma,
+        });
+        return;
+      case "daily_quota":
+        await releaseHostedLinqQuotaReplyNoticeClaim({
+          memberId: effect.payload.memberId,
+          occurredAt: effect.payload.occurredAt,
+          prisma,
+        });
+        return;
+      case "invite_signin":
+      case "ai_usage_quota":
+      case "conversation_home_redirect":
+        return;
+    }
+  } catch (error) {
+    console.error(
+      "Hosted Linq side-effect notice claim release failed.",
+      buildHostedLinqSideEffectLogDetails(effect, error, 0),
+    );
   }
 }

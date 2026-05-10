@@ -3712,6 +3712,10 @@ test("WriteBatch keeps append rollback prerequisites durable before finalization
   assert.equal(recoverableAction.state, "staged");
   assert.equal(recoverableAction.existedBefore, true);
   assert.equal(recoverableAction.originalSize, Buffer.byteLength("first\n"));
+  assert.deepEqual(recoverableAction.baseContentReceipt, {
+    sha256: createHash("sha256").update("first\n").digest("hex"),
+    byteLength: Buffer.byteLength("first\n"),
+  });
   assert.deepEqual(recoverableAction.committedPayloadReceipt, {
     sha256: createHash("sha256").update("second\n").digest("hex"),
     byteLength: Buffer.byteLength("second\n"),

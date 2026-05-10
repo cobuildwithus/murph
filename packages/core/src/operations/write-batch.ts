@@ -1,7 +1,7 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 
 import {
   copyFileAtomic,
@@ -81,6 +81,8 @@ export type HostedCanonicalWriteReceiptAction =
       targetRelativePath: string;
       appendSha256: string;
       appendByteLength: number;
+      baseSha256: string;
+      baseByteLength: number;
       originalSize: number | null;
       contentRef?: HostedCanonicalWriteReceiptContentRef;
     }
@@ -238,6 +240,7 @@ type StoredWriteAction =
       effect?: "append";
       existedBefore?: boolean;
       originalSize?: number;
+      baseContentReceipt?: CommittedPayloadReceipt;
       committedPayloadReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
@@ -321,6 +324,29 @@ function createCommittedPayloadReceipt(content: string | Uint8Array): CommittedP
     sha256: createHash("sha256").update(buffer).digest("hex"),
     byteLength: buffer.byteLength,
   };
+}
+
+async function createFileContentReceipt(absolutePath: string): Promise<CommittedPayloadReceipt> {
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(absolutePath);
+    stream.on("data", (chunk) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += bytes.byteLength;
+      hash.update(bytes);
+    });
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return {
+    sha256: hash.digest("hex"),
+    byteLength,
+  };
+}
+
+function receiptsMatch(left: CommittedPayloadReceipt, right: CommittedPayloadReceipt): boolean {
+  return left.sha256 === right.sha256 && left.byteLength === right.byteLength;
 }
 
 function createHostedCanonicalWriteReceiptContentRef(
@@ -473,6 +499,8 @@ export async function applyHostedCanonicalWriteReceipt(input: {
           ref: action.contentRef,
         });
         await applyHostedCanonicalJsonlAppendReceiptAction({
+          baseByteLength: action.baseByteLength,
+          baseSha256: action.baseSha256,
           bytes,
           originalSize: action.originalSize,
           targetRelativePath: action.targetRelativePath,
@@ -566,6 +594,8 @@ async function applyHostedCanonicalTextReceiptAction(input: {
 }
 
 async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
+  baseByteLength: number;
+  baseSha256: string;
   bytes: Uint8Array;
   originalSize: number | null;
   targetRelativePath: string;
@@ -575,6 +605,13 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     kind: "jsonl_append",
   });
   const originalSize = input.originalSize ?? 0;
+  if (input.baseByteLength !== originalSize) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+      "Hosted canonical JSONL append base receipt does not match the recorded base size.",
+    );
+  }
+
   let existing = new Uint8Array();
   try {
     existing = await fs.readFile(target.absolutePath);
@@ -588,6 +625,14 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     throw new VaultError(
       "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
       "Hosted canonical JSONL append base size is not present.",
+    );
+  }
+
+  const baseReceipt = createCommittedPayloadReceipt(existing.subarray(0, input.baseByteLength));
+  if (baseReceipt.sha256 !== input.baseSha256 || baseReceipt.byteLength !== input.baseByteLength) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+      "Hosted canonical JSONL append base content does not match the receipt.",
     );
   }
 
@@ -699,6 +744,29 @@ function stageRootRelativePath(operationId: string): string {
 
 function stageArtifactRelativePath(operationId: string, fileName: string): string {
   return `${stageRootRelativePath(operationId)}/payloads/${fileName}`;
+}
+
+function getActionStageRelativePath(action: StoredWriteAction): string | null {
+  return action.kind === "raw_copy" || action.kind === "text_write" || action.kind === "jsonl_append"
+    ? action.stageRelativePath
+    : null;
+}
+
+function assertUniqueStageRelativePaths(actions: readonly StoredWriteAction[]): void {
+  const seen = new Set<string>();
+  for (const action of actions) {
+    const stageRelativePath = getActionStageRelativePath(action);
+    if (!stageRelativePath) {
+      continue;
+    }
+    if (seen.has(stageRelativePath)) {
+      throw new VaultError(
+        "OPERATION_STAGE_ARTIFACT_CONFLICT",
+        "Write batch staged two payloads to the same artifact path.",
+      );
+    }
+    seen.add(stageRelativePath);
+  }
 }
 
 function backupArtifactRelativePath(operationId: string, fileName: string): string {
@@ -835,13 +903,21 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
         return null;
       }
 
+      const baseContentReceipt = parseCommittedPayloadReceipt(record.baseContentReceipt);
+      if (baseContentReceipt === null) {
+        return null;
+      }
+
       return {
         kind: "jsonl_append",
         ...base,
+        baseContentReceipt,
         committedPayloadReceipt,
         effect: record.effect === "append" ? record.effect : undefined,
         originalSize:
-          typeof record.originalSize === "number" && Number.isFinite(record.originalSize)
+          typeof record.originalSize === "number" &&
+            Number.isInteger(record.originalSize) &&
+            record.originalSize >= 0
             ? record.originalSize
             : undefined,
         stageRelativePath,
@@ -1127,6 +1203,8 @@ export class WriteBatch {
   private readonly hostedCanonicalWritePort: HostedCanonicalWritePort | null;
   private readonly hostedCanonicalWriteReceiptDirectory: string | null;
   private readonly record: StoredWriteOperation;
+  private persistTail: Promise<void> = Promise.resolve();
+  private nextStageArtifactOrdinal: number;
 
   private constructor(input: {
     hostedCanonicalWritePort?: HostedCanonicalWritePort | null;
@@ -1151,6 +1229,7 @@ export class WriteBatch {
           ? path.resolve(input.hostedCanonicalWriteReceiptDirectory)
           : null;
     this.record = record;
+    this.nextStageArtifactOrdinal = record.actions.filter((action) => getActionStageRelativePath(action)).length;
   }
 
   static async create({
@@ -1213,10 +1292,7 @@ export class WriteBatch {
       throw new VaultError("VAULT_SOURCE_INVALID", "Raw source path must point to a file.");
     }
 
-    const stageRelativePath = stageArtifactRelativePath(
-      this.operationId,
-      `${String(this.record.actions.length).padStart(4, "0")}.raw`,
-    );
+    const stageRelativePath = this.reserveStageArtifactRelativePath("raw");
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.copyFile(sourceAbsolutePath, stageAbsolutePath);
@@ -1288,10 +1364,7 @@ export class WriteBatch {
       },
     });
 
-    const stageRelativePath = stageArtifactRelativePath(
-      this.operationId,
-      `${String(this.record.actions.length).padStart(4, "0")}.raw`,
-    );
+    const stageRelativePath = this.reserveStageArtifactRelativePath("raw");
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     if (typeof content === "string") {
@@ -1336,10 +1409,7 @@ export class WriteBatch {
       },
     });
 
-    const stageRelativePath = stageArtifactRelativePath(
-      this.operationId,
-      `${String(this.record.actions.length).padStart(4, "0")}.txt`,
-    );
+    const stageRelativePath = this.reserveStageArtifactRelativePath("txt");
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.writeFile(stageAbsolutePath, content, "utf8");
@@ -1368,10 +1438,7 @@ export class WriteBatch {
       },
     });
 
-    const stageRelativePath = stageArtifactRelativePath(
-      this.operationId,
-      `${String(this.record.actions.length).padStart(4, "0")}.jsonl`,
-    );
+    const stageRelativePath = this.reserveStageArtifactRelativePath("jsonl");
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.writeFile(stageAbsolutePath, content, "utf8");
@@ -1413,6 +1480,7 @@ export class WriteBatch {
 
   async commit(): Promise<HostedCanonicalWriteReceipt | null> {
     this.assertMutable();
+    assertUniqueStageRelativePaths(this.record.actions);
     const lock = await acquireCanonicalWriteLock(this.vaultRoot);
     let hostedCanonicalWriteReceipt: HostedCanonicalWriteReceipt | null = null;
 
@@ -1522,8 +1590,22 @@ export class WriteBatch {
     }
   }
 
+  private reserveStageArtifactRelativePath(extension: "jsonl" | "raw" | "txt"): string {
+    const ordinal = this.nextStageArtifactOrdinal;
+    this.nextStageArtifactOrdinal += 1;
+    return stageArtifactRelativePath(
+      this.operationId,
+      `${String(ordinal).padStart(4, "0")}.${extension}`,
+    );
+  }
+
   private async persist(): Promise<void> {
-    await writeTextFileAtomic(this.metadataAbsolutePath, `${JSON.stringify(this.record, null, 2)}\n`);
+    const snapshot = `${JSON.stringify(this.record, null, 2)}\n`;
+    const write = this.persistTail.then(async () => {
+      await writeTextFileAtomic(this.metadataAbsolutePath, snapshot);
+    });
+    this.persistTail = write.catch(() => undefined);
+    await write;
   }
 
   private async persistBestEffort(): Promise<void> {
@@ -1686,6 +1768,7 @@ export class WriteBatch {
   }
 
   private async createHostedCanonicalWritePayloads(): Promise<HostedCanonicalWritePayload[]> {
+    assertUniqueStageRelativePaths(this.record.actions);
     const payloadsBySha = new Map<string, HostedCanonicalWritePayload>();
     for (const action of this.record.actions) {
       if (
@@ -1733,11 +1816,21 @@ export class WriteBatch {
       }
       case "jsonl_append": {
         const payloadReceipt = await this.requireActionPayloadReceipt(action);
+        const baseContentReceipt = action.baseContentReceipt ??
+          (action.originalSize === 0 ? createCommittedPayloadReceipt(new Uint8Array()) : null);
+        if (!baseContentReceipt) {
+          throw new VaultError(
+            "CANONICAL_WRITE_RECEIPT_INCOMPLETE",
+            "JSONL append receipt is missing the base content receipt.",
+          );
+        }
         return {
           kind: "jsonl_append",
           targetRelativePath: action.targetRelativePath,
           appendSha256: payloadReceipt.sha256,
           appendByteLength: payloadReceipt.byteLength,
+          baseSha256: baseContentReceipt.sha256,
+          baseByteLength: baseContentReceipt.byteLength,
           originalSize: action.originalSize ?? null,
           contentRef: createHostedCanonicalWriteReceiptContentRef(payloadReceipt),
         };
@@ -1849,6 +1942,21 @@ export class WriteBatch {
       operationId: this.operationId,
       relativePath: action.targetRelativePath,
     });
+  }
+
+  private getPreparedJsonlBaseReceipt(
+    action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
+  ): CommittedPayloadReceipt {
+    if (action.baseContentReceipt) {
+      return action.baseContentReceipt;
+    }
+    if (action.originalSize === 0) {
+      return createCommittedPayloadReceipt(new Uint8Array());
+    }
+    throw this.buildResumeConflictError(
+      action,
+      `Append target "${action.targetRelativePath}" cannot be resumed without a base content receipt.`,
+    );
   }
 
   private async applyRawCopy(action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
@@ -2020,7 +2128,8 @@ export class WriteBatch {
   private async applyJsonlAppend(action: Extract<StoredWriteAction, { kind: "jsonl_append" }>): Promise<void> {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
     const payload = await readText(stageAbsolutePath);
-    const payloadReceipt = action.committedPayloadReceipt ?? createCommittedPayloadReceipt(payload);
+    const payloadBytes = Buffer.from(payload, "utf8");
+    const payloadReceipt = action.committedPayloadReceipt ?? createCommittedPayloadReceipt(payloadBytes);
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -2035,6 +2144,7 @@ export class WriteBatch {
           return undefined;
         }
 
+        const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
         if (!(await pathExists(target.absolutePath))) {
           if (action.existedBefore) {
             throw this.buildResumeConflictError(
@@ -2047,11 +2157,27 @@ export class WriteBatch {
         }
 
         const targetSize = (await fs.stat(target.absolutePath)).size;
+        if (targetSize < action.originalSize) {
+          throw this.buildResumeConflictError(
+            action,
+            `Append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
+          );
+        }
+
+        const targetContent = await fs.readFile(target.absolutePath);
+        const actualBaseReceipt = createCommittedPayloadReceipt(targetContent.subarray(0, action.originalSize));
+        if (!receiptsMatch(actualBaseReceipt, baseContentReceipt)) {
+          throw this.buildResumeConflictError(
+            action,
+            `Append target "${action.targetRelativePath}" base content changed while resuming the write batch.`,
+          );
+        }
+
         if (targetSize === action.originalSize) {
           return undefined;
         }
 
-        const expectedSize = action.originalSize + Buffer.byteLength(payload);
+        const expectedSize = action.originalSize + payloadBytes.byteLength;
         if (targetSize !== expectedSize) {
           throw this.buildResumeConflictError(
             action,
@@ -2059,8 +2185,7 @@ export class WriteBatch {
           );
         }
 
-        const targetContent = await readText(target.absolutePath);
-        if (targetContent.slice(action.originalSize) !== payload) {
+        if (!Buffer.from(targetContent.subarray(action.originalSize)).equals(payloadBytes)) {
           throw this.buildResumeConflictError(
             action,
             `Append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
@@ -2082,8 +2207,20 @@ export class WriteBatch {
       prepareMutation: async (target) => {
         const existedBefore = action.existedBefore ?? (await pathExists(target.absolutePath));
         const originalSize = action.originalSize ?? (existedBefore ? (await fs.stat(target.absolutePath)).size : 0);
+        const baseContentReceipt = action.baseContentReceipt ??
+          (existedBefore ? await createFileContentReceipt(target.absolutePath) : createCommittedPayloadReceipt(new Uint8Array()));
+        if (baseContentReceipt.byteLength !== originalSize) {
+          throw this.buildResumeConflictError(
+            action,
+            `Append target "${action.targetRelativePath}" base size changed while preparing the write batch.`,
+          );
+        }
         await this.persistPreparedAction(() => {
           let changed = false;
+          if (action.baseContentReceipt === undefined) {
+            action.baseContentReceipt = baseContentReceipt;
+            changed = true;
+          }
           if (action.committedPayloadReceipt === undefined) {
             action.committedPayloadReceipt = payloadReceipt;
             changed = true;

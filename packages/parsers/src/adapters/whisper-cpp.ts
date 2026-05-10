@@ -22,7 +22,9 @@ export interface WhisperCppProviderOptions {
   language?: string;
   translate?: boolean;
   extraArgs?: string[];
+  commandTimeoutMs?: number;
   maxInputBytes?: number;
+  maxCommandOutputBytes?: number;
   maxTranscriptBytes?: number;
   resolvedToolState?: {
     available: boolean;
@@ -31,6 +33,9 @@ export interface WhisperCppProviderOptions {
     modelPath: string | null;
   };
 }
+
+const WHISPER_COMMAND_TIMEOUT_MS = 10 * 60 * 1_000;
+const WHISPER_COMMAND_OUTPUT_BYTES = 64 * 1024;
 
 export function createWhisperCppProvider(
   options: WhisperCppProviderOptions = {},
@@ -136,7 +141,12 @@ export function createWhisperCppProvider(
         ...(options.translate ? ["-tr"] : []),
         ...(options.extraArgs ?? []),
       ];
-      await runCommand(command, args);
+      await runCommand(command, args, {
+        maxStderrBytes: options.maxCommandOutputBytes ?? WHISPER_COMMAND_OUTPUT_BYTES,
+        maxStdoutBytes: options.maxCommandOutputBytes ?? WHISPER_COMMAND_OUTPUT_BYTES,
+        signal: request.signal,
+        timeoutMs: options.commandTimeoutMs ?? WHISPER_COMMAND_TIMEOUT_MS,
+      });
       const maxTranscriptBytes =
         options.maxTranscriptBytes ?? DEFAULT_PARSER_TRANSCRIPT_MAX_BYTES;
       const textOutput = (await readUtf8IfExists(`${outputBase}.txt`, {

@@ -46,6 +46,7 @@ export interface ParseRequest {
   inputPath: string;
   preparedKind?: ParserArtifactKind;
   scratchDirectory: string;
+  signal?: AbortSignal;
 }
 
 export interface ProviderRunResult {

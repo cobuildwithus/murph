@@ -22,6 +22,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
   claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+  releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
+  releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -32,6 +34,8 @@ import {
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  releaseHostedLinqOnboardingLinkNoticeClaim,
+  releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
 import {
   createHostedWebhookLinqMessageSideEffect,
@@ -227,9 +231,84 @@ describe("hosted Linq webhook transport", () => {
           template: "daily_quota",
         }),
       );
-      expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+      expect(claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
+        memberId: "member-1",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        prisma: {},
+      });
+      expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+        memberId: "member-1",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        prisma: {},
+      });
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("claims daily quota notices before delivery and skips already-claimed notices", async () => {
+    vi.mocked(claimHostedLinqQuotaReplyNotice).mockResolvedValueOnce(false);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: {},
+    });
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("releases invite signup notice claims when delivery fails", async () => {
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          inviteCode: "invite-code",
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "invite_signup",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toThrow("send failed");
+
+    expect(claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 });

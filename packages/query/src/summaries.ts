@@ -39,6 +39,12 @@ export interface SampleWindowSummaryFilter {
   profile?: SampleSummaryProfile;
 }
 
+interface DailySampleSummaryGroup {
+  summary: DailySampleSummary;
+  sourcePathSet: Set<string>;
+  unitSet: Set<string>;
+}
+
 export function summarizeDailySamples(
   vault: VaultReadModel,
   filters: SampleSummaryFilter = {},
@@ -46,10 +52,7 @@ export function summarizeDailySamples(
   const { from, to, streams, experimentSlug } = filters;
   const streamSet = streams ? new Set(streams) : null;
 
-  const groups = new Map<
-    string,
-    { summary: DailySampleSummary; values: number[]; unitSet: Set<string> }
-  >();
+  const groups = new Map<string, DailySampleSummaryGroup>();
 
   for (const sample of vault.samples) {
     if (!isSummarizableSample(sample)) {
@@ -84,10 +87,11 @@ export function summarizeDailySamples(
     const key = buildSummaryKey(date, stream, unit);
     const group = getOrCreateSummaryGroup(groups, key, date, stream, unit);
 
-    const { summary, values, unitSet } = group;
+    const { summary, sourcePathSet, unitSet } = group;
     summary.sampleCount += 1;
 
-    if (!summary.sourcePaths.includes(sample.path)) {
+    if (!sourcePathSet.has(sample.path)) {
+      sourcePathSet.add(sample.path);
       summary.sourcePaths.push(sample.path);
     }
 
@@ -107,12 +111,18 @@ export function summarizeDailySamples(
 
     if (numericValue !== null) {
       summary.numericSampleCount += 1;
-      values.push(numericValue);
+      summary.sumValue = (summary.sumValue ?? 0) + numericValue;
+      summary.minValue = summary.minValue === null
+        ? numericValue
+        : Math.min(summary.minValue, numericValue);
+      summary.maxValue = summary.maxValue === null
+        ? numericValue
+        : Math.max(summary.maxValue, numericValue);
     }
   }
 
   return [...groups.values()]
-    .map(({ summary, values, unitSet }) => finalizeSummary(summary, values, unitSet))
+    .map(({ summary, unitSet }) => finalizeSummary(summary, unitSet))
     .sort(compareDailySampleSummaries);
 }
 
@@ -149,15 +159,12 @@ function isSummarizableSample(sample: CanonicalEntity): boolean {
 }
 
 function getOrCreateSummaryGroup(
-  groups: Map<
-    string,
-    { summary: DailySampleSummary; values: number[]; unitSet: Set<string> }
-  >,
+  groups: Map<string, DailySampleSummaryGroup>,
   key: string,
   date: string,
   stream: string,
   unit: string | null,
-): { summary: DailySampleSummary; values: number[]; unitSet: Set<string> } {
+): DailySampleSummaryGroup {
   const existing = groups.get(key);
   if (existing) {
     return existing;
@@ -179,7 +186,7 @@ function getOrCreateSummaryGroup(
       lastSampleAt: null,
       sourcePaths: [],
     },
-    values: [],
+    sourcePathSet: new Set<string>(),
     unitSet: new Set<string>(unit ? [unit] : []),
   };
 
@@ -189,18 +196,14 @@ function getOrCreateSummaryGroup(
 
 function finalizeSummary(
   summary: DailySampleSummary,
-  values: number[],
   unitSet: Set<string>,
 ): DailySampleSummary {
   const sortedUnits = [...unitSet].sort();
   summary.units = sortedUnits;
   summary.unit = sortedUnits.length === 1 ? sortedUnits[0] : null;
 
-  if (values.length > 0) {
-    summary.minValue = Math.min(...values);
-    summary.maxValue = Math.max(...values);
-    summary.sumValue = values.reduce((sum, value) => sum + value, 0);
-    summary.averageValue = Number((summary.sumValue / values.length).toFixed(4));
+  if (summary.numericSampleCount > 0 && summary.sumValue !== null) {
+    summary.averageValue = Number((summary.sumValue / summary.numericSampleCount).toFixed(4));
   }
 
   summary.sourcePaths.sort();

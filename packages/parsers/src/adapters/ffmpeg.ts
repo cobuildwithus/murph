@@ -6,6 +6,8 @@ import { ensureDirectory, readConfiguredEnvValue, resolveConfiguredExecutable, r
 export interface FfmpegToolOptions {
   commandCandidates?: string[];
   allowSystemLookup?: boolean;
+  commandTimeoutMs?: number;
+  maxCommandOutputBytes?: number;
 }
 
 export async function resolveFfmpegCommand(
@@ -25,6 +27,7 @@ export async function prepareAudioInput(input: {
   artifact: ParserArtifactRef;
   scratchDirectory: string;
   ffmpeg?: FfmpegToolOptions;
+  signal?: AbortSignal;
 }): Promise<{ inputPath: string; preparedKind?: "audio" }> {
   const { artifact, scratchDirectory } = input;
 
@@ -59,7 +62,20 @@ export async function prepareAudioInput(input: {
     "-c:a",
     "pcm_s16le",
     outputPath,
-  ]);
+  ], {
+    signal: input.signal,
+    ...(input.ffmpeg?.maxCommandOutputBytes === undefined
+      ? {}
+      : {
+          maxStderrBytes: input.ffmpeg.maxCommandOutputBytes,
+          maxStdoutBytes: input.ffmpeg.maxCommandOutputBytes,
+        }),
+    ...(input.ffmpeg?.commandTimeoutMs === undefined
+      ? {}
+      : {
+          timeoutMs: input.ffmpeg.commandTimeoutMs,
+        }),
+  });
 
   return {
     inputPath: outputPath,

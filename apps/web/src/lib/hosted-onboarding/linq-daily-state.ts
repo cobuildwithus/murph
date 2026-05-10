@@ -114,6 +114,25 @@ export async function claimHostedLinqOnboardingLinkNotice(input: {
   return claimed.count === 1;
 }
 
+export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+}): Promise<void> {
+  await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      onboardingLinkSentAt: {
+        not: null,
+      },
+    },
+    data: {
+      onboardingLinkSentAt: null,
+    },
+  });
+}
+
 export async function claimHostedLinqQuotaReplyNotice(input: {
   memberId: string;
   occurredAt: Date | string;
@@ -134,4 +153,23 @@ export async function claimHostedLinqQuotaReplyNotice(input: {
   });
 
   return claimed.count === 1;
+}
+
+export async function releaseHostedLinqQuotaReplyNoticeClaim(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+}): Promise<void> {
+  await input.prisma.hostedLinqDailyState.updateMany({
+    where: {
+      dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
+      memberId: input.memberId,
+      quotaReplySentAt: {
+        not: null,
+      },
+    },
+    data: {
+      quotaReplySentAt: null,
+    },
+  });
 }
