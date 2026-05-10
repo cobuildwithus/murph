@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-09
+Last verified: 2026-05-10
 
 ## Decision
 
@@ -32,17 +32,20 @@ The live ownership split is:
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
-  After a runner finishes idle with a working checkpoint and no workspace
-  next wake, Cloudflare schedules one `idle_shutdown_checkpoint` alarm for the
-  configured idle window, five minutes by default. That Durable Object alarm
-  owns checkpoint and shutdown ordering. The runner container's own activity
-  expiry is fallback-only and carries extra grace beyond the idle checkpoint
-  window; it is not a second idle owner. Fresh nudges clear that pending idle
-  checkpoint. When the idle alarm is still current, Cloudflare starts a normal
-  lease-scoped invocation that renews container liveness, runs checkpoint
-  reason `idle_shutdown`, validates the same workspace CAS/user fences, writes
-  a full/base checkpoint, and destroys the warm container only if no pending
-  work arrived meanwhile.
+  After a foreground runner invocation leaves a warm container quiet,
+  Cloudflare schedules at most one `idle_shutdown_checkpoint` alarm for the
+  configured idle window minus the default 60 second safety margin. If a
+  workspace wake is due before that T-minus checkpoint, the wake preempts the
+  checkpoint; if the wake is later, the checkpoint runs first and preserves the
+  later wake. That Durable Object alarm owns checkpoint and shutdown ordering.
+  The runner container's own activity expiry is fallback-only and carries extra
+  grace beyond the idle checkpoint window; it is not a second idle owner. Fresh
+  nudges clear that pending idle checkpoint and foreground input always outranks
+  idle maintenance. When the idle alarm is still current, Cloudflare starts a
+  normal lease-scoped invocation that renews container liveness, runs checkpoint
+  reason `idle_shutdown_checkpoint`, validates the same workspace CAS/user
+  fences, writes a full/base checkpoint, and destroys the warm container only if
+  no pending work arrived meanwhile.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority
@@ -216,18 +219,18 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime/checkpoint result carries the next fast mailbox
 retry wake so Cloudflare can promptly reinvoke the workspace.
-When a non-idle retry or receipt wake would preempt the normal idle-shutdown
-window after deferred foreground progress, Cloudflare must first schedule the
-deferred idle-shutdown checkpoint ahead of that wake; otherwise a cold container
-can lose the staged watermark or terminal reply evidence and loop over the same
-mailbox prefix. The Durable Object alarm consumer must preserve that ordering
-even if the checkpoint alarm is delivered late enough that the later retry wake
-is also due. If the ordered checkpoint alarm collides with an already-active
-workspace invocation, Cloudflare must defer the checkpoint ahead of the recovery
-wake rather than clearing it, so active-invocation recovery cannot erase the
-durability job. Optional auxiliary work, including browser-vault refresh, stays
-detached from runner alarms. It may run best-effort from live warm state, but
-failure or staleness cannot mutate runner checkpoint, reply, or wake state.
+Cloudflare no longer treats runtime-reported deferred checkpoint state as
+scheduler state. Quiet foreground completion uses the same T-minus idle
+checkpoint rule regardless of whether runtime output includes a deprecated
+`deferredCheckpointRequired` compatibility flag. The Durable Object alarm
+consumer preserves ordering by comparing due times: a due workspace wake at or
+before the idle checkpoint cancels/deprioritizes idle maintenance, while a later
+wake is retained as `checkpointNextWakeAt` and runs after the checkpoint. If the
+idle checkpoint collides with an already-active workspace invocation, Cloudflare
+keeps the checkpoint retry state rather than clearing it. Optional auxiliary
+work, including browser-vault refresh, stays detached from runner alarms. It may
+run best-effort from live warm state, but failure or staleness cannot mutate
+runner checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence

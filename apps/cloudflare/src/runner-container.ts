@@ -508,6 +508,12 @@ export class RunnerContainer extends Container {
         this.recordActiveInvocationContainerStopped(activeWorkspaceOperation),
       );
     }
+    const workspaceInvocationAborted = abortRunnerContainerOperation(
+      this.workspaceInvocationAbortController,
+      new Error(
+        `workspace invocation container stopped during active work (${params.reason}, exit ${params.exitCode})`,
+      ),
+    );
 
     return {
       browserVaultRefresh: abortRunnerContainerOperation(
@@ -516,12 +522,7 @@ export class RunnerContainer extends Container {
           `browser-vault refresh container stopped during active work (${params.reason}, exit ${params.exitCode})`,
         ),
       ),
-      workspaceInvocation: abortRunnerContainerOperation(
-        this.workspaceInvocationAbortController,
-        new Error(
-          `workspace invocation container stopped during active work (${params.reason}, exit ${params.exitCode})`,
-        ),
-      ),
+      workspaceInvocation: activeWorkspaceOperation !== null && workspaceInvocationAborted,
     };
   }
 
@@ -626,15 +627,11 @@ export class RunnerContainer extends Container {
     this.currentLogContext = logContext;
     const operationAbortController = new AbortController();
     this.workspaceInvocationAbortController = operationAbortController;
-    this.workspaceInvocationActiveOperation = activeOperation;
     let activeOperationAcquired = false;
+    let cleanupWarmContainerOnFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
 
     try {
-      await this.writeRunnerActiveOperation(activeOperation);
-      activeOperationAcquired = true;
-      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-      this.noteRunnerActivity("invoke-started");
       const startTime = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -653,6 +650,7 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
+      cleanupWarmContainerOnFailure = true;
       const runnerControlToken = await this.ensureContainerReady(input);
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
@@ -660,6 +658,12 @@ export class RunnerContainer extends Container {
       await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      await this.writeRunnerActiveOperation(activeOperation);
+      activeOperationAcquired = true;
+      this.workspaceInvocationAbortController = operationAbortController;
+      this.workspaceInvocationActiveOperation = activeOperation;
+      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
+      this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -750,6 +754,10 @@ export class RunnerContainer extends Container {
               failClosed: true,
             });
           }
+        } else if (cleanupWarmContainerOnFailure) {
+          await this.stopWarmContainer({
+            failClosed: true,
+          });
         }
       } finally {
         if (activeOperationAcquired) {
@@ -1280,28 +1288,15 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
-    const runnerControlToken = this.runnerControlToken ?? await this.readRunnerControlToken();
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
-    try {
-      const stopped = await this.destroyIfRunning({ failClosed });
-      if (stopped) {
-        this.runnerControlToken = null;
-        await this.clearRunnerControlToken();
-        return;
-      }
-    } catch (error) {
-      if (runnerControlToken) {
-        this.runnerControlToken = runnerControlToken;
-        await this.writeRunnerControlToken(runnerControlToken);
-      }
-      throw error;
+    const hadRunnerControlToken =
+      this.runnerControlToken !== null || (await this.readRunnerControlToken()) !== null;
+    if (hadRunnerControlToken) {
+      this.runnerControlToken = null;
+      await this.clearRunnerControlToken();
     }
-
-    if (runnerControlToken) {
-      this.runnerControlToken = runnerControlToken;
-      await this.writeRunnerControlToken(runnerControlToken);
-    }
+    await this.destroyIfRunning({ failClosed });
   }
 
   private startRunnerActivityRenewal(): () => void {
