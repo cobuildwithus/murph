@@ -67,9 +67,16 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       memberId: userId,
       memberPhone,
     });
+    const activationBaselineCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
     await requireScenario().runWake(buildActivationWake(), userId);
-    const activationStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(activationStatus.lastErrorCode ?? null).toBeNull();
+    const activationCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(activationCompletionStatus.lastErrorCode ?? null).toBeNull();
+    expectMailboxLagDrained(activationCompletionStatus);
+    const activationCompletionWorkspaceVersion = requireWorkspaceVersion(activationCompletionStatus);
+    const activationStatus = await waitForIdleShutdownCheckpoint({
+      baselineCleanupCount: activationBaselineCleanupCount,
+      previousWorkspaceVersion: activationCompletionWorkspaceVersion,
+    });
     expectWorkspaceBaseOnly(activationStatus);
     const activationWorkspaceVersion = requireWorkspaceVersion(activationStatus);
 
@@ -103,16 +110,20 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectWorkspaceBaseOnly(firstCompletionStatus);
-    expect(requireWorkspaceVersion(firstCompletionStatus)).toBe(activationWorkspaceVersion);
+    expectMailboxLagDrained(firstCompletionStatus);
     expectDeferredMailboxImportLog(firstCompletionStatus, {
       expectedConversationSeqEnd: firstSeq,
       expectedConversationSeqStart: "0",
+      expectedWorkspaceVersion: activationWorkspaceVersion,
     });
 
-    const idleCheckpointStatus = await waitForIdleShutdownCheckpoint({
-      baselineCleanupCount,
-      previousWorkspaceVersion: activationWorkspaceVersion,
-    });
+    const idleCheckpointStatus =
+      requireWorkspaceVersion(firstCompletionStatus) === activationWorkspaceVersion
+        ? await waitForIdleShutdownCheckpoint({
+            baselineCleanupCount,
+            previousWorkspaceVersion: activationWorkspaceVersion,
+          })
+        : firstCompletionStatus;
     expectWorkspaceBaseOnly(idleCheckpointStatus);
     const idleWorkspaceVersion = requireWorkspaceVersion(idleCheckpointStatus);
     expect(idleWorkspaceVersion).not.toBe(activationWorkspaceVersion);
@@ -137,9 +148,11 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
 
     const finalStatus = await waitForHostedInvocationIdleWithLogs();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expectMailboxLagDrained(finalStatus);
     expectDeferredMailboxImportLog(finalStatus, {
       expectedConversationSeqEnd: secondSeq,
       expectedConversationSeqStart: firstSeq,
+      expectedWorkspaceVersion: idleWorkspaceVersion,
     });
   }, 600_000);
 });
@@ -289,6 +302,10 @@ function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
   expect(isWorkspaceBaseOnly(status)).toBe(true);
 }
 
+function expectMailboxLagDrained(status: Pick<HostedRunnerStatusResponse, "mailboxLag">): void {
+  expect(status.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+}
+
 function isWorkspaceBaseOnly(status: HostedRunnerStatusResponse): boolean {
   const snapshotRef = status.workspace?.snapshotRef ?? null;
   return snapshotRef !== null
@@ -309,12 +326,14 @@ function expectDeferredMailboxImportLog(
   input: {
     expectedConversationSeqEnd: string;
     expectedConversationSeqStart: string;
+    expectedWorkspaceVersion?: string;
   },
 ): void {
   const logs = status.recentLogs ?? [];
   const log = findDeferredMailboxImportLog(logs, {
     expectedConversationSeqEnd: input.expectedConversationSeqEnd,
     expectedConversationSeqStart: input.expectedConversationSeqStart,
+    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
   });
   if (!log) {
     throw new Error([
@@ -337,6 +356,7 @@ function findDeferredMailboxImportLog(
   input: {
     expectedConversationSeqEnd: string;
     expectedConversationSeqStart: string;
+    expectedWorkspaceVersion?: string;
   },
 ): HostedRuntimeLogEntry | null {
   return [...logs].reverse().find((entry) =>
@@ -346,6 +366,10 @@ function findDeferredMailboxImportLog(
     && entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
     && entry.redactedJson?.checkpointDeferred === true
     && entry.redactedJson?.stateChanged === true
+    && (
+      input.expectedWorkspaceVersion === undefined
+      || entry.workspaceVersion === input.expectedWorkspaceVersion
+    )
   ) ?? null;
 }
 
