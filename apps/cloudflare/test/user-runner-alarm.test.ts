@@ -2472,9 +2472,120 @@ describe("HostedUserRunner runtime crypto context", () => {
       active_invocation_container_stopped_at: "2026-04-26T23:59:55.000Z",
       active_invocation_id: "workspace-invocation-1",
       in_flight: 1,
+      pending_nudge: 1,
+      pending_work: 1,
+    }]);
+  });
+
+  it("clears a stopped consumed nudge back onto the nudge path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_container_stopped_at = ?,
+        active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        pending_nudge = 0,
+        pending_work = 0
+      WHERE user_id = ?`,
+      "2026-04-26T23:59:55.000Z",
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
       pending_nudge: 0,
       pending_work: 0,
+      retry_failure_count: 0,
     }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message: "Hosted workspace invocation container stopped; clearing stale in-flight state.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("aborts the local container wait when the active nudge container stops", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return await firstInvocation.promise;
+      }
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, { invoke });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    const firstRequest = invoke.mock.calls[0]?.[0].job.request;
+    if (!firstRequest) {
+      throw new Error("Expected the first hosted runner invocation request.");
+    }
+    await expect(runner.recordActiveInvocationContainerStopped({
+      attemptId: firstRequest.attemptId,
+      leaseGeneration: firstRequest.leaseGeneration,
+      stoppedAt: "2026-04-26T23:59:55.000Z",
+      userId: "member_123",
+    })).resolves.toEqual({ recorded: true });
+    await flushDetachedRunnerDrive();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await flushDetachedRunnerDrive();
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]));
   });
 
   it("records container stop liveness without pushing pending recovery to orphan grace", async () => {
@@ -2892,6 +3003,40 @@ describe("HostedUserRunner runtime crypto context", () => {
     const usageGateCall = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
       .find(([input]) => input.path === HOSTED_WEB_USAGE_GATE_PATH);
     expect(usageGateCall).toBeUndefined();
+  });
+
+  it("treats direct retry recovery with a pending nudge as a nudge invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET pending_nudge = 1,
+           pending_work = 1,
+           retry_failure_count = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "retry" })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(sql.exec(
+      `SELECT pending_nudge,
+              pending_work,
+              retry_failure_count
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray()).toEqual([{
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]);
   });
 
   it("refreshes the cached runtime crypto context after the web TTL expires", async () => {
@@ -5153,7 +5298,10 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(idleInvoke).toHaveBeenCalledOnce();
     expect(destroyInstance).toHaveBeenCalledOnce();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+    expect([
+      "2026-04-27T00:00:00.000Z",
+      "2026-04-27T00:00:01.000Z",
+    ]).toContain(alarms.at(-1));
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,

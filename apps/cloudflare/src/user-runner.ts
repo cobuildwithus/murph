@@ -125,6 +125,13 @@ interface RunnerDrainInput {
   reason: HostedWorkspaceInvocationReason;
 }
 
+interface ActiveWorkspaceInvocationAbort {
+  attemptId: string;
+  controller: AbortController;
+  leaseGeneration: string;
+  userId: string;
+}
+
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
   nextWakeAt: string | null;
@@ -145,6 +152,7 @@ export class HostedUserRunner {
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private invocationLock: Promise<void> | null = null;
+  private activeWorkspaceInvocationAbort: ActiveWorkspaceInvocationAbort | null = null;
   private pendingRunnerDriveAfterInvocation: {
     aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
     reason: HostedWorkspaceInvocationReason;
@@ -723,9 +731,14 @@ export class HostedUserRunner {
     if (!result.recorded) {
       return { recorded: false };
     }
-    if (this.invocationLock === null) {
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: new Date().toISOString(),
+    const abortedLocalInvocation = this.abortActiveWorkspaceInvocationAfterContainerStop(input);
+    const preferredWakeAt = new Date().toISOString();
+    await this.runtimeAlarmScheduler.syncNextWake({ preferredWakeAt });
+    if (abortedLocalInvocation && result.record?.pendingNudge) {
+      this.queueOrStartRunnerDriveAfterInvocation({
+        aiUsageAllowDecision: null,
+        reason: "nudge",
+        userId: input.userId,
       });
     }
     return { recorded: true };
@@ -823,10 +836,15 @@ export class HostedUserRunner {
       }
     }
 
+    const invocationReason = resolveHostedRunnerInvocationReason({
+      record: initialRecord,
+      requestedReason: input.reason,
+    });
+
     if (!shouldRunHostedRunnerInvocation({
       dueWake: input.dueWake,
       idleShutdownCheckpointsEnabled: this.env.idleShutdownCheckpointsEnabled,
-      reason: input.reason,
+      reason: invocationReason,
       record: initialRecord,
     })) {
       const record = await this.runtimeAlarmScheduler.syncNextWake({
@@ -839,7 +857,7 @@ export class HostedUserRunner {
     }
 
     let preflightWorkspaceRead: HostedWorkspaceReadResponse | null = null;
-    if (input.reason === "idle_shutdown_checkpoint") {
+    if (invocationReason === "idle_shutdown_checkpoint") {
       const idlePreflight = await this.preflightIdleShutdownCheckpoint({
         expectedWorkspaceVersion: input.idleCheckpointWorkspaceVersion ?? null,
         record: initialRecord,
@@ -856,9 +874,9 @@ export class HostedUserRunner {
     let lease: RunnerInvocationLease;
     try {
       lease = await this.stateStore.beginInvocation({
-        consumePendingNudge: input.reason === "idle_shutdown_checkpoint" ? false : undefined,
+        consumePendingNudge: invocationReason === "idle_shutdown_checkpoint" ? false : undefined,
         expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        reason: input.reason,
+        reason: invocationReason,
         userId: initialRecord.userId,
         workerVersionId: this.currentWorkerVersionId,
       });
@@ -872,7 +890,7 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          reason: input.reason,
+          reason: invocationReason,
         },
         message: "Hosted runner invocation already active; synced recovery wake.",
         phase: "scheduled",
@@ -888,7 +906,7 @@ export class HostedUserRunner {
       details: {
         workspaceAttemptId: lease.attemptId,
         workspaceLeaseGeneration: lease.leaseGeneration,
-        workspaceReason: input.reason,
+        workspaceReason: invocationReason,
       },
       message: "Hosted runner workspace invocation started.",
       phase: "wake.running",
@@ -897,7 +915,7 @@ export class HostedUserRunner {
 
     let workspaceVersion: string | null = null;
     try {
-      if (input.reason === "idle_shutdown_checkpoint") {
+      if (invocationReason === "idle_shutdown_checkpoint") {
         const quietRecord = await this.stateStore.readState();
         if (quietRecord.pendingNudge) {
           const completion = await this.stateStore.completeInvocation({
@@ -934,11 +952,11 @@ export class HostedUserRunner {
         workspaceVersion,
       });
       const result = await this.invokeWorkspaceRunner({
-        checkpointNextWakeAt: input.reason === "idle_shutdown_checkpoint"
+        checkpointNextWakeAt: invocationReason === "idle_shutdown_checkpoint"
           ? initialRecord.nextWakeAt
           : null,
         lease,
-        reason: input.reason,
+        reason: invocationReason,
         userId: initialRecord.userId,
         workspaceVersion,
       });
@@ -947,7 +965,7 @@ export class HostedUserRunner {
         lease,
       });
       if (completion.completed) {
-        if (input.reason === "idle_shutdown_checkpoint") {
+        if (invocationReason === "idle_shutdown_checkpoint") {
           await this.handleIdleShutdownCheckpointResult({
             result,
             userId: initialRecord.userId,
@@ -1006,7 +1024,7 @@ export class HostedUserRunner {
       if (failure.failed) {
         const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
           defaultRetryDelayMs: this.env.retryDelayMs,
-          reason: input.reason,
+          reason: invocationReason,
           retryFailureCount: failure.record.retryFailureCount,
         });
         const latestRecord = await this.stateStore.readState();
@@ -1015,12 +1033,12 @@ export class HostedUserRunner {
             record: latestRecord,
             userId: initialRecord.userId,
           });
-        } else if (input.reason === "nudge") {
+        } else if (invocationReason === "nudge") {
           await this.preservePendingNudgeRetryAfterFailure({
             retryDelayMs,
           });
         } else if (
-          input.reason === "idle_shutdown_checkpoint"
+          invocationReason === "idle_shutdown_checkpoint"
           && input.idleCheckpointWorkspaceVersion
         ) {
           const retryScheduled = await this.scheduleIdleShutdownCheckpointRetry({
@@ -1044,11 +1062,11 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          pendingNudgePresent: failure.record.pendingNudge || input.reason === "nudge",
+          pendingNudgePresent: failure.record.pendingNudge || invocationReason === "nudge",
           retryFailureCount: failure.record.retryFailureCount,
           workspaceAttemptId: lease.attemptId,
           workspaceLeaseGeneration: lease.leaseGeneration,
-          workspaceReason: input.reason,
+          workspaceReason: invocationReason,
           workspaceVersion,
         },
         level: "warn",
@@ -1315,6 +1333,28 @@ export class HostedUserRunner {
     return recovery;
   }
 
+  private abortActiveWorkspaceInvocationAfterContainerStop(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): boolean {
+    const active = this.activeWorkspaceInvocationAbort;
+    if (
+      !active
+      || active.attemptId !== input.attemptId
+      || active.leaseGeneration !== input.leaseGeneration
+      || active.userId !== input.userId
+      || active.controller.signal.aborted
+    ) {
+      return false;
+    }
+
+    active.controller.abort(
+      new Error("Hosted workspace invocation container stopped during active work."),
+    );
+    return true;
+  }
+
   private logStaleInvocationLeaseCleared(
     attemptId: string | null,
     userId: string,
@@ -1470,14 +1510,30 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    return await invokeHostedExecutionContainerRunner({
-      job,
-      runnerContainerName,
-      runnerContainerNamespace: this.runnerContainerNamespace,
-      signal: AbortSignal.timeout(this.env.runnerTimeoutMs),
-      timeoutMs: this.env.runnerTimeoutMs,
+    const timeoutSignal = AbortSignal.timeout(this.env.runnerTimeoutMs);
+    const activeAbort = createHostedRunnerActiveInvocationAbort({
+      attemptId: input.lease.attemptId,
+      leaseGeneration: input.lease.leaseGeneration,
+      timeoutSignal,
       userId: input.userId,
     });
+    this.activeWorkspaceInvocationAbort = activeAbort.active;
+
+    try {
+      return await invokeHostedExecutionContainerRunner({
+        job,
+        runnerContainerName,
+        runnerContainerNamespace: this.runnerContainerNamespace,
+        signal: activeAbort.active.controller.signal,
+        timeoutMs: this.env.runnerTimeoutMs,
+        userId: input.userId,
+      });
+    } finally {
+      activeAbort.unlinkTimeout();
+      if (this.activeWorkspaceInvocationAbort === activeAbort.active) {
+        this.activeWorkspaceInvocationAbort = null;
+      }
+    }
   }
 
   private async scheduleNextWorkspaceAlarm(input: {
@@ -2448,6 +2504,63 @@ function shouldRunHostedRunnerInvocation(input: {
     || input.reason === "manual"
     || input.record.pendingNudge
     || input.dueWake === true;
+}
+
+function resolveHostedRunnerInvocationReason(input: {
+  record: RunnerStateRecord;
+  requestedReason: HostedWorkspaceInvocationReason;
+}): HostedWorkspaceInvocationReason {
+  if (
+    input.record.pendingNudge
+    && (
+      input.requestedReason === "alarm"
+      || input.requestedReason === "retry"
+    )
+  ) {
+    return "nudge";
+  }
+
+  return input.requestedReason;
+}
+
+function createHostedRunnerActiveInvocationAbort(input: {
+  attemptId: string;
+  leaseGeneration: string;
+  timeoutSignal: AbortSignal;
+  userId: string;
+}): {
+  active: ActiveWorkspaceInvocationAbort;
+  unlinkTimeout(): void;
+} {
+  const controller = new AbortController();
+  const active: ActiveWorkspaceInvocationAbort = {
+    attemptId: input.attemptId,
+    controller,
+    leaseGeneration: input.leaseGeneration,
+    userId: input.userId,
+  };
+
+  if (input.timeoutSignal.aborted) {
+    controller.abort(input.timeoutSignal.reason);
+    return {
+      active,
+      unlinkTimeout: () => undefined,
+    };
+  }
+
+  const abortFromTimeout = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(input.timeoutSignal.reason);
+    }
+  };
+  input.timeoutSignal.addEventListener("abort", abortFromTimeout, { once: true });
+
+  return {
+    active,
+    unlinkTimeout: () => {
+      input.timeoutSignal.removeEventListener("abort", abortFromTimeout);
+    },
+  };
 }
 
 function isCommittedIdleShutdownCheckpointResult(input: HostedWorkspaceInvocationResult): boolean {

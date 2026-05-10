@@ -524,6 +524,69 @@ describe("RunnerStateStore schema guard", () => {
     }
   });
 
+  it("preserves a consumed nudge when clearing a stopped active invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    try {
+      const { db, store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        expiresAt: "2026-04-27T00:00:45.000Z",
+        reason: "nudge",
+        userId: "user-existing",
+      });
+      expect(db.prepare(`
+        SELECT pending_nudge, pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        pending_nudge: 0,
+        pending_work: 0,
+      });
+
+      await expect(store.recordActiveInvocationContainerStopped({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        stoppedAt: "2026-04-27T00:00:05.000Z",
+        userId: "user-existing",
+      })).resolves.toMatchObject({
+        recorded: true,
+        record: {
+          inFlight: true,
+          pendingNudge: true,
+          pendingWork: true,
+        },
+      });
+
+      await expect(store.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: null,
+        heartbeatStaleMs: 3_000,
+        nowMs: Date.parse("2026-04-27T00:00:06.000Z"),
+        timeoutMs: 45_000,
+      })).resolves.toMatchObject({
+        cleared: true,
+        reason: "container_stopped",
+        record: {
+          inFlight: false,
+          pendingNudge: true,
+          pendingWork: true,
+          workspaceInvocation: null,
+        },
+      });
+      expect(db.prepare(`
+        SELECT in_flight, pending_nudge, pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        in_flight: 0,
+        pending_nudge: 1,
+        pending_work: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");
