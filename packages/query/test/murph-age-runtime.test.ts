@@ -14,8 +14,11 @@ import {
 import { test } from "vitest";
 
 import {
+  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   calculateMurphAgeFromVaultInputBundle,
   calculateMurphAgeForVault,
+  defaultMurphAgeModelCardArtifactRoot,
+  loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   rebuildQueryProjection,
@@ -235,6 +238,147 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
   }
 });
 
+test("calculateMurphAgeFromVaultInputBundle loads ignored local research model-card artifacts", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    await writeLocalModelCardArtifact(vaultRoot, "lab9.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const loaded = await loadMurphAgeLocalModelCardArtifacts({ vaultRoot });
+    assert.equal(loaded.warnings.length, 0);
+    assert.equal(loaded.models.lab9_bp_body_10y_acm_research?.modelId, "fixture-lab9-research-model");
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "ready");
+    assert.equal(output.result?.modelId, "fixture-lab9-research-model");
+    assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle ignores local model-card artifacts in product mode", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    const modelCardRoot = defaultMurphAgeModelCardArtifactRoot(vaultRoot);
+    await mkdir(modelCardRoot, { recursive: true });
+    await writeFile(path.join(modelCardRoot, "malformed.json"), "{");
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "abstain");
+    assert.equal(output.mode, "product");
+    assert.equal(output.result, null);
+    assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+    assert.equal(output.warnings.some((warning) => warning.message.includes("not valid JSON")), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle rejects local artifacts that add unauthorized score-bearing metrics", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    await writeLocalModelCardArtifact(vaultRoot, "lab9-invalid.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: {
+        ...fixtureLab9ResearchModel(),
+        features: [
+          ...fixtureLab9ResearchModel().features,
+          {
+            coefficient: -0.1,
+            key: "steps",
+            kind: "metric",
+            label: "Steps",
+            metricKey: "steps",
+            moduleId: "activity",
+          },
+        ],
+        modelId: "fixture-lab9-invalid-wearable-model",
+      },
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const loaded = await loadMurphAgeLocalModelCardArtifacts({ vaultRoot });
+    assert.equal(loaded.models.lab9_bp_body_10y_acm_research, undefined);
+    assert.equal(loaded.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "abstain");
+    assert.equal(output.result, null);
+    assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+    assert.equal(output.warnings.some((warning) => warning.message.includes("Steps")), false);
+    assert.equal(output.warnings.some((warning) => warning.message.includes("no matching score-bearing model")), true);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("loadMurphAgeLocalModelCardArtifacts skips missing and malformed local artifacts", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    const missing = await loadMurphAgeLocalModelCardArtifacts({ vaultRoot });
+    assert.deepEqual(missing, { models: {}, warnings: [] });
+
+    const root = defaultMurphAgeModelCardArtifactRoot(vaultRoot);
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "ignored.txt"), "not a model card\n");
+    await writeFile(path.join(root, "invalid-json.json"), "{");
+    await writeFile(path.join(root, "invalid-schema.json"), JSON.stringify({ schemaVersion: "wrong" }));
+    await writeLocalModelCardArtifact(vaultRoot, "valid.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const loaded = await loadMurphAgeLocalModelCardArtifacts({ vaultRoot });
+    assert.equal(loaded.models.lab9_bp_body_10y_acm_research?.modelId, "fixture-lab9-research-model");
+    assert.equal(loaded.warnings.length, 2);
+    assert.equal(loaded.warnings.every((warning) => warning.code === "INVALID_INPUT"), true);
+    assert.equal(loaded.warnings.some((warning) => warning.message.includes("not valid JSON")), true);
+    assert.equal(loaded.warnings.some((warning) => warning.message.includes("expected schema")), true);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("calculateMurphAgeFromVaultInputBundle treats wearable-only inputs as context-only", async () => {
   const vaultRoot = await createProjectionVault();
   try {
@@ -432,6 +576,12 @@ async function createProjectionVault(): Promise<string> {
   );
   await writeFile(path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl"), "");
   return vaultRoot;
+}
+
+async function writeLocalModelCardArtifact(vaultRoot: string, fileName: string, artifact: unknown): Promise<void> {
+  const root = defaultMurphAgeModelCardArtifactRoot(vaultRoot);
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, fileName), `${JSON.stringify(artifact, null, 2)}\n`);
 }
 
 function insertMetricPoints(vaultRoot: string, points: readonly MetricPoint[]): void {

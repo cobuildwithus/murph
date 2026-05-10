@@ -1,20 +1,28 @@
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
 import {
   MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   listMurphAgeInputBundleMetricKeys,
+  resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
   validateMurphAgeRiskModel,
   type MetricPoint,
+  type MetricSelectionPolicy,
   type MurphAgeCalculationInput,
   type MurphAgeCalculatorInput,
   type MurphAgeCalculatorMode,
   type MurphAgeCalculatorOutput,
+  type MurphAgeModelFeature,
   type MurphAgeResult,
   type MurphAgeRiskModel,
+  type MurphAgeScoreBearingCardId,
   type MurphAgeWarning,
 } from "@murphai/health-metrics";
+import { z } from "zod";
 
 import {
   listMetricPointsRuntime,
@@ -30,6 +38,136 @@ export interface CalculateMurphAgeFromVaultInputBundleInput extends Omit<MurphAg
   asOf: string;
   vaultRoot: string;
 }
+
+export const MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION = "murph.age.model-card-artifact.v1" as const;
+
+export interface MurphAgeLocalModelCardArtifact {
+  cardId: MurphAgeScoreBearingCardId;
+  model: MurphAgeRiskModel;
+  schemaVersion: typeof MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION;
+}
+
+export interface MurphAgeLocalModelCardLoadResult {
+  models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
+  warnings: MurphAgeWarning[];
+}
+
+const MURPH_AGE_MODEL_CARD_RELATIVE_DIR = path.join(".runtime", "operations", "murph-age", "model-cards");
+
+const murphAgeScoreBearingCardIdSchema = z.enum([
+  "lab5_bp_bmi_transport_research",
+  "lab9_bp_body_10y_acm_research",
+]);
+
+const metricSelectionPolicySchema: z.ZodType<MetricSelectionPolicy> = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("latest-valid"),
+    staleAfterDays: z.number().finite().positive().optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("latest-lab"),
+    preferCollectedAt: z.literal(true),
+    preferFasting: z.boolean().optional(),
+    staleAfterDays: z.number().finite().positive().optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("daily-aggregate"),
+    latestWindowDays: z.number().finite().positive().optional(),
+    minimumPoints: z.number().finite().positive().optional(),
+    staleAfterDays: z.number().finite().positive().optional(),
+    statistic: z.enum(["mean", "median", "min", "max", "sum", "count"]),
+  }).strict(),
+  z.object({
+    kind: z.literal("latest-device-estimate"),
+    staleAfterDays: z.number().finite().positive().optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("qualified-latest"),
+    requiredQualifiers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+    staleAfterDays: z.number().finite().positive().optional(),
+  }).strict(),
+]);
+
+const featureTransformSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("identity") }).strict(),
+  z.object({
+    kind: z.literal("ln"),
+    offset: z.number().finite().optional(),
+  }).strict(),
+  z.object({
+    clamp: z.object({
+      max: z.number().finite().optional(),
+      min: z.number().finite().optional(),
+    }).strict().optional(),
+    kind: z.literal("z-score"),
+    mean: z.number().finite(),
+    standardDeviation: z.number().finite().positive(),
+  }).strict(),
+]);
+
+const murphAgeModelFeatureSchema: z.ZodType<MurphAgeModelFeature> = z.discriminatedUnion("kind", [
+  z.object({
+    coefficient: z.number().finite(),
+    key: z.string().min(1),
+    kind: z.literal("chronological-age"),
+    label: z.string().min(1),
+    moduleId: z.string().min(1).optional(),
+    transform: featureTransformSchema.optional(),
+  }).strict(),
+  z.object({
+    coefficient: z.number().finite(),
+    key: z.string().min(1),
+    kind: z.literal("sex"),
+    label: z.string().min(1),
+    moduleId: z.string().min(1).optional(),
+    sex: z.enum(["female", "male"]),
+    transform: featureTransformSchema.optional(),
+  }).strict(),
+  z.object({
+    biomarkerKey: z.string().min(1).optional(),
+    coefficient: z.number().finite(),
+    expectedUnit: z.string().min(1).optional(),
+    key: z.string().min(1),
+    kind: z.literal("metric"),
+    label: z.string().min(1),
+    metricKey: z.string().min(1),
+    moduleId: z.string().min(1).optional(),
+    required: z.boolean().optional(),
+    selectionPolicy: metricSelectionPolicySchema.optional(),
+    transform: featureTransformSchema.optional(),
+  }).strict(),
+]);
+
+const murphAgeRiskModelSchema: z.ZodType<MurphAgeRiskModel> = z.object({
+  blockedBiomarkerKeys: z.array(z.string().min(1)).optional(),
+  blockedMetricKeys: z.array(z.string().min(1)).optional(),
+  calibration: z.object({
+    intercept: z.number().finite(),
+    slope: z.number().finite(),
+  }).strict().optional(),
+  endpoint: z.string().min(1),
+  features: z.array(murphAgeModelFeatureSchema).min(1),
+  horizonYears: z.number().finite().positive(),
+  intercept: z.number().finite(),
+  modelId: z.string().min(1),
+  modelVersion: z.string().min(1).optional(),
+  referencePopulation: z.string().min(1),
+  referenceRiskCurve: z.array(z.object({
+    ageYears: z.number().finite(),
+    riskProbability: z.number().finite().min(0).max(1),
+  }).strict()).min(2),
+  uncertainty: z.object({
+    baseYears: z.number().finite().nonnegative().optional(),
+    perLowConfidenceMetricYears: z.number().finite().nonnegative().optional(),
+    perMissingOptionalFeatureYears: z.number().finite().nonnegative().optional(),
+  }).strict().optional(),
+}).strict();
+
+const murphAgeLocalModelCardArtifactSchema: z.ZodType<MurphAgeLocalModelCardArtifact> = z.object({
+  cardId: murphAgeScoreBearingCardIdSchema,
+  model: murphAgeRiskModelSchema,
+  schemaVersion: z.literal(MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION),
+}).strip();
 
 export async function calculateMurphAgeForVault(
   input: CalculateMurphAgeForVaultInput,
@@ -88,15 +226,19 @@ export async function calculateMurphAgeFromVaultInputBundle(
     asOf,
     vaultRoot: input.vaultRoot,
   });
+  const localModelCards = mode === "research"
+    ? await loadMurphAgeLocalModelCardArtifacts({ vaultRoot: input.vaultRoot })
+    : { models: {}, warnings: [] };
 
-  return calculateMurphAgeFromInputBundle({
+  const output = calculateMurphAgeFromInputBundle({
     asOf,
     chronologicalAgeYears: input.chronologicalAgeYears,
     mode,
-    models: input.models,
+    models: { ...localModelCards.models, ...input.models },
     points,
     sex: input.sex,
   });
+  return withPrependedWarnings(output, localModelCards.warnings);
 }
 
 export function metricPointFiltersForMurphAgeModel(
@@ -136,6 +278,132 @@ export function metricPointFiltersForMurphAgeInputBundle(asOf: string): QueryMet
     }
     return filter;
   });
+}
+
+export function defaultMurphAgeModelCardArtifactRoot(vaultRoot: string): string {
+  return path.join(vaultRoot, MURPH_AGE_MODEL_CARD_RELATIVE_DIR);
+}
+
+export async function loadMurphAgeLocalModelCardArtifacts(input: {
+  vaultRoot: string;
+}): Promise<MurphAgeLocalModelCardLoadResult> {
+  const root = defaultMurphAgeModelCardArtifactRoot(input.vaultRoot);
+  let entries: Array<{ isFile(): boolean; name: string }>;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return { models: {}, warnings: [] };
+    }
+    return {
+      models: {},
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact directory could not be read.")],
+    };
+  }
+
+  const models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>> = {};
+  const warnings: MurphAgeWarning[] = [];
+  const jsonEntries = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of jsonEntries) {
+    const artifact = await readLocalModelCardArtifact(path.join(root, entry.name));
+    warnings.push(...artifact.warnings);
+    if (!artifact.value) continue;
+    if (models[artifact.value.cardId]) {
+      warnings.push(localModelCardWarning("Duplicate local Murph Age model-card artifacts were found for the same card id."));
+      continue;
+    }
+    models[artifact.value.cardId] = artifact.value.model;
+  }
+
+  return { models, warnings };
+}
+
+async function readLocalModelCardArtifact(filePath: string): Promise<{
+  value: MurphAgeLocalModelCardArtifact | null;
+  warnings: MurphAgeWarning[];
+}> {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf8");
+  } catch {
+    return {
+      value: null,
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact could not be read.")],
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      value: null,
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact is not valid JSON.")],
+    };
+  }
+
+  const artifact = murphAgeLocalModelCardArtifactSchema.safeParse(parsed);
+  if (!artifact.success) {
+    return {
+      value: null,
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact does not match the expected schema.")],
+    };
+  }
+
+  const warnings = validateLocalModelCardArtifactPolicy(artifact.data);
+  if (warnings.length > 0) {
+    return { value: null, warnings };
+  }
+  return { value: artifact.data, warnings: [] };
+}
+
+function validateLocalModelCardArtifactPolicy(artifact: MurphAgeLocalModelCardArtifact): MurphAgeWarning[] {
+  const modelValidation = validateMurphAgeRiskModel(artifact.model);
+  const warnings: MurphAgeWarning[] = [];
+  if (modelValidation.status === "invalid") {
+    return [localModelCardWarning("A local Murph Age model-card artifact contains an invalid model.")];
+  }
+  const policy = resolveMurphAgeModelCardPolicy(artifact.cardId);
+  if (!policy?.scoreBearing) {
+    warnings.push(localModelCardWarning("A local Murph Age model-card artifact selected a non-score-bearing card id."));
+    return warnings;
+  }
+
+  const allowedMetricKeys = new Set(policy.scoreBearingMetricKeys.map(resolveMetricInputKey));
+  for (const feature of artifact.model.features) {
+    if (feature.kind !== "metric") continue;
+    const metricKey = resolveMetricInputKey(feature.metricKey);
+    if (!allowedMetricKeys.has(metricKey)) {
+      warnings.push({
+        code: "MODEL_CARD_POLICY_VIOLATION",
+        featureKey: feature.key,
+        message: `${artifact.cardId} does not authorize a local score-bearing feature for this metric.`,
+        metricKey,
+      });
+    }
+  }
+  return warnings;
+}
+
+function localModelCardWarning(message: string): MurphAgeWarning {
+  return {
+    code: "INVALID_INPUT",
+    message,
+  };
+}
+
+function withPrependedWarnings(
+  output: MurphAgeCalculatorOutput,
+  warnings: readonly MurphAgeWarning[],
+): MurphAgeCalculatorOutput {
+  if (warnings.length === 0) return output;
+  return {
+    ...output,
+    warnings: [...warnings, ...output.warnings],
+  };
 }
 
 async function loadMurphAgeMetricPoints(input: {
@@ -329,6 +597,13 @@ function parseTimezoneOffsetMinutes(value: string): number | null {
   if (hourValue > 23 || minuteValue > 59) return null;
   const absolute = hourValue * 60 + minuteValue;
   return sign === "+" ? absolute : -absolute;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && typeof error.code === "string"
+    && error.code === "ENOENT";
 }
 
 function compareMetricPointToAsOf(point: MetricPoint, asOf: string): number {

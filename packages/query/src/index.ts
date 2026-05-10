@@ -359,10 +359,15 @@ export async function selectMetric(input: {
 export type {
   CalculateMurphAgeForVaultInput,
   CalculateMurphAgeFromVaultInputBundleInput,
+  MurphAgeLocalModelCardArtifact,
+  MurphAgeLocalModelCardLoadResult,
 } from "./murph-age.ts";
 export {
+  defaultMurphAgeModelCardArtifactRoot,
+  loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
+  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
 } from "./murph-age.ts";
 
 export async function calculateMurphAgeForVault(
