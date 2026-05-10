@@ -34,12 +34,6 @@ describe('Codex thread instructions', () => {
 
     await expect(
       executeCodexAssistantTurnAttempt({
-        conversationMessages: [
-          {
-            content: 'Earlier answer.',
-            role: 'assistant',
-          },
-        ],
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -61,7 +55,6 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(
       [
-        'Conversation so far:\nAssistant:\nEarlier answer.',
         'Current Murph runtime context.',
         'User message:\nWhat changed?',
       ].join('\n\n'),
@@ -82,12 +75,6 @@ describe('Codex thread instructions', () => {
     })
 
     await executeCodexAssistantTurnAttempt({
-      conversationMessages: [
-        {
-          content: 'Old transcript fallback.',
-          role: 'assistant',
-        },
-      ],
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -111,7 +98,6 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.prompt).toBe(
       ['Current Murph runtime context.', 'User message:\nContinue.'].join('\n\n'),
     )
-    expect(appServerInput.prompt).not.toContain('Old transcript fallback.')
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
     expect(appServerInput.resumeSessionId).toBe('thread-resume')
   })

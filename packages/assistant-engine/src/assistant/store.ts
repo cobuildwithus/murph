@@ -74,7 +74,7 @@ import type {
   AssistantTranscriptEntryRef,
 } from './store/types.js'
 
-const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v1'
+const ASSISTANT_STATE_SCHEMA = 'murph.assistant-conversation.v2'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -180,9 +180,9 @@ export async function resolveAssistantSession(
     }
     const session = parseAssistantSessionRecord({
       schema: ASSISTANT_STATE_SCHEMA,
-      sessionId: createAssistantSessionId(),
-      target,
-      resumeState: null,
+      conversationId: createAssistantSessionId(),
+      codexTarget: target,
+      codexResume: null,
       alias: manualAlias,
       binding: createAssistantBinding(bindingInputFromLocator(input)),
       createdAt: now,

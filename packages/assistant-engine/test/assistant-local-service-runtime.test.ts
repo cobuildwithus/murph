@@ -341,8 +341,6 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
             routeId: 'route-active-turn',
           },
           session,
-          threadInstructionsFingerprint:
-            `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
         },
       }
     })
@@ -360,8 +358,6 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
             routeId: 'route-active-turn',
           },
           session,
-          threadInstructionsFingerprint:
-            `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
         },
       }
     })
@@ -519,10 +515,8 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState,
     {
-      providerSessionId: 'provider-thread-active-turn',
-      resumeRouteId: 'route-active-turn',
-      threadInstructionsFingerprint:
-        `thread-instructions-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+      routeFingerprint: 'route-active-turn',
+      threadId: 'provider-thread-active-turn',
     },
   )
   assert.deepEqual(
@@ -593,10 +587,8 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
 test('sendAssistantMessageLocal clears final resume state without a fresh final provider thread', async () => {
   const session = createAssistantSession({
     resumeState: {
-      providerSessionId: 'old-provider-thread',
-      resumeRouteId: 'old-route',
-      threadInstructionsFingerprint:
-        `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`,
+      routeFingerprint: 'old-route',
+      threadId: 'old-provider-thread',
     },
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -616,8 +608,6 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
         },
         response: 'draft without fresh provider thread',
         session,
-        threadInstructionsFingerprint:
-          `thread-instructions-v1:${'g'.repeat(64)}:${'h'.repeat(64)}`,
       },
     }))
     .mockImplementationOnce(async () => ({
@@ -663,7 +653,7 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
-      .resumeState?.providerSessionId,
+      .resumeState?.threadId,
     'fresh-provider-thread',
   )
   assert.deepEqual(
@@ -718,8 +708,6 @@ test('sendAssistantMessageLocal journals provider request before provider execut
           routeId: 'route-default',
         },
         session,
-        threadInstructionsFingerprint:
-          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   })
@@ -765,8 +753,6 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
           routeId: 'route-default',
         },
         session,
-        threadInstructionsFingerprint:
-          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   })
@@ -3330,8 +3316,8 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
     session: createAssistantSession({
       sessionId: 'session-updated',
       resumeState: {
-        providerSessionId: 'provider-session-1',
-        resumeRouteId: 'route-1',
+        routeFingerprint: 'route-1',
+        threadId: 'provider-session-1',
       },
     }),
   })
@@ -3547,8 +3533,6 @@ async function loadLocalServiceModule(input?: {
           routeId: 'route-default',
         },
         session,
-        threadInstructionsFingerprint:
-          `thread-instructions-v1:${'e'.repeat(64)}:${'f'.repeat(64)}`,
       },
     }
   const deliveryOutcome =
@@ -3916,14 +3900,10 @@ async function loadLocalServiceModule(input?: {
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
     resolveAssistantResumeStateFromProviderTurn: (input: {
       providerSessionId: string | null
-      routeId: string
-      threadInstructionsFingerprint?: string | null
+      routeFingerprint: string
     }) => ({
-      providerSessionId: input.providerSessionId,
-      resumeRouteId: input.routeId,
-      ...(input.threadInstructionsFingerprint
-        ? { threadInstructionsFingerprint: input.threadInstructionsFingerprint }
-        : {}),
+      routeFingerprint: input.routeFingerprint,
+      threadId: input.providerSessionId,
     }),
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
@@ -4060,6 +4040,11 @@ function createAssistantSession(input?: {
         threadIsDirect: false,
       },
     createdAt: '2026-04-08T00:00:00.000Z',
+    codexResume: input?.resumeState ?? null,
+    codexTarget:
+      input?.target ??
+      createCodexTarget(),
+    conversationId: input?.sessionId ?? 'session-test',
     lastTurnAt: null,
     provider: input?.provider ?? 'codex-cli',
     providerOptions: {
@@ -4078,7 +4063,7 @@ function createAssistantSession(input?: {
       ...input?.providerOptions,
     },
     resumeState: input?.resumeState ?? null,
-    schema: 'murph.assistant-session.v1',
+    schema: 'murph.assistant-conversation.v2',
     sessionId: input?.sessionId ?? 'session-test',
     target:
       input?.target ??

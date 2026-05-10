@@ -16,7 +16,6 @@ import {
 } from '../provider-registry.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
 import {
-  readPersistedAssistantCliSurfaceBootstrapContext,
   resolveAssistantCliSurfaceBootstrapContext,
 } from '../cli-surface-bootstrap.js'
 import {
@@ -36,7 +35,9 @@ import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from '../provider-binding.js'
-import { listAssistantTranscriptEntries } from '../store.js'
+import {
+  readAssistantSessionResumeState,
+} from '../provider-state.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -64,12 +65,7 @@ export interface AssistantRouteTurnPlan {
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantActiveTurnProviderHistoryMessage['content']
-    role: 'assistant' | 'user'
-  }>
   activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
-  continuityContext: string | null
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
   providerContinuation: AssistantProviderContinuation
@@ -80,7 +76,6 @@ export interface AssistantRouteTurnPlan {
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
-  threadInstructionsFingerprint: string | null
   turnContextPrompt: string | null
   workingDirectory: string
 }
@@ -288,7 +283,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = resolveAssistantRouteResumeBinding({
     route: input.route,
-    sessionResumeState: input.session.resumeState,
+    sessionResumeState: readAssistantSessionResumeState(input.session),
   })
   const routeProviderCapabilities = resolveCodexAssistantTargetCapabilities({
     ...input.route.providerOptions,
@@ -313,13 +308,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const resumeProviderSessionId = threadPlan.resumeProviderSessionId
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
-  const shouldPrepareThreadInstructions =
-    shouldInjectBootstrapContext ||
-    resumeProviderSessionId !== null
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const storedThreadInstructionsFingerprint = normalizeNullableString(
-    resumeBinding?.threadInstructionsFingerprint,
-  )
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
@@ -332,25 +321,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     executionContext: input.executionContext,
   })
   const shouldPrepareConversationThreadInstructions =
-    shouldPrepareThreadInstructions && input.profile.promptProfile === 'conversation'
-  const shouldTryPersistedThreadInstructions =
-    shouldPrepareConversationThreadInstructions &&
-    resumeProviderSessionId !== null &&
-    storedThreadInstructionsFingerprint !== null
-  let assistantCliContract = shouldTryPersistedThreadInstructions
-    ? await readPersistedAssistantCliSurfaceBootstrapContext({
+    shouldPrepareBootstrapContext && input.profile.promptProfile === 'conversation'
+  const assistantCliContract = shouldPrepareConversationThreadInstructions
+    ? await resolveAssistantCliSurfaceBootstrapContext({
+        cliEnv: input.sharedPlan.cliAccess.env,
+        executionContext: input.input.executionContext,
         sessionId: input.session.sessionId,
         vault: input.input.vault,
+        workingDirectory,
       })
-    : shouldPrepareConversationThreadInstructions
-      ? await resolveAssistantCliSurfaceBootstrapContext({
-          cliEnv: input.sharedPlan.cliAccess.env,
-          executionContext: input.input.executionContext,
-          sessionId: input.session.sessionId,
-          vault: input.input.vault,
-          workingDirectory,
-        })
-      : null
+    : null
   const assistantSupportedExperimentProtocols =
     input.profile.promptProfile === 'conversation'
       ? resolveAssistantSupportedExperimentProtocols()
@@ -410,54 +390,29 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }, {
             toolSchemaHash,
           })
-  let systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
-  let threadInstructionsFingerprint =
-    buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
-  let refreshThreadInstructions =
-    resumeProviderSessionId === null ||
-    threadInstructionsFingerprint === null ||
-    storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
-  if (shouldTryPersistedThreadInstructions && refreshThreadInstructions) {
-    assistantCliContract = await resolveAssistantCliSurfaceBootstrapContext({
-      cliEnv: input.sharedPlan.cliAccess.env,
-      executionContext: input.input.executionContext,
-      sessionId: input.session.sessionId,
-      vault: input.input.vault,
-      workingDirectory,
-    })
-    systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
-    threadInstructionsFingerprint =
-      buildAssistantThreadInstructionsFingerprint(systemPromptResult.cacheMetadata)
-    refreshThreadInstructions =
-      resumeProviderSessionId === null ||
-      threadInstructionsFingerprint === null ||
-      storedThreadInstructionsFingerprint !== threadInstructionsFingerprint
-  }
+  const systemPromptResult = buildRouteSystemPromptResult(assistantCliContract)
+  const refreshThreadInstructions = resumeProviderSessionId === null
   const systemPrompt = systemPromptResult.prompt
-  const developerInstructions = [
-    systemPromptResult.layers.staticCacheableCorePrompt,
-    systemPromptResult.layers.stableRouteCapabilityPrompt,
-  ]
-    .filter((section): section is string => Boolean(normalizeNullableString(section)))
-    .join('\n\n')
+  const developerInstructions =
+    resumeProviderSessionId === null
+      ? [
+          systemPromptResult.layers.staticCacheableCorePrompt,
+          systemPromptResult.layers.stableRouteCapabilityPrompt,
+        ]
+          .filter((section): section is string =>
+            Boolean(normalizeNullableString(section)),
+          )
+          .join('\n\n')
+      : null
   const turnContextPrompt = normalizeNullableString(
     systemPromptResult.layers.dynamicTurnContextPrompt,
   )
-  const conversationMessages = await resolveAssistantTranscriptConversationMessages({
-    promptProfile: input.profile.promptProfile,
-    resumeProviderSessionId,
-    session: input.session,
-    threadScope: input.profile.threadScope,
-    vault: input.input.vault,
-  })
 
   return {
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     developerInstructions: normalizeNullableString(developerInstructions),
     activeTurnMessages: activeTurnHistory?.messages ?? undefined,
-    conversationMessages,
-    continuityContext: null,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
     providerContinuation: resolveAssistantProviderContinuation({
@@ -473,48 +428,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
-    threadInstructionsFingerprint,
     turnContextPrompt,
   }
-}
-
-export function buildAssistantThreadInstructionsFingerprint(
-  metadata: AssistantPromptCacheMetadata | null,
-): string | null {
-  if (!metadata) {
-    return null
-  }
-
-  return [
-    'thread-instructions-v1',
-    metadata.staticPromptHash,
-    metadata.stableRouteCapabilityPromptHash,
-  ].join(':')
-}
-
-async function resolveAssistantTranscriptConversationMessages(input: {
-  promptProfile: AssistantProviderTurnPromptProfile
-  resumeProviderSessionId: string | null
-  session: Pick<AssistantSession, 'sessionId' | 'turnCount'>
-  threadScope: AssistantProviderThreadScope
-  vault: string
-}): Promise<AssistantRouteTurnPlan['conversationMessages']> {
-  if (
-    input.promptProfile !== 'conversation' ||
-    input.resumeProviderSessionId !== null ||
-    input.session.turnCount <= 0 ||
-    input.threadScope !== 'session-thread'
-  ) {
-    return undefined
-  }
-
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
-    input.session.sessionId,
-  )
-  const messages = selectAssistantReplayMessages(transcript, 12)
-
-  return messages.length > 0 ? messages : undefined
 }
 
 function resolveAssistantSupportedExperimentProtocols() {
@@ -603,61 +518,4 @@ function resolveAssistantEffectiveProviderResumeSessionId(input: {
   resumeProviderSessionId: string | null
 }): string | null {
   return normalizeNullableString(input.resumeProviderSessionId)
-}
-
-export function selectAssistantReplayMessages(
-  entries: readonly {
-    createdAt?: string | null
-    kind: string
-    text: string
-  }[],
-  limit: number,
-): Array<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  const replayLimit =
-    typeof limit === 'number' && Number.isFinite(limit)
-      ? Math.max(0, Math.trunc(limit))
-      : 0
-  if (replayLimit === 0) {
-    return []
-  }
-
-  const replayMessages: Array<{
-    content: string
-    role: 'assistant' | 'user'
-  }> = []
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const message = toAssistantReplayMessage(entries[index])
-    if (!message) {
-      continue
-    }
-    replayMessages.unshift(message)
-    if (replayMessages.length >= replayLimit) {
-      break
-    }
-  }
-
-  return replayMessages
-}
-
-function toAssistantReplayMessage(entry: {
-  createdAt?: string | null
-  kind: string
-  text: string
-} | undefined): {
-  content: string
-  role: 'assistant' | 'user'
-} | null {
-  if (!entry) {
-    return null
-  }
-  if (entry.kind === 'assistant' || entry.kind === 'user') {
-    return {
-      role: entry.kind,
-      content: entry.text,
-    }
-  }
-  return null
 }

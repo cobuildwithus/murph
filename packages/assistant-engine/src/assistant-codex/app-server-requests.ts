@@ -55,7 +55,7 @@ export function buildCodexThreadResumeParams(input: {
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     developerInstructions:
-      input.input.refreshThreadInstructions !== false
+      input.input.refreshThreadInstructions === true
         ? normalizeNullableString(input.input.developerInstructions)
         : undefined,
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,

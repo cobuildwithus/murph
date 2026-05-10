@@ -551,8 +551,8 @@ describe('assistant service-result seam', () => {
       resumeKind: 'codex-thread',
     })
     expect(result.session.resumeState).toEqual({
-      providerSessionId: 'provider-session-1',
-      resumeRouteId: 'route-1',
+      routeFingerprint: 'route-1',
+      threadId: 'provider-session-1',
     })
   })
 })

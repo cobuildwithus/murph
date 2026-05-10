@@ -64,11 +64,6 @@ export interface AssistantProviderTurnInput {
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
   codexHome?: string | null
-  continuityContext?: string | null
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
@@ -104,11 +99,6 @@ export interface AssistantProviderTurnExecutionInput {
   }>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
-  continuityContext?: string | null
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null

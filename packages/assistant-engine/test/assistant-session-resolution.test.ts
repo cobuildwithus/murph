@@ -470,8 +470,8 @@ describe('assistant session resolution', () => {
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: previousTarget,
       resumeState: {
-        providerSessionId: 'thread_old',
-        resumeRouteId: 'route-old',
+        routeFingerprint: 'route-old',
+        threadId: 'thread_old',
       },
     })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
@@ -502,7 +502,7 @@ describe('assistant session resolution', () => {
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
     expect(result.session.resumeState).toBeNull()
     expect(resolvedSession.session.target).toEqual(previousTarget)
-    expect(resolvedSession.session.resumeState?.providerSessionId).toBe('thread_old')
+    expect(resolvedSession.session.resumeState?.threadId).toBe('thread_old')
   })
 
   it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
@@ -512,8 +512,8 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'high',
     })
     const resumeState = {
-      providerSessionId: 'resp_current',
-      resumeRouteId: 'route-current',
+      routeFingerprint: 'route-current',
+      threadId: 'resp_current',
     }
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: hostedDefaultTarget,

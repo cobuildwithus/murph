@@ -11,12 +11,12 @@ describe('resolveAssistantResumeStateFromProviderTurn', () => {
       resolveAssistantResumeStateFromProviderTurn({
         codexRolloutRelativePath,
         providerSessionId,
-        routeId: 'route-new',
+        routeFingerprint: 'route-new',
       }),
     ).toEqual({
-      codexRolloutRelativePath,
-      providerSessionId,
-      resumeRouteId: 'route-new',
+      rolloutRelativePath: codexRolloutRelativePath,
+      routeFingerprint: 'route-new',
+      threadId: providerSessionId,
     })
   })
 
@@ -24,7 +24,7 @@ describe('resolveAssistantResumeStateFromProviderTurn', () => {
     expect(
       resolveAssistantResumeStateFromProviderTurn({
         providerSessionId: null,
-        routeId: 'route-new',
+        routeFingerprint: 'route-new',
       }),
     ).toBeNull()
   })

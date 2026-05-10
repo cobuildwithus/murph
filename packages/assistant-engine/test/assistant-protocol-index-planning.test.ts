@@ -16,17 +16,12 @@ const runtimeMocks = vi.hoisted(() => ({
 }))
 
 const planningMocks = vi.hoisted(() => ({
-  readPersistedAssistantCliSurfaceBootstrapContext: vi.fn(
-    async (): Promise<string | null> => null,
-  ),
   resolveAssistantCliSurfaceBootstrapContext: vi.fn(async () => 'bootstrap contract'),
   resolveAssistantVaultOverviewBlock: vi.fn(async () => null),
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
     supportsNativeResume: false,
   })),
 }))
-const staleThreadInstructionsFingerprint =
-  `thread-instructions-v1:${'0'.repeat(64)}:${'1'.repeat(64)}`
 
 vi.mock('@murphai/health-commons/runtime', () => ({
   listGeneratedAssistantProtocolIndexEntries:
@@ -34,8 +29,6 @@ vi.mock('@murphai/health-commons/runtime', () => ({
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
-  readPersistedAssistantCliSurfaceBootstrapContext:
-    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext,
   resolveAssistantCliSurfaceBootstrapContext:
     planningMocks.resolveAssistantCliSurfaceBootstrapContext,
 }))
@@ -63,7 +56,6 @@ import type { CodexThreadIdentity } from '../src/assistant/provider-route.js'
 
 afterEach(() => {
   runtimeMocks.listGeneratedAssistantProtocolIndexEntries.mockReset()
-  planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.resolveAssistantVaultOverviewBlock.mockReset()
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
@@ -111,7 +103,7 @@ describe('assistant protocol index planning', () => {
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
   })
 
-  it('skips resumed thread-instruction refresh when the fingerprint matches', async () => {
+  it('resumes Codex threads without refreshing bootstrap developer instructions', async () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -137,12 +129,8 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(initialPlan.threadInstructionsFingerprint).toEqual(
-      expect.stringContaining('thread-instructions-v1:'),
-    )
-    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
-      'bootstrap contract',
-    )
+    expect(initialPlan.refreshThreadInstructions).toBe(true)
+    expect(initialPlan.developerInstructions).toContain('bootstrap contract')
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockClear()
     planningMocks.resolveAssistantVaultOverviewBlock.mockClear()
 
@@ -157,10 +145,8 @@ describe('assistant protocol index planning', () => {
       route,
       session: createSession({
         resumeState: {
-          providerSessionId: 'thread-resume',
-          resumeRouteId: route.routeId,
-          threadInstructionsFingerprint:
-            initialPlan.threadInstructionsFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-resume',
         },
       }),
       sharedPlan: createSharedPlan(),
@@ -168,13 +154,8 @@ describe('assistant protocol index planning', () => {
 
     expect(resumedPlan.resumeProviderSessionId).toBe('thread-resume')
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
-    expect(resumedPlan.threadInstructionsFingerprint).toBe(
-      initialPlan.threadInstructionsFingerprint,
-    )
+    expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
-    expect(
-      planningMocks.readPersistedAssistantCliSurfaceBootstrapContext,
-    ).toHaveBeenCalledTimes(1)
     expect(
       planningMocks.resolveAssistantCliSurfaceBootstrapContext,
     ).not.toHaveBeenCalled()
@@ -205,9 +186,6 @@ describe('assistant protocol index planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
-      'bootstrap contract',
-    )
 
     const resumedPlan = await resolveAssistantRouteTurnPlan({
       activeTurnHistory: {
@@ -234,10 +212,8 @@ describe('assistant protocol index planning', () => {
       route,
       session: createSession({
         resumeState: {
-          providerSessionId: 'thread-active-turn',
-          resumeRouteId: route.routeId,
-          threadInstructionsFingerprint:
-            initialPlan.threadInstructionsFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-active-turn',
         },
       }),
       sharedPlan: createSharedPlan(),
@@ -260,7 +236,7 @@ describe('assistant protocol index planning', () => {
     })
   })
 
-  it('replays committed transcript messages when provider-native resume is unavailable', async () => {
+  it('does not replay committed transcript messages when provider-native resume is unavailable', async () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -313,9 +289,7 @@ describe('assistant protocol index planning', () => {
       })
 
       expect(plan.resumeProviderSessionId).toBeNull()
-      expect(plan.conversationMessages).toHaveLength(12)
-      expect(plan.conversationMessages?.[0]?.content).toBe('Historical message 8')
-      expect(plan.conversationMessages?.[11]?.content).toBe('Historical message 19')
+      expect('conversationMessages' in plan).toBe(false)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
@@ -366,16 +340,13 @@ describe('assistant protocol index planning', () => {
       })
 
       expect(plan.resumeProviderSessionId).toBeNull()
-      expect(plan.conversationMessages).toBeUndefined()
+      expect('conversationMessages' in plan).toBe(false)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
   })
 
-  it('refreshes resumed thread instructions when the fingerprint changed', async () => {
-    planningMocks.readPersistedAssistantCliSurfaceBootstrapContext.mockResolvedValue(
-      'bootstrap contract',
-    )
+  it('starts a fresh thread with bootstrap developer instructions when the route fingerprint changed', async () => {
     planningMocks.resolveAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.resolveAssistantVaultOverviewBlock.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -399,16 +370,16 @@ describe('assistant protocol index planning', () => {
       route,
       session: createSession({
         resumeState: {
-          providerSessionId: 'thread-resume',
-          resumeRouteId: route.routeId,
-          threadInstructionsFingerprint: staleThreadInstructionsFingerprint,
+          routeFingerprint: 'stale-route',
+          threadId: 'thread-resume',
         },
       }),
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeProviderSessionId).toBe('thread-resume')
+    expect(plan.resumeProviderSessionId).toBeNull()
     expect(plan.refreshThreadInstructions).toBe(true)
+    expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(
       planningMocks.resolveAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
@@ -453,6 +424,7 @@ function createRoute(): CodexThreadIdentity {
         provider: 'codex-cli',
       }),
     ),
+    routeFingerprint: 'route-test',
     routeId: 'route-test',
   }
 }
@@ -485,8 +457,11 @@ function createSession(input?: {
         provider: 'codex-cli',
       }),
     ),
+    codexResume: input?.resumeState ?? null,
+    codexTarget: target,
+    conversationId: 'session-test',
     resumeState: input?.resumeState ?? null,
-    schema: 'murph.assistant-session.v1',
+    schema: 'murph.assistant-conversation.v2',
     sessionId: 'session-test',
     target,
     turnCount: input?.turnCount ?? 0,

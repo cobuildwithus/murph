@@ -156,7 +156,7 @@ describe('assistant redaction helpers', () => {
     expect(providerOptions.headers).toBeNull()
 
     const session = redactAssistantSessionForDisplay({
-      schema: 'murph.assistant-session.v1',
+      schema: 'murph.assistant-conversation.v2',
       alias: 'session-alpha',
       binding: {
         actorId: null,
@@ -167,6 +167,20 @@ describe('assistant redaction helpers', () => {
         threadId: 'thread-1',
         threadIsDirect: true,
       },
+      codexResume: null,
+      codexTarget: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: '/tmp/codex-cli',
+        codexHome: '/tmp/codex-home',
+        model: 'gpt-5.4',
+        modelProvider: 'vercel-ai-gateway',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+      },
+      conversationId: 'session-alpha',
       createdAt: '2026-04-08T00:00:00.000Z',
       lastTurnAt: null,
       provider: 'codex-cli',

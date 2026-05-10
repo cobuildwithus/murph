@@ -2479,21 +2479,27 @@ function readAssistantSessionProviderResumeRequirementsFromText(text: string): A
     }];
   }
 
-  const resumeState = recordProperty(parsed, "resumeState");
+  const resumeState =
+    recordProperty(parsed, "codexResume") ?? recordProperty(parsed, "resumeState");
   const providerSessionId =
-    recordStringProperty(resumeState, "providerSessionId")
+    recordStringProperty(resumeState, "threadId")
+    ?? recordStringProperty(resumeState, "providerSessionId")
+    ?? recordStringProperty(parsed, "codexThreadId")
     ?? recordStringProperty(parsed, "providerSessionId");
   if (!providerSessionId) {
     return [];
   }
-  const targetAdapter = recordStringProperty(recordProperty(parsed, "target"), "adapter");
+  const target =
+    recordProperty(parsed, "codexTarget") ?? recordProperty(parsed, "target");
+  const targetAdapter = recordStringProperty(target, "adapter");
   if (targetAdapter && targetAdapter !== "codex-cli") {
     return [];
   }
 
   return [{
     codexRolloutRelativePath:
-      recordStringProperty(resumeState, "codexRolloutRelativePath"),
+      recordStringProperty(resumeState, "rolloutRelativePath")
+      ?? recordStringProperty(resumeState, "codexRolloutRelativePath"),
     providerSessionId,
   }];
 }

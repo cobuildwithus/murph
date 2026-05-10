@@ -11,15 +11,18 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  readAssistantSessionResumeState,
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionCodexRolloutRelativePath,
   writeAssistantSessionProviderSessionId,
-  writeAssistantSessionThreadInstructionsFingerprint,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
 } from './transcript-audit.js'
+import {
+  readCodexThreadRouteFingerprint,
+} from './provider-route.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -34,16 +37,12 @@ export type AssistantProviderResumeStateAction =
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   codexRolloutRelativePath?: string | null
   providerSessionId: string | null
-  routeId: string
-  threadInstructionsFingerprint?: string | null
+  routeFingerprint: string
 }): AssistantSession['resumeState'] {
   return writeAssistantSessionCodexRolloutRelativePath(
-    writeAssistantSessionThreadInstructionsFingerprint(
-      writeAssistantProviderResumeRouteId(
-        writeAssistantSessionProviderSessionId(null, input.providerSessionId),
-        input.routeId,
-      ),
-      input.threadInstructionsFingerprint,
+    writeAssistantProviderResumeRouteId(
+      writeAssistantSessionProviderSessionId(null, input.providerSessionId),
+      input.routeFingerprint,
     ),
     input.codexRolloutRelativePath,
   )
@@ -128,13 +127,14 @@ export async function persistAssistantTurnAndSession(input: {
     action: input.providerResumeStateAction,
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     providerSessionId: input.providerResult.providerSessionId,
-    routeId: input.providerResult.route.routeId,
-    sessionResumeState: input.session.resumeState,
-    threadInstructionsFingerprint: input.providerResult.threadInstructionsFingerprint,
+    routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
+    sessionResumeState: readAssistantSessionResumeState(input.session),
   })
 
   const savedSession = await state.sessions.save({
     ...input.session,
+    codexResume: nextResumeState,
+    codexTarget: nextTarget,
     provider: nextTarget.adapter,
     providerOptions: nextProviderOptions,
     target: nextTarget,
@@ -151,9 +151,8 @@ function resolveAssistantNextResumeState(input: {
   action: AssistantProviderResumeStateAction
   codexRolloutRelativePath?: string | null
   providerSessionId: string | null
-  routeId: string
+  routeFingerprint: string
   sessionResumeState: AssistantSession['resumeState']
-  threadInstructionsFingerprint?: string | null
 }): AssistantSession['resumeState'] {
   switch (input.action) {
     case 'clear':
@@ -164,8 +163,7 @@ function resolveAssistantNextResumeState(input: {
       return resolveAssistantResumeStateFromProviderTurn({
         codexRolloutRelativePath: input.codexRolloutRelativePath,
         providerSessionId: input.providerSessionId,
-        routeId: input.routeId,
-        threadInstructionsFingerprint: input.threadInstructionsFingerprint,
+        routeFingerprint: input.routeFingerprint,
       })
   }
 }

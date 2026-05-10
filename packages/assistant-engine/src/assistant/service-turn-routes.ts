@@ -27,7 +27,6 @@ export function resolveAssistantTurnRoute(
   return resolveAssistantExecutionPlan({
     defaults,
     override: compactAssistantProviderConfigInput(input),
-    resumeState: resolved.session.resumeState,
     sessionTarget: resolved.session.target,
   }).codexRoute
 }

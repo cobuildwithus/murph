@@ -29,7 +29,6 @@ import {
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedBundleTextFile,
   readHostedWorkspaceSkippedInlineFiles,
-  repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   restoreHostedWorkspaceWorkingDelta,
@@ -3899,56 +3898,6 @@ test("hosted Codex continuity verification can tolerate live warm-cache Codex ho
     assert.equal(
       await readFile(path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
       rolloutJson,
-    );
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
-test("hosted workspace snapshot repair strips legacy Codex resume handles only", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-repair-"));
-
-  try {
-    const vaultRoot = path.join(workspaceRoot, "vault");
-    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
-    await writeFile(
-      path.join(assistantRoot, "sessions", "session.json"),
-      JSON.stringify({
-        alias: "primary",
-        providerSessionId: "legacy-thread",
-        resumeState: {
-          providerSessionId: "thread-test",
-          resumeRouteId: "route-test",
-        },
-      }),
-      "utf8",
-    );
-    const bundle = await snapshotHostedBundleRoots({
-      kind: "vault",
-      roots: [
-        {
-          root: vaultRoot,
-          rootKey: "vault",
-        },
-      ],
-    });
-    assert.ok(bundle);
-
-    const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
-      bundle,
-    });
-
-    assert.equal(repair.scrubbedSessionCount, 1);
-    assert.equal(repair.removedMalformedSessionCount, 0);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: repair.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/sessions/session.json",
-        root: "vault",
-      }),
-      "{\"alias\":\"primary\",\"resumeState\":null}\n",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });

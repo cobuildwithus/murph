@@ -1,6 +1,3 @@
-import type {
-  AssistantSessionResumeState,
-} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
@@ -25,14 +22,12 @@ export interface AssistantExecutionPlan {
   codexRoute: CodexThreadIdentity
   primaryProviderConfig: AssistantProviderConfig
   primaryTarget: AssistantModelTarget
-  resumeState: AssistantSessionResumeState | null
 }
 
 export function resolveAssistantExecutionPlan(input: {
   boundaryDefaultTarget?: AssistantModelTarget | null
   defaults: AssistantOperatorDefaults | null
   override?: AssistantProviderConfigInput | null
-  resumeState?: AssistantSessionResumeState | null
   sessionTarget?: AssistantModelTarget | null
 }): AssistantExecutionPlan {
   const baseTarget =
@@ -81,6 +76,5 @@ export function resolveAssistantExecutionPlan(input: {
     codexRoute,
     primaryProviderConfig,
     primaryTarget,
-    resumeState: input.resumeState ?? null,
   }
 }

@@ -116,7 +116,7 @@ describe('assistant session secret sidecars', () => {
     const result = extractAssistantSessionSecretsForPersistence(session)
 
     expect(result.migratedHeaderNames).toEqual([])
-    expect(result.persisted.target).toEqual({
+    expect(result.persisted.codexTarget).toEqual({
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexCommand: null,
@@ -137,7 +137,7 @@ describe('assistant session secret sidecars', () => {
     const result = extractAssistantSessionSecretsForPersistence(session)
 
     expect(result.migratedHeaderNames).toEqual([])
-    expect(result.persisted.target).toEqual(session.target)
+    expect(result.persisted.codexTarget).toEqual(session.target)
     expect(result.secrets).toBeNull()
     expect(mergeAssistantSessionSecrets(session, null)).toBe(session)
   })

@@ -16,6 +16,7 @@ export interface CodexThreadIdentity {
   label: string
   provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
+  routeFingerprint?: string
   routeId: string
 }
 
@@ -28,17 +29,25 @@ export function buildCodexThreadIdentity(
     ? providerConfig.target.codexCommand
     : null
 
+  const routeFingerprint = hashCodexThreadIdentity({
+    codexCommand,
+    provider,
+    providerOptions,
+  })
   return {
-    routeId: hashCodexThreadIdentity({
-      codexCommand,
-      provider,
-      providerOptions,
-    }),
+    routeFingerprint,
+    routeId: routeFingerprint,
     label: buildCodexThreadIdentityLabel(providerConfig),
     provider,
     providerOptions,
     codexCommand,
   }
+}
+
+export function readCodexThreadRouteFingerprint(
+  route: Pick<CodexThreadIdentity, 'routeId' | 'routeFingerprint'> | null | undefined,
+): string {
+  return route?.routeFingerprint ?? route?.routeId ?? ''
 }
 
 function buildCodexThreadIdentityLabel(

@@ -1,5 +1,6 @@
-import type {
-  CodexThreadIdentity,
+import {
+  readCodexThreadRouteFingerprint,
+  type CodexThreadIdentity,
 } from '../provider-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
@@ -15,10 +16,7 @@ export async function recordProviderAttemptStarted(input: {
   activeTurnMessagesPresent: boolean
   attemptCount: number
   at: string
-  conversationMessagesPresent: boolean
   hasResumeProviderSessionId: boolean
-  hasStoredThreadInstructionsFingerprint: boolean
-  hasThreadInstructionsFingerprint: boolean
   providerContinuationKind: string
   refreshThreadInstructions: boolean
   route: CodexThreadIdentity
@@ -26,6 +24,7 @@ export async function recordProviderAttemptStarted(input: {
   turnId: string
   vault: string
 }): Promise<void> {
+  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
   await appendAssistantTurnReceiptEvent({
     vault: input.vault,
     turnId: input.turnId,
@@ -35,7 +34,7 @@ export async function recordProviderAttemptStarted(input: {
       attempt: String(input.attemptCount),
       provider: input.route.provider,
       model: input.route.providerOptions.model ?? 'default',
-      routeId: input.route.routeId,
+      routeFingerprint,
     },
     at: input.at,
   })
@@ -48,7 +47,7 @@ export async function recordProviderAttemptStarted(input: {
     turnId: input.turnId,
     data: {
       attempt: input.attemptCount,
-      routeId: input.route.routeId,
+      routeFingerprint,
       provider: input.route.provider,
       model: input.route.providerOptions.model,
       modelProvider: input.route.providerOptions.modelProvider,
@@ -56,11 +55,7 @@ export async function recordProviderAttemptStarted(input: {
       providerContinuationKind: input.providerContinuationKind,
       refreshThreadInstructions: input.refreshThreadInstructions,
       hasResumeProviderSessionId: input.hasResumeProviderSessionId,
-      hasStoredThreadInstructionsFingerprint:
-        input.hasStoredThreadInstructionsFingerprint,
-      hasThreadInstructionsFingerprint: input.hasThreadInstructionsFingerprint,
       activeTurnMessagesPresent: input.activeTurnMessagesPresent,
-      conversationMessagesPresent: input.conversationMessagesPresent,
     },
     counterDeltas: {
       providerAttempts: 1,
@@ -79,13 +74,12 @@ export async function recordProviderPlan(input: {
   resumeProviderSessionIdPresent: boolean
   route: CodexThreadIdentity
   sessionId: string
-  storedThreadInstructionsFingerprintPresent: boolean
-  threadInstructionsFingerprintPresent: boolean
   turnId: string
   vault: string
   vaultRoot: string
   workingDirectory: string
 }): Promise<void> {
+  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
   const pathDiagnostics = buildProviderPlanPathDiagnostics({
     codexHome: input.route.providerOptions.codexHome ?? null,
     vaultRoot: input.vaultRoot,
@@ -100,17 +94,13 @@ export async function recordProviderPlan(input: {
     turnId: input.turnId,
     data: {
       sessionId: input.sessionId,
-      routeId: input.route.routeId,
+      routeFingerprint,
       providerRequestOrdinal: input.providerRequestOrdinal,
       providerContinuation: input.providerContinuation,
       resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
       refreshThreadInstructions: input.refreshThreadInstructions,
       activeTurnHistoryPresent: input.activeTurnHistoryPresent,
       activeTurnHistoryMessageCount: input.activeTurnHistoryMessageCount,
-      threadInstructionsFingerprintPresent:
-        input.threadInstructionsFingerprintPresent,
-      storedThreadInstructionsFingerprintPresent:
-        input.storedThreadInstructionsFingerprintPresent,
       ...pathDiagnostics,
     },
     at: input.at,
@@ -160,11 +150,12 @@ export async function recordProviderAttemptSucceeded(input: {
   vault: string
 }): Promise<void> {
   const activityLabels = input.activityLabels ?? []
+  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
   const metadata: Record<string, string> = {
     attempt: String(input.attemptCount),
     provider: input.route.provider,
     model: input.route.providerOptions.model ?? 'default',
-    routeId: input.route.routeId,
+    routeFingerprint,
   }
   if (activityLabels.length > 0) {
     metadata.activityCount = String(activityLabels.length)
@@ -191,11 +182,12 @@ export async function recordProviderAttemptFailed(input: {
   vault: string
 }): Promise<void> {
   const activityLabels = input.activityLabels ?? []
+  const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
   const metadata: Record<string, string> = {
     attempt: String(input.attemptCount),
     provider: input.route.provider,
     model: input.route.providerOptions.model ?? 'default',
-    routeId: input.route.routeId,
+    routeFingerprint,
     code: input.errorCode ?? 'unknown',
   }
   if (activityLabels.length > 0) {
@@ -221,7 +213,7 @@ export async function recordProviderAttemptFailed(input: {
     turnId: input.turnId,
     data: {
       attempt: input.attemptCount,
-      routeId: input.route.routeId,
+      routeFingerprint,
       provider: input.route.provider,
       model: input.route.providerOptions.model,
     },

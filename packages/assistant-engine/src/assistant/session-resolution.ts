@@ -196,6 +196,7 @@ export function applyHostedDefaultTargetToResolvedSession(
 
   const projectedSession = normalizeAssistantSessionSnapshot({
     ...resolved.session,
+    codexTarget: defaultTarget,
     target: defaultTarget,
   })
   const continuityChanged =
@@ -213,6 +214,7 @@ export function applyHostedDefaultTargetToResolvedSession(
     ...resolved,
     session: normalizeAssistantSessionSnapshot({
       ...projectedSession,
+      codexResume: null,
       resumeState: null,
     }),
   }

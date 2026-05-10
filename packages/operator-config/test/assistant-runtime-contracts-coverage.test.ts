@@ -89,7 +89,8 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     updatedAt: '2026-04-08T12:05:00.000Z',
   })
 
-  assert.equal(parsedSession.resumeState?.providerSessionId, 'codex-thread-123')
+  assert.equal(parsedSession.codexResume?.threadId, 'codex-thread-123')
+  assert.equal(parsedSession.resumeState?.threadId, 'codex-thread-123')
   assert.equal(parsedSession.providerOptions.continuityFingerprint, runtimeTarget.continuityFingerprint)
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
   assert.equal(parsedSession.providerOptions.modelProvider, 'vercel-ai-gateway')

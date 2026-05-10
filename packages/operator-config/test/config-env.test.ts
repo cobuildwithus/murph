@@ -387,8 +387,8 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       updatedAt: '2026-04-08T12:05:00.000Z',
     })
   assert.deepEqual(parsedAssistantSession.resumeState, {
-    providerSessionId: 'provider-session',
-    resumeRouteId: 'route-1',
+    routeFingerprint: 'route-1',
+    threadId: 'provider-session',
   })
   assert.deepEqual(parsedAssistantSession.providerOptions, {
     approvalPolicy: 'never',

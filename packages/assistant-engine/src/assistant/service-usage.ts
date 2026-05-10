@@ -9,7 +9,10 @@ import type {
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { CodexThreadIdentity } from './provider-route.js'
+import {
+  readCodexThreadRouteFingerprint,
+  type CodexThreadIdentity,
+} from './provider-route.js'
 import type { AssistantProviderUsage } from './providers/types.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type { AssistantExecutionContext } from './execution-context.js'
@@ -57,7 +60,7 @@ export async function recordAssistantUsageEvent(input: {
       providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
       occurredAt: new Date().toISOString(),
       provider: input.providerResult.provider,
-      routeId: input.providerResult.route.routeId,
+      routeId: readCodexThreadRouteFingerprint(input.providerResult.route),
       requestedModel: usage.requestedModel ?? input.providerResult.providerOptions.model,
       servedModel: usage.servedModel ?? null,
       providerName: normalizeNullableString(usage.providerName),
