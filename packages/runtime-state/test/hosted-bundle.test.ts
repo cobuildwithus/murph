@@ -29,7 +29,6 @@ import {
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedBundleTextFile,
   readHostedWorkspaceSkippedInlineFiles,
-  repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   restoreHostedWorkspaceWorkingDelta,
@@ -3905,56 +3904,6 @@ test("hosted Codex continuity verification can tolerate live warm-cache Codex ho
   }
 });
 
-test("hosted workspace snapshot repair strips legacy Codex resume handles only", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-codex-repair-"));
-
-  try {
-    const vaultRoot = path.join(workspaceRoot, "vault");
-    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
-    await writeFile(
-      path.join(assistantRoot, "sessions", "session.json"),
-      JSON.stringify({
-        alias: "primary",
-        providerSessionId: "legacy-thread",
-        resumeState: {
-          providerSessionId: "thread-test",
-          resumeRouteId: "route-test",
-        },
-      }),
-      "utf8",
-    );
-    const bundle = await snapshotHostedBundleRoots({
-      kind: "vault",
-      roots: [
-        {
-          root: vaultRoot,
-          rootKey: "vault",
-        },
-      ],
-    });
-    assert.ok(bundle);
-
-    const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
-      bundle,
-    });
-
-    assert.equal(repair.scrubbedSessionCount, 1);
-    assert.equal(repair.removedMalformedSessionCount, 0);
-    assert.equal(
-      readHostedBundleTextFile({
-        bytes: repair.bundle,
-        expectedKind: "vault",
-        path: ".runtime/operations/assistant/sessions/session.json",
-        root: "vault",
-      }),
-      "{\"alias\":\"primary\",\"resumeState\":null}\n",
-    );
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
 test("hosted assistant hot-state snapshots reject resume state without rollout continuity", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-missing-"));
 
@@ -3964,7 +3913,7 @@ test("hosted assistant hot-state snapshots reject resume state without rollout c
     await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
     await writeFile(
       path.join(assistantRoot, "sessions", "session.json"),
-      "{\"providerSessionId\":\"thread-test\"}\n",
+      "{\"providerSessionId\":\"thread-test\",\"resumeRouteId\":\"route-test\"}\n",
       "utf8",
     );
 
@@ -4027,7 +3976,7 @@ test("hosted full snapshots reject config-only Codex home continuity", async () 
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted"), { recursive: true });
     await writeFile(
       path.join(assistantRoot, "sessions", "session.json"),
-      "{\"providerSessionId\":\"thread-test\"}\n",
+      "{\"providerSessionId\":\"thread-test\",\"resumeRouteId\":\"route-test\"}\n",
       "utf8",
     );
     await writeFile(
@@ -4275,6 +4224,65 @@ test("hosted full snapshots require explicit fixture policy to ignore dangling C
         root: "vault",
       }),
       "{\"resumeState\":{\"providerSessionId\":\"thread-test\",\"resumeRouteId\":\"route-test\"}}",
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted full snapshots ignore non-resumable thread-id-only Codex session state", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-thread-only-continuity-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const assistantRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+    await mkdir(path.join(assistantRoot, "sessions"), { recursive: true });
+    await writeFile(
+      path.join(assistantRoot, "sessions", "legacy-session.json"),
+      JSON.stringify({
+        resumeState: {
+          providerSessionId: "legacy-thread-only",
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(assistantRoot, "sessions", "v2-session.json"),
+      JSON.stringify({
+        codexResume: {
+          threadId: "v2-thread-only",
+        },
+      }),
+      "utf8",
+    );
+
+    const snapshot = await snapshotHostedExecutionContext({
+      vaultRoot,
+    });
+
+    assert.equal(
+      hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+        bundle: snapshot.bundle,
+      }),
+      false,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/legacy-session.json",
+        root: "vault",
+      }),
+      "{\"resumeState\":{\"providerSessionId\":\"legacy-thread-only\"}}",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".runtime/operations/assistant/sessions/v2-session.json",
+        root: "vault",
+      }),
+      "{\"codexResume\":{\"threadId\":\"v2-thread-only\"}}",
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });

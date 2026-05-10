@@ -77,8 +77,19 @@ const TEST_PROVIDER_OPTIONS = {
 } satisfies AssistantSession['providerOptions']
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v1',
+  schema: 'murph.assistant-conversation.v2',
+  conversationId: 'session_http_test',
   sessionId: 'session_http_test',
+  codexTarget: {
+    adapter: 'codex-cli',
+    approvalPolicy: null,
+    codexCommand: null,
+    model: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+  },
   target: {
     adapter: 'codex-cli',
     approvalPolicy: null,
@@ -89,6 +100,7 @@ const TEST_SESSION: AssistantSession = {
     reasoningEffort: null,
     sandbox: null,
   },
+  codexResume: null,
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: { ...TEST_PROVIDER_OPTIONS },

@@ -1,41 +1,50 @@
 import type {
   AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  normalizeCodexResumeState,
+} from '@murphai/operator-config/assistant/codex-resume-state'
 import { normalizeNullableString } from './shared.js'
-import type { CodexThreadIdentity } from './provider-route.js'
+import {
+  readCodexThreadRouteFingerprint,
+  type CodexThreadIdentity,
+} from './provider-route.js'
 
 export function resolveAssistantProviderResumeKey(input: {
-  resumeState: AssistantSessionResumeState | null
+  resumeState: unknown
 }): string | null {
-  if (!input.resumeState) {
+  const resumeState = normalizeCodexResumeState(input.resumeState)
+  if (!resumeState) {
     return null
   }
 
-  return input.resumeState.providerSessionId
+  return resumeState.threadId
 }
 
 export function resolveAssistantRouteResumeBinding(input: {
   route: CodexThreadIdentity
-  sessionResumeState: AssistantSessionResumeState | null
+  sessionResumeState: unknown
 }): AssistantSessionResumeState | null {
+  const sessionResumeState = normalizeCodexResumeState(input.sessionResumeState)
   if (
     doesAssistantResumeBindingMatchRoute({
-      resumeState: input.sessionResumeState,
+      resumeState: sessionResumeState,
       route: input.route,
     })
   ) {
-    return input.sessionResumeState
+    return sessionResumeState
   }
 
   return null
 }
 
 export function doesAssistantResumeBindingMatchRoute(input: {
-  resumeState: AssistantSessionResumeState | null
+  resumeState: unknown
   route: CodexThreadIdentity
 }): boolean {
+  const resumeState = normalizeCodexResumeState(input.resumeState)
   const storedRouteId = normalizeNullableString(
-    input.resumeState?.resumeRouteId,
+    resumeState?.routeFingerprint,
   )
   if (storedRouteId === null) {
     return false
@@ -45,5 +54,5 @@ export function doesAssistantResumeBindingMatchRoute(input: {
   // fingerprint that minted it. Cross-route guesses can resume the wrong
   // upstream thread after target changes, so exact matches are the only safe
   // contract.
-  return storedRouteId === input.route.routeId
+  return storedRouteId === readCodexThreadRouteFingerprint(input.route)
 }

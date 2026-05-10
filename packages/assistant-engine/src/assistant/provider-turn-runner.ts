@@ -18,6 +18,7 @@ import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
 import {
+  readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './provider-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
@@ -229,8 +230,6 @@ function emitProviderPlanTraceEvent(input: {
   providerRequestOrdinal: number | null
   refreshThreadInstructions: boolean
   resumeProviderSessionIdPresent: boolean
-  storedThreadInstructionsFingerprintPresent: boolean
-  threadInstructionsFingerprintPresent: boolean
   workingDirectory: string
 }): void {
   if (!input.onTraceEvent) {
@@ -249,10 +248,6 @@ function emitProviderPlanTraceEvent(input: {
         providerRequestOrdinal: input.providerRequestOrdinal,
         refreshThreadInstructions: input.refreshThreadInstructions,
         resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
-        storedThreadInstructionsFingerprintPresent:
-          input.storedThreadInstructionsFingerprintPresent,
-        threadInstructionsFingerprintPresent:
-          input.threadInstructionsFingerprintPresent,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
             ? 'hosted-stable-proc-cwd'
@@ -292,11 +287,6 @@ async function executeAssistantProviderAttempt(input: {
       attemptPlan.routePlan.resumeProviderSessionId !== null,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
-    storedThreadInstructionsFingerprintPresent:
-      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
-      'string',
-    threadInstructionsFingerprintPresent:
-      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
     vaultRoot: executionPlan.input.vault,
@@ -313,11 +303,6 @@ async function executeAssistantProviderAttempt(input: {
     refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     resumeProviderSessionIdPresent:
       attemptPlan.routePlan.resumeProviderSessionId !== null,
-    storedThreadInstructionsFingerprintPresent:
-      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
-      'string',
-    threadInstructionsFingerprintPresent:
-      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
   await recordProviderAttemptStarted({
@@ -325,13 +310,6 @@ async function executeAssistantProviderAttempt(input: {
       (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
-    conversationMessagesPresent:
-      (attemptPlan.routePlan.conversationMessages?.length ?? 0) > 0,
-    hasStoredThreadInstructionsFingerprint:
-      typeof attemptPlan.session.resumeState?.threadInstructionsFingerprint ===
-      'string',
-    hasThreadInstructionsFingerprint:
-      attemptPlan.routePlan.threadInstructionsFingerprint !== null,
     hasResumeProviderSessionId:
       attemptPlan.routePlan.resumeProviderSessionId !== null,
     providerContinuationKind: attemptPlan.routePlan.providerContinuation.kind,
@@ -381,7 +359,6 @@ async function executeAssistantProviderAttempt(input: {
         route: attemptPlan.route,
         userMessageContent: executionPlan.input.userMessageContent,
       }),
-      continuityContext: attemptPlan.routePlan.continuityContext,
       systemPrompt: attemptPlan.routePlan.systemPrompt,
       turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
       sessionContext: attemptPlan.routePlan.sessionContext
@@ -389,6 +366,7 @@ async function executeAssistantProviderAttempt(input: {
             binding: attemptPlan.session.binding,
           }
         : undefined,
+      freshThreadFallback: attemptPlan.routePlan.freshThreadFallback,
       resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
       refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:
@@ -402,7 +380,6 @@ async function executeAssistantProviderAttempt(input: {
       sandbox: attemptPlan.route.providerOptions.sandbox,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
       activeTurnMessages: attemptPlan.routePlan.activeTurnMessages,
-      conversationMessages: attemptPlan.routePlan.conversationMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,
       profile: attemptPlan.route.providerOptions.profile,
       oss: attemptPlan.route.providerOptions.oss,
@@ -454,8 +431,6 @@ async function executeAssistantProviderAttempt(input: {
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
-        threadInstructionsFingerprint:
-          attemptPlan.routePlan.threadInstructionsFingerprint,
         usageAttribution,
         workingDirectory: attemptPlan.routePlan.workingDirectory,
       },
@@ -466,7 +441,7 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan.profile.threadScope === 'session-thread'
         ? await recoverAssistantSessionAfterProviderFailure({
             error,
-            routeId: attemptPlan.route.routeId,
+            routeId: readCodexThreadRouteFingerprint(attemptPlan.route),
             session: attemptPlan.session,
             vault: executionPlan.input.vault,
           })

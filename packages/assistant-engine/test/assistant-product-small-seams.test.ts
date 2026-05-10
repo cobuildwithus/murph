@@ -935,18 +935,10 @@ describe('assistant product small seams', () => {
     )
     const plan = resolveAssistantExecutionPlan({
       defaults: null,
-      resumeState: {
-        providerSessionId: 'provider-session-1',
-        resumeRouteId: 'route-primary',
-      },
       sessionTarget: createDefaultLocalAssistantModelTarget(),
     })
 
     expect(plan.primaryTarget.adapter).toBeTruthy()
-    expect(plan.resumeState).toEqual({
-      providerSessionId: 'provider-session-1',
-      resumeRouteId: 'route-primary',
-    })
     expect(plan.codexRoute.provider).toBe('codex-cli')
 
     expect(() =>
@@ -1440,12 +1432,15 @@ function createAssistantSession(input?: {
       threadId: null,
       threadIsDirect: null,
     },
+    codexResume: null,
+    codexTarget: target,
+    conversationId: input?.sessionId ?? 'session-test',
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: 'codex-cli',
     providerOptions,
     resumeState: null,
-    schema: 'murph.assistant-session.v1',
+    schema: 'murph.assistant-conversation.v2',
     sessionId: input?.sessionId ?? 'session-test',
     target,
     turnCount: input?.turnCount ?? 0,

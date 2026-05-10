@@ -144,7 +144,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/transcripts",
-    "Assistant transcript tails used for hosted continuity and replay context.",
+    "Assistant transcript tails kept for audit, receipts, and active-turn transcript references.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/cron/automation-runtime.json",

@@ -29,6 +29,11 @@
       "import": "./dist/assistant/provider-config.js",
       "default": "./dist/assistant/provider-config.js"
     },
+    "./assistant/codex-resume-state": {
+      "types": "./dist/assistant/codex-resume-state.d.ts",
+      "import": "./dist/assistant/codex-resume-state.js",
+      "default": "./dist/assistant/codex-resume-state.js"
+    },
     "./assistant/redaction": {
       "types": "./dist/assistant/redaction.d.ts",
       "import": "./dist/assistant/redaction.js",

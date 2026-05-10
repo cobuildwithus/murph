@@ -25,8 +25,21 @@ function createSession(
   overrides: Partial<AssistantSession> = {},
 ): AssistantSession {
   return {
-    schema: 'murph.assistant-session.v1',
+    schema: 'murph.assistant-conversation.v2',
+    conversationId: 'asst_demo',
     sessionId: 'asst_demo',
+    codexTarget: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      codexHome: null,
+      model: null,
+      modelProvider: null,
+      oss: false,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: 'danger-full-access',
+    },
     target: {
       adapter: 'codex-cli',
       approvalPolicy: 'never',
@@ -39,6 +52,7 @@ function createSession(
       reasoningEffort: null,
       sandbox: 'danger-full-access',
     },
+    codexResume: null,
     resumeState: null,
     provider: 'codex-cli',
     providerOptions: {

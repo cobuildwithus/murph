@@ -42,6 +42,12 @@ import {
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
 import {
+  readCodexThreadRouteFingerprint,
+} from './provider-route.js'
+import {
+  readAssistantSessionResumeState,
+} from './provider-state.js'
+import {
   appendAssistantTurnReceiptEvent,
   createAssistantTurnReceipt,
   finalizeAssistantTurnReceipt,
@@ -757,12 +763,15 @@ export async function updateAssistantSessionOptionsLocal(input: {
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
     nextProviderOptions.continuityFingerprint
+  const currentResumeState = readAssistantSessionResumeState(session.session)
 
   return saveAssistantSession(input.vault, {
     ...session.session,
+    codexResume: continuityChanged ? null : currentResumeState,
+    codexTarget: nextTarget,
     provider: nextTarget.adapter,
     providerOptions: nextProviderOptions,
-    resumeState: continuityChanged ? null : session.session.resumeState,
+    resumeState: continuityChanged ? null : currentResumeState,
     target: nextTarget,
     updatedAt: new Date().toISOString(),
   })
@@ -802,22 +811,25 @@ function resolveActiveTurnProviderLoopSession(input: {
   const providerSessionId = normalizeNullableString(
     input.providerResult.providerSessionId,
   )
-  const routeId = normalizeNullableString(input.providerResult.route?.routeId)
-  if (!providerSessionId || !routeId) {
+  const routeFingerprint = normalizeNullableString(
+    readCodexThreadRouteFingerprint(input.providerResult.route),
+  )
+  if (!providerSessionId || !routeFingerprint) {
     return {
       ...input.providerResult.session,
+      codexResume: null,
       resumeState: null,
     }
   }
+  const nextResumeState = resolveAssistantResumeStateFromProviderTurn({
+    providerSessionId,
+    routeFingerprint,
+  })
 
   return {
     ...input.providerResult.session,
-    resumeState: resolveAssistantResumeStateFromProviderTurn({
-      providerSessionId,
-      routeId,
-      threadInstructionsFingerprint:
-        input.providerResult.threadInstructionsFingerprint,
-    }),
+    codexResume: nextResumeState,
+    resumeState: nextResumeState,
   }
 }
 

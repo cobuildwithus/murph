@@ -281,6 +281,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
     userId: string;
   }): Promise<ObservedLinqRequest[]> => {
     const startedAt = Date.now();
+    let nextNudgeAt = startedAt;
 
     while ((Date.now() - startedAt) < 60_000) {
       const matchingRequests = observedRequests.filter((request) =>
@@ -294,6 +295,12 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
 
       if (matchingRequests.length >= input.expectedCount) {
         return matchingRequests;
+      }
+
+      const now = Date.now();
+      if (now >= nextNudgeAt) {
+        nextNudgeAt = now + 2_000;
+        await input.scenario.harness.nudgeUserBestEffort(input.userId);
       }
 
       await sleep(250);

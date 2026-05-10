@@ -1217,7 +1217,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("clears a stale pending nudge when deferred checkpoint status drains mailbox lag", async () => {
+  it("keeps pending nudge follow-up even when deferred checkpoint status catches up", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -1244,7 +1244,7 @@ describe("HostedUserRunner runtime crypto context", () => {
           status: "idle" as const,
         };
       }
-      throw new Error("Unexpected extra stale pending nudge follow-up.");
+      throw new Error("Unexpected extra workspace invocation.");
     });
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
       invoke,
@@ -1290,39 +1290,23 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(activeRun).resolves.toMatchObject({
       status: "idle",
     });
-    await flushDetachedRunnerDrive();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms.at(-1)).toBe("2026-04-27T00:04:00.100Z");
-    expect(
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    await vi.waitFor(() => expect(
       sql.exec(
-        `SELECT alarm_kind,
-                deferred_checkpoint_required,
-                deferred_checkpoint_mailbox_status_json,
-                idle_shutdown_checkpoint_due_at,
-                next_wake_at,
+        `SELECT in_flight,
                 pending_nudge,
                 pending_work
          FROM runner_meta WHERE user_id = ?`,
         "member_123",
       ).toArray(),
     ).toEqual([{
-      alarm_kind: "idle_checkpoint",
-      deferred_checkpoint_required: 1,
-      deferred_checkpoint_mailbox_status_json: JSON.stringify({
-        hostedMailboxSystemImportedSeq: "7",
-        hostedMailboxConversationImportedSeq: "42",
-      }),
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.100Z",
-      next_wake_at: null,
+      in_flight: 0,
       pending_nudge: 0,
       pending_work: 0,
-    }]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
-      }),
-    );
+    }]));
   });
 
   it("keeps pending nudge follow-up when effective mailbox lag remains nonzero", async () => {
@@ -1575,17 +1559,9 @@ describe("HostedUserRunner runtime crypto context", () => {
       pending_nudge: 0,
       pending_work: 0,
     }]));
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.runner",
-        message: "Hosted runner could not verify pending nudge mailbox lag before follow-up.",
-        phase: "scheduled",
-        userId: "member_123",
-      }),
-    );
   });
 
-  it("keeps a newer pending nudge that arrives during drained-lag verification", async () => {
+  it("keeps pending nudge follow-up without status-read clearing races", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -5207,6 +5183,109 @@ describe("HostedUserRunner runtime crypto context", () => {
       next_wake_at: null,
       pending_nudge: 0,
     }]);
+  });
+
+  it("preserves deferred mailbox status across no-progress runs before lifecycle checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxSystemImportedSeq: "0",
+      },
+      snapshotRef: createBundleRef("base-only-deferred-mailbox-preserved"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: null,
+          redactedStatus: {
+            hostedMailboxConversationImportedSeq: "0",
+            hostedMailboxSystemImportedSeq: "1",
+          },
+          status: "idle" as const,
+        };
+      }
+
+      return {
+        nextWakeAt: null,
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+        status: "idle" as const,
+      };
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: {
+        mailboxLag: [
+          {
+            importedSeq: "0",
+            lag: "1",
+            lane: "system",
+            maxSeq: "1",
+          },
+          {
+            importedSeq: "0",
+            lag: "0",
+            lane: "conversation",
+            maxSeq: "0",
+          },
+        ],
+        userId: "member_123",
+        workspace,
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      deferredCheckpointRequired: true,
+      status: "idle",
+    });
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                deferred_checkpoint_mailbox_status_json
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_mailbox_status_json: JSON.stringify({
+        hostedMailboxSystemImportedSeq: "1",
+        hostedMailboxConversationImportedSeq: "0",
+      }),
+      deferred_checkpoint_required: 1,
+    }]);
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      mailboxLag: [
+        {
+          importedSeq: "1",
+          lag: "0",
+          lane: "system",
+          maxSeq: "1",
+        },
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "0",
+        },
+      ],
+      workspace: {
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+      },
+    });
   });
 
   it("keeps a lifecycle checkpoint alarm before the first workspace row exists", async () => {

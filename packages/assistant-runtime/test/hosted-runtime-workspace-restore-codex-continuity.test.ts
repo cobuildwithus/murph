@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  parseAssistantSessionRecord,
   type AssistantSessionResumeState,
   type AssistantSessionBinding,
   type AssistantModelTarget,
@@ -404,7 +403,7 @@ describe("hosted workspace restore Codex continuity", () => {
         snapshotRef: secondSnapshotRef,
         vaultRoot: restoredVaultRoot,
       });
-      const rolloutRelativePath = secondHotSnapshot.resumeState.codexRolloutRelativePath;
+      const rolloutRelativePath = secondHotSnapshot.resumeState.rolloutRelativePath;
       assert.ok(rolloutRelativePath);
       await writeFile(
         path.join(restoredOperatorHomeRoot, ".codex-hosted", "config.toml"),
@@ -517,7 +516,7 @@ describe("hosted workspace restore Codex continuity", () => {
           schema: "murph.hosted-codex-continuity.v1",
           threads: [{
             codexRolloutRelativePath: rolloutRelativePath,
-            providerSessionId: secondHotSnapshot.resumeState.providerSessionId,
+            providerSessionId: secondHotSnapshot.resumeState.threadId,
             rolloutBlob: {
               byteSize: Buffer.byteLength(secondRolloutJson),
               sha256: sha256HostedBundleHex(Buffer.from(secondRolloutJson)),
@@ -683,7 +682,7 @@ describe("hosted workspace restore Codex continuity", () => {
         threadId: "00000000-0000-4000-8000-000000000013",
         workspaceRoot,
       });
-      const rolloutRelativePath = hotSnapshot.resumeState.codexRolloutRelativePath;
+      const rolloutRelativePath = hotSnapshot.resumeState.rolloutRelativePath;
       assert.ok(rolloutRelativePath);
       const tamperedBundle = writeHostedBundleTextFile({
         bytes: hotSnapshot.bundle,
@@ -791,7 +790,7 @@ describe("hosted workspace restore Codex continuity", () => {
         }),
       });
       assert.deepEqual(artifactGetCalls, [hotHash]);
-      const rolloutRelativePath = hotSnapshot.resumeState.codexRolloutRelativePath;
+      const rolloutRelativePath = hotSnapshot.resumeState.rolloutRelativePath;
       assert.ok(rolloutRelativePath);
       assert.equal(
         await readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", rolloutRelativePath), "utf8"),
@@ -947,7 +946,7 @@ describe("hosted workspace restore Codex continuity", () => {
     }
   });
 
-  test("repairs incomplete legacy base Codex resume state during restore", async () => {
+  test("rejects incomplete legacy base Codex resume state during restore", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-base-"));
 
     try {
@@ -984,52 +983,33 @@ describe("hosted workspace restore Codex continuity", () => {
       const baseHash = sha256HostedBundleHex(baseBundle);
       const logRequests: HostedRuntimeLogRequest[] = [];
 
-      await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createRestorePlatform({
-          artifactBytesByHash: new Map([[baseHash, baseBundle]]),
-          logRequests,
-        }),
-        vaultRoot: restoredVaultRoot,
-        workspace: createWorkspaceState({
-          snapshotRef: createBundleRef({
-            hash: baseHash,
-            key: "users/bundles/member-synthetic/base-incomplete.bundle.json",
-            size: baseBundle.byteLength,
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform: createRestorePlatform({
+            artifactBytesByHash: new Map([[baseHash, baseBundle]]),
+            logRequests,
+          }),
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef: createBundleRef({
+              hash: baseHash,
+              key: "users/bundles/member-synthetic/base-incomplete.bundle.json",
+              size: baseBundle.byteLength,
+            }),
           }),
         }),
-      });
-
-      assert.equal(
-        await readFile(
-          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
-          "utf8",
-        ),
-        JSON.stringify({
-          ...legacySession,
-          resumeState: null,
-        }) + "\n",
+        /Hosted Codex continuity manifest is missing/u,
       );
       assert.equal(
-        parseAssistantSessionRecord(JSON.parse(
-          await readFile(
-            path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
-            "utf8",
-          ),
-        )).resumeState,
-        null,
+        JSON.stringify(flattenLogEntries(logRequests)).includes("workspace.legacy_codex_resume_repaired"),
+        false,
       );
-      const repairLogs = flattenLogEntries(logRequests).filter((entry) =>
-        entry.eventCode === "workspace.legacy_codex_resume_repaired"
-      );
-      assert.equal(repairLogs.length, 1);
-      assert.equal(repairLogs[0]?.redactedJson?.snapshotLayer, "base");
-      assert.equal(repairLogs[0]?.redactedJson?.nativeResumeDisabled, true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 
-  test("repairs incomplete legacy hot Codex resume state and clears stale base Codex home", async () => {
+  test("rejects incomplete legacy hot Codex resume state without clearing stale base Codex home as repair", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-hot-"));
 
     try {
@@ -1067,6 +1047,7 @@ describe("hosted workspace restore Codex continuity", () => {
         path.join(hotAssistantRoot, "sessions", "session.json"),
         JSON.stringify({
           providerSessionId: "thread-test",
+          resumeRouteId: "route-test",
           session: "latest",
         }) + "\n",
         "utf8",
@@ -1085,51 +1066,37 @@ describe("hosted workspace restore Codex continuity", () => {
       const hotHash = sha256HostedBundleHex(hotBundle);
       const logRequests: HostedRuntimeLogRequest[] = [];
 
-      await restoreHostedWorkspaceRuntimeJobWorkspace({
-        platform: createRestorePlatform({
-          artifactBytesByHash: new Map([
-            [baseHash, baseBundle],
-            [hotHash, hotBundle],
-          ]),
-          logRequests,
-        }),
-        vaultRoot: restoredVaultRoot,
-        workspace: createWorkspaceState({
-          snapshotRef: buildHostedExecutionLayeredSnapshotRef({
-            base: createBundleRef({
-              hash: baseHash,
-              key: "users/bundles/member-synthetic/base-incomplete-hot.bundle.json",
-              size: baseBundle.byteLength,
-            }),
-            hot: createBundleRef({
-              hash: hotHash,
-              key: "users/bundles/member-synthetic/hot-incomplete.bundle.json",
-              size: hotBundle.byteLength,
+      await assert.rejects(
+        restoreHostedWorkspaceRuntimeJobWorkspace({
+          platform: createRestorePlatform({
+            artifactBytesByHash: new Map([
+              [baseHash, baseBundle],
+              [hotHash, hotBundle],
+            ]),
+            logRequests,
+          }),
+          vaultRoot: restoredVaultRoot,
+          workspace: createWorkspaceState({
+            snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+              base: createBundleRef({
+                hash: baseHash,
+                key: "users/bundles/member-synthetic/base-incomplete-hot.bundle.json",
+                size: baseBundle.byteLength,
+              }),
+              hot: createBundleRef({
+                hash: hotHash,
+                key: "users/bundles/member-synthetic/hot-incomplete.bundle.json",
+                size: hotBundle.byteLength,
+              }),
             }),
           }),
         }),
-      });
-
+        /Hosted Codex continuity manifest is missing/u,
+      );
       assert.equal(
-        await readFile(
-          path.join(restoredVaultRoot, ".runtime", "operations", "assistant", "sessions", "session.json"),
-          "utf8",
-        ),
-        "{\"session\":\"latest\"}\n",
+        JSON.stringify(flattenLogEntries(logRequests)).includes("workspace.legacy_codex_resume_repaired"),
+        false,
       );
-      const restoredOperatorHomeRoot = path.join(
-        path.dirname(restoredVaultRoot),
-        `${path.basename(restoredVaultRoot)}-operator-home`,
-      );
-      await assert.rejects(
-        readFile(path.join(restoredOperatorHomeRoot, ".codex-hosted", "sessions", "old-only.json"), "utf8"),
-      );
-      const repairLogs = flattenLogEntries(logRequests).filter((entry) =>
-        entry.eventCode === "workspace.legacy_codex_resume_repaired"
-      );
-      assert.equal(repairLogs.length, 1);
-      assert.equal(repairLogs[0]?.redactedJson?.snapshotLayer, "hot");
-      assert.equal(repairLogs[0]?.redactedJson?.nativeResumeDisabled, true);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1156,9 +1123,9 @@ async function createHotStateSnapshot(input: {
   const rolloutRelativePath =
     `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${input.threadId}.jsonl`;
   const resumeState = {
-    codexRolloutRelativePath: rolloutRelativePath,
-    providerSessionId: input.threadId,
-    resumeRouteId: `route-${input.sessionName}`,
+    rolloutRelativePath,
+    routeFingerprint: `route-${input.sessionName}`,
+    threadId: input.threadId,
   };
   await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
   await mkdir(path.join(sourceHotOperatorHomeRoot, ".codex-hosted", "sessions", "2026", "05", "06"), {
@@ -1191,14 +1158,14 @@ async function createHotStateSnapshot(input: {
 
 function createCodexSessionRecord(input: {
   alias?: string | null;
-  resumeState?: AssistantSessionResumeState | null;
+  resumeState?: unknown;
   sessionId: string;
 }): {
   alias: string | null;
   binding: AssistantSessionBinding;
   createdAt: string;
   lastTurnAt: string | null;
-  resumeState: AssistantSessionResumeState | null;
+  resumeState: unknown;
   schema: "murph.assistant-session.v1";
   sessionId: string;
   target: AssistantModelTarget;

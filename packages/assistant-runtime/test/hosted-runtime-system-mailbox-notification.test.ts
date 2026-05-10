@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
+import path from "node:path";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
 import type {
   HostedMailboxItem,
 } from "@murphai/hosted-execution/runtime-control";
@@ -53,6 +59,57 @@ beforeEach(() => {
 });
 
 describe("hosted system mailbox notification execution context", () => {
+  it("bootstraps member activation before queued system maintenance", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:bootstrap-before-maintenance",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      timeZone: "America/New_York",
+    });
+
+    try {
+      assert.deepEqual(
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedActivationItem(),
+          vaultRoot: workspace.vaultRoot,
+          wake,
+        }),
+        {
+          reasonCode: "system_mailbox.queued",
+          status: "imported",
+        },
+      );
+      await access(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata));
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceMailboxItemId: "mailbox_item_system_activation",
+          wake: expect.objectContaining({
+            kind: "member.activated",
+          }),
+        }),
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("keeps hosted member context on queued notification wakes", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -288,6 +345,47 @@ function createResolvedNotificationItem(overrides: Partial<{
     },
     route: {
       action: "dispatch-assistant-notification",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createResolvedActivationItem(): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: "member.activated:bootstrap-before-maintenance",
+    expiresAt: null,
+    id: "mailbox_item_system_activation",
+    kind: "member.activated",
+    lane: "system",
+    laneSeq: "1",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_123",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-member-activation",
       advanceProgress: true,
       itemRef: {
         id: item.id,

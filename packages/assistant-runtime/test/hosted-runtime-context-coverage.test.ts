@@ -30,20 +30,6 @@ const mocks = vi.hoisted(() => ({
   vaultInit: vi.fn(),
 }));
 
-vi.mock("@murphai/contracts", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/contracts")>(
-    "@murphai/contracts",
-  );
-
-  return {
-    ...actual,
-    VAULT_LAYOUT: {
-      ...actual.VAULT_LAYOUT,
-      metadata: "vault.json",
-    },
-  };
-});
-
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
     "@murphai/hosted-execution",

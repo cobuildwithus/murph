@@ -24,7 +24,6 @@ import {
   clearHostedCodexContinuityRestoreRoot,
   createHostedPortableWorkspaceManifestFromBundle,
   hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity,
-  repairLegacyHostedWorkspaceSnapshotProviderContinuity,
   readHostedPortableWorkspaceManifestFromBundle,
   restoredWorkspaceRequiresHostedCodexProviderContinuity,
   resolveAssistantStatePaths,
@@ -35,10 +34,8 @@ import {
   writeHostedWorkspaceSkippedInlineFiles,
   type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
-import {
-  buildHostedRuntimeLogContextFields,
-  type HostedRuntimeLogContext,
-  writeHostedRuntimeLogBestEffort,
+import type {
+  HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
   readHostedCanonicalWriteReceiptLogEntries,
@@ -275,25 +272,19 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         platform: input.platform,
         ref: baseSnapshotRef,
       });
-      const baseRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
-        bundle: baseBundle,
-        logContext: input.logContext ?? null,
-        platform: input.platform,
-        snapshotLayer: "base",
-      });
-      materializerBundles.push(async () => baseRepair.bundle);
+      materializerBundles.push(async () => baseBundle);
       if (deltaSnapshotRef) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
       }
       await restoreHostedWorkspaceRuntimeBundle({
-        bundle: baseRepair.bundle,
+        bundle: baseBundle,
         platform: input.platform,
         ref: baseSnapshotRef,
         restored,
         trackSkippedInlineFiles: true,
       });
       const baseProvidesCodexProviderContinuity = hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-        bundle: baseRepair.bundle,
+        bundle: baseBundle,
       });
       await writeHostedWorkspaceBaseRestoreCacheBestEffort({
         cache: {
@@ -449,31 +440,23 @@ async function restoreHostedWorkspaceRuntimeHotLayer(input: {
     platform: input.input.platform,
     ref: input.hotSnapshotRef,
   });
-  const hotRepair = await repairHostedWorkspaceRuntimeBundleProviderContinuity({
-    bundle: hotBundle,
-    logContext: input.input.logContext ?? null,
-    platform: input.input.platform,
-    snapshotLayer: "hot",
-  });
-  const hotBundleRepaired =
-    hotRepair.removedMalformedSessionCount > 0 || hotRepair.scrubbedSessionCount > 0;
   await clearHostedAssistantRuntimeHotState({
-    operatorHomeRoot: hotBundleRepaired || hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
-      bundle: hotRepair.bundle,
+    operatorHomeRoot: hostedAssistantRuntimeHotStateIncludesCodexProviderContinuity({
+      bundle: hotBundle,
     })
       ? input.restored.operatorHomeRoot
       : null,
     vaultRoot: input.restored.vaultRoot,
   });
   await restoreHostedWorkspaceRuntimeBundle({
-    bundle: hotRepair.bundle,
+    bundle: hotBundle,
     platform: input.input.platform,
     ref: input.hotSnapshotRef,
     restored: input.restored,
     appendSkippedInlineFiles: true,
     trackSkippedInlineFiles: true,
   });
-  return hotRepair.bundle;
+  return hotBundle;
 }
 
 function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
@@ -732,42 +715,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
-}
-
-async function repairHostedWorkspaceRuntimeBundleProviderContinuity(input: {
-  bundle: Uint8Array | ArrayBuffer;
-  logContext?: HostedRuntimeLogContext | null;
-  platform: HostedRuntimePlatform;
-  snapshotLayer: "base" | "hot";
-}): Promise<{
-  bundle: Uint8Array | ArrayBuffer;
-  removedMalformedSessionCount: number;
-  scrubbedSessionCount: number;
-}> {
-  const repair = repairLegacyHostedWorkspaceSnapshotProviderContinuity({
-    bundle: input.bundle,
-  });
-  if (repair.removedMalformedSessionCount === 0 && repair.scrubbedSessionCount === 0) {
-    return repair;
-  }
-
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields(input.logContext),
-      component: "workspace",
-      eventCode: "workspace.legacy_codex_resume_repaired",
-      level: "warn",
-      phase: "restore",
-      redactedJson: {
-        nativeResumeDisabled: true,
-        removedMalformedSessionCount: repair.removedMalformedSessionCount,
-        scrubbedSessionCount: repair.scrubbedSessionCount,
-        snapshotLayer: input.snapshotLayer,
-      },
-    },
-    platform: input.platform,
-  });
-  return repair;
 }
 
 async function readHostedWorkspaceBaseRestoreCache(

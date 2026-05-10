@@ -121,23 +121,6 @@ export interface AssistantTurnSharedPlan {
   requestedWorkingDirectory: string
 }
 
-export interface AssistantRouteTurnPlan {
-  cliEnv: NodeJS.ProcessEnv
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
-  continuityContext: string | null
-  provider: AssistantChatProvider
-  providerOptions: AssistantSession['providerOptions']
-  resumeProviderSessionId: string | null
-  sessionContext?: {
-    binding: AssistantSession['binding']
-  }
-  systemPrompt: string | null
-  workingDirectory: string
-}
-
 export interface PersistedUserTurn {
   turnCreatedAt: string
   turnId: string
@@ -153,24 +136,8 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   providerOptions: AssistantProviderSessionOptions
   route: CodexThreadIdentity
   session: AssistantSession
-  threadInstructionsFingerprint?: string | null
   usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
-}
-
-export interface AssistantProviderTurnExecutionPlan {
-  input: AssistantMessageInput
-  memoryTurnEnv: NodeJS.ProcessEnv
-  route: CodexThreadIdentity
-  sharedPlan: AssistantTurnSharedPlan
-  turnId: string
-}
-
-export interface AssistantProviderAttemptPlan {
-  attemptCount: number
-  route: CodexThreadIdentity
-  routePlan: AssistantRouteTurnPlan
-  session: AssistantSession
 }
 
 export type AssistantDeliveryOutcome =

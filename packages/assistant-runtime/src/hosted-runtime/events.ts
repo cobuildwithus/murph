@@ -672,16 +672,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       readHostedAssistantProviderPlanBoolean(record, "refreshThreadInstructions"),
     resumeProviderSessionIdPresent:
       readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
-    storedThreadInstructionsFingerprintPresent:
-      readHostedAssistantProviderPlanBoolean(
-        record,
-        "storedThreadInstructionsFingerprintPresent",
-      ),
-    threadInstructionsFingerprintPresent:
-      readHostedAssistantProviderPlanBoolean(
-        record,
-        "threadInstructionsFingerprintPresent",
-      ),
     workingDirectoryKind,
   };
 }

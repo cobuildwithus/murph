@@ -27,6 +27,11 @@ import {
   assistantResumeKindValues,
   resolveAssistantRuntimeTarget,
 } from './assistant/target-runtime.js'
+import {
+  codexResumeStateSchema,
+  normalizeCodexResumeState,
+  type CodexResumeState,
+} from './assistant/codex-resume-state.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -212,82 +217,16 @@ export const assistantCodexModelTargetSchema = z
   .strict()
 
 export const assistantModelTargetSchema = assistantCodexModelTargetSchema
-const assistantThreadInstructionsFingerprintPattern =
-  /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
-const assistantCodexRolloutRelativePathPattern =
-  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
-const assistantThreadInstructionsFingerprintSchema = z.preprocess(
-  (value) => normalizeAssistantThreadInstructionsFingerprint(value),
-  z
-    .string()
-    .max(160)
-    .regex(assistantThreadInstructionsFingerprintPattern)
-    .nullable(),
-)
-const assistantCodexRolloutRelativePathSchema = z.preprocess(
-  (value) => normalizeAssistantCodexRolloutRelativePath(value),
-  z.string().min(1).nullable(),
-)
-
-export const assistantSessionResumeStateSchema = z
+const legacyAssistantSessionResumeStateSchema = z
   .object({
-    codexRolloutRelativePath:
-      assistantCodexRolloutRelativePathSchema.optional(),
+    codexRolloutRelativePath: z.string().min(1).nullable().optional(),
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
-    threadInstructionsFingerprint:
-      assistantThreadInstructionsFingerprintSchema.optional(),
+    threadInstructionsFingerprint: z.string().min(1).nullable().optional(),
   })
   .strict()
 
-function normalizeAssistantThreadInstructionsFingerprint(
-  value: unknown,
-): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return assistantThreadInstructionsFingerprintPattern.test(normalized)
-    ? normalized
-    : null
-}
-
-function normalizeAssistantCodexRolloutRelativePath(
-  value: unknown,
-): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  if (
-    normalized.length === 0 ||
-    normalized.startsWith('/') ||
-    normalized.includes('\\')
-  ) {
-    return null
-  }
-
-  const segments = normalized.split('/')
-  if (segments.some((segment) =>
-    segment.length === 0 || segment === '.' || segment === '..',
-  )) {
-    return null
-  }
-
-  const match = assistantCodexRolloutRelativePathPattern.exec(normalized)
-  if (
-    !match ||
-    match[1] !== match[4] ||
-    match[2] !== match[5] ||
-    match[3] !== match[6]
-  ) {
-    return null
-  }
-
-  return normalized
-}
+export const assistantSessionResumeStateSchema = codexResumeStateSchema
 
 function createAssistantOpaqueIdSchema(kind: string) {
   return z.string().trim().refine(
@@ -359,12 +298,15 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-export const assistantPersistedSessionSchema = z
+const assistantPersistedSessionV1Schema = z
   .object({
     schema: z.literal('murph.assistant-session.v1'),
     sessionId: assistantSessionIdSchema,
     target: assistantModelTargetSchema,
-    resumeState: assistantSessionResumeStateSchema.nullable().default(null),
+    resumeState: z
+      .union([assistantSessionResumeStateSchema, legacyAssistantSessionResumeStateSchema])
+      .nullable()
+      .default(null),
     alias: z.string().min(1).nullable(),
     binding: assistantSessionBindingSchema,
     createdAt: isoTimestampSchema,
@@ -374,7 +316,33 @@ export const assistantPersistedSessionSchema = z
   })
   .strict()
 
-export const assistantSessionSchema = assistantPersistedSessionSchema.transform((value) =>
+export const assistantPersistedSessionSchema = z
+  .object({
+    schema: z.literal('murph.assistant-conversation.v2'),
+    conversationId: assistantSessionIdSchema,
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    codexTarget: assistantModelTargetSchema,
+    codexResume: assistantSessionResumeStateSchema.nullable().default(null),
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+  })
+  .strict()
+
+const assistantPersistedSessionInputSchema = assistantPersistedSessionSchema
+  .extend({
+    codexResume: z.unknown().nullable().default(null),
+  })
+  .strict()
+
+const assistantPersistedSessionRecordSchema = z.union([
+  assistantPersistedSessionInputSchema,
+  assistantPersistedSessionV1Schema,
+])
+
+export const assistantSessionSchema = assistantPersistedSessionRecordSchema.transform((value) =>
   normalizeAssistantSessionRecord(value),
 )
 
@@ -384,96 +352,92 @@ export function parseAssistantSessionRecord(value: unknown): AssistantSession {
 
 const assistantSessionOutputSchema = assistantPersistedSessionSchema
   .extend({
+    sessionId: assistantSessionIdSchema,
+    target: assistantModelTargetSchema,
+    resumeState: assistantSessionResumeStateSchema.nullable().default(null),
     provider: z.enum(assistantChatProviderValues),
     providerOptions: assistantProviderSessionOptionsSchema,
   })
   .strict()
 
 function normalizeAssistantSessionRecord(
-  value: z.infer<typeof assistantPersistedSessionSchema>,
+  value: z.infer<typeof assistantPersistedSessionRecordSchema>,
 ): AssistantSession {
-  return buildAssistantRuntimeSession({
-    ...value,
-    resumeState: normalizeAssistantSessionResumeState(value.resumeState),
-  })
+  const normalized = normalizeAssistantPersistedConversation(value)
+  return buildAssistantRuntimeSession(normalized)
 }
 
 function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
-  const provider = value.target.adapter
+  const provider = value.codexTarget.adapter
   const resolvedRuntimeTarget = resolveAssistantRuntimeTarget({
     provider,
-    approvalPolicy: value.target.approvalPolicy,
-    codexHome: value.target.codexHome,
-    model: value.target.model,
-    modelProvider: value.target.modelProvider,
-    oss: value.target.oss,
-    profile: value.target.profile,
-    reasoningEffort: value.target.reasoningEffort,
-    sandbox: value.target.sandbox,
+    approvalPolicy: value.codexTarget.approvalPolicy,
+    codexHome: value.codexTarget.codexHome,
+    model: value.codexTarget.model,
+    modelProvider: value.codexTarget.modelProvider,
+    oss: value.codexTarget.oss,
+    profile: value.codexTarget.profile,
+    reasoningEffort: value.codexTarget.reasoningEffort,
+    sandbox: value.codexTarget.sandbox,
   })
   const providerOptions = assistantProviderSessionOptionsSchema.parse({
     continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
     executionDriver: resolvedRuntimeTarget.executionDriver,
     provider,
-    model: value.target.model,
-    reasoningEffort: value.target.reasoningEffort,
+    model: value.codexTarget.model,
+    reasoningEffort: value.codexTarget.reasoningEffort,
     resumeKind: resolvedRuntimeTarget.resumeKind,
-    sandbox: value.target.sandbox,
-    approvalPolicy: value.target.approvalPolicy,
-    profile: value.target.profile,
-    oss: value.target.oss,
-    ...(value.target.codexHome ? { codexHome: value.target.codexHome } : {}),
+    sandbox: value.codexTarget.sandbox,
+    approvalPolicy: value.codexTarget.approvalPolicy,
+    profile: value.codexTarget.profile,
+    oss: value.codexTarget.oss,
+    ...(value.codexTarget.codexHome
+      ? { codexHome: value.codexTarget.codexHome }
+      : {}),
     ...(resolvedRuntimeTarget.modelProvider
       ? { modelProvider: resolvedRuntimeTarget.modelProvider }
       : {}),
   })
   return {
     ...value,
+    sessionId: value.conversationId,
+    target: value.codexTarget,
+    resumeState: value.codexResume,
     provider,
     providerOptions,
   }
 }
 
-function normalizeAssistantSessionResumeState(
-  value: AssistantSessionResumeState | null | undefined,
-): AssistantSessionResumeState | null {
-  if (!value) {
-    return null
+function normalizeAssistantPersistedConversation(
+  value: z.infer<typeof assistantPersistedSessionRecordSchema>,
+): AssistantPersistedSessionRecord {
+  if (value.schema === 'murph.assistant-conversation.v2') {
+    return assistantPersistedSessionSchema.parse({
+      ...value,
+      codexResume: normalizeCodexResumeState(value.codexResume),
+    })
   }
 
-  const providerSessionId =
-    typeof value.providerSessionId === 'string' && value.providerSessionId.trim().length > 0
-      ? value.providerSessionId.trim()
-      : null
-  const resumeRouteId =
-    typeof value.resumeRouteId === 'string' && value.resumeRouteId.trim().length > 0
-      ? value.resumeRouteId.trim()
-      : null
-  const codexRolloutRelativePath = normalizeAssistantCodexRolloutRelativePath(
-    value.codexRolloutRelativePath,
-  )
-  const threadInstructionsFingerprint =
-    normalizeAssistantThreadInstructionsFingerprint(
-      value.threadInstructionsFingerprint,
-    )
-
-  // A stored route id without an upstream provider session id cannot resume
-  // anything safely, so greenfield runtime sessions only keep fully resumable
-  // state.
-  if (!providerSessionId) {
-    return null
-  }
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(codexRolloutRelativePath ? { codexRolloutRelativePath } : {}),
-    providerSessionId,
-    resumeRouteId,
-    ...(threadInstructionsFingerprint
-      ? { threadInstructionsFingerprint }
-      : {}),
+  return assistantPersistedSessionSchema.parse({
+    schema: 'murph.assistant-conversation.v2',
+    conversationId: value.sessionId,
+    alias: value.alias,
+    binding: value.binding,
+    codexTarget: value.target,
+    codexResume: normalizeAssistantSessionResumeState(value.resumeState),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    lastTurnAt: value.lastTurnAt,
+    turnCount: value.turnCount,
   })
+}
+
+function normalizeAssistantSessionResumeState(
+  value: unknown,
+): AssistantSessionResumeState | null {
+  return normalizeCodexResumeState(value)
 }
 
 export const assistantTranscriptEntrySchema = z.object({
@@ -1164,11 +1128,16 @@ export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >
 export type AssistantModelTarget = z.infer<typeof assistantModelTargetSchema>
-export type AssistantSessionResumeState = z.infer<
-  typeof assistantSessionResumeStateSchema
->
+export type AssistantSessionResumeState = CodexResumeState
 type AssistantPersistedSessionRecord = z.infer<typeof assistantPersistedSessionSchema>
-export type AssistantSession = AssistantPersistedSessionRecord & {
+export type AssistantSession = AssistantPersistedSessionRecord &
+  AssistantRuntimeSessionFields & {
+    resumeState: AssistantSessionResumeState | null
+  }
+
+type AssistantRuntimeSessionFields = {
+  sessionId: string
+  target: AssistantModelTarget
   provider: AssistantChatProvider
   providerOptions: z.infer<typeof assistantProviderSessionOptionsSchema>
 }

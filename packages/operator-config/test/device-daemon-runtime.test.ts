@@ -1954,27 +1954,32 @@ test('default spawn helper covers pid-less and synchronous child-process failure
 })
 
 test('default spawn helper closes the first log descriptor when opening the second one fails', async () => {
+  const vault = await createTempVault('operator-config-daemon-log-open-')
   const closedDescriptors: number[] = []
   let openCalls = 0
 
   const processModule = await importDeviceDaemonProcessWithMocks(() => {
-    vi.doMock('node:fs/promises', () => ({
-      mkdir: async () => undefined,
-    }))
-    vi.doMock('node:fs', () => ({
-      chmodSync: () => undefined,
-      closeSync: (fd: number) => {
-        closedDescriptors.push(fd)
-      },
-      openSync: () => {
-        openCalls += 1
-        if (openCalls === 1) {
-          return 11
-        }
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>()
+      const regularFileStats = actual.statSync(process.execPath)
 
-        throw new Error('second log open failed')
-      },
-    }))
+      return {
+        ...actual,
+        closeSync: (fd: number) => {
+          closedDescriptors.push(fd)
+        },
+        fchmodSync: () => undefined,
+        fstatSync: () => regularFileStats,
+        openSync: () => {
+          openCalls += 1
+          if (openCalls === 1) {
+            return 11
+          }
+
+          throw new Error('second log open failed')
+        },
+      }
+    })
   })
   await assert.rejects(
     () =>
@@ -1982,8 +1987,8 @@ test('default spawn helper closes the first log descriptor when opening the seco
         command: process.execPath,
         args: [...deviceDaemonChildFixtureArgs],
         env: {},
-        stdoutPath: '/tmp/operator-config-daemon/stdout.log',
-        stderrPath: '/tmp/operator-config-daemon/stderr.log',
+        stdoutPath: path.join(vault, 'stdout.log'),
+        stderrPath: path.join(vault, 'stderr.log'),
       }),
     (error) =>
       error instanceof Error &&

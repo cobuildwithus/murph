@@ -90,19 +90,23 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedBrowserVaultReplicaRefreshPreparation> {
-  const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-    platform: input.platform,
-    vaultRoot: input.vaultRoot,
-    workspace: input.workspace,
+  const restored = input.workspace
+    ? await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: input.platform,
+        vaultRoot: input.vaultRoot,
+        workspace: input.workspace,
+      })
+    : {
+        mode: "null-bootstrap" as const,
+        restoreWasCold: false,
+        vaultRoot: path.resolve(input.vaultRoot),
+      };
+  const sourceManifest = await listCanonicalSourceManifest(restored.vaultRoot);
+  const replica = await createHostedBrowserVaultReplicaForSourceState({
+    generatedAt: input.generatedAt,
+    sourceStateHash: input.sourceStateHash,
+    vaultRoot: restored.vaultRoot,
   });
-  const [sourceManifest, replica] = await Promise.all([
-    listCanonicalSourceManifest(restored.vaultRoot),
-    createHostedBrowserVaultReplicaForSourceState({
-      generatedAt: input.generatedAt,
-      sourceStateHash: input.sourceStateHash,
-      vaultRoot: restored.vaultRoot,
-    }),
-  ]);
 
   return {
     content: summarizeHostedBrowserVaultReplicaContent(replica),

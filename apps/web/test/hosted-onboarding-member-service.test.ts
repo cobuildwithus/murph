@@ -643,6 +643,7 @@ describe("abortHostedInvitePhoneCode", () => {
       data: {
         signupPhoneCodeSendAttemptId: null,
         signupPhoneCodeSendAttemptStartedAt: null,
+        signupPhoneCodeSentAt: new Date("2026-04-07T01:00:05.000Z"),
       },
     });
   });

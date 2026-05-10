@@ -93,8 +93,19 @@ import { runAssistantDoctor } from '../src/assistant/doctor.ts'
 const testNow = '2026-04-08T12:00:00.000Z'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v1',
+  schema: 'murph.assistant-conversation.v2',
+  conversationId: 'session-doctor-demo',
   sessionId: 'session-doctor-demo',
+  codexTarget: {
+    adapter: 'codex-cli',
+    approvalPolicy: null,
+    codexCommand: null,
+    model: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+  },
   target: {
     adapter: 'codex-cli',
     approvalPolicy: null,
@@ -105,6 +116,7 @@ const BASE_SESSION: AssistantSession = {
     reasoningEffort: null,
     sandbox: null,
   },
+  codexResume: null,
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
@@ -189,9 +201,9 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
 function toPersistedSessionFile(session: AssistantSession) {
   return {
     schema: session.schema,
-    sessionId: session.sessionId,
-    target: session.target,
-    resumeState: session.resumeState,
+    conversationId: session.conversationId,
+    codexTarget: session.codexTarget,
+    codexResume: session.codexResume,
     alias: session.alias,
     binding: session.binding,
     createdAt: session.createdAt,

@@ -5811,7 +5811,7 @@ describe('assistant auto-reply runtime', () => {
           candidates.map(createCapturelessReplyGroupItem),
         )
         if (!context) {
-          throw new Error('expected replay context')
+          throw new Error('expected mailbox group context')
         }
 
         await reply.processAssistantAutoReplyGroup({
@@ -6024,17 +6024,17 @@ describe('assistant auto-reply runtime', () => {
     const inboxServices = createInboxServices({
       show: vi.fn(),
     })
-    const replayContext = reply.createAssistantAutoReplyGroupContext([
+    const activeTurnContext = reply.createAssistantAutoReplyGroupContext([
       createCapturelessReplyGroupItem(initialInput),
       createCapturelessReplyGroupItem(lateInput),
     ])
-    if (!replayContext) {
-      throw new Error('expected replay context')
+    if (!activeTurnContext) {
+      throw new Error('expected active-turn group context')
     }
 
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
-      context: replayContext,
+      context: activeTurnContext,
       enabledChannels: ['linq'],
       executionContext,
       inboxServices,

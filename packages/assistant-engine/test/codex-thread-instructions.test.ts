@@ -10,6 +10,7 @@ vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
 }))
 
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   executeCodexAssistantTurnAttempt,
@@ -34,12 +35,6 @@ describe('Codex thread instructions', () => {
 
     await expect(
       executeCodexAssistantTurnAttempt({
-        conversationMessages: [
-          {
-            content: 'Earlier answer.',
-            role: 'assistant',
-          },
-        ],
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
@@ -61,7 +56,6 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(
       [
-        'Conversation so far:\nAssistant:\nEarlier answer.',
         'Current Murph runtime context.',
         'User message:\nWhat changed?',
       ].join('\n\n'),
@@ -82,12 +76,6 @@ describe('Codex thread instructions', () => {
     })
 
     await executeCodexAssistantTurnAttempt({
-      conversationMessages: [
-        {
-          content: 'Old transcript fallback.',
-          role: 'assistant',
-        },
-      ],
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -111,9 +99,83 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.prompt).toBe(
       ['Current Murph runtime context.', 'User message:\nContinue.'].join('\n\n'),
     )
-    expect(appServerInput.prompt).not.toContain('Old transcript fallback.')
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
     expect(appServerInput.resumeSessionId).toBe('thread-resume')
+  })
+
+  it('starts stale-resume fallback with fresh thread instructions', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'thread/resume failed: no rollout found for thread id stale-thread',
+          {
+            retryable: true,
+            staleResume: true,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        finalMessage: 'done',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'thread-fresh',
+        stderr: '',
+        stdout: '',
+        threadId: 'thread-fresh',
+        turnId: 'turn-fresh',
+      })
+
+    await expect(
+      executeCodexAssistantTurnAttempt({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        env: {},
+        developerInstructions: null,
+        freshThreadFallback: {
+          developerInstructions: 'Stable Murph instructions.',
+          sessionContext: {
+            binding: {
+              actorId: 'actor-1',
+              channel: 'telegram',
+              conversationKey: null,
+              delivery: null,
+              identityId: 'identity-1',
+              threadId: 'thread-telegram',
+              threadIsDirect: true,
+            },
+          },
+          turnContextPrompt: 'Current Murph runtime context.',
+        },
+        refreshThreadInstructions: false,
+        resumeProviderSessionId: 'stale-thread',
+        userPrompt: 'Continue.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+    })
+
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({
+        developerInstructions: null,
+        refreshThreadInstructions: false,
+        resumeSessionId: 'stale-thread',
+      })
+    const fallbackInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+      .calls[1]?.[0]
+    expect(fallbackInput).toMatchObject({
+      developerInstructions: 'Stable Murph instructions.',
+      refreshThreadInstructions: true,
+      resumeSessionId: undefined,
+    })
+    expect(fallbackInput.prompt).toContain('Current Murph runtime context.')
+    expect(fallbackInput.prompt).toContain('Conversation context:')
+    expect(fallbackInput.prompt).toContain('thread: thread-telegram')
+    expect(fallbackInput.prompt).toContain('User message:\nContinue.')
+    expect(fallbackInput.prompt).not.toContain('Stable Murph instructions.')
   })
 
   it('does not promote or replay legacy system prompts', async () => {

@@ -1,89 +1,45 @@
 import { z } from 'zod'
 import {
   assistantPersistedSessionSchema,
-  assistantSessionResumeStateSchema,
   parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  buildCodexResumeState,
+  normalizeCodexResumeState,
+  normalizeCodexRolloutRelativePath,
+} from '@murphai/operator-config/assistant/codex-resume-state'
 import { normalizeNullableString } from './shared.js'
 
-const assistantThreadInstructionsFingerprintPattern =
-  /^thread-instructions-v1:[a-f0-9]{64}:[a-f0-9]{64}$/u
-const assistantCodexRolloutRelativePathPattern =
-  /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$/u
-
-function normalizeAssistantCodexRolloutRelativePath(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  if (
-    normalized.length === 0 ||
-    normalized.startsWith('/') ||
-    normalized.includes('\\')
-  ) {
-    return null
-  }
-
-  const segments = normalized.split('/')
-  if (segments.some((segment) =>
-    segment.length === 0 || segment === '.' || segment === '..',
-  )) {
-    return null
-  }
-
-  const match = assistantCodexRolloutRelativePathPattern.exec(normalized)
-  if (
-    !match ||
-    match[1] !== match[4] ||
-    match[2] !== match[5] ||
-    match[3] !== match[6]
-  ) {
-    return null
-  }
-
-  return normalized
-}
-
-function normalizeAssistantThreadInstructionsFingerprint(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return assistantThreadInstructionsFingerprintPattern.test(normalized)
-    ? normalized
-    : null
-}
-
 export function readAssistantProviderResumeRouteId(input: {
+  codexResume?: AssistantSessionResumeState | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
-  return normalizeNullableString(resumeState?.resumeRouteId) ?? null
+  return normalizeNullableString(resumeState?.routeFingerprint) ?? null
 }
 
 export function readAssistantProviderSessionId(input: {
+  codexResume?: AssistantSessionResumeState | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
-  return normalizeNullableString(resumeState?.providerSessionId) ?? null
+  return normalizeNullableString(resumeState?.threadId) ?? null
 }
 
 export function readAssistantCodexRolloutRelativePath(input: {
+  codexResume?: AssistantSessionResumeState | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
   const resumeState = readAssistantSessionResumeState(input)
-  return normalizeAssistantCodexRolloutRelativePath(
-    resumeState?.codexRolloutRelativePath,
-  )
+  return normalizeCodexRolloutRelativePath(resumeState?.rolloutRelativePath)
 }
 
 export function readAssistantSessionResumeState(
   input:
     | {
+        codexResume?: AssistantSessionResumeState | null
         resumeState?: AssistantSessionResumeState | null
       }
     | AssistantSession
@@ -94,72 +50,54 @@ export function readAssistantSessionResumeState(
     return null
   }
 
+  if ('codexResume' in input) {
+    return normalizeAssistantSessionResumeState(input.codexResume)
+  }
+
   if ('resumeState' in input) {
-    const normalizedResumeState = normalizeAssistantSessionResumeState(input.resumeState)
-    if (normalizedResumeState) {
-      return normalizedResumeState
-    }
+    return normalizeAssistantSessionResumeState(input.resumeState)
   }
 
   return null
 }
 
 export function writeAssistantProviderResumeRouteId(
-  resumeState: AssistantSessionResumeState | null | undefined,
+  resumeState: unknown,
   routeId: string | null | undefined,
-): AssistantSessionResumeState | null {
-  return writeAssistantSessionResumeRouteId(resumeState, routeId)
-}
-
-export function writeAssistantSessionProviderSessionId(
-  resumeState: AssistantSessionResumeState | null | undefined,
-  providerSessionId: string | null | undefined,
-): AssistantSessionResumeState | null {
-  const current = normalizeAssistantSessionResumeState(resumeState)
-  const normalizedProviderSessionId = normalizeNullableString(providerSessionId)
-  if (!normalizedProviderSessionId) {
-    return null
-  }
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(current?.codexRolloutRelativePath
-      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
-      : {}),
-    providerSessionId: normalizedProviderSessionId,
-    resumeRouteId: current?.resumeRouteId ?? null,
-    ...(current?.threadInstructionsFingerprint
-      ? { threadInstructionsFingerprint: current.threadInstructionsFingerprint }
-      : {}),
-  })
-}
-
-export function writeAssistantSessionThreadInstructionsFingerprint(
-  resumeState: AssistantSessionResumeState | null | undefined,
-  threadInstructionsFingerprint: string | null | undefined,
 ): AssistantSessionResumeState | null {
   const current = normalizeAssistantSessionResumeState(resumeState)
   if (!current) {
     return null
   }
 
-  const normalizedThreadInstructionsFingerprint = normalizeAssistantThreadInstructionsFingerprint(
-    threadInstructionsFingerprint,
-  )
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(current.codexRolloutRelativePath
-      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
-      : {}),
-    providerSessionId: current.providerSessionId,
-    resumeRouteId: current.resumeRouteId,
-    ...(normalizedThreadInstructionsFingerprint
-      ? { threadInstructionsFingerprint: normalizedThreadInstructionsFingerprint }
-      : {}),
+  return buildCodexResumeState({
+    rolloutRelativePath: current.rolloutRelativePath,
+    routeFingerprint: routeId,
+    threadId: current.threadId,
   })
 }
 
+export function writeAssistantSessionProviderSessionId(
+  resumeState: unknown,
+  providerSessionId: string | null | undefined,
+): AssistantSessionResumeState | null {
+  const current = normalizeAssistantSessionResumeState(resumeState)
+  return buildCodexResumeState({
+    rolloutRelativePath: current?.rolloutRelativePath,
+    routeFingerprint: current?.routeFingerprint,
+    threadId: providerSessionId,
+  })
+}
+
+export function writeAssistantSessionThreadInstructionsFingerprint(
+  resumeState: unknown,
+  _threadInstructionsFingerprint: string | null | undefined,
+): AssistantSessionResumeState | null {
+  return normalizeAssistantSessionResumeState(resumeState)
+}
+
 export function writeAssistantSessionCodexRolloutRelativePath(
-  resumeState: AssistantSessionResumeState | null | undefined,
+  resumeState: unknown,
   codexRolloutRelativePath: string | null | undefined,
 ): AssistantSessionResumeState | null {
   const current = normalizeAssistantSessionResumeState(resumeState)
@@ -167,49 +105,17 @@ export function writeAssistantSessionCodexRolloutRelativePath(
     return null
   }
 
-  const normalizedCodexRolloutRelativePath =
-    normalizeAssistantCodexRolloutRelativePath(codexRolloutRelativePath)
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(normalizedCodexRolloutRelativePath
-      ? { codexRolloutRelativePath: normalizedCodexRolloutRelativePath }
-      : {}),
-    providerSessionId: current.providerSessionId,
-    resumeRouteId: current.resumeRouteId,
-    ...(current.threadInstructionsFingerprint
-      ? { threadInstructionsFingerprint: current.threadInstructionsFingerprint }
-      : {}),
+  return buildCodexResumeState({
+    rolloutRelativePath: codexRolloutRelativePath,
+    routeFingerprint: current.routeFingerprint,
+    threadId: current.threadId,
   })
 }
 
 export function normalizeAssistantSessionResumeState(
-  value: AssistantSessionResumeState | null | undefined,
+  value: unknown,
 ): AssistantSessionResumeState | null {
-  if (!value) {
-    return null
-  }
-
-  const providerSessionId = normalizeNullableString(value.providerSessionId)
-  const resumeRouteId = normalizeNullableString(value.resumeRouteId)
-  const codexRolloutRelativePath = normalizeAssistantCodexRolloutRelativePath(
-    value.codexRolloutRelativePath,
-  )
-  const threadInstructionsFingerprint = normalizeAssistantThreadInstructionsFingerprint(
-    value.threadInstructionsFingerprint,
-  )
-
-  if (!providerSessionId) {
-    return null
-  }
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(codexRolloutRelativePath ? { codexRolloutRelativePath } : {}),
-    providerSessionId,
-    resumeRouteId,
-    ...(threadInstructionsFingerprint
-      ? { threadInstructionsFingerprint }
-      : {}),
-  })
+  return normalizeCodexResumeState(value)
 }
 
 export function normalizeAssistantSessionSnapshot(
@@ -221,45 +127,25 @@ export function normalizeAssistantSessionSnapshot(
 export function serializeAssistantSessionForPersistence(
   session: AssistantSession,
 ): z.infer<typeof assistantPersistedSessionSchema> {
-  const target = session.target
+  const target = session.codexTarget ?? session.target
   if (!target) {
-    throw new TypeError('Assistant session target is required.')
+    throw new TypeError('Assistant conversation Codex target is required.')
   }
 
-  const resumeState = normalizeAssistantSessionResumeState(session.resumeState)
+  const resumeState = normalizeAssistantSessionResumeState(
+    session.codexResume ?? session.resumeState,
+  )
 
   return assistantPersistedSessionSchema.parse({
-    schema: 'murph.assistant-session.v1',
-    sessionId: session.sessionId,
-    target,
-    resumeState,
+    schema: 'murph.assistant-conversation.v2',
+    conversationId: session.conversationId ?? session.sessionId,
     alias: session.alias,
     binding: session.binding,
+    codexTarget: target,
+    codexResume: resumeState,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastTurnAt: session.lastTurnAt,
     turnCount: session.turnCount,
-  })
-}
-
-function writeAssistantSessionResumeRouteId(
-  resumeState: AssistantSessionResumeState | null | undefined,
-  routeId: string | null | undefined,
-): AssistantSessionResumeState | null {
-  const current = normalizeAssistantSessionResumeState(resumeState)
-  const providerSessionId = current?.providerSessionId ?? null
-  if (!providerSessionId) {
-    return null
-  }
-
-  return assistantSessionResumeStateSchema.parse({
-    ...(current?.codexRolloutRelativePath
-      ? { codexRolloutRelativePath: current.codexRolloutRelativePath }
-      : {}),
-    providerSessionId,
-    resumeRouteId: normalizeNullableString(routeId),
-    ...(current?.threadInstructionsFingerprint
-      ? { threadInstructionsFingerprint: current.threadInstructionsFingerprint }
-      : {}),
   })
 }

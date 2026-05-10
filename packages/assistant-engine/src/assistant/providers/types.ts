@@ -64,11 +64,6 @@ export interface AssistantProviderTurnInput {
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
   codexHome?: string | null
-  continuityContext?: string | null
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
@@ -82,6 +77,7 @@ export interface AssistantProviderTurnInput {
   reasoningEffort?: string | null
   refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
+  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -95,6 +91,14 @@ export interface AssistantProviderTurnInput {
   workingDirectory: string
 }
 
+export interface AssistantProviderFreshThreadFallbackInput {
+  developerInstructions?: string | null
+  sessionContext?: {
+    binding?: AssistantSessionBinding | null
+  }
+  turnContextPrompt?: string | null
+}
+
 export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -104,11 +108,6 @@ export interface AssistantProviderTurnExecutionInput {
   }>
   activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
-  continuityContext?: string | null
-  conversationMessages?: ReadonlyArray<{
-    content: string | AssistantUserMessageContentPart[]
-    role: 'assistant' | 'user'
-  }>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -117,6 +116,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerConfig: AssistantProviderConfig
   refreshThreadInstructions?: boolean
   resumeProviderSessionId?: string | null
+  freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
