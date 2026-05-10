@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedExecutionEnvironment,
+} from "../src/env.ts";
+import {
   buildHostedExecutionRuntimePlatform,
 } from "../src/runtime-platform.ts";
 import {
@@ -10,8 +13,6 @@ import {
 import {
   TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
   TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
-  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-  TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
 } from "./hosted-execution-fixtures.js";
 import {
   startHostedLocalFullStackScenario,
@@ -26,8 +27,6 @@ const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-syn
 const whoopBaseUrl = "https://whoop-oauth.example.test";
 const whoopClientId = "synthetic-whoop-client";
 const whoopClientSecret = "synthetic-whoop-secret";
-const hostedWebCallbackPublicKeyringJson =
-  `{"v1":${TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON}}`;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 
@@ -44,11 +43,7 @@ describe("hosted local device connect e2e", () => {
           TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
         HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
           "projects/test/locations/global/keyRings/ring/cryptoKeys/web-wrap",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-        HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: hostedWebCallbackPublicKeyringJson,
-        HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-        MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS: "1",
         WHOOP_BASE_URL: whoopBaseUrl,
         WHOOP_CLIENT_ID: whoopClientId,
         WHOOP_CLIENT_SECRET: whoopClientSecret,
@@ -93,12 +88,12 @@ describe("hosted local device connect e2e", () => {
     expect(JSON.stringify(forwardedEnv)).not.toContain(whoopClientSecret);
     expect(JSON.stringify(userEnv)).not.toContain(whoopClientSecret);
 
+    const hostedExecutionEnvironment = readHostedExecutionEnvironment(
+      requireHostedWorkerRuntimeEnv(),
+    );
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: userId,
-      webCallbackSigning: {
-        keyId: "v1",
-        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
+      webCallbackSigning: hostedExecutionEnvironment.webCallbackSigning,
       webControlBaseUrl: requireScenario().harness.webBaseUrl,
     });
     const connectLink = await platform.deviceSyncPort?.createConnectLink({
@@ -113,8 +108,11 @@ describe("hosted local device connect e2e", () => {
     expect(connectLink?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
     const authorizationUrl = new URL(connectLink?.authorizationUrl ?? "");
     expect(authorizationUrl.origin).toBe(requireScenario().harness.webBaseUrl);
-    expect(authorizationUrl.pathname).toMatch(/^\/device\/connect\/dc_[A-Za-z0-9_-]+$/u);
-    expect(authorizationUrl.search).toBe("");
+    expect(authorizationUrl.pathname).toBe("/connect");
+    expect(authorizationUrl.searchParams.get("deviceConnectIntent")).toMatch(
+      /^dc_[A-Za-z0-9_-]{32}$/u,
+    );
+    expect(authorizationUrl.searchParams.get("connectSource")).toBe("whoop");
     expect(connectLink?.authorizationUrl).not.toContain(whoopClientSecret);
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "No device sync providers are configured",
@@ -128,4 +126,14 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
+}
+
+function requireHostedWorkerRuntimeEnv(): NodeJS.ProcessEnv {
+  const workerRuntimeEnv = requireScenario().harness.workerRuntimeEnv;
+
+  if (!workerRuntimeEnv) {
+    throw new Error("Hosted local worker runtime environment was not initialized.");
+  }
+
+  return workerRuntimeEnv;
 }
