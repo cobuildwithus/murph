@@ -2,6 +2,11 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
+import {
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+} from "@/src/lib/hosted-onboarding/legacy-usage-price";
+
 const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
@@ -67,7 +72,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_pulse_recurring",
       stripe: mocks.stripe,
-      usagePriceId: "price_pulse_usage",
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription());
     mocks.stripe.subscriptions.update.mockResolvedValue(makeSubscription({
@@ -277,13 +281,56 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
   });
 
-  test("rejects subscriptions missing the configured metered usage item", async () => {
+  test("drops legacy metered usage items when ending the trial", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       items: [
         makeSubscriptionItem({
           priceId: "price_pulse_recurring",
           quantity: 1,
           usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_pulse_usage",
+          quantity: null,
+          usageType: "metered",
+        }),
+      ],
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        items: [
+          {
+            deleted: true,
+            id: "si_price_pulse_usage",
+          },
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  test("rejects metered usage items with unsupported quantities", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_pulse_usage",
+          quantity: 1,
+          usageType: "metered",
         }),
       ],
     }));
@@ -299,13 +346,34 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
-  test("accepts a single recurring Pulse item when metering is disabled", async () => {
-    mocks.requireHostedStripeBillingPlanConfig.mockReturnValueOnce({
-      billingPlanCode: "launch_monthly",
-      priceId: "price_pulse_recurring",
-      stripe: mocks.stripe,
-      usagePriceId: null,
+  test("rejects unmarked no-quantity metered items", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_unknown_usage",
+          quantity: null,
+          usageType: "metered",
+        }),
+      ],
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
     });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("accepts a single recurring Pulse item", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       items: [
         makeSubscriptionItem({
@@ -360,11 +428,6 @@ function makeSubscription(input: {
           quantity: 1,
           usageType: "licensed",
         }),
-        makeSubscriptionItem({
-          priceId: "price_pulse_usage",
-          quantity: null,
-          usageType: "metered",
-        }),
       ],
     },
     latest_invoice: input.latestInvoice ?? null,
@@ -386,6 +449,12 @@ function makeSubscriptionItem(input: {
     object: "subscription_item",
     price: {
       id: input.priceId,
+      metadata: input.priceId === "price_pulse_usage"
+        ? {
+            [HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY]:
+              HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+          }
+        : {},
       object: "price",
       recurring: {
         interval: "month",

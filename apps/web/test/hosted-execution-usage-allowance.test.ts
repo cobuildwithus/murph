@@ -302,7 +302,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("uses the Edge usage-based pricing notice when an Edge member is over limit", async () => {
+  it("uses the Edge usage limit notice when an Edge member is over limit", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: 25_000_000n,
@@ -316,9 +316,9 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: false,
       userNotice: {
-        code: "edge_enable_usage_based_pricing",
+        code: "edge_usage_limit_reached",
         message:
-          "Hey, you've reached your usage limit for the month. Enable usage-based pricing: https://withmurph.ai/home",
+          "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
       },
     });
   });

@@ -1,8 +1,6 @@
 export const HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS = [
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-  "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY",
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
-  "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
 ] as const;
 
 const FLAT_PRICE_PLAN_KEYS = [
@@ -10,13 +8,11 @@ const FLAT_PRICE_PLAN_KEYS = [
     code: "launch_monthly",
     label: "monthly",
     priceKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-    usagePriceKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY",
   },
   {
     code: "launch_edge_monthly",
     label: "edge",
     priceKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
-    usagePriceKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
   },
 ] as const;
 
@@ -26,15 +22,12 @@ interface StripePlanStatus {
   code: string;
   label: string;
   priceKey: string;
-  usagePriceKey: string;
   flatPriceReady: boolean;
-  usagePriceReady: boolean;
 }
 
 export interface HostedLocalStripeCheckoutDiagnostics {
   configuredPlanLabels: string[];
   missingFlatPriceKeys: string[];
-  missingUsagePriceKeys: string[];
   secretMode: StripeSecretMode;
 }
 
@@ -45,25 +38,16 @@ export function evaluateHostedLocalStripeCheckoutEnv(
     code: plan.code,
     label: plan.label,
     priceKey: plan.priceKey,
-    usagePriceKey: plan.usagePriceKey,
     flatPriceReady: isConfiguredStripePriceId(env[plan.priceKey]),
-    usagePriceReady: isConfiguredStripePriceId(env[plan.usagePriceKey]),
   }));
-  const aiUsageBillingMode = env.HOSTED_AI_USAGE_BILLING_MODE?.trim() ?? "";
-  const usagePricesRequired = aiUsageBillingMode === "stripe_meter";
 
   return {
     configuredPlanLabels: planStatuses
-      .filter((plan) => plan.flatPriceReady && (!usagePricesRequired || plan.usagePriceReady))
+      .filter((plan) => plan.flatPriceReady)
       .map((plan) => plan.label),
     missingFlatPriceKeys: planStatuses
       .filter((plan) => !plan.flatPriceReady)
       .map((plan) => plan.priceKey),
-    missingUsagePriceKeys: usagePricesRequired
-      ? planStatuses
-        .filter((plan) => plan.flatPriceReady && !plan.usagePriceReady)
-        .map((plan) => plan.usagePriceKey)
-      : [],
     secretMode: classifyStripeSecretKey(env.STRIPE_SECRET_KEY),
   };
 }
@@ -105,16 +89,6 @@ export function writeHostedLocalStripeCheckoutDiagnostics(input: {
         "[setup] Warning: Stripe test checkout is missing plan price env keys: ",
         diagnostics.missingFlatPriceKeys.join(", "),
         ". Create recurring test-mode Prices in Stripe and add their `price_...` ids locally.\n",
-      ].join(""),
-    );
-  }
-
-  if (diagnostics.missingUsagePriceKeys.length > 0) {
-    stderrTarget.write(
-      [
-        "[setup] Warning: HOSTED_AI_USAGE_BILLING_MODE=stripe_meter is set, but usage price env keys are missing: ",
-        diagnostics.missingUsagePriceKeys.join(", "),
-        ". Either add test-mode metered Prices or leave HOSTED_AI_USAGE_BILLING_MODE=disabled locally.\n",
       ].join(""),
     );
   }

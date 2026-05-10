@@ -12,15 +12,11 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_monthly_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
-      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_usage_edge_monthly_123",
-      HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY: "price_usage_monthly_123",
-      HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME: "murph_ai_tokens",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
     }));
 
-    expect(environment.aiUsageBillingMode).toBe("disabled");
     expect(environment.allowedMutationOrigins).toEqual([]);
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
     expect(environment.privyAppId).toBe("cm_app_123");
@@ -31,27 +27,6 @@ describe("readHostedOnboardingEnvironment", () => {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
     });
-    expect(environment.stripeUsageMeterEventName).toBe("murph_ai_tokens");
-    expect(environment.stripeUsagePriceIdsByPlan).toEqual({
-      launch_edge_monthly: "price_usage_edge_monthly_123",
-      launch_monthly: "price_usage_monthly_123",
-    });
-  });
-
-  it("reads explicit Stripe-meter AI usage billing mode", () => {
-    const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      HOSTED_AI_USAGE_BILLING_MODE: "stripe_meter",
-    }));
-
-    expect(environment.aiUsageBillingMode).toBe("stripe_meter");
-  });
-
-  it("fails unsupported hosted AI usage billing modes closed to disabled", () => {
-    const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      HOSTED_AI_USAGE_BILLING_MODE: "usage_allowance",
-    }));
-
-    expect(environment.aiUsageBillingMode).toBe("disabled");
   });
 
   it("reads explicit Linq config", () => {

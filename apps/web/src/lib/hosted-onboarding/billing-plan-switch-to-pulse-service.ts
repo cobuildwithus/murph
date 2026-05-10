@@ -20,6 +20,7 @@ import {
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
+import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
@@ -48,7 +49,6 @@ export type HostedBillingPlanSwitchToPulseResult =
 
 interface HostedStripePlanConfig {
   priceId: string;
-  usagePriceId: string;
 }
 
 interface HostedSwitchScheduleContext {
@@ -354,18 +354,9 @@ function requireHostedSwitchPlanConfig(
     billingPlanCode,
   });
 
-  if (!config.usagePriceId) {
-    throw hostedOnboardingError({
-      code: "STRIPE_USAGE_PRICE_ID_REQUIRED",
-      httpStatus: 500,
-      message: "Hosted plan switching requires configured Stripe usage prices.",
-    });
-  }
-
   return {
     priceId: config.priceId,
     stripe: config.stripe,
-    usagePriceId: config.usagePriceId,
   };
 }
 
@@ -439,25 +430,31 @@ function assertHostedStripeCanonicalEdgeSubscriptionItems(input: {
 }): void {
   const items = input.subscription.items?.data ?? [];
   const recurringItems = items.filter((item) => item.price?.id === input.edgeConfig.priceId);
-  const usageItems = items.filter((item) => item.price?.id === input.edgeConfig.usagePriceId);
+  const unsupportedItems = items.filter((item) =>
+    item.price?.id !== input.edgeConfig.priceId &&
+    !isHostedStripeLegacyAiUsageMeteredItem(item)
+  );
 
   if (
-    items.length !== 2 ||
     recurringItems.length !== 1 ||
-    usageItems.length !== 1
+    unsupportedItems.length > 0
   ) {
     throw buildHostedStripeSubscriptionItemsUnsupportedError();
   }
 
   const recurringItem = recurringItems[0];
-  const usageItem = usageItems[0];
 
   if (!isHostedStripeLicensedMonthlyPrice(recurringItem.price) || !isSupportedRecurringQuantity(recurringItem)) {
     throw buildHostedStripeSubscriptionItemsUnsupportedError();
   }
 
-  if (!isHostedStripeMeteredMonthlyPrice(usageItem.price) || hasSubscriptionItemQuantity(usageItem)) {
-    throw buildHostedStripeSubscriptionItemsUnsupportedError();
+  for (const item of items) {
+    if (
+      item.id !== recurringItem.id &&
+      !isHostedStripeLegacyAiUsageMeteredItem(item)
+    ) {
+      throw buildHostedStripeSubscriptionItemsUnsupportedError();
+    }
   }
 
 }
@@ -468,19 +465,9 @@ function isHostedStripeLicensedMonthlyPrice(price: Stripe.Price | null | undefin
     price.recurring.usage_type === "licensed";
 }
 
-function isHostedStripeMeteredMonthlyPrice(price: Stripe.Price | null | undefined): boolean {
-  return price?.recurring?.interval === "month" &&
-    (price.recurring.interval_count ?? 1) === 1 &&
-    price.recurring.usage_type === "metered";
-}
-
 function isSupportedRecurringQuantity(item: Stripe.SubscriptionItem): boolean {
   const quantity = readHostedStripeObjectNumber(item, "quantity");
   return quantity === null || quantity === 1;
-}
-
-function hasSubscriptionItemQuantity(item: Stripe.SubscriptionItem): boolean {
-  return readHostedStripeObjectNumber(item, "quantity") !== null;
 }
 
 async function retrieveHostedBillingPlanSwitchSchedule(input: {
@@ -583,9 +570,6 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
         price: input.context.edgeConfig.priceId,
         quantity: 1,
       },
-      {
-        price: input.context.edgeConfig.usagePriceId,
-      },
     ],
     start_date: input.phase.start_date,
   };
@@ -603,9 +587,6 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
       {
         price: context.pulseConfig.priceId,
         quantity: 1,
-      },
-      {
-        price: context.pulseConfig.usagePriceId,
       },
     ],
     metadata: buildHostedBillingPlanSwitchFuturePhaseMetadata(context),
@@ -706,7 +687,6 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
     currentPhase.end_date === context.currentPeriodEndUnix &&
     hasHostedStripeSchedulePhaseItems(currentPhase, {
       recurringPriceId: context.edgeConfig.priceId,
-      usagePriceId: context.edgeConfig.usagePriceId,
     }) &&
     futurePhase.start_date === context.currentPeriodEndUnix &&
     futurePhase.end_date > context.currentPeriodEndUnix &&
@@ -715,7 +695,6 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
     hasHostedStripeTrialMetadataClears(futurePhase.metadata) &&
     hasHostedStripeSchedulePhaseItems(futurePhase, {
       recurringPriceId: context.pulseConfig.priceId,
-      usagePriceId: context.pulseConfig.usagePriceId,
     });
 }
 
@@ -732,24 +711,18 @@ function hasHostedStripeSchedulePhaseItems(
   phase: Stripe.SubscriptionSchedule.Phase,
   expected: {
     recurringPriceId: string;
-    usagePriceId: string;
   },
 ): boolean {
-  if (phase.items.length !== 2) {
+  if (phase.items.length !== 1) {
     return false;
   }
 
   const recurringItems = phase.items.filter((item) =>
     coerceStripeObjectId(item.price) === expected.recurringPriceId
   );
-  const usageItems = phase.items.filter((item) =>
-    coerceStripeObjectId(item.price) === expected.usagePriceId
-  );
 
   return recurringItems.length === 1 &&
-    usageItems.length === 1 &&
-    readHostedStripeObjectNumber(recurringItems[0], "quantity") === 1 &&
-    readHostedStripeObjectNumber(usageItems[0], "quantity") === null;
+    readHostedStripeObjectNumber(recurringItems[0], "quantity") === 1;
 }
 
 function hasHostedStripeTrialMetadataClears(metadata: Stripe.Metadata | null): boolean {
@@ -788,11 +761,9 @@ function buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(
 ): string {
   return `hosted-billing-switch-to-pulse:update:${sha256Hex(JSON.stringify({
     currentPeriodEnd: context.currentPeriodEndUnix,
-    edgePriceId: context.edgeConfig.priceId,
-    edgeUsagePriceId: context.edgeConfig.usagePriceId,
     memberId: context.memberId,
+    edgePriceId: context.edgeConfig.priceId,
     pulsePriceId: context.pulseConfig.priceId,
-    pulseUsagePriceId: context.pulseConfig.usagePriceId,
     stripeSubscriptionId: context.stripeSubscriptionId,
     targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
   }))}`;

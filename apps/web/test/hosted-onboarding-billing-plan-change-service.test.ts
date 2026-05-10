@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
+import {
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+} from "@/src/lib/hosted-onboarding/legacy-usage-price";
+
 const mocks = vi.hoisted(() => ({
   applyStripeSubscriptionUpdated: vi.fn(),
   getPrisma: vi.fn(),
@@ -87,9 +92,6 @@ describe("upgradeHostedBillingPlan", () => {
         ? "price_pulse_recurring"
         : "price_edge_recurring",
       stripe: mocks.stripe,
-      usagePriceId: input.billingPlanCode === "launch_monthly"
-        ? "price_pulse_usage"
-        : "price_edge_usage",
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription({
       customer: "cus_123",
@@ -108,7 +110,6 @@ describe("upgradeHostedBillingPlan", () => {
       customer: "cus_123",
       items: [
         ["si_recurring", "price_edge_recurring"],
-        ["si_usage", "price_edge_usage"],
         ["si_addon", "price_unknown_addon"],
       ],
       metadata: {
@@ -134,7 +135,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
-  test("updates the existing Pulse subscription items to Edge and leaves unknown items untouched", async () => {
+  test("updates the existing Pulse subscription item to Edge and removes old metered items", async () => {
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
@@ -153,8 +154,8 @@ describe("upgradeHostedBillingPlan", () => {
           quantity: 1,
         },
         {
+          deleted: true,
           id: "si_usage",
-          price: "price_edge_usage",
         },
       ],
       payment_behavior: "pending_if_incomplete",
@@ -186,7 +187,61 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
-  test("recovers when Stripe is already Edge but local billing is still Pulse", async () => {
+  test("rejects quantity-bearing metered subscription items during Edge upgrade", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+        ["si_usage", "price_pulse_usage", 1],
+      ],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects unmarked no-quantity metered subscription items during Edge upgrade", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+        ["si_unknown_metered", "price_unknown_usage"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("recovers when Stripe is already Edge and drops legacy metered items", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
       items: [
@@ -209,7 +264,23 @@ describe("upgradeHostedBillingPlan", () => {
       status: "upgraded",
     });
 
-    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      {
+        expand: ["items.data.price"],
+        items: [
+          {
+            deleted: true,
+            id: "si_usage",
+          },
+        ],
+      },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-billing-plan-upgrade-applied-items:[a-f0-9]{64}$/u,
+        ),
+      },
+    );
     expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "sub_123",
@@ -225,6 +296,60 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
+  test("rejects quantity-bearing metered items when Stripe already has Edge applied", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_usage", "price_edge_usage", 1],
+      ],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
+  test("rejects unmarked no-quantity metered items when Stripe already has Edge applied", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_edge_recurring"],
+        ["si_unknown_metered", "price_unknown_usage"],
+      ],
+      metadata: {
+        billingPlanCode: "launch_edge_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
   test("normalizes stale Stripe metadata before recovering an already-applied Edge upgrade", async () => {
     const staleMetadata: Record<string, string> = {
       billingPlanCode: "launch_monthly",
@@ -238,7 +363,6 @@ describe("upgradeHostedBillingPlan", () => {
       customer: "cus_123",
       items: [
         ["si_recurring", "price_edge_recurring"],
-        ["si_usage", "price_edge_usage"],
       ],
       metadata: staleMetadata,
       status: "active",
@@ -248,7 +372,6 @@ describe("upgradeHostedBillingPlan", () => {
         customer: "cus_123",
         items: [
           ["si_recurring", "price_edge_recurring"],
-          ["si_usage", "price_edge_usage"],
         ],
         metadata: applyStripeMetadataUpdate(staleMetadata, params.metadata ?? {}),
         status: "active",
@@ -312,7 +435,6 @@ describe("upgradeHostedBillingPlan", () => {
       customer: "cus_123",
       items: [
         ["si_recurring", "price_edge_recurring"],
-        ["si_usage", "price_edge_usage"],
       ],
       metadata: staleMetadata,
       status: "active",
@@ -322,7 +444,6 @@ describe("upgradeHostedBillingPlan", () => {
         customer: "cus_123",
         items: [
           ["si_recurring", "price_edge_recurring"],
-          ["si_usage", "price_edge_usage"],
         ],
         metadata: applyStripeMetadataUpdate(staleMetadata, params.metadata ?? {}),
         status: "active",
@@ -397,7 +518,6 @@ describe("upgradeHostedBillingPlan", () => {
         customer: "cus_123",
         items: [
           ["si_recurring", "price_edge_recurring"],
-          ["si_usage", "price_edge_usage"],
         ],
         metadata: applyStripeMetadataUpdate(oldMetadata, params.metadata ?? {}),
         status: "active",
@@ -424,8 +544,8 @@ describe("upgradeHostedBillingPlan", () => {
             quantity: 1,
           },
           {
+            deleted: true,
             id: "si_usage",
-            price: "price_edge_usage",
           },
         ],
         payment_behavior: "pending_if_incomplete",
@@ -594,7 +714,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
-  test("adds the Edge usage item when the Pulse subscription has only the recurring item", async () => {
+  test("updates the recurring item when the Pulse subscription has only the recurring item", async () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
       items: [
@@ -621,9 +741,6 @@ describe("upgradeHostedBillingPlan", () => {
           id: "si_recurring",
           price: "price_edge_recurring",
           quantity: 1,
-        },
-        {
-          price: "price_edge_usage",
         },
       ],
     }), expect.any(Object));
@@ -683,7 +800,7 @@ describe("upgradeHostedBillingPlan", () => {
 
 function makeSubscription(input: {
   customer: string;
-  items: Array<[id: string, priceId: string]>;
+  items: Array<[id: string, priceId: string, quantity?: number | null]>;
   metadata: Record<string, string>;
   pendingUpdate?: boolean;
   status: Stripe.Subscription.Status;
@@ -692,11 +809,22 @@ function makeSubscription(input: {
     customer: input.customer,
     id: "sub_123",
     items: {
-      data: input.items.map(([id, priceId]) => ({
+      data: input.items.map(([id, priceId, quantity]) => ({
         id,
         price: {
           id: priceId,
+          metadata: isLegacyUsagePriceId(priceId)
+            ? {
+                [HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY]:
+                  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+              }
+            : {},
+          recurring: {
+            interval: "month",
+            usage_type: priceId.endsWith("_usage") ? "metered" : "licensed",
+          },
         },
+        ...(quantity === undefined ? {} : { quantity }),
       })),
     },
     metadata: input.metadata,
@@ -704,6 +832,10 @@ function makeSubscription(input: {
     pending_update: input.pendingUpdate ? {} : null,
     status: input.status,
   } as Stripe.Subscription;
+}
+
+function isLegacyUsagePriceId(priceId: string): boolean {
+  return priceId === "price_pulse_usage" || priceId === "price_edge_usage";
 }
 
 function applyStripeMetadataUpdate(

@@ -1,5 +1,3 @@
-import type { HostedAiUsageBillingMode } from "@murphai/hosted-execution";
-
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
@@ -61,7 +59,6 @@ export interface HostedBillingPlanDefinition {
   readonly interval: HostedBillingPlanInterval;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
-  readonly usagePriceIdEnvKey: string;
 }
 
 export interface HostedBillingPlanPresentation {
@@ -82,7 +79,6 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
-    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY",
   },
   launch_edge_monthly: {
     badge: null,
@@ -91,7 +87,6 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     interval: "month",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     recurringAmountUsdCents: 2_000,
-    usagePriceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
@@ -242,32 +237,23 @@ export function listHostedBillingPlanPresentations(input?: {
 }
 
 export function resolveHostedBillingReady(input: {
-  aiUsageBillingMode: HostedAiUsageBillingMode;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeSecretKey: string | null;
-  stripeUsageMeterEventName: string | null;
-  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): boolean {
   if (!input.stripeSecretKey) {
     return false;
   }
 
-  if (input.aiUsageBillingMode === "stripe_meter" && !input.stripeUsageMeterEventName) {
-    return false;
-  }
-
   return HOSTED_BILLING_PLAN_CODES.some((code) =>
-    hasHostedBillingPlanStripePrices(input, code, input.aiUsageBillingMode)
+    hasHostedBillingPlanStripePrice(input, code)
   );
 }
 
 export function resolveConfiguredHostedBillingPlanCodes(input: {
-  aiUsageBillingMode: HostedAiUsageBillingMode;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
-  stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
 }): HostedBillingPlanCode[] {
   return HOSTED_BILLING_PLAN_CODES.filter((code) =>
-    hasHostedBillingPlanStripePrices(input, code, input.aiUsageBillingMode)
+    hasHostedBillingPlanStripePrice(input, code)
   );
 }
 
@@ -299,21 +285,13 @@ function buildHostedBillingPlanPresentation(
   };
 }
 
-function hasHostedBillingPlanStripePrices(
+function hasHostedBillingPlanStripePrice(
   input: {
     stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
-    stripeUsagePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   },
   code: HostedBillingPlanCode,
-  aiUsageBillingMode: HostedAiUsageBillingMode,
 ): boolean {
-  if (!input.stripePriceIdsByPlan[code]) {
-    return false;
-  }
-
-  return aiUsageBillingMode === "stripe_meter"
-    ? Boolean(input.stripeUsagePriceIdsByPlan[code])
-    : true;
+  return Boolean(input.stripePriceIdsByPlan[code]);
 }
 
 function hasHostedBillingPlanCode(

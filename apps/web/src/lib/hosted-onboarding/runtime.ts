@@ -76,7 +76,6 @@ export function requireHostedStripeCheckoutConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
-  usagePriceId: string | null;
 } {
   return requireHostedStripeBillingPlanConfig(input);
 }
@@ -87,22 +86,11 @@ export function requireHostedStripeBillingPlanConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
-  usagePriceId: string | null;
 } {
   const environment = getHostedOnboardingEnvironment();
   const billingPlanCode = input?.billingPlanCode ?? getHostedDefaultBillingPlanCode();
   const billingPlan = getHostedBillingPlanDefinition(billingPlanCode);
   const priceId = environment.stripePriceIdsByPlan[billingPlanCode];
-  const usagePriceId = environment.stripeUsagePriceIdsByPlan[billingPlanCode];
-  const usageBillingEnabled = environment.aiUsageBillingMode === "stripe_meter";
-
-  if (usageBillingEnabled && !environment.stripeUsageMeterEventName) {
-    throw hostedOnboardingError({
-      code: "STRIPE_USAGE_METER_EVENT_NAME_REQUIRED",
-      message: "HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME must be configured for hosted Stripe billing.",
-      httpStatus: 500,
-    });
-  }
 
   if (!priceId) {
     throw hostedOnboardingError({
@@ -112,19 +100,10 @@ export function requireHostedStripeBillingPlanConfig(input?: {
     });
   }
 
-  if (usageBillingEnabled && !usagePriceId) {
-    throw hostedOnboardingError({
-      code: "STRIPE_USAGE_PRICE_ID_REQUIRED",
-      message: `${billingPlan.usagePriceIdEnvKey} must be configured for hosted Stripe billing.`,
-      httpStatus: 500,
-    });
-  }
-
   return {
     billingPlanCode,
     priceId,
     stripe: requireHostedStripeApi(),
-    usagePriceId: usageBillingEnabled ? usagePriceId : null,
   };
 }
 

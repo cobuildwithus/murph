@@ -4,11 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  HOSTED_AI_USAGE_BILLING_MODE_ENV,
-  parseHostedAiUsageBillingMode,
-  readHostedAiUsageBillingMode,
-} from "../src/ai-usage-billing-mode.ts";
-import {
   encodeHostedExecutionSignedRequestPayload,
   readHostedExecutionSignatureHeaders,
 } from "../src/auth.ts";
@@ -241,19 +236,6 @@ describe("hosted execution coverage gaps", () => {
     expect(shouldScheduleBrowserVaultRefresh({
       currentReplicaRef: freshReplica,
     })).toBeNull();
-  });
-
-  it("parses hosted AI usage billing mode with a disabled default", () => {
-    expect(readHostedAiUsageBillingMode({})).toBe("disabled");
-    expect(readHostedAiUsageBillingMode({
-      [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "stripe_meter",
-    })).toBe("stripe_meter");
-    expect(readHostedAiUsageBillingMode({
-      [HOSTED_AI_USAGE_BILLING_MODE_ENV]: "usage_allowance",
-    })).toBe("disabled");
-    expect(() => parseHostedAiUsageBillingMode("usage_allowance")).toThrow(
-      /HOSTED_AI_USAGE_BILLING_MODE/u,
-    );
   });
 
   it("reads signature headers and normalizes signed request payloads", () => {

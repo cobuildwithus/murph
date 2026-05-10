@@ -193,9 +193,6 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
-- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_MONTHLY`
-- `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
-- `HOSTED_AI_USAGE_BILLING_MODE`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
@@ -242,11 +239,7 @@ Hosted managed crypto:
 
 Hosted AI usage metering:
 
-- `HOSTED_AI_USAGE_BILLING_MODE` defaults to `disabled`, which records hosted AI usage rows but does not attach usage prices at checkout or post Stripe meter events.
-- Missing or unsupported `HOSTED_AI_USAGE_BILLING_MODE` values fail closed to `disabled`.
-- `HOSTED_AI_USAGE_BILLING_MODE=stripe_meter` re-enables the classic hosted-web Stripe meter fallback and requires `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` plus `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`.
-- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME` must match the Stripe Billing meter attached to the configured `HOSTED_ONBOARDING_STRIPE_USAGE_PRICE_ID_*` prices when you use `stripe_meter`.
-- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT` controls how many pending Stripe meter rows each cron drain attempts.
+- Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
 - Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
 - `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`, shared with Cloudflare, lets web attach a fresh signed allow decision to foreground runner nudges after the live usage gate allows a turn. Cloudflare validates the signature, user id, and short freshness window before skipping the live gate call; missing or stale decisions fall back to the live gate.
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
@@ -258,14 +251,10 @@ Hosted runner cleanup:
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
-While usage billing is disabled, recorded rows keep
-`stripeMeterStatus=skipped` so they cannot be backbilled later. The hosted-web
-Stripe drain owns `stripeMeterSource=murph` when `stripe_meter` is enabled.
-
-Stripe meter state remains downstream billing/reconciliation. The hosted
-allowance gate reads web-owned spend, never Stripe meter totals, and Cloudflare
-only enforces the signed gate decision before starting a new container
-invocation.
+Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
+the removed Stripe meter path. The hosted allowance gate reads web-owned spend,
+and Cloudflare only enforces the signed gate decision before starting a new
+container invocation.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
@@ -310,13 +299,11 @@ the flow without moving real money:
    - `STRIPE_SECRET_KEY=sk_test_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
-2. Leave `HOSTED_AI_USAGE_BILLING_MODE=disabled` locally unless you are also
-   testing the legacy Stripe meter fallback with matching usage-price ids.
-3. Install and log in to the Stripe CLI once with `stripe login`.
-4. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
+2. Install and log in to the Stripe CLI once with `stripe login`.
+3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
    orchestrator starts `stripe listen` and injects the captured
    `STRIPE_WEBHOOK_SECRET` into the web process.
-5. Use a real hosted onboarding invite and continue to checkout. The dev-only
+4. Use a real hosted onboarding invite and continue to checkout. The dev-only
    `/join/<inviteCode>?preview=checkout` URL is only a UI preview; pressing its
    checkout button still calls the real checkout API.
 6. On the Stripe-hosted Checkout page, use Stripe's interactive test card
@@ -490,8 +477,8 @@ Notes:
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` use `apps/web/.next`.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as
   generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted wake repair, usage metering, and Stripe recovery accept only Vercel
-  cron bearer auth via `CRON_SECRET`.
+- Hosted stale-runner cleanup, retention, and Stripe recovery cron paths accept
+  only Vercel cron bearer auth via `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning.
@@ -537,7 +524,6 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/runtime/apply`
 - `POST /api/internal/device-sync/runtime/dirty-pending`
 - `POST /api/internal/device-sync/runtime/dirty-ack`
-- `GET /api/internal/hosted-execution/usage/cron`
 - `GET /api/internal/hosted-execution/stale-runner-cleanup/cron`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-mailbox/fetch`

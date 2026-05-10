@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
+import {
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY,
+  HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+} from "@/src/lib/hosted-onboarding/legacy-usage-price";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
@@ -78,9 +83,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
         ? "price_pulse_recurring"
         : "price_edge_recurring",
       stripe: mocks.stripe,
-      usagePriceId: input.billingPlanCode === "launch_monthly"
-        ? "price_pulse_usage"
-        : "price_edge_usage",
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription());
     mocks.stripe.subscriptionSchedules.create.mockResolvedValue(makeSchedule({
@@ -152,9 +154,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
             price: "price_edge_recurring",
             quantity: 1,
           },
-          {
-            price: "price_edge_usage",
-          },
         ],
         start_date: 1_775_606_400,
       }),
@@ -167,9 +166,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
           {
             price: "price_pulse_recurring",
             quantity: 1,
-          },
-          {
-            price: "price_pulse_usage",
           },
         ],
         metadata: expect.objectContaining({
@@ -352,8 +348,8 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     ["cancel at period end", makeSubscription({ cancelAtPeriodEnd: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["pending update", makeSubscription({ pendingUpdate: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["unknown item", makeSubscription({ items: ["price_edge_recurring", "price_edge_usage", "price_unknown"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
-    ["duplicate item", makeSubscription({ items: ["price_edge_recurring", "price_edge_usage", "price_edge_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
-    ["missing usage item", makeSubscription({ items: ["price_edge_recurring"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
+    ["unmarked metered item", makeSubscription({ items: ["price_edge_recurring", "price_edge_usage", "price_unknown_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
+    ["duplicate recurring item", makeSubscription({ items: ["price_edge_recurring", "price_edge_recurring"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
   ])("rejects %s before schedule mutation", async (_label, subscription, code) => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(subscription);
 
@@ -463,9 +459,6 @@ describe("hosted Pulse switch schedule pending-field helpers", () => {
         ? "price_pulse_recurring"
         : "price_edge_recurring",
       stripe: mocks.stripe,
-      usagePriceId: input.billingPlanCode === "launch_monthly"
-        ? "price_pulse_usage"
-        : "price_edge_usage",
     }));
     mocks.writeHostedMemberStripeBillingRefTx.mockResolvedValue({
       memberId: "member_123",
@@ -562,6 +555,12 @@ function makePrice(priceId: string): Stripe.Price {
 
   return {
     id: priceId,
+    metadata: isLegacyUsagePriceId(priceId)
+      ? {
+          [HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_KEY]:
+            HOSTED_STRIPE_LEGACY_AI_USAGE_PRICE_METADATA_VALUE,
+        }
+      : {},
     object: "price",
     recurring: {
       interval: "month",
@@ -569,6 +568,10 @@ function makePrice(priceId: string): Stripe.Price {
       usage_type: usageType,
     },
   } as Stripe.Price;
+}
+
+function isLegacyUsagePriceId(priceId: string): boolean {
+  return priceId === "price_pulse_usage" || priceId === "price_edge_usage";
 }
 
 function makeCompatibleSchedule(input?: {
@@ -591,7 +594,7 @@ function makeCompatibleSchedule(input?: {
     phases: [
       makeSchedulePhase({
         endDate: currentEndDate,
-        priceIds: ["price_edge_recurring", "price_edge_usage"],
+        priceIds: ["price_edge_recurring"],
         startDate: currentStartDate,
       }),
       makeSchedulePhase({
@@ -605,7 +608,7 @@ function makeCompatibleSchedule(input?: {
           trialPolicyVersion: "",
           trialUsageLimitUsdMicros: "",
         },
-        priceIds: ["price_pulse_recurring", "price_pulse_usage"],
+        priceIds: ["price_pulse_recurring"],
         startDate: currentEndDate,
       }),
     ],

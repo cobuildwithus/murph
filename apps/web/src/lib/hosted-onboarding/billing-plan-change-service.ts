@@ -20,6 +20,7 @@ import {
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
+import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
@@ -129,13 +130,20 @@ export async function upgradeHostedBillingPlan(input: {
   if (isHostedStripeSubscriptionAppliedPlan({
     subscription,
     targetPriceId: targetConfig.priceId,
-    targetUsagePriceId: targetConfig.usagePriceId,
   })) {
-    const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
+    const cleanedSubscription = await cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems({
       memberId: input.memberId,
       stripe,
       stripeSubscriptionId,
       subscription,
+      targetPlanCode,
+      targetPriceId: targetConfig.priceId,
+    });
+    const appliedSubscription = await normalizeAppliedHostedBillingPlanUpgradeSubscription({
+      memberId: input.memberId,
+      stripe,
+      stripeSubscriptionId,
+      subscription: cleanedSubscription,
       targetPlanCode,
     });
     await reconcileAppliedHostedBillingPlanUpgrade({
@@ -159,10 +167,8 @@ export async function upgradeHostedBillingPlan(input: {
 
   const updateItems = buildHostedBillingPlanUpgradeSubscriptionItems({
     currentPriceId: currentConfig.priceId,
-    currentUsagePriceId: currentConfig.usagePriceId,
     subscription,
     targetPriceId: targetConfig.priceId,
-    targetUsagePriceId: targetConfig.usagePriceId,
   });
   const updatedSubscription = await callHostedStripePlanUpgradeOperation(
     "subscription.update.plan-items",
@@ -176,12 +182,10 @@ export async function upgradeHostedBillingPlan(input: {
         idempotencyKey: buildHostedBillingPlanUpgradeIdempotencyKey({
           currentPlanCode: transition.currentPlanCode,
           currentPriceId: currentConfig.priceId,
-          currentUsagePriceId: currentConfig.usagePriceId,
           memberId: input.memberId,
           stripeSubscriptionId,
           targetPlanCode,
           targetPriceId: targetConfig.priceId,
-          targetUsagePriceId: targetConfig.usagePriceId,
         }),
       })
   );
@@ -189,7 +193,6 @@ export async function upgradeHostedBillingPlan(input: {
   if (!isHostedStripeSubscriptionAppliedPlan({
     subscription: updatedSubscription,
     targetPriceId: targetConfig.priceId,
-    targetUsagePriceId: targetConfig.usagePriceId,
   })) {
     return {
       billingPlanCode: transition.currentPlanCode,
@@ -280,10 +283,8 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
 
 function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
   currentPriceId: string;
-  currentUsagePriceId: string | null;
   subscription: Stripe.Subscription;
   targetPriceId: string;
-  targetUsagePriceId: string | null;
 }): Stripe.SubscriptionUpdateParams.Item[] {
   const recurringItem = findHostedStripeSubscriptionItemByPriceId(
     input.subscription,
@@ -306,25 +307,103 @@ function buildHostedBillingPlanUpgradeSubscriptionItems(input: {
     },
   ];
 
-  if (input.targetUsagePriceId) {
-    const usageItem = input.currentUsagePriceId
-      ? findHostedStripeSubscriptionItemByPriceId(
-        input.subscription,
-        input.currentUsagePriceId,
-      )
-      : null;
+  for (const item of input.subscription.items.data) {
+    if (item.id === recurringItem.id) {
+      continue;
+    }
 
-    items.push(usageItem
-      ? {
-        id: usageItem.id,
-        price: input.targetUsagePriceId,
-      }
-      : {
-        price: input.targetUsagePriceId,
+    if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
+      items.push({
+        deleted: true,
+        id: item.id,
       });
+      continue;
+    }
+
+    if (isHostedStripeMeteredPrice(item.price)) {
+      throw buildHostedBillingSubscriptionItemsUnsupportedError();
+    }
   }
 
   return items;
+}
+
+async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
+  memberId: string;
+  stripe: Stripe;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+  targetPlanCode: "launch_edge_monthly";
+  targetPriceId: string;
+}): Promise<Stripe.Subscription> {
+  const cleanupItems = buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems({
+    subscription: input.subscription,
+    targetPriceId: input.targetPriceId,
+  });
+
+  if (cleanupItems.length === 0) {
+    return input.subscription;
+  }
+
+  return callHostedStripePlanUpgradeOperation(
+    "subscription.update.applied-plan-items",
+    () =>
+      input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+        expand: ["items.data.price"],
+        items: cleanupItems,
+      }, {
+        idempotencyKey: buildHostedBillingPlanUpgradeAppliedItemsCleanupIdempotencyKey({
+          memberId: input.memberId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          targetPlanCode: input.targetPlanCode,
+          targetPriceId: input.targetPriceId,
+        }),
+      }),
+  );
+}
+
+function buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems(input: {
+  subscription: Stripe.Subscription;
+  targetPriceId: string;
+}): Stripe.SubscriptionUpdateParams.Item[] {
+  const targetItem = findHostedStripeSubscriptionItemByPriceId(
+    input.subscription,
+    input.targetPriceId,
+  );
+
+  if (!targetItem || !isHostedStripeLicensedMonthlyItem(targetItem)) {
+    throw buildHostedBillingSubscriptionItemsUnsupportedError();
+  }
+
+  const cleanupItems: Stripe.SubscriptionUpdateParams.Item[] = [];
+
+  for (const item of input.subscription.items.data) {
+    if (item.id === targetItem.id) {
+      continue;
+    }
+
+    if (isHostedStripeLegacyAiUsageMeteredItem(item)) {
+      cleanupItems.push({
+        deleted: true,
+        id: item.id,
+      });
+      continue;
+    }
+
+    if (isHostedStripeMeteredPrice(item.price)) {
+      throw buildHostedBillingSubscriptionItemsUnsupportedError();
+    }
+  }
+
+  return cleanupItems;
+}
+
+function buildHostedBillingSubscriptionItemsUnsupportedError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+    httpStatus: 409,
+    message: "Your subscription items are not ready for this plan change.",
+  });
 }
 
 function buildHostedBillingPlanUpgradeSubscriptionMetadata(input: {
@@ -424,10 +503,31 @@ function findHostedStripeSubscriptionItemByPriceId(
   return subscription.items.data.find((item) => item.price?.id === priceId) ?? null;
 }
 
+function isHostedStripeMeteredPrice(
+  price: Stripe.Price | null | undefined,
+): boolean {
+  return price?.recurring?.usage_type === "metered";
+}
+
+function isHostedStripeLicensedMonthlyItem(item: Stripe.SubscriptionItem): boolean {
+  const recurring = item.price?.recurring;
+  return recurring?.interval === "month" &&
+    (recurring.interval_count ?? 1) === 1 &&
+    recurring.usage_type === "licensed" &&
+    !hasUnsupportedHostedStripeSubscriptionItemQuantity(item);
+}
+
+function hasHostedStripeSubscriptionItemQuantity(item: Stripe.SubscriptionItem): boolean {
+  return typeof item.quantity === "number" && Number.isFinite(item.quantity);
+}
+
+function hasUnsupportedHostedStripeSubscriptionItemQuantity(item: Stripe.SubscriptionItem): boolean {
+  return hasHostedStripeSubscriptionItemQuantity(item) && item.quantity !== 1;
+}
+
 function isHostedStripeSubscriptionAppliedPlan(input: {
   subscription: Stripe.Subscription;
   targetPriceId: string;
-  targetUsagePriceId: string | null;
 }): boolean {
   if (input.subscription.pending_update) {
     return false;
@@ -446,8 +546,7 @@ function isHostedStripeSubscriptionAppliedPlan(input: {
       .filter((priceId): priceId is string => typeof priceId === "string"),
   );
 
-  return itemPriceIds.has(input.targetPriceId) &&
-    (!input.targetUsagePriceId || itemPriceIds.has(input.targetUsagePriceId));
+  return itemPriceIds.has(input.targetPriceId);
 }
 
 async function reconcileAppliedHostedBillingPlanUpgrade(input: {
@@ -515,12 +614,10 @@ async function createHostedBillingPlanUpgradePortalUrl(input: {
 function buildHostedBillingPlanUpgradeIdempotencyKey(input: {
   currentPlanCode: HostedBillingPlanCode;
   currentPriceId: string;
-  currentUsagePriceId: string | null;
   memberId: string;
   stripeSubscriptionId: string;
   targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
-  targetUsagePriceId: string | null;
 }): string {
   return `hosted-billing-plan-upgrade:${sha256Hex(JSON.stringify(input))}`;
 }
@@ -531,6 +628,15 @@ function buildHostedBillingPlanUpgradeMetadataRepairIdempotencyKey(input: {
   targetPlanCode: HostedBillingPlanCode;
 }): string {
   return `hosted-billing-plan-upgrade-metadata:${sha256Hex(JSON.stringify(input))}`;
+}
+
+function buildHostedBillingPlanUpgradeAppliedItemsCleanupIdempotencyKey(input: {
+  memberId: string;
+  stripeSubscriptionId: string;
+  targetPlanCode: HostedBillingPlanCode;
+  targetPriceId: string;
+}): string {
+  return `hosted-billing-plan-upgrade-applied-items:${sha256Hex(JSON.stringify(input))}`;
 }
 
 async function callHostedStripePlanUpgradeOperation<T>(

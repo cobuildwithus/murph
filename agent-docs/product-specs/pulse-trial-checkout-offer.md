@@ -70,7 +70,7 @@ The current local checkout now has the Pulse Trial shape implemented on that fou
 
 - `apps/web/src/lib/hosted-onboarding/billing-plans.ts` defines only `launch_monthly` and `launch_edge_monthly`.
 - `billing-plans.ts` stores included hosted AI usage allowances by plan: Pulse is 10.00 USD micros and Edge is 25.00 USD micros.
-- `apps/web/src/lib/hosted-onboarding/billing-service.ts` creates Stripe Checkout Sessions in `subscription` mode with plan line items, optional metered usage line items, session metadata, subscription metadata, card payment methods, and a deterministic Stripe idempotency key that includes the checkout offer and trial policy inputs.
+- `apps/web/src/lib/hosted-onboarding/billing-service.ts` creates Stripe Checkout Sessions in `subscription` mode with the plan recurring line item, session metadata, subscription metadata, card payment methods, and a deterministic Stripe idempotency key that includes the checkout offer and trial policy inputs.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` binds Stripe customer/subscription refs on standard `checkout.session.completed`, activates paid subscriptions from `invoice.paid`, records subscription period markers from subscription events, and has one metadata-gated Pulse Trial activation path for Stripe trialing subscriptions.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-status.ts` deliberately keeps subscription webhook writes conservative: Stripe `trialing` maps to hosted `active`, but subscription events that would make an inactive Murph member active are written as `incomplete` unless the member was already active.
 - `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, current billing phase, current checkout offer, immutable trial redemption metadata, trial start/end markers, and last Stripe event freshness.
@@ -331,7 +331,7 @@ Treat trial metadata as audit and reconciliation context, not as the usage allow
 
 ### Stripe Request
 
-For trial checkout, reuse the existing Pulse recurring price and optional usage price:
+For trial checkout, reuse the existing Pulse recurring price:
 
 ```ts
 await stripe.checkout.sessions.create({
@@ -339,10 +339,7 @@ await stripe.checkout.sessions.create({
   client_reference_id: memberId,
   customer: existingCustomerId,
   customer_email: verifiedEmailIfNoCustomer,
-  line_items: buildHostedBillingCheckoutLineItems({
-    priceId: pulsePriceId,
-    usagePriceId,
-  }),
+  line_items: buildHostedBillingCheckoutLineItems(pulsePriceId),
   metadata: checkoutMetadata,
   mode: "subscription",
   payment_method_types: ["card"],
@@ -383,7 +380,6 @@ This prevents these collisions:
 
 - standard Pulse vs Pulse Trial with the same Pulse price
 - Pulse Trial policy v1 vs any later trial policy with different days or allowance
-- Pulse Trial with usage price enabled vs disabled
 - email-bound checkout vs later durable customer-bound checkout
 
 ## Trial Activation

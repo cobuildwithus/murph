@@ -49,7 +49,7 @@ Future plan changes can generalize after this path is proven in Stripe test cloc
 
 Use Stripe as the source of truth, but do not use Customer Portal plan switching for this plan switch.
 
-Stripe Customer Portal supports scheduled downgrades in general, but current Stripe docs say subscriptions using usage-based billing can be canceled in the portal but cannot be updated there. Murph plans include a recurring item and a metered usage item, so Portal subscription updates are not a clean fit.
+Stripe Customer Portal supports scheduled downgrades in general, but the app keeps this in-product switch explicit so pending state, schedule compatibility, and allowance reconciliation stay under Murph control.
 
 `subscription_update_confirm` is also not a fit because Stripe currently allows only one item in that flow and says subscriptions with multiple items cannot be updated through it.
 
@@ -169,7 +169,7 @@ Algorithm:
 1. Load member core state and billing ref.
 2. Require active access and paid Edge local state.
 3. Require Stripe customer and subscription ids.
-4. Load Stripe plan config for Edge and Pulse, including recurring and usage price ids.
+4. Load Stripe recurring plan config for Edge and Pulse.
 5. Retrieve the Stripe subscription with `items.data.price` expanded.
 6. Confirm the subscription customer matches the billing ref customer.
 7. Reject if Stripe shows:
@@ -202,11 +202,11 @@ Algorithm:
 15. Current phase:
     - start from the current phase returned by Stripe
     - preserve non-plan phase/default fields that must remain set
-    - keep Edge recurring and Edge metered usage prices
+    - keep the Edge recurring price
     - end exactly at the subscription current period end
 16. Future phase:
     - start exactly at subscription current period end
-    - use Pulse recurring and Pulse metered usage prices
+    - use the Pulse recurring price
     - last one billing interval
     - set phase `proration_behavior` to `none`
     - set metadata for Pulse and clear trial-shaped metadata keys
@@ -217,8 +217,7 @@ Algorithm:
 
 Important schedule rules:
 
-- Include both recurring and metered usage prices in each phase.
-- Do not set quantity on metered usage items.
+- Include only the hosted recurring price in each phase.
 - Do not use `end_behavior: "cancel"` for downgrades.
 - Do not mutate the subscription directly while a schedule owns the pending change.
 - While a switch is pending, the first version should reject additional in-app plan changes rather than trying to merge intents.
@@ -231,9 +230,8 @@ Important schedule rules:
 First version supports only canonical hosted subscriptions with exactly the known hosted plan items:
 
 - one configured Edge recurring price
-- one configured Edge metered usage price
 
-Reject subscriptions with unknown active items, duplicate known items, missing usage price when metering is enabled, mismatched usage type, non-month recurring intervals, or unsupported quantities. Do not silently preserve unknown add-ons into the future phase; add-on preservation can be added later as a separate plan-change capability.
+Reject subscriptions with unknown active licensed items, duplicate known recurring items, non-month recurring intervals, unsupported quantities, or unmarked metered add-ons. Marked legacy hosted AI usage metered items may be dropped by the schedule update; do not silently preserve unknown add-ons into the future phase.
 
 Schedule creation is a two-step Stripe operation because `from_subscription` cannot be combined with phase values. The service must be retry-safe across:
 
@@ -298,7 +296,7 @@ When the scheduled phase starts and Stripe updates the subscription to Pulse:
 Do not create local pending state from a schedule webhook based only on Stripe metadata.
 
 This feature updates only the central subscription reconciliation needed to
-detect Pulse from configured recurring and usage price ids after the scheduled
+detect Pulse from configured recurring price ids after the scheduled
 phase applies, even if metadata is missing or stale. Do not do a broad global
 plan-detection refactor in this feature.
 
@@ -355,15 +353,14 @@ Required tests:
 - service rejects missing, duplicate, unknown, or mismatched subscription items
 - service creates schedule from subscription with deterministic idempotency key
 - service updates phases with Edge current prices and Pulse future prices
-- both phases include recurring and metered usage prices
-- metered usage item has no quantity
+- both phases include only the hosted recurring price
 - top-level and future phase proration behavior are `none`
 - future phase metadata sets Pulse and clears trial metadata
 - duplicate request returns `already_scheduled`
 - retry after schedule-created/local-write-failed self-heals
 - pending display fields are written after successful schedule update
 - schedule lifecycle webhooks clear or refresh only matching pending fields
-- `customer.subscription.updated` with Pulse price ids updates current plan to Pulse and clears pending fields
+- `customer.subscription.updated` with Pulse recurring price id updates current plan to Pulse and clears pending fields
 - usage allowance remains Edge before phase start and becomes Pulse only after subscription reconciliation
 - settings renders Edge, Switch to Pulse, pending switch, and reconciled Pulse
 
@@ -373,24 +370,22 @@ freshness belongs in the reconciliation system, not this plan switch.
 
 Stripe sandbox acceptance:
 
-- create canonical Edge subscription with exactly Edge recurring and Edge metered usage items
+- create canonical Edge subscription with exactly the Edge recurring item
 - schedule switch to Pulse at current period end
 - verify schedule has two phases and `end_behavior: "release"`
-- verify no duplicate recurring or usage items
-- verify current-period usage remains on Edge usage price
+- verify no duplicate recurring items
 - advance Test Clock to the phase boundary
-- verify subscription now has Pulse recurring and Pulse usage prices
+- verify subscription now has the Pulse recurring price
 - verify schedule releases or completes and the subscription continues as Pulse
 - replay webhooks and verify settings, billing ref, and usage allowance converge
 
 Deployment checks:
 
 - production has both recurring price env vars
-- production has both usage price env vars when Stripe metering is enabled
 - webhook endpoint includes subscription and schedule events
 - backend deploy lands before UI exposure
 - consider a feature flag or server-side allowlist for first production test
 
 ## Open Questions
 
-- Do existing Pulse and Edge usage prices share the same Stripe billing meter, and does test-clock usage rate exactly as expected at the phase boundary?
+- Are there any historical Stripe subscriptions with legacy metered items that should be cleaned up manually before enabling broad in-app downgrades?
