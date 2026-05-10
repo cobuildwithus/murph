@@ -559,6 +559,49 @@ export class RunnerStateStore {
     };
   }
 
+  async clearActiveIdleShutdownCheckpointForForegroundNudge(userId: string): Promise<{
+    attemptId: string | null;
+    cleared: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const meta = this.selectMetaRowSync();
+    if (meta && meta.user_id !== userId) {
+      throw new Error(
+        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
+      );
+    }
+
+    if (
+      !meta
+      || meta.in_flight !== 1
+      || meta.active_invocation_reason !== "idle_shutdown_checkpoint"
+      || !meta.active_invocation_id
+    ) {
+      if (!meta) {
+        await this.bindUser(userId);
+      }
+      const record = meta
+        ? this.readStateFromMetaSync(meta)
+        : await this.readState();
+      return {
+        attemptId: null,
+        cleared: false,
+        record,
+      };
+    }
+
+    const attemptId = meta.active_invocation_id;
+    this.clearActiveInvocationMetaSync(meta);
+    meta.in_flight = 0;
+    this.writeMetaRowSync(meta);
+
+    return {
+      attemptId,
+      cleared: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
   async markPendingInvocationNudge(input: {
     preferredWakeAt?: string | null;
     resetRetryFailureCount?: boolean;

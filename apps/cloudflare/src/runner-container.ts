@@ -49,7 +49,6 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
-const RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS = 120_000;
 const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
 const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
@@ -2332,7 +2331,7 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
 
   if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS + RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS;
+    return DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS;
   }
 
   if (typeof raw !== "string") {
@@ -2346,7 +2345,7 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
     );
   }
 
-  return parsed + RUNNER_CONTAINER_IDLE_FALLBACK_GRACE_MS;
+  return parsed;
 }
 
 function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {

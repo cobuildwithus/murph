@@ -93,6 +93,8 @@ const STALE_LOCAL_ACTIVE_INVOCATION_ABORT_MESSAGE =
   "Hosted workspace invocation lost liveness during active work.";
 const CONTAINER_STOPPED_ACTIVE_INVOCATION_ABORT_MESSAGE =
   "Hosted workspace invocation container stopped during active work.";
+const FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE =
+  "Hosted idle-shutdown checkpoint preempted by foreground input.";
 const BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY = "runner:pending-browser-vault-refresh:v1";
 const BROWSER_VAULT_REFRESH_INTENT_SCHEMA = "murph.hosted-runner.browser-vault-refresh-intent.v1";
 const BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
@@ -649,6 +651,11 @@ export class HostedUserRunner {
       }
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
+    const activeWorkspaceInvocation = runningRecord.workspaceInvocation;
+    const activeIdleShutdownCheckpoint =
+      activeWorkspaceInvocation?.reason === "idle_shutdown_checkpoint"
+        ? activeWorkspaceInvocation
+        : null;
     const nowMs = Date.now();
     const resetRetryFailureCount = runningRecord.retryFailureCount >= this.env.maxEventAttempts;
     const retryFailureCount = resetRetryFailureCount
@@ -673,7 +680,11 @@ export class HostedUserRunner {
       preferredWakeAt,
       resetRetryFailureCount,
     });
-    const preemptedActiveInvocation = false;
+    let preemptedActiveInvocation = false;
+    let preemptedPersistedActiveInvocation = false;
+    let preemptedPersistedActiveInvocationContainerDestroyed:
+      | Awaited<ReturnType<typeof destroyHostedExecutionContainer>>
+      | null = null;
     let immediateDriveStarted = false;
     if (activeInThisIsolate) {
       immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
@@ -681,6 +692,37 @@ export class HostedUserRunner {
         reason: "nudge",
         userId: record.userId,
       });
+      if (activeIdleShutdownCheckpoint) {
+        preemptedActiveInvocation = this.abortActiveWorkspaceInvocation(
+          {
+            attemptId: activeIdleShutdownCheckpoint.attemptId,
+            leaseGeneration: runningRecord.leaseGeneration.toString(),
+            userId: runningRecord.userId,
+          },
+          new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
+        );
+      }
+    } else if (activeIdleShutdownCheckpoint) {
+      const preemption = await this.stateStore.clearActiveIdleShutdownCheckpointForForegroundNudge(
+        runningRecord.userId,
+      );
+      preemptedPersistedActiveInvocation = preemption.cleared;
+      if (preemption.cleared) {
+        preemptedPersistedActiveInvocationContainerDestroyed =
+          await destroyHostedExecutionContainer({
+            runnerContainerName: resolveHostedExecutionRunnerContainerName({
+              source: this.runnerRuntimeEnvSource,
+              userId: runningRecord.userId,
+            }),
+            runnerContainerNamespace: this.runnerContainerNamespace,
+            userId: runningRecord.userId,
+          });
+        immediateDriveStarted = this.startDetachedRunnerDrive({
+          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+          reason: "nudge",
+          userId: record.userId,
+        });
+      }
     } else if (!alreadyRunning) {
       immediateDriveStarted = this.startDetachedRunnerDrive({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
@@ -695,7 +737,11 @@ export class HostedUserRunner {
         alreadyRunning,
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
-        preemptedPersistedActiveInvocation: false,
+        preemptedPersistedActiveInvocation,
+        preemptedPersistedActiveInvocationContainerDestroyAttempted:
+          preemptedPersistedActiveInvocationContainerDestroyed?.attempted ?? false,
+        preemptedPersistedActiveInvocationContainerDestroyOk:
+          preemptedPersistedActiveInvocationContainerDestroyed?.ok ?? true,
         preemptedActiveInvocation,
         retryFailureCountReset: resetRetryFailureCount,
       },
@@ -1096,6 +1142,35 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
+      if (
+        invocationReason === "idle_shutdown_checkpoint"
+        && isForegroundNudgePreemptedIdleCheckpointAbortError(error)
+      ) {
+        const completion = await this.stateStore.completeInvocation({
+          finishedAt: new Date().toISOString(),
+          lease,
+        });
+        const record = await this.syncRunnerFollowUpAfterInvocation({
+          record: completion.record,
+          userId: initialRecord.userId,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            pendingNudge: record.pendingNudge,
+            workspaceAttemptId: lease.attemptId,
+            workspaceLeaseGeneration: lease.leaseGeneration,
+          },
+          message: "Hosted runner aborted idle-shutdown checkpoint for foreground input.",
+          phase: "scheduled",
+          userId: initialRecord.userId,
+        });
+        return {
+          nextWakeAt: record.nextWakeAt,
+          status: "scheduled",
+        };
+      }
+
       const failure = await this.stateStore.failInvocation({
         error,
         finishedAt: new Date().toISOString(),
@@ -3313,6 +3388,11 @@ function isRecoveredActiveInvocationAbortError(error: unknown): boolean {
       error.message === STALE_LOCAL_ACTIVE_INVOCATION_ABORT_MESSAGE
       || error.message === CONTAINER_STOPPED_ACTIVE_INVOCATION_ABORT_MESSAGE
     );
+}
+
+function isForegroundNudgePreemptedIdleCheckpointAbortError(error: unknown): boolean {
+  return error instanceof Error
+    && error.message === FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE;
 }
 
 function readHostedWorkerVersionIdFromSource(
