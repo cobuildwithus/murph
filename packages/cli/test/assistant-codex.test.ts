@@ -129,6 +129,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     assert.deepEqual(args, ['-s', 'workspace-write', '-a', 'never', 'app-server'])
     assert.deepEqual(options, {
       cwd: expectedWorkingDirectory,
+      detached: true,
       env: {
         CODEX_HOME: codexHome,
         PATH: '/custom/bin',

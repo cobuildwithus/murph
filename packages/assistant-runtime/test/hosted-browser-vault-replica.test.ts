@@ -4,6 +4,11 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.unmock("@murphai/contracts");
+vi.unmock("@murphai/query");
+vi.unmock("@murphai/query/browser");
+vi.unmock("@murphai/runtime-state/node");
+
 beforeEach(() => {
   vi.resetModules();
   vi.doUnmock("@murphai/contracts");
@@ -15,12 +20,14 @@ beforeEach(() => {
 describe("hosted browser-vault replica refresh preparation", () => {
   it("summarizes restored canonical source separately from default metric selection rows", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const { listCanonicalSourceManifest } = await import("@murphai/query");
     const {
       createHostedBrowserVaultReplicaRefreshFromWorkspace,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
     try {
-      await writeVaultFile(vaultRoot, path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md"), [
+      await writeVaultFile(vaultRoot, experimentPath, [
         "---",
         "experimentId: exp_trial",
         "slug: trial",
@@ -33,6 +40,9 @@ describe("hosted browser-vault replica refresh preparation", () => {
         "Private browser-vault content.",
         "",
       ].join("\n"));
+
+      const directManifest = await listCanonicalSourceManifest(vaultRoot);
+      expect(directManifest.map((entry) => entry.relativePath)).toEqual([experimentPath]);
 
       const prepared = await createHostedBrowserVaultReplicaRefreshFromWorkspace({
         generatedAt: "2026-05-10T00:00:00.000Z",
