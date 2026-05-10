@@ -109,10 +109,12 @@ describe("hosted local device connect e2e", () => {
     const authorizationUrl = new URL(connectLink?.authorizationUrl ?? "");
     expect(authorizationUrl.origin).toBe(requireScenario().harness.webBaseUrl);
     expect(authorizationUrl.pathname).toBe("/connect");
-    expect(authorizationUrl.searchParams.get("deviceConnectIntent")).toMatch(
+    expect(authorizationUrl.search).toBe("");
+    const authorizationFragment = new URLSearchParams(authorizationUrl.hash.slice(1));
+    expect(authorizationFragment.get("deviceConnectIntent")).toMatch(
       /^dc_[A-Za-z0-9_-]{32}$/u,
     );
-    expect(authorizationUrl.searchParams.get("connectSource")).toBe("whoop");
+    expect(authorizationFragment.get("connectSource")).toBe("whoop");
     expect(connectLink?.authorizationUrl).not.toContain(whoopClientSecret);
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "No device sync providers are configured",

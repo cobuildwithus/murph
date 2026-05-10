@@ -43,7 +43,7 @@ describe("device sync internal connect-link route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.createHostedDeviceConnectIntent.mockResolvedValue({
       claim: "dc_opaque",
-      connectUrl: "https://join.example.test/device/connect/dc_opaque",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
       expiresAt: "2026-04-04T12:00:00.000Z",
     });
   });
@@ -78,8 +78,8 @@ describe("device sync internal connect-link route", () => {
       sourceProviderSlug: null,
     });
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://join.example.test/device/connect/dc_opaque",
-      connectUrl: "https://join.example.test/device/connect/dc_opaque",
+      authorizationUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
       expiresAt: "2026-04-04T12:00:00.000Z",
       provider: "whoop",
       providerLabel: "WHOOP",
@@ -94,7 +94,7 @@ describe("device sync internal connect-link route", () => {
         status: "issued",
       },
     );
-    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("join.example.test/device/connect");
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("join.example.test/connect");
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
@@ -108,7 +108,7 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("JUNCTION_REGION", "us");
     mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
       claim: "dc_fitbit_opaque",
-      connectUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_fitbit_opaque&connectSource=fitbit",
       expiresAt: "2026-04-04T12:00:00.000Z",
     });
 
@@ -133,8 +133,8 @@ describe("device sync internal connect-link route", () => {
       sourceProviderSlug: "fitbit",
     });
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
-      connectUrl: "https://join.example.test/device/connect/dc_fitbit_opaque",
+      authorizationUrl: "https://join.example.test/connect#deviceConnectIntent=dc_fitbit_opaque&connectSource=fitbit",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_fitbit_opaque&connectSource=fitbit",
       expiresAt: "2026-04-04T12:00:00.000Z",
       provider: "fitbit",
       providerLabel: "Fitbit",

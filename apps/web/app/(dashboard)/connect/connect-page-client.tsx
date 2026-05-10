@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
@@ -65,6 +65,18 @@ export type ConnectCallbackInput = {
   status: "connected" | "error";
 } | null;
 
+export type InitialDeviceConnectIntent = {
+  claim: string;
+  connectSource: string | null;
+} | null;
+
+const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
+
+type ConnectConsentRequest = {
+  intentClaim?: string;
+  source: ConnectSource;
+};
+
 type ConnectCallbackNotice = {
   kind: "error" | "success" | "warning";
   message: string;
@@ -74,11 +86,13 @@ type ConnectCallbackNotice = {
 export function ConnectSourcesGrid({
   authenticated = true,
   initialCallback = null,
+  initialConnectIntent = null,
   initialLoadError = null,
   sources,
 }: {
   authenticated?: boolean;
   initialCallback?: ConnectCallbackInput;
+  initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
   sources: readonly ConnectSource[];
 }) {
@@ -92,11 +106,13 @@ export function ConnectSourcesGrid({
     message: string;
     sourceId: string;
   } | null>(null);
-  const [consentSource, setConsentSource] = useState<ConnectSource | null>(null);
+  const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [locationConnectIntent, setLocationConnectIntent] = useState<InitialDeviceConnectIntent>(null);
+  const initialConnectIntentAttemptedRef = useRef(false);
   const callbackConnectedSourceId = initialCallback?.status === "connected"
     ? resolveCallbackSourceId(initialCallback, sources)
     : null;
@@ -114,6 +130,7 @@ export function ConnectSourcesGrid({
     [displaySources, search],
   );
   const hasInitialCallback = Boolean(initialCallback);
+  const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
 
   useEffect(() => {
     if (hasInitialCallback) {
@@ -121,7 +138,21 @@ export function ConnectSourcesGrid({
     }
   }, [hasInitialCallback]);
 
-  async function startConnection(source: ConnectSource) {
+  useEffect(() => {
+    if (initialConnectIntent || locationConnectIntent) {
+      return;
+    }
+
+    const intent = readDeviceConnectIntentFromCurrentLocation(displaySources);
+    if (intent) {
+      setLocationConnectIntent(intent);
+    }
+  }, [displaySources, initialConnectIntent, locationConnectIntent]);
+
+  const startConnection = useCallback(async (
+    source: ConnectSource,
+    options: { intentClaim?: string } = {},
+  ) => {
     if (!source.connectTarget || !authenticated) {
       return;
     }
@@ -129,17 +160,29 @@ export function ConnectSourcesGrid({
     setPendingSourceId(source.id);
     setActionError(null);
     setNotice(null);
-    setConsentSource(null);
+    setConsentRequest(null);
 
     try {
       const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
+        ...(options.intentClaim
+          ? {
+              headers: {
+                accept: "application/json",
+              },
+            }
+          : {}),
         method: "POST",
-        url: `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
+        url: options.intentClaim
+          ? `/device/connect/${encodeURIComponent(options.intentClaim)}`
+          : `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
       });
       window.location.assign(readConnectAuthorizationUrl(result));
     } catch (error) {
       if (isHostedConsentRequiredError(error)) {
-        setConsentSource(source);
+        setConsentRequest({
+          ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
+          source,
+        });
         setPendingSourceId(null);
         return;
       }
@@ -151,7 +194,51 @@ export function ConnectSourcesGrid({
       });
       setPendingSourceId(null);
     }
-  }
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (
+      initialConnectIntentAttemptedRef.current
+      || !authenticated
+      || !activeConnectIntent?.claim
+    ) {
+      return;
+    }
+
+    initialConnectIntentAttemptedRef.current = true;
+    stripDeviceConnectIntentParams();
+
+    const source = findInitialConnectIntentSource(activeConnectIntent, displaySources);
+    if (!source) {
+      setNotice({
+        kind: "error",
+        title: "Unable to start connection",
+        message: "This connection link does not match an available source.",
+      });
+      return;
+    }
+
+    if (!source.connectTarget) {
+      setActionError({
+        message: "This source is not available to connect right now.",
+        sourceId: source.id,
+      });
+      return;
+    }
+
+    if (source.connected) {
+      setNotice({
+        kind: "success",
+        title: "Device already connected",
+        message: `${source.name} is already connected.`,
+      });
+      return;
+    }
+
+    void startConnection(source, {
+      intentClaim: activeConnectIntent.claim,
+    });
+  }, [activeConnectIntent, authenticated, displaySources, startConnection]);
 
   async function disconnectConnection(source: ConnectSource) {
     const connectionId = source.disconnectConnectionId?.trim();
@@ -259,14 +346,18 @@ export function ConnectSourcesGrid({
       )}
 
       <ConnectConsentDialog
-        source={consentSource}
+        source={consentRequest?.source ?? null}
         onOpenChange={(open) => {
           if (!open) {
-            setConsentSource(null);
+            setConsentRequest(null);
           }
         }}
         onAccepted={async (source) => {
-          await startConnection(source);
+          await startConnection(source, {
+            ...(consentRequest?.intentClaim
+              ? { intentClaim: consentRequest.intentClaim }
+              : {}),
+          });
         }}
       />
 
@@ -556,6 +647,83 @@ function stripConnectCallbackParams() {
   url.searchParams.delete("connectSource");
   url.searchParams.delete("connectTarget");
   window.history?.replaceState?.({}, "", url.toString());
+}
+
+function stripDeviceConnectIntentParams() {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete("deviceConnectIntent");
+  url.searchParams.delete("connectSource");
+  const hashParams = readDeviceConnectIntentHashParams(url.hash);
+  if (hashParams) {
+    hashParams.delete("deviceConnectIntent");
+    hashParams.delete("connectSource");
+    url.hash = hashParams.toString();
+  }
+  window.history?.replaceState?.({}, "", url.toString());
+}
+
+function readDeviceConnectIntentFromCurrentLocation(
+  sources: readonly ConnectSource[],
+): InitialDeviceConnectIntent {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const hashParams = readDeviceConnectIntentHashParams(window.location.hash);
+  return hashParams ? readDeviceConnectIntentParams(hashParams, sources) : null;
+}
+
+function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {
+  const fragment = typeof hash === "string" && hash.startsWith("#")
+    ? hash.slice(1)
+    : hash;
+
+  if (!fragment) {
+    return null;
+  }
+
+  const params = new URLSearchParams(fragment);
+  return params.has("deviceConnectIntent") ? params : null;
+}
+
+function readDeviceConnectIntentParams(
+  params: URLSearchParams,
+  sources: readonly ConnectSource[],
+): InitialDeviceConnectIntent {
+  const claim = params.get("deviceConnectIntent");
+  if (!claim || !DEVICE_CONNECT_INTENT_CLAIM_PATTERN.test(claim)) {
+    return null;
+  }
+
+  const requestedSource = normalizeConnectSourceId(params.get("connectSource"));
+  const connectSource = requestedSource
+    ? sources.find((source) => normalizeConnectSourceId(source.id) === requestedSource)?.id ?? null
+    : null;
+
+  return {
+    claim,
+    connectSource,
+  };
+}
+
+function findInitialConnectIntentSource(
+  input: InitialDeviceConnectIntent,
+  sources: readonly ConnectSource[],
+): ConnectSource | null {
+  if (!input?.connectSource) {
+    return null;
+  }
+
+  const sourceId = normalizeConnectSourceId(input.connectSource);
+  if (!sourceId) {
+    return null;
+  }
+
+  return sources.find((source) => normalizeConnectSourceId(source.id) === sourceId) ?? null;
 }
 
 function normalizeConnectKey(value: string | null | undefined): string | null {
