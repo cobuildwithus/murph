@@ -1217,7 +1217,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("drains a pending nudge instead of clearing it from deprecated deferred checkpoint status", async () => {
+  it("clears a stale pending nudge when deferred checkpoint status drains mailbox lag", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -1292,12 +1292,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await flushDetachedRunnerDrive();
 
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(invoke).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:04:00.100Z");
     expect(
       sql.exec(
         `SELECT alarm_kind,
+                deferred_checkpoint_required,
+                deferred_checkpoint_mailbox_status_json,
                 idle_shutdown_checkpoint_due_at,
                 next_wake_at,
                 pending_nudge,
@@ -1307,12 +1308,17 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       alarm_kind: "idle_checkpoint",
+      deferred_checkpoint_required: 1,
+      deferred_checkpoint_mailbox_status_json: JSON.stringify({
+        hostedMailboxSystemImportedSeq: "7",
+        hostedMailboxConversationImportedSeq: "42",
+      }),
       idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.100Z",
       next_wake_at: null,
       pending_nudge: 0,
       pending_work: 0,
     }]);
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
       }),
@@ -4810,7 +4816,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("runs a lifecycle idle-shutdown checkpoint on a base-only workspace without deferred scheduler state", async () => {
+  it("runs a lifecycle idle-shutdown checkpoint on a base-only workspace with deferred mailbox status", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -4883,7 +4889,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     ).toArray();
     expect(deferredMailboxStatusRows).toHaveLength(1);
-    expect(deferredMailboxStatusRows[0]?.deferred_checkpoint_mailbox_status_json).toBeNull();
+    expect(deferredMailboxStatusRows[0]?.deferred_checkpoint_mailbox_status_json).toBe(JSON.stringify({
+      hostedMailboxSystemImportedSeq: "0",
+      hostedMailboxConversationImportedSeq: "445",
+    }));
 
     vi.setSystemTime(new Date("2026-04-27T00:04:00.000Z"));
     await runner.alarm();
