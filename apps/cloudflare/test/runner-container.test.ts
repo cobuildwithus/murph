@@ -1418,6 +1418,63 @@ describe("RunnerContainer", () => {
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
   });
 
+  it("lets foreground invocation proceed when active browser-vault refresh ignores abort", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        return await new Promise<Response>(() => undefined);
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts } =
+      createContainerDouble({
+        containerFetch,
+      });
+
+    const refresh = container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:test-foreground-preempt-ignores-abort",
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/browser-vault-refresh",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+    const refreshRejected = expect(refresh).rejects.toThrow("browser-vault refresh preempted");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_refresh_ignores_abort"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await refreshRejected;
+
+    expect(containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toHaveLength(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
   it("honors browser-vault refresh aborts recorded before the refresh lifecycle starts", async () => {
     let resolveInvocation!: () => void;
     const activeInvocation = new Promise<void>((resolve) => {
@@ -2502,6 +2559,8 @@ describe("RunnerContainer", () => {
     await expect(container.destroyInstance()).resolves.toBeUndefined();
     expect(destroy).toHaveBeenCalledOnce();
 
+    await expect(refresh).rejects.toThrow("browser-vault refresh runner destroyed");
+
     resolveRefresh(new Response(JSON.stringify({
       status: "already_fresh",
       userId: "member_123",
@@ -2511,9 +2570,6 @@ describe("RunnerContainer", () => {
       },
       status: 200,
     }));
-    await expect(refresh).resolves.toMatchObject({
-      status: "already_fresh",
-    });
   });
 
   it("accepts explicit destroy races when the shell is already stopping and still settles", async () => {
