@@ -56,6 +56,7 @@ const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
+const RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS = 500;
 const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
 const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX = "runner-container-active-operation:v1:";
@@ -299,7 +300,25 @@ export class RunnerContainer extends Container {
     if (!abortController.signal.aborted) {
       abortController.abort(new Error("browser-vault refresh preempted"));
     }
-    await this.browserVaultRefreshCompletion;
+    const preempted = await waitForRunnerContainerOperationCompletion(
+      this.browserVaultRefreshCompletion,
+      RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS,
+    );
+    if (preempted) {
+      return;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        preemptTimeoutMs: RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS,
+      },
+      level: "warn",
+      message: "Hosted execution container browser-vault refresh did not release promptly after foreground preemption.",
+      phase: "container.ready",
+      userId,
+    });
+    await this.stopWarmContainer({ failClosed: true });
   }
 
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -743,29 +762,33 @@ export class RunnerContainer extends Container {
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
-      const response = await this.containerFetch(
-        RUNNER_BROWSER_VAULT_REFRESH_URL,
-        {
-          body: JSON.stringify({
-            internalWorkerProxyToken: outboundProxyState.token,
-            localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
-              localInternalProxyBaseUrl,
+      const requestSignal = combineRunnerContainerAbortSignals(
+        operationAbortController.signal,
+        AbortSignal.timeout(remainingTimeoutMs),
+      );
+      const response = await raceRunnerContainerOperationAbort(
+        this.containerFetch(
+          RUNNER_BROWSER_VAULT_REFRESH_URL,
+          {
+            body: JSON.stringify({
+              internalWorkerProxyToken: outboundProxyState.token,
+              localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
+                localInternalProxyBaseUrl,
+                userId: input.userId,
+              }),
+              runtime: input.runtime,
               userId: input.userId,
             }),
-            runtime: input.runtime,
-            userId: input.userId,
-          }),
-          headers: {
-            authorization: `Bearer ${runnerControlToken}`,
-            "content-type": "application/json; charset=utf-8",
+            headers: {
+              authorization: `Bearer ${runnerControlToken}`,
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+            signal: requestSignal,
           },
-          method: "POST",
-          signal: combineRunnerContainerAbortSignals(
-            operationAbortController.signal,
-            AbortSignal.timeout(remainingTimeoutMs),
-          ),
-        },
-        RUNNER_PORT,
+          RUNNER_PORT,
+        ),
+        requestSignal,
       );
       this.noteRunnerActivity("browser-vault-refresh-response-received");
 
@@ -1459,6 +1482,32 @@ async function raceRunnerContainerOperationAbort<T>(
     throw error;
   } finally {
     removeAbortListener();
+  }
+}
+
+async function waitForRunnerContainerOperationCompletion(
+  completion: Promise<void> | null,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (!completion) {
+    return true;
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      completion.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<false>((resolve) => {
+        timeoutId = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
