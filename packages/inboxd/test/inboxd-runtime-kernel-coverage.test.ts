@@ -171,6 +171,43 @@ test("sqlite runtime mutation head follows the latest capture state and created-
   }
 });
 
+test("sqlite runtime resolves attachments by id without capture-list scanning", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-attachment-lookup");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await runtimeSurface.openInboxRuntime({ vaultRoot });
+  try {
+    const attachmentId = buildAttachmentId("cap-attachment-owner", 1);
+    runtime.upsertCaptureIndex(createIndexedCaptureFixture({
+      captureId: "cap-attachment-owner",
+      source: "telegram",
+      accountId: "bot",
+      externalId: "update:attachment-owner",
+      occurredAt: "2026-03-13T08:00:00.000Z",
+      text: "capture with attachment",
+      attachments: [
+        {
+          attachmentId,
+          ordinal: 1,
+          kind: "document",
+          mime: "application/pdf",
+          fileName: "report.pdf",
+          storedPath: "raw/inbox/telegram/bot/report.pdf",
+          sha256: "report-sha",
+          byteSize: 12,
+        },
+      ],
+    }));
+
+    const match = runtime.getAttachment(attachmentId);
+    assert.equal(match?.capture.captureId, "cap-attachment-owner");
+    assert.equal(match?.attachment.fileName, "report.pdf");
+    assert.equal(runtime.getAttachment("missing-attachment"), null);
+  } finally {
+    runtime.close();
+  }
+});
+
 test("canonical inbox record builders sanitize attachment paths and keep raw refs sparse", () => {
   const inbound = createInboundCaptureFixture({
     source: "telegram",
@@ -594,6 +631,9 @@ function createStubInboxPipeline(): InboxPipeline {
         return [];
       },
       getCapture() {
+        return null;
+      },
+      getAttachment() {
         return null;
       },
     },

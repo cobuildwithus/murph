@@ -36,6 +36,7 @@ type InboxServicesRuntimeStoreOwner = Pick<
   | 'searchCaptures'
   | 'listAttachmentParseJobs'
   | 'getCapture'
+  | 'getAttachment'
 >
 
 test('inbox services runtime record types stay owned by inboxd', () => {

@@ -98,6 +98,10 @@ export interface InboxRuntimeStore extends ParserRuntimeStore {
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
   getCapture(captureId: string): InboxCaptureRecord | null;
+  getAttachment(attachmentId: string): {
+    capture: InboxCaptureRecord;
+    attachment: InboxCaptureRecord["attachments"][number];
+  } | null;
 }
 
 export interface OpenInboxRuntimeInput {
@@ -719,6 +723,9 @@ function createInboxRuntimeStore(
   const getCaptureStatement = database.prepare(
     "select * from capture where capture_id = ?",
   );
+  const findCaptureIdByAttachmentIdStatement = database.prepare(
+    "select capture_id from capture_attachment where attachment_id = ?",
+  );
   const parseJobs = createAttachmentParseJobStore({
     database,
     refreshCaptureSearchIndex(captureId) {
@@ -1019,6 +1026,24 @@ function createInboxRuntimeStore(
       }
 
       return hydrateCaptureRows(database, [decodeCaptureRow(row)])[0] ?? null;
+    },
+    getAttachment(attachmentId) {
+      const row = findCaptureIdByAttachmentIdStatement.get(attachmentId) as
+        | { capture_id: string }
+        | undefined;
+      if (!row) {
+        return null;
+      }
+
+      const capture = this.getCapture(row.capture_id);
+      const attachment =
+        capture?.attachments.find((candidate) => candidate.attachmentId === attachmentId) ?? null;
+      return capture && attachment
+        ? {
+            capture,
+            attachment,
+          }
+        : null;
     },
     replaceCaptureProjection(entries) {
       const normalizedEntries = entries.map((entry) => ({

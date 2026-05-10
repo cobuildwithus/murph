@@ -269,6 +269,17 @@ function createRuntimeStore(input: {
     getCapture(captureId: string) {
       return input.captures.find((capture) => capture.captureId === captureId) ?? null
     },
+    getAttachment(attachmentId: string) {
+      for (const capture of input.captures) {
+        const attachment = capture.attachments.find(
+          (candidate) => candidate.attachmentId === attachmentId,
+        )
+        if (attachment) {
+          return { capture, attachment }
+        }
+      }
+      return null
+    },
     getCursor(source, accountId) {
       return cursorStore.get(getKey(source, accountId)) ?? null
     },
@@ -646,6 +657,49 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
   })
   assert.equal(searched.hits.length, 1)
   assert.equal(searched.hits[0]?.promotions[0]?.target, 'document')
+})
+
+test('read ops resolve attachments by direct runtime lookup instead of capture scanning', async () => {
+  const paths = await createTempPaths()
+  const captures = Array.from({ length: 201 }, (_, index) =>
+    createCapture({
+      captureId: `capture-${index + 1}`,
+      attachments:
+        index === 200
+          ? [
+              createAttachment({
+                attachmentId: 'attachment-after-first-page',
+                fileName: 'late.pdf',
+                kind: 'document',
+                ordinal: 1,
+              }),
+            ]
+          : [],
+    }),
+  )
+  const { runtime } = createRuntimeStore({ captures })
+  runtime.listCaptures = vi.fn(() => {
+    throw new Error('attachment lookup should not scan captures')
+  })
+  const env = createEnv()
+
+  stateMocks.withInitializedInboxRuntime.mockImplementation(
+    async (_loadInbox, _vault, fn) =>
+      fn({
+        paths,
+        runtime,
+      }),
+  )
+
+  const ops = createInboxReadOps(env)
+  const shownAttachment = await ops.showAttachment({
+    attachmentId: 'attachment-after-first-page',
+    requestId: null,
+    vault: paths.absoluteVaultRoot,
+  })
+
+  assert.equal(shownAttachment.captureId, 'capture-201')
+  assert.equal(shownAttachment.attachment.fileName, 'late.pdf')
 })
 
 test('read ops report empty parse-status state when no parse jobs exist yet', async () => {

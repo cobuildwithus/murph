@@ -11,7 +11,7 @@ import type {
   RuntimeStore,
 } from '../inbox-app/types.js'
 import { requireConnector } from './state.js'
-import { listAllCaptures, runtimeNamespaceAccountId } from './shared.js'
+import { runtimeNamespaceAccountId } from './shared.js'
 
 export function hasStoredPath(
   attachment: RuntimeAttachmentRecord,
@@ -132,17 +132,9 @@ export function requireAttachmentRecord(
   capture: RuntimeCaptureRecord
   attachment: RuntimeAttachmentRecord
 } {
-  for (const capture of listAllCaptures(runtime)) {
-    const detailedCapture = runtime.getCapture(capture.captureId) ?? capture
-    const attachment = detailedCapture.attachments.find(
-      (candidate) => candidate.attachmentId === attachmentId,
-    )
-    if (attachment) {
-      return {
-        capture: detailedCapture,
-        attachment,
-      }
-    }
+  const match = runtime.getAttachment(attachmentId)
+  if (match) {
+    return match
   }
 
   throw new VaultCliError(

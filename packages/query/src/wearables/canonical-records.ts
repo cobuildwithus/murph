@@ -28,6 +28,7 @@ export function collectCanonicalWearableDataset(
   const activitySessions: WearableMetricCandidate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
   const tombstones = collectCanonicalTombstoneKeys(records);
+  const sleepResourceDates = collectCanonicalSleepResourceDates(records);
 
   for (const record of records) {
     const provider = record.source.provider.toLowerCase();
@@ -55,7 +56,7 @@ export function collectCanonicalWearableDataset(
       continue;
     }
 
-    const date = record.dayKey ?? extractIsoDatePrefix(record.occurredAt ?? record.recordedAt ?? record.observedAt);
+    const date = deriveCanonicalWearableDate(record, sleepResourceDates);
     if (!date || !matchesDateFilters(date, filters)) {
       continue;
     }
@@ -90,6 +91,67 @@ export function collectCanonicalWearableDataset(
     rawMetricCandidates,
     sleepWindows: dedupeSleepWindowCandidates(sleepWindows).sort(compareSleepWindowByDateDesc),
   };
+}
+
+function collectCanonicalSleepResourceDates(records: readonly CanonicalWearableRecord[]): Map<string, string> {
+  const dates = new Map<string, string>();
+
+  for (const record of records) {
+    if (record.kind !== "session" || record.sessionKind !== "sleep_session") {
+      continue;
+    }
+
+    const resourceKey = canonicalResourceKey(record.source);
+    if (!resourceKey || dates.has(resourceKey)) {
+      continue;
+    }
+
+    const date = deriveCanonicalSleepSessionDate(record);
+    if (date) {
+      dates.set(resourceKey, date);
+    }
+  }
+
+  return dates;
+}
+
+function deriveCanonicalWearableDate(
+  record: CanonicalWearableRecord,
+  sleepResourceDates: ReadonlyMap<string, string>,
+): string | null {
+  const dayKey = normalizeNullableString(record.dayKey);
+  if (dayKey) {
+    return dayKey;
+  }
+
+  if (record.kind === "session" && record.sessionKind === "sleep_session") {
+    return deriveCanonicalSleepSessionDate(record);
+  }
+
+  const resourceKey = canonicalResourceKey(record.source);
+  const sleepResourceDate = resourceKey ? sleepResourceDates.get(resourceKey) : undefined;
+  if (sleepResourceDate) {
+    return sleepResourceDate;
+  }
+
+  return firstIsoDatePrefix(record.occurredAt, record.recordedAt, record.observedAt);
+}
+
+function deriveCanonicalSleepSessionDate(
+  record: Extract<CanonicalWearableRecord, { kind: "session" }>,
+): string | null {
+  return firstIsoDatePrefix(record.endAt, record.recordedAt, record.occurredAt, record.startAt, record.observedAt);
+}
+
+function firstIsoDatePrefix(...candidates: Array<string | null | undefined>): string | null {
+  for (const candidate of candidates) {
+    const date = extractIsoDatePrefix(candidate);
+    if (date) {
+      return date;
+    }
+  }
+
+  return null;
 }
 
 function buildCanonicalMetricCandidate(
@@ -224,6 +286,13 @@ function collectCanonicalTombstoneKeys(records: readonly CanonicalWearableRecord
   return new Set(records.flatMap((record) => record.kind === "tombstone"
     ? [tombstoneKey(record.source, record.providerResourceType, record.providerResourceId)]
     : []));
+}
+
+function canonicalResourceKey(source: CanonicalWearableSource): string | null {
+  const resourceType = normalizeNullableString(source.providerResourceType);
+  const resourceId = normalizeNullableString(source.providerResourceId);
+
+  return resourceType && resourceId ? tombstoneKey(source, resourceType, resourceId) : null;
 }
 
 function tombstoneKey(

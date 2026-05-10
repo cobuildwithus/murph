@@ -194,6 +194,88 @@ test("collectCanonicalWearableDataset scopes tombstones to the same source ident
   );
 });
 
+test("collectCanonicalWearableDataset buckets canonical sleep records without dayKey to the sleep night", () => {
+  const records: CanonicalWearableRecord[] = [
+    {
+      id: "sleep_window_without_day_key",
+      kind: "session",
+      schemaVersion: "wearable.canonical_record.v1",
+      observedAt: "2026-04-06T08:00:00.000Z",
+      recordedAt: "2026-04-06T08:00:00.000Z",
+      occurredAt: "2026-04-01T23:00:00.000Z",
+      source: {
+        provider: "whoop",
+        dataSourceId: "wearable_source_whoop",
+        externalRef: {
+          resourceId: "sleep-1",
+          resourceType: "sleep",
+          system: "whoop",
+        },
+        normalizerVersion: "test-normalizer.v1",
+        providerResourceId: "sleep-1",
+        providerResourceType: "sleep",
+        rawArtifactRoles: ["sleep"],
+      },
+      sessionKind: "sleep_session",
+      durationMinutes: 480,
+      startAt: "2026-04-01T23:00:00.000Z",
+      endAt: "2026-04-02T07:00:00.000Z",
+      title: "WHOOP sleep",
+    },
+    {
+      id: "sleep_metric_without_day_key",
+      kind: "observation",
+      schemaVersion: "wearable.canonical_record.v1",
+      observedAt: "2026-04-06T08:00:00.000Z",
+      recordedAt: "2026-04-06T08:00:00.000Z",
+      occurredAt: "2026-04-01T23:00:00.000Z",
+      source: {
+        provider: "whoop",
+        dataSourceId: "wearable_source_whoop",
+        externalRef: {
+          resourceId: "sleep-1",
+          resourceType: "sleep",
+          system: "whoop",
+        },
+        normalizerVersion: "test-normalizer.v1",
+        providerResourceId: "sleep-1",
+        providerResourceType: "sleep",
+        rawArtifactRoles: ["sleep"],
+      },
+      metric: "sleepScore",
+      unit: "score",
+      value: 88,
+    },
+    {
+      id: "activity_metric_without_day_key",
+      kind: "observation",
+      schemaVersion: "wearable.canonical_record.v1",
+      observedAt: "2026-04-02T08:00:00.000Z",
+      recordedAt: "2026-04-06T08:00:00.000Z",
+      occurredAt: "2026-04-01T23:00:00.000Z",
+      source: {
+        provider: "oura",
+        dataSourceId: "wearable_source_oura",
+        normalizerVersion: "test-normalizer.v1",
+        providerResourceId: "activity-1",
+        providerResourceType: "daily_activity",
+        rawArtifactRoles: ["daily-activity"],
+      },
+      metric: "steps",
+      unit: "count",
+      value: 1200,
+    },
+  ];
+
+  const dataset = collectCanonicalWearableDataset(records);
+  const sleepMetric = dataset.metricCandidates.find((candidate) => candidate.metric === "sleepScore");
+  const activityMetric = dataset.metricCandidates.find((candidate) => candidate.metric === "steps");
+
+  assert.equal(dataset.sleepWindows[0]?.date, "2026-04-02");
+  assert.equal(sleepMetric?.date, "2026-04-02");
+  assert.equal(activityMetric?.date, "2026-04-01");
+});
+
 test("collectCanonicalWearableDataset filters Junction-backed canonical records by public source", () => {
   const records: CanonicalWearableRecord[] = [
     {

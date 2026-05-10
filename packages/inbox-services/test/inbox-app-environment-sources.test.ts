@@ -59,6 +59,9 @@ function createRuntimeStore(): RuntimeStore {
     getCapture() {
       return null
     },
+    getAttachment() {
+      return null
+    },
     getCursor() {
       return null
     },

@@ -205,6 +205,17 @@ function createRuntimeStore(
     getCapture(captureId) {
       return captures.find((capture) => capture.captureId === captureId) ?? null
     },
+    getAttachment(attachmentId: string) {
+      for (const capture of captures) {
+        const attachment = capture.attachments.find(
+          (candidate) => candidate.attachmentId === attachmentId,
+        )
+        if (attachment) {
+          return { capture, attachment }
+        }
+      }
+      return null
+    },
     getCursor() {
       return null
     },
@@ -569,6 +580,9 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
             }
           },
           getCapture() {
+            return null
+          },
+          getAttachment() {
             return null
           },
           getCursor() {

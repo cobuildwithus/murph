@@ -149,6 +149,9 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
         getCapture() {
           return null;
         },
+        getAttachment() {
+          return null;
+        },
       },
       async processCapture(input) {
         return createPersistedCapture(input);
@@ -237,6 +240,9 @@ test("runPollConnector uses connector-supplied checkpoints when emitting capture
         getCapture() {
           return null;
         },
+        getAttachment() {
+          return null;
+        },
       },
       async processCapture(input) {
         return createPersistedCapture(input);
@@ -321,6 +327,9 @@ test("runPollConnectorBackfill preserves the latest emitted checkpoint when the 
           return [];
         },
         getCapture() {
+          return null;
+        },
+        getAttachment() {
           return null;
         },
       },
@@ -461,6 +470,9 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
         getCapture() {
           return null;
         },
+        getAttachment() {
+          return null;
+        },
       },
       async processCapture(input) {
         return createPersistedCapture(input);
@@ -563,6 +575,9 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
             getCapture() {
               return null;
             },
+            getAttachment() {
+              return null;
+            },
           },
           async processCapture(_input) {
             throw new Error("processCapture should not be called");
@@ -637,6 +652,9 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
               return [];
             },
             getCapture() {
+              return null;
+            },
+            getAttachment() {
               return null;
             },
           },
@@ -750,6 +768,9 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
           return [];
         },
         getCapture() {
+          return null;
+        },
+        getAttachment() {
           return null;
         },
       },
@@ -951,6 +972,9 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
             getCapture() {
               return null;
             },
+            getAttachment() {
+              return null;
+            },
           },
           async processCapture(_input) {
             throw new Error("processCapture should not be called");
@@ -1014,6 +1038,9 @@ function createStubInboxPipeline(): InboxPipeline {
         return [];
       },
       getCapture() {
+        return null;
+      },
+      getAttachment() {
         return null;
       },
     },
