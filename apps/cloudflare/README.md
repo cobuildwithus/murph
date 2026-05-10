@@ -99,9 +99,11 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
-invocations for a Durable Object. When the cap is reached, the runner clears the
-retry alarm and waits for fresh nudge/manual input instead of continuing the
-alarm loop. Successful invocations and fresh nudges reset the counter.
+invocations for a Durable Object. When the cap is reached, ordinary retry alarms
+are cleared until fresh nudge/manual input arrives. Pending user-visible nudges
+stay recoverable, but move to the longer capped retry backoff after the fast
+attempts are exhausted. Successful invocations and fresh nudges reset the
+counter.
 
 Optional execution vars and secrets:
 
