@@ -85,7 +85,7 @@ import {
 } from "./runner-job-transport.js";
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+const ACTIVE_INVOCATION_HEARTBEAT_STALE_MS = 3_000;
 const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
 const DEFERRED_CHECKPOINT_DRAIN_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
@@ -401,11 +401,16 @@ export class HostedUserRunner {
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId, {
       logLimit: input.logLimit,
     });
+    const deferredCheckpointMailboxStatus = record.deferredCheckpointRequired
+      ? record.deferredCheckpointMailboxStatus
+      : null;
     const mailboxLag = mergeHostedRunnerDeferredCheckpointMailboxLag({
       mailboxLag: webStatus.mailboxLag,
-      redactedStatus: record.deferredCheckpointRequired
-        ? record.deferredCheckpointMailboxStatus
-        : null,
+      redactedStatus: deferredCheckpointMailboxStatus,
+    });
+    const workspace = mergeHostedRunnerDeferredCheckpointWorkspaceStatus({
+      redactedStatus: deferredCheckpointMailboxStatus,
+      workspace: webStatus.workspace,
     });
 
     return {
@@ -420,7 +425,7 @@ export class HostedUserRunner {
       ),
       mailboxLag,
       userId: record.userId,
-      workspace: webStatus.workspace,
+      workspace,
     };
   }
 
@@ -552,8 +557,8 @@ export class HostedUserRunner {
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
         currentWorkerVersionId: this.currentWorkerVersionId,
+        heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
         nowMs: Date.now(),
-        orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
         timeoutMs: this.env.runnerTimeoutMs,
       });
       runningRecord = recovery.record;
@@ -571,7 +576,9 @@ export class HostedUserRunner {
     const retryFailureCount = resetRetryFailureCount
       ? 0
       : runningRecord.retryFailureCount;
-    const preferredWakeAt = alreadyRunning
+    const preferredWakeAt = activeInThisIsolate
+      ? new Date(nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS).toISOString()
+      : alreadyRunning
       ? resolvePendingNudgeDrainContinuationWakeAt({
           nowMs,
           record: runningRecord,
@@ -1305,8 +1312,8 @@ export class HostedUserRunner {
   > {
     const recovery = await this.stateStore.clearStaleInvocationIfExpired({
       currentWorkerVersionId: this.currentWorkerVersionId,
+      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
       nowMs: Date.now(),
-      orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
       timeoutMs: this.env.runnerTimeoutMs,
     });
     if (recovery.cleared) {
@@ -2509,15 +2516,10 @@ function resolvePendingNudgeWakeAt(input: {
   const lastHeartbeatAtMs = invocation.lastHeartbeatAt
     ? Date.parse(invocation.lastHeartbeatAt)
     : Number.NaN;
-  const orphanObservedAtMs = invocation.orphanObservedAt
-    ? Date.parse(invocation.orphanObservedAt)
-    : Number.NaN;
-  const orphanDeadlineMs = Number.isFinite(lastHeartbeatAtMs)
-    ? lastHeartbeatAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
-    : Number.isFinite(orphanObservedAtMs)
-      ? orphanObservedAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
-      : input.nowMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS;
-  return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, orphanDeadlineMs))).toISOString();
+  const livenessDeadlineMs = Number.isFinite(lastHeartbeatAtMs)
+    ? lastHeartbeatAtMs + ACTIVE_INVOCATION_HEARTBEAT_STALE_MS
+    : input.nowMs;
+  return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, livenessDeadlineMs))).toISOString();
 }
 
 function resolvePendingNudgeDrainContinuationWakeAt(input: {
@@ -2549,6 +2551,46 @@ function applyMinimumFutureWakeAt(input: {
   }
 
   return new Date(minimumWakeAtMs).toISOString();
+}
+
+function mergeHostedRunnerDeferredCheckpointWorkspaceStatus(input: {
+  redactedStatus: HostedRuntimeRedactedJson | null;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceState | null {
+  if (!input.workspace || !input.redactedStatus) {
+    return input.workspace;
+  }
+
+  return {
+    ...input.workspace,
+    redactedStatus: mergeHostedRunnerDeferredCheckpointRedactedStatus({
+      base: input.workspace.redactedStatus ?? null,
+      deferred: input.redactedStatus,
+    }),
+  };
+}
+
+function mergeHostedRunnerDeferredCheckpointRedactedStatus(input: {
+  base: HostedRuntimeRedactedJson | null;
+  deferred: HostedRuntimeRedactedJson;
+}): HostedRuntimeRedactedJson {
+  const merged: HostedRuntimeRedactedJson = {
+    ...(input.base ?? {}),
+  };
+
+  for (const [key, value] of Object.entries(input.deferred)) {
+    const deferredSeq = readNonNegativeBigInt(value);
+    if (deferredSeq === null) {
+      continue;
+    }
+
+    const baseSeq = readNonNegativeBigInt(merged[key]);
+    if (baseSeq === null || deferredSeq > baseSeq) {
+      merged[key] = deferredSeq.toString();
+    }
+  }
+
+  return merged;
 }
 
 function mergeHostedRunnerDeferredCheckpointMailboxLag(input: {

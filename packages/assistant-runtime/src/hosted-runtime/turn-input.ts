@@ -156,12 +156,14 @@ export function createHostedAssistantInputSource(input: {
   }
 
   const foregroundReplayBaseSource = source;
+  const foregroundReplayInputIdSet = new Set(foregroundReplayInputIds);
   return {
     ...foregroundReplayBaseSource,
     async listInputCandidates(query) {
       const base = await foregroundReplayBaseSource.listInputCandidates(query);
       const replayLimit = normalizePreferredAssistantInputLimit(query.limit);
       const replay = await listPreferredAssistantInputCandidates({
+        includeBoundaryInputIds: foregroundReplayInputIdSet,
         preferredInputIds: foregroundReplayInputIds.slice(-replayLimit),
         query,
         vaultRoot: input.vaultRoot,
@@ -323,10 +325,12 @@ function latestAssistantInputCursor(
 }
 
 async function listPreferredAssistantInputCandidates(input: {
+  includeBoundaryInputIds?: ReadonlySet<string> | null;
   preferredInputIds: readonly string[];
   query: AssistantInputCandidateQuery;
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
+  const includeBoundaryInputIds = input.includeBoundaryInputIds ?? null;
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
   const limit = normalizePreferredAssistantInputLimit(input.query.limit);
   const candidates: AssistantInputCandidate[] = [];
@@ -351,7 +355,11 @@ async function listPreferredAssistantInputCandidates(input: {
     }
     if (
       input.query.afterCursor
-      && compareAssistantInputCursors(candidate.event.cursor, input.query.afterCursor) <= 0
+      && !isPreferredBoundaryCandidate({
+        afterCursor: input.query.afterCursor,
+        candidate,
+        includeBoundaryInputIds,
+      })
     ) {
       continue;
     }
@@ -361,6 +369,26 @@ async function listPreferredAssistantInputCandidates(input: {
   return candidates
     .sort((left, right) => compareAssistantInputCursors(left.event.cursor, right.event.cursor))
     .slice(0, limit);
+}
+
+function isPreferredBoundaryCandidate(input: {
+  afterCursor: AssistantInputCandidateQuery["afterCursor"];
+  candidate: AssistantInputCandidate;
+  includeBoundaryInputIds: ReadonlySet<string> | null;
+}): boolean {
+  if (!input.afterCursor) {
+    return true;
+  }
+
+  const order = compareAssistantInputCursors(
+    input.candidate.event.cursor,
+    input.afterCursor,
+  );
+  if (order > 0) {
+    return true;
+  }
+  return order === 0
+    && input.includeBoundaryInputIds?.has(input.candidate.event.inputId) === true;
 }
 
 function normalizePreferredAssistantInputLimit(value: number | undefined): number {

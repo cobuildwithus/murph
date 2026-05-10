@@ -718,8 +718,8 @@ export class RunnerStateStore {
 
   async clearStaleInvocationIfExpired(input: {
     currentWorkerVersionId?: string | null;
+    heartbeatStaleMs?: number | null;
     nowMs: number;
-    orphanGraceMs?: number | null;
     timeoutMs: number;
   }): Promise<RunnerStaleInvocationRecoveryResult> {
     const meta = this.requireMetaRowSync();
@@ -748,13 +748,13 @@ export class RunnerStateStore {
       || (Number.isFinite(expiresAtMs)
         ? input.nowMs >= expiresAtMs
         : input.nowMs - startedAtMs >= input.timeoutMs);
-    const orphanGraceMs = input.orphanGraceMs ?? null;
+    const heartbeatStaleMs = input.heartbeatStaleMs ?? null;
     const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
       ? Date.parse(meta.active_invocation_last_heartbeat_at)
       : Number.NaN;
-    const hasRecentHeartbeat = orphanGraceMs !== null
+    const hasRecentHeartbeat = heartbeatStaleMs !== null
       && Number.isFinite(lastHeartbeatAtMs)
-      && input.nowMs - lastHeartbeatAtMs < orphanGraceMs;
+      && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
     if (meta.active_invocation_container_stopped_at !== null) {
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
@@ -775,7 +775,7 @@ export class RunnerStateStore {
     if (
       currentWorkerVersionId !== null
       && activeWorkerVersionId !== currentWorkerVersionId
-      && (isHardExpired || !hasRecentHeartbeat)
+      && !hasRecentHeartbeat
     ) {
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
@@ -794,22 +794,7 @@ export class RunnerStateStore {
       };
     }
 
-    let isOrphanExpired = false;
-    if (!isHardExpired && orphanGraceMs !== null) {
-      const observedAtMs = meta.active_invocation_orphan_observed_at
-        ? Date.parse(meta.active_invocation_orphan_observed_at)
-        : Number.NaN;
-      if (Number.isFinite(lastHeartbeatAtMs)) {
-        isOrphanExpired = input.nowMs - lastHeartbeatAtMs >= orphanGraceMs;
-      } else if (Number.isFinite(observedAtMs)) {
-        isOrphanExpired = input.nowMs - observedAtMs >= orphanGraceMs;
-      } else {
-        meta.active_invocation_orphan_observed_at = new Date(input.nowMs).toISOString();
-        this.writeMetaRowSync(meta);
-      }
-    }
-
-    if (!isHardExpired && !isOrphanExpired) {
+    if (!isHardExpired && hasRecentHeartbeat) {
       return {
         attemptId,
         cleared: false,

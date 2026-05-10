@@ -616,6 +616,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
+    const effectiveMailboxImport = result.latestMailboxImport;
     if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
       await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
     }
@@ -625,11 +626,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       committedWorkspace,
       mailboxImportRetryAt,
     });
+    const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
+      effectiveMailboxImport.importResult,
+    );
     const redactedStatus = {
-      ...buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult),
+      ...mailboxRedactedStatus,
       ...(result.assistantPhaseResult?.progressed === true
         ? result.assistantPhaseResult.redactedStatus ?? {}
         : {}),
+      hostedMailboxConversationImportedSeq:
+        mailboxRedactedStatus["hostedMailboxConversationImportedSeq"],
+      hostedMailboxSystemImportedSeq:
+        mailboxRedactedStatus["hostedMailboxSystemImportedSeq"],
     };
     const deferredCheckpointRequired = foregroundRunRequiresDeferredCheckpoint(result);
 
