@@ -68,7 +68,6 @@ import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
-import { handleLegacyHostedRunnerWakeQueue } from "./legacy-runner-wake-queue.ts";
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
@@ -93,7 +92,6 @@ import {
 } from "./runner-outbound/browser-vault-refresh-authority.ts";
 import {
   asWorkerStringEnvironment,
-  type WorkerQueueMessageBatchLike,
 } from "./worker-contracts.ts";
 import {
   decodeRouteParam,
@@ -318,13 +316,6 @@ export default {
     assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
 
     await handleHostedEmailIngress(message, env, ctx);
-  },
-  async queue(
-    batch: WorkerQueueMessageBatchLike,
-    env: WorkerEnvironmentSource,
-  ): Promise<void> {
-    assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
-    await handleLegacyHostedRunnerWakeQueue(batch, env);
   },
 };
 
