@@ -745,6 +745,8 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,

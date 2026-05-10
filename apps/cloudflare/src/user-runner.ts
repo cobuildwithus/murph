@@ -1712,12 +1712,9 @@ export class HostedUserRunner {
     userId: string;
     workspaceVersion: string;
   }): Promise<void> {
-    const record = input.result.deferredCheckpointRequired === true
-      && input.result.redactedStatus
-      ? await this.stateStore.markDeferredCheckpointRequired({
-          redactedStatus: input.result.redactedStatus,
-        })
-      : await this.stateStore.clearDeferredCheckpointRequired();
+    const record = await this.syncDeferredCheckpointStateAfterInvocation({
+      result: input.result,
+    });
     if (record.pendingNudge) {
       const queuedRecord = await this.queuePendingNudgeContinuationAfterInvocation({
         record,
@@ -1775,6 +1772,36 @@ export class HostedUserRunner {
       phase: "scheduled",
       userId: input.userId,
     });
+  }
+
+  private async syncDeferredCheckpointStateAfterInvocation(input: {
+    result: HostedWorkspaceInvocationResult;
+  }): Promise<RunnerStateRecord> {
+    const record = await this.stateStore.readState();
+    const nextDeferredStatus = input.result.redactedStatus
+      ? mergeHostedRunnerDeferredCheckpointRedactedStatus({
+          base: record.deferredCheckpointRequired
+            ? record.deferredCheckpointMailboxStatus
+            : null,
+          deferred: input.result.redactedStatus,
+        })
+      : null;
+
+    if (input.result.deferredCheckpointRequired === true && nextDeferredStatus) {
+      return await this.stateStore.markDeferredCheckpointRequired({
+        redactedStatus: nextDeferredStatus,
+      });
+    }
+
+    if (record.deferredCheckpointRequired && record.deferredCheckpointMailboxStatus) {
+      return nextDeferredStatus
+        ? await this.stateStore.markDeferredCheckpointRequired({
+            redactedStatus: nextDeferredStatus,
+          })
+        : record;
+    }
+
+    return await this.stateStore.clearDeferredCheckpointRequired();
   }
 
   private async scheduleBrowserVaultRefreshBestEffort(input: {

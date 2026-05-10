@@ -5185,6 +5185,109 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("preserves deferred mailbox status across no-progress runs before lifecycle checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxSystemImportedSeq: "0",
+      },
+      snapshotRef: createBundleRef("base-only-deferred-mailbox-preserved"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return {
+          deferredCheckpointRequired: true,
+          nextWakeAt: null,
+          redactedStatus: {
+            hostedMailboxConversationImportedSeq: "0",
+            hostedMailboxSystemImportedSeq: "1",
+          },
+          status: "idle" as const,
+        };
+      }
+
+      return {
+        nextWakeAt: null,
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+        status: "idle" as const,
+      };
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: {
+        mailboxLag: [
+          {
+            importedSeq: "0",
+            lag: "1",
+            lane: "system",
+            maxSeq: "1",
+          },
+          {
+            importedSeq: "0",
+            lag: "0",
+            lane: "conversation",
+            maxSeq: "0",
+          },
+        ],
+        userId: "member_123",
+        workspace,
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      deferredCheckpointRequired: true,
+      status: "idle",
+    });
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(
+      sql.exec(
+        `SELECT deferred_checkpoint_required,
+                deferred_checkpoint_mailbox_status_json
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      deferred_checkpoint_mailbox_status_json: JSON.stringify({
+        hostedMailboxSystemImportedSeq: "1",
+        hostedMailboxConversationImportedSeq: "0",
+      }),
+      deferred_checkpoint_required: 1,
+    }]);
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      mailboxLag: [
+        {
+          importedSeq: "1",
+          lag: "0",
+          lane: "system",
+          maxSeq: "1",
+        },
+        {
+          importedSeq: "0",
+          lag: "0",
+          lane: "conversation",
+          maxSeq: "0",
+        },
+      ],
+      workspace: {
+        redactedStatus: {
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxSystemImportedSeq: "1",
+        },
+      },
+    });
+  });
+
   it("keeps a lifecycle checkpoint alarm before the first workspace row exists", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
