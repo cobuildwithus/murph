@@ -405,6 +405,7 @@ export class RunnerStateStore {
       };
     }
 
+    preserveConsumedNudgeAfterActiveInvocationClears(meta);
     meta.active_invocation_container_stopped_at = normalizeOptionalIsoDateString(
       input.stoppedAt ?? null,
     ) ?? new Date().toISOString();
@@ -756,6 +757,7 @@ export class RunnerStateStore {
       && Number.isFinite(lastHeartbeatAtMs)
       && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
     if (meta.active_invocation_container_stopped_at !== null) {
+      preserveConsumedNudgeAfterActiveInvocationClears(meta);
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
       meta.last_error_at = new Date(input.nowMs).toISOString();
@@ -1166,6 +1168,15 @@ function isHostedWorkspaceInvocationReasonValue(
     || value === "retry"
     || value === "manual"
     || value === "idle_shutdown_checkpoint";
+}
+
+function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): void {
+  if (meta.active_invocation_reason !== "nudge") {
+    return;
+  }
+
+  meta.pending_nudge = 1;
+  meta.pending_work = 1;
 }
 
 function normalizeIsoDateString(value: string): string {
