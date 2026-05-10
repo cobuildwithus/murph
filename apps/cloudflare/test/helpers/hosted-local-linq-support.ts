@@ -116,10 +116,23 @@ export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
   "",
 ].join("\n"));
 
+export const HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+]);
+
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
+  const imageBytes = HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES;
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
   const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
   let nextObservedChatSequence = 0;
@@ -209,12 +222,15 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
     if (
       request.method === "GET"
       && request.url
-      && /^\/attachment-downloads\/[^/]+\.(?:m4a|pdf|wav)$/u.test(request.url)
+      && /^\/attachment-downloads\/[^/]+\.(?:m4a|pdf|png|wav)$/u.test(request.url)
     ) {
       response.statusCode = 200;
       if (request.url.endsWith(".pdf")) {
         response.setHeader("content-type", "application/pdf");
         response.end(Buffer.from(pdfBytes));
+      } else if (request.url.endsWith(".png")) {
+        response.setHeader("content-type", "image/png");
+        response.end(Buffer.from(imageBytes));
       } else {
         response.setHeader(
           "content-type",
@@ -662,7 +678,11 @@ function buildHostedLocalLinqAttachmentDownloadUrl(
   attachmentDownloadBaseUrl: string,
   attachmentId: string,
 ): string {
-  const extension = attachmentId.startsWith("att_pdf_") ? "pdf" : "wav";
+  const extension = attachmentId.startsWith("att_pdf_")
+    ? "pdf"
+    : attachmentId.startsWith("att_image_")
+      ? "png"
+      : "wav";
   return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.${extension}`;
 }
 

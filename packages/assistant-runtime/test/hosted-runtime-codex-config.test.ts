@@ -50,6 +50,17 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+const HOSTED_CODEX_E2E_STUB_PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+]);
 
 afterEach(async () => {
   await Promise.all(
@@ -375,7 +386,10 @@ test("hosted Codex runtime local E2E app-server stub records resumed assistant c
     assert.equal(requests.length, 2);
     assert.match(readResponsesRequestInput(requests[0]!), /first hosted local prompt/u);
     assert.match(readResponsesRequestInput(requests[1]!), /second hosted local prompt/u);
-    assert.doesNotMatch(readResponsesRequestInput(requests[1]!), /Conversation so far:/u);
+    assert.match(
+      readResponsesRequestInput(requests[1]!),
+      /Conversation so far:\\nAssistant:\\nfirst assistant reply/u,
+    );
     const threadId = readHostedLocalCodexStubThreadId(messages);
     const rolloutLog = await readHostedLocalCodexShimRolloutLog(result.codexHome, threadId);
     assert.deepEqual(parseHostedLocalCodexShimContinuityEntries(rolloutLog), [
@@ -407,6 +421,60 @@ test("hosted Codex runtime local E2E app-server stub records resumed assistant c
     });
     assert.doesNotMatch(rolloutLog, /first hosted local prompt/u);
     assert.doesNotMatch(rolloutLog, /second hosted local prompt/u);
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
+test("hosted Codex runtime local E2E app-server stub forwards local images", async () => {
+  const workspaceRoot = await createTemporaryDirectory();
+  const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+  const vaultRoot = path.join(workspaceRoot, "vault");
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: "image observed",
+  });
+
+  try {
+    await mkdir(vaultRoot, { recursive: true });
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "secret-openai-key",
+        PATH: process.env.PATH ?? "",
+      },
+    });
+
+    const turn = await executeCodexAppServerTurn({
+      approvalPolicy: "never",
+      codexHome: result.runtimeEnv.CODEX_HOME,
+      env: {
+        CODEX_HOME: result.runtimeEnv.CODEX_HOME,
+        HOME: operatorHomeRoot,
+        OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
+        PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
+      },
+      images: [
+        {
+          bytes: HOSTED_CODEX_E2E_STUB_PNG_BYTES,
+          mimeType: "image/png",
+        },
+      ],
+      prompt: "inspect hosted local image",
+      sandbox: "danger-full-access",
+      workingDirectory: vaultRoot,
+    });
+
+    assert.equal(turn.finalMessage, "image observed");
+    assert.equal(requests.length, 1);
+    assert.equal(responsesRequestInputContains(requests[0]!, "inspect hosted local image"), true);
+    assert.equal(responsesRequestHasInputImageDataUrl(requests[0]!, "image/png"), true);
+    assert.equal(responsesRequestInputContains(requests[0]!, "murph-codex-"), false);
   } finally {
     await closeHttpServer(server);
   }
@@ -1389,6 +1457,46 @@ function writeResponsesStubSseEvent(
 function readResponsesRequestInput(body: string): string {
   const parsed = JSON.parse(body) as Record<string, unknown>;
   return stringifyResponsesRequestInput(parsed.input);
+}
+
+function responsesRequestInputContains(body: string, token: string): boolean {
+  const parsed = parseJsonObject(body);
+  return stringifyResponsesRequestInput(parsed?.input).includes(token);
+}
+
+function responsesRequestHasInputImageDataUrl(body: string, mimeType: string): boolean {
+  const parsed = parseJsonObject(body);
+  return collectResponseInputPartsByType(parsed?.input, "input_image").some((part) =>
+    typeof part.image_url === "string"
+      && part.image_url.startsWith(`data:${mimeType};base64,`)
+  );
+}
+
+function collectResponseInputPartsByType(
+  value: unknown,
+  type: string,
+): Record<string, unknown>[] {
+  const matches: Record<string, unknown>[] = [];
+  const visit = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== "object") {
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        visit(item);
+      }
+      return;
+    }
+    const record = candidate as Record<string, unknown>;
+    if (record.type === type) {
+      matches.push(record);
+    }
+    for (const child of Object.values(record)) {
+      visit(child);
+    }
+  };
+  visit(value);
+  return matches;
 }
 
 function stringifyResponsesRequestInput(value: unknown): string {

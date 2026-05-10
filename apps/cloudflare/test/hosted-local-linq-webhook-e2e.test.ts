@@ -21,6 +21,7 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
+  HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
@@ -29,6 +30,7 @@ import {
 
 const linqWebhookSecret = "linq-local-webhook-secret";
 const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
+const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
@@ -39,7 +41,7 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
-let linqWebhookMemberCounter = 0;
+const linqWebhookMemberCountersByLabel = new Map<string, number>();
 
 interface ActiveLinqWebhookMember {
   chatId: string;
@@ -237,35 +239,117 @@ describe("hosted local Linq webhook e2e", () => {
       assistantProviderCountBeforeReply,
     );
     expect(assistantProviderRequests).toHaveLength(1);
-    const providerBody = parseAssistantProviderRequestBody(assistantProviderRequests[0]?.body);
-    const providerInput = Array.isArray(providerBody.input) ? providerBody.input : [];
-    const inputFiles = providerInput.flatMap((item) => {
-      if (!item || typeof item !== "object" || !("content" in item)) {
-        return [];
-      }
-      const content = (item as { content?: unknown }).content;
-      return Array.isArray(content)
-        ? content.filter((part) =>
-            part
-              && typeof part === "object"
-              && (part as { type?: unknown }).type === "input_file"
-          )
-        : [];
-    });
+    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    const providerBody = parseAssistantProviderRequestBody(assistantProviderBody);
+    const inputFiles = collectProviderInputPartsByType(providerBody, "input_file");
     expect(inputFiles).toEqual([]);
-    expect(assistantProviderRequests[0]?.body).toContain("Attachment context:");
-    expect(assistantProviderRequests[0]?.body).toContain("fileName: lab-results.pdf");
-    expect(assistantProviderRequests[0]?.body).toContain("raw/assistant-input/");
-    expect(assistantProviderRequests[0]?.body).toContain("attachments/001.pdf");
-    expect(assistantProviderRequests[0]?.body).toContain("storedPath");
-    expect(assistantProviderRequests[0]?.body).not.toContain("raw evidence: not_attempted");
-    expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
+    expect(assistantProviderBody.includes("\"input_file\"")).toBe(false);
+    expect(assistantProviderBody.includes("\"file_data\"")).toBe(false);
+    expect(assistantProviderBody.includes("\"file_id\"")).toBe(false);
+    expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
+    expect(assistantProviderBody.includes("fileName: lab-results.pdf")).toBe(true);
+    expect(assistantProviderBody.includes("raw/assistant-input/")).toBe(true);
+    expect(assistantProviderBody.includes("attachments/001.pdf")).toBe(true);
+    expect(assistantProviderBody.includes("storedPath")).toBe(true);
+    expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
+    expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
       expectedAttachmentDownloadPath,
       expectedAttachmentDownloadUrl,
       "pdfEvidencePath:",
       "stub-local-openai-key",
       "OPENAI_API_KEY",
+    ]);
+  }, 300_000);
+
+  it("passes image-only iMessage media through the multimodal provider path", async () => {
+    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
+      await createActiveLinqWebhookMember("image");
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const attachmentId = `att_image_${userId}`;
+    const expectedAttachmentDownloadPath =
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.png`;
+    const expectedAttachmentDownloadUrl =
+      `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.png`;
+    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+    });
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+
+    requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText]);
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_image_${userId}`,
+        messageId: `msg_image_${userId}`,
+        parts: [
+          {
+            attachmentId,
+            fileName: "outbox.png",
+            mimeType: "image/png",
+            size: 68,
+            type: "media",
+            url: expectedAttachmentDownloadUrl,
+          },
+        ],
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentDownloadCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.inFlight).toBe(false);
+    expect(finalStatus.workspace).not.toBeNull();
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedReplyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqImageAssistantReplyText,
+    );
+    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
+      assistantProviderCountBeforeReply,
+    );
+    expect(assistantProviderRequests).toHaveLength(1);
+    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    const providerBody = parseAssistantProviderRequestBody(assistantProviderBody);
+    const inputImages = collectProviderInputPartsByType(providerBody, "input_image");
+    const expectedImageDataUrl =
+      `data:image/png;base64,${Buffer.from(HOSTED_LOCAL_LINQ_IMAGE_PNG_BYTES).toString("base64")}`;
+    const imageShapeSummary = summarizeProviderImageRequestShape(
+      providerBody,
+      assistantProviderBody,
+    );
+    expect(inputImages.length, imageShapeSummary).toBeGreaterThan(0);
+    expect(
+      providerInputPartsIncludeImageUrl(inputImages, expectedImageDataUrl),
+      imageShapeSummary,
+    ).toBe(true);
+    expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
+    expect(assistantProviderBody.includes("fileName: outbox.png")).toBe(true);
+    expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
+    expectNoNativeAttachmentLeaks(assistantProviderBody, [
+      attachmentId,
+      expectedAttachmentDownloadPath,
+      expectedAttachmentDownloadUrl,
     ]);
   }, 300_000);
 
@@ -335,10 +419,10 @@ describe("hosted local Linq webhook e2e", () => {
     );
     expect(assistantProviderRequests).toHaveLength(1);
     const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
-    expect(assistantProviderBody).toContain("Attachment context:");
-    expect(assistantProviderBody).toContain("fileName: Audio Message.m4a");
-    expect(assistantProviderBody).toContain(hostedLinqVoiceNoteTranscriptText);
-    expect(assistantProviderBody).not.toContain("raw evidence: not_attempted");
+    expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
+    expect(assistantProviderBody.includes("fileName: Audio Message.m4a")).toBe(true);
+    expect(assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText)).toBe(true);
+    expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,
       expectedAttachmentDownloadPath,
@@ -392,10 +476,81 @@ function parseAssistantProviderRequestBody(body: string | undefined): Record<str
   return parsed as Record<string, unknown>;
 }
 
+function collectProviderInputPartsByType(
+  body: Record<string, unknown>,
+  type: string,
+): Record<string, unknown>[] {
+  const matches: Record<string, unknown>[] = [];
+  const visit = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== "object") {
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        visit(item);
+      }
+      return;
+    }
+    const record = candidate as Record<string, unknown>;
+    if (record.type === type) {
+      matches.push(record);
+    }
+    for (const child of Object.values(record)) {
+      visit(child);
+    }
+  };
+  visit(body);
+  return matches;
+}
+
+function providerInputPartsIncludeImageUrl(
+  parts: readonly Record<string, unknown>[],
+  imageUrl: string,
+): boolean {
+  return parts.some((part) => part.image_url === imageUrl);
+}
+
+function summarizeProviderImageRequestShape(
+  body: Record<string, unknown>,
+  rawBody: string,
+): string {
+  return JSON.stringify({
+    hasAttachmentContext: rawBody.includes("Attachment context:"),
+    hasDataImage: rawBody.includes("data:image"),
+    hasInputImage: rawBody.includes("input_image"),
+    inputItemCount: Array.isArray(body.input) ? body.input.length : null,
+    inputTypes: collectJsonTypeFields(body).slice(0, 24),
+  });
+}
+
+function collectJsonTypeFields(value: unknown): string[] {
+  const types: string[] = [];
+  const visit = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== "object") {
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        visit(item);
+      }
+      return;
+    }
+    const record = candidate as Record<string, unknown>;
+    if (typeof record.type === "string") {
+      types.push(record.type);
+    }
+    for (const child of Object.values(record)) {
+      visit(child);
+    }
+  };
+  visit(value);
+  return types;
+}
+
 function expectNoNativeAttachmentLeaks(body: string | undefined, blockedTokens: readonly string[]): void {
   const normalized = body ?? "";
   for (const token of blockedTokens) {
-    expect(normalized).not.toContain(token);
+    expect(normalized.includes(token)).toBe(false);
   }
 }
 
@@ -454,8 +609,9 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
 }
 
 async function createActiveLinqWebhookMember(label: string): Promise<ActiveLinqWebhookMember> {
-  linqWebhookMemberCounter += 1;
-  const userId = `member_local_linq_webhook_${label}_${linqWebhookRunId}_${linqWebhookMemberCounter}`;
+  const labelCounter = (linqWebhookMemberCountersByLabel.get(label) ?? 0) + 1;
+  linqWebhookMemberCountersByLabel.set(label, labelCounter);
+  const userId = `member_local_linq_webhook_${label}_${linqWebhookRunId}_${labelCounter}`;
 
   return await activateLinqWebhookMember(userId);
 }
@@ -487,10 +643,10 @@ async function startLinqScenario(
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {
-  return ["reply", "rapid", "pdf", "voice"]
-    .map((label, index) =>
+  return ["reply", "rapid", "pdf", "image", "voice"]
+    .map((label) =>
       buildLinqRecipientPhoneNumber(
-        `member_local_linq_webhook_${label}_${linqWebhookRunId}_${index + 1}`,
+        `member_local_linq_webhook_${label}_${linqWebhookRunId}_1`,
       )
     )
     .join(",");
