@@ -6,7 +6,7 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 5;
+const RUNNER_STATE_SCHEMA_VERSION = 6;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -43,6 +43,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       idle_shutdown_checkpoint_workspace_version TEXT,
       next_wake_at TEXT,
       pending_nudge INTEGER NOT NULL DEFAULT 0,
+      pending_nudge_generation INTEGER NOT NULL DEFAULT 0,
       pending_work INTEGER NOT NULL DEFAULT 0,
       retry_failure_count INTEGER NOT NULL DEFAULT 0
     )
@@ -71,6 +72,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     sql,
     "runner_meta",
     "pending_nudge",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "pending_nudge_generation",
     "INTEGER NOT NULL DEFAULT 0",
   );
   ensureRunnerStateTableColumn(
@@ -140,6 +147,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "idle_shutdown_checkpoint_workspace_version",
       "next_wake_at",
       "pending_nudge",
+      "pending_nudge_generation",
       "pending_work",
       "retry_failure_count",
     ],

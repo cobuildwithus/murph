@@ -46,6 +46,7 @@ export interface RunnerMetaRow {
   idle_shutdown_checkpoint_workspace_version: string | null;
   next_wake_at: string | null;
   pending_nudge: number;
+  pending_nudge_generation: number;
   pending_work: number;
   retry_failure_count: number;
   user_id: string;
@@ -81,6 +82,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     idle_shutdown_checkpoint_workspace_version: null,
     next_wake_at: null,
     pending_nudge: 0,
+    pending_nudge_generation: 0,
     pending_work: 0,
     retry_failure_count: 0,
     user_id: userId,
@@ -142,6 +144,9 @@ export function projectRunnerStateRecord(input: {
         ? alarm.dueAt
         : input.meta.next_wake_at,
       pendingNudge: pendingWork,
+      pendingNudgeGeneration: normalizeRetryFailureCount(
+        input.meta.pending_nudge_generation,
+      ),
       retryFailureCount: normalizeRetryFailureCount(input.meta.retry_failure_count),
       userId: input.meta.user_id,
       workspaceInvocation: hasPersistedInvocationLease

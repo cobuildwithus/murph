@@ -461,6 +461,8 @@ export class RunnerStateStore {
     }
     meta.pending_nudge = 1;
     meta.pending_work = 1;
+    meta.pending_nudge_generation =
+      normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
     this.setAlarmMetaSync(meta, {
       dueAt: resolveRunnerNextWakeAt({
         preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
@@ -468,6 +470,27 @@ export class RunnerStateStore {
       kind: "work",
       workspaceVersion: null,
     });
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearPendingInvocationNudge(input: {
+    expectedPendingNudgeGeneration: number;
+  }): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    if (
+      normalizeRetryFailureCount(meta.pending_nudge_generation)
+        !== input.expectedPendingNudgeGeneration
+    ) {
+      return this.readStateFromMetaSync(meta);
+    }
+
+    meta.pending_nudge = 0;
+    meta.pending_work = 0;
+    if (this.readRunnerAlarmKindFromMetaSync(meta) === "work") {
+      this.clearAlarmMetaSync(meta);
+    }
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -916,6 +939,7 @@ export class RunnerStateStore {
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
+        pending_nudge_generation,
         pending_work,
         retry_failure_count
       FROM runner_meta
@@ -958,9 +982,10 @@ export class RunnerStateStore {
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
+        pending_nudge_generation,
         pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -987,6 +1012,7 @@ export class RunnerStateStore {
       meta.idle_shutdown_checkpoint_workspace_version,
       meta.next_wake_at,
       meta.pending_nudge,
+      normalizeRetryFailureCount(meta.pending_nudge_generation),
       meta.pending_work,
       normalizeRetryFailureCount(meta.retry_failure_count),
     );
@@ -1179,6 +1205,8 @@ function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): 
   }
 
   meta.pending_nudge = 1;
+  meta.pending_nudge_generation =
+    normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
   meta.pending_work = 1;
 }
 

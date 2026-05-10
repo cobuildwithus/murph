@@ -222,7 +222,7 @@ describe("RunnerStateStore schema guard", () => {
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(5);
+    ).toBe(6);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -309,7 +309,7 @@ describe("RunnerStateStore schema guard", () => {
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(5);
+    ).toBe(6);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
