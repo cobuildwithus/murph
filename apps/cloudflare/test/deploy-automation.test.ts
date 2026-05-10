@@ -765,6 +765,21 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
+  it("keeps the immediate deploy script on the default runner idle TTL", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
+    ) as { scripts?: Record<string, string> };
+    const immediateDeployScript = packageJson.scripts?.["cf:deploy:immediate"];
+    const workflowInputs = new Map(
+      [...(immediateDeployScript ?? "").matchAll(/(?:^|\s)-f\s+([^=\s]+)=([^\s]+)/gu)].map(
+        (match) => [match[1] ?? "", match[2] ?? ""] as const,
+      ),
+    );
+
+    expect(workflowInputs.get("runner_idle_ttl_ms")).toBe("300000");
+    expect(immediateDeployScript).not.toContain("runner_idle_ttl_ms=43200000");
+  });
+
   it("passes explicit runner env profiles through to worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
