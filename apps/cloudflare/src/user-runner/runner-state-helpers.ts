@@ -18,6 +18,7 @@ import type {
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
   active_invocation_expires_at: string | null;
+  active_invocation_container_stopped_at: string | null;
   active_invocation_id: string | null;
   active_invocation_last_heartbeat_at: string | null;
   active_invocation_orphan_observed_at: string | null;
@@ -51,6 +52,7 @@ export interface RunnerStateProjection {
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
     active_invocation_expires_at: null,
+    active_invocation_container_stopped_at: null,
     active_invocation_id: null,
     active_invocation_last_heartbeat_at: null,
     active_invocation_orphan_observed_at: null,

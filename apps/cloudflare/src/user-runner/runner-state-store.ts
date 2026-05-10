@@ -94,7 +94,7 @@ export type RunnerStaleInvocationRecoveryResult =
   | {
     attemptId: string | null;
     cleared: true;
-    reason: "expired" | "worker_version_mismatch";
+    reason: "container_stopped" | "expired" | "worker_version_mismatch";
     record: RunnerStateRecord;
   };
 
@@ -250,6 +250,7 @@ export class RunnerStateStore {
     meta.lease_generation = nextLeaseGeneration;
     meta.active_invocation_id = attemptId;
     meta.active_invocation_expires_at = expiresAt;
+    meta.active_invocation_container_stopped_at = null;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = input.reason;
@@ -374,6 +375,42 @@ export class RunnerStateStore {
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
+  }
+
+  async recordActiveInvocationContainerStopped(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    stoppedAt?: string | null;
+    userId: string;
+  }): Promise<{
+    recorded: boolean;
+    record: RunnerStateRecord | null;
+  }> {
+    const meta = this.selectMetaRowSync();
+    if (!meta || meta.user_id !== input.userId) {
+      return {
+        recorded: false,
+        record: meta ? this.readStateFromMetaSync(meta) : null,
+      };
+    }
+    if (
+      meta.active_invocation_id !== input.attemptId
+      || normalizeLeaseGeneration(meta.lease_generation).toString() !== input.leaseGeneration
+    ) {
+      return {
+        recorded: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    meta.active_invocation_container_stopped_at = normalizeOptionalIsoDateString(
+      input.stoppedAt ?? null,
+    ) ?? new Date().toISOString();
+    this.writeMetaRowSync(meta);
+    return {
+      recorded: true,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async clearActiveInvocationForUserDeletion(userId: string): Promise<{
@@ -711,6 +748,23 @@ export class RunnerStateStore {
     const hasRecentHeartbeat = orphanGraceMs !== null
       && Number.isFinite(lastHeartbeatAtMs)
       && input.nowMs - lastHeartbeatAtMs < orphanGraceMs;
+    if (meta.active_invocation_container_stopped_at !== null) {
+      this.clearActiveInvocationMetaSync(meta);
+      meta.in_flight = 0;
+      meta.last_error_at = new Date(input.nowMs).toISOString();
+      meta.last_error_code = deriveHostedExecutionErrorCode(
+        new Error("Hosted workspace invocation container stopped during active work."),
+      );
+      meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+      this.writeMetaRowSync(meta);
+
+      return {
+        attemptId,
+        cleared: true,
+        reason: "container_stopped",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     if (
       currentWorkerVersionId !== null
       && activeWorkerVersionId !== currentWorkerVersionId
@@ -843,6 +897,7 @@ export class RunnerStateStore {
         user_id,
         active_invocation_id,
         active_invocation_expires_at,
+        active_invocation_container_stopped_at,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
@@ -883,6 +938,7 @@ export class RunnerStateStore {
         user_id,
         active_invocation_id,
         active_invocation_expires_at,
+        active_invocation_container_stopped_at,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
@@ -905,11 +961,12 @@ export class RunnerStateStore {
         pending_nudge,
         pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
       meta.active_invocation_expires_at,
+      meta.active_invocation_container_stopped_at,
       meta.active_invocation_last_heartbeat_at,
       meta.active_invocation_orphan_observed_at,
       meta.active_invocation_reason,
@@ -978,6 +1035,7 @@ export class RunnerStateStore {
   private clearActiveInvocationMetaSync(meta: RunnerMetaRow): void {
     meta.active_invocation_id = null;
     meta.active_invocation_expires_at = null;
+    meta.active_invocation_container_stopped_at = null;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = null;

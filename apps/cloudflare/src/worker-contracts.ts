@@ -52,8 +52,14 @@ export interface WorkerUserRunnerStubLike {
         | "stale_attempt"
         | "stale_generation"
         | "wrong_user";
-    }
+      }
   >;
+  recordActiveInvocationContainerStopped?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    stoppedAt?: string | null;
+    userId: string;
+  }): Promise<{ recorded: boolean }>;
   recordActiveInvocationWorkspaceCheckpoint?(input: {
     attemptId: string;
     leaseGeneration: string;

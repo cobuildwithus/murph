@@ -160,6 +160,17 @@ interface RunnerContainerLogContext {
   userId: string;
 }
 
+interface RunnerContainerUserRunnerNamespaceLike {
+  getByName(name: string): {
+    recordActiveInvocationContainerStopped?(input: {
+      attemptId: string;
+      leaseGeneration: string;
+      stoppedAt?: string | null;
+      userId: string;
+    }): Promise<{ recorded: boolean }>;
+  };
+}
+
 interface RunnerContainerStopWaitResult {
   lastStatus: string | null;
   observedStatuses: string[];
@@ -225,6 +236,7 @@ export class RunnerContainer extends Container {
   private browserVaultRefreshCompletion: Promise<void> | null = null;
   private browserVaultRefreshAttemptId: string | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
+  private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
   private readonly browserVaultRefreshAttemptUsers = new Map<string, string>();
   private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
 
@@ -479,10 +491,20 @@ export class RunnerContainer extends Container {
     });
   }
 
-  private abortActiveOperationsForContainerStop(params: StopParams): {
+  private abortActiveOperationsForContainerStop(params: {
+    exitCode: number | null;
+    reason: string;
+  }): {
     browserVaultRefresh: boolean;
     workspaceInvocation: boolean;
   } {
+    const activeWorkspaceOperation = this.workspaceInvocationActiveOperation;
+    if (activeWorkspaceOperation) {
+      this.deferContainerLifecycleTask(
+        this.recordActiveInvocationContainerStopped(activeWorkspaceOperation),
+      );
+    }
+
     return {
       browserVaultRefresh: abortRunnerContainerOperation(
         this.browserVaultRefreshAbortController,
@@ -501,9 +523,15 @@ export class RunnerContainer extends Container {
 
   override onError(error: unknown): never {
     const context = this.currentLogContext;
+    const abortedOperations = this.abortActiveOperationsForContainerStop({
+      exitCode: null,
+      reason: "error",
+    });
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
+        activeBrowserVaultRefreshAborted: abortedOperations.browserVaultRefresh,
+        activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
         lifecycleStage: "onError",
         runnerPort: RUNNER_PORT,
       },
@@ -513,6 +541,43 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
     throw error;
+  }
+
+  private deferContainerLifecycleTask(promise: Promise<void>): void {
+    const waitUntil = (this.ctx as { waitUntil?: (task: Promise<unknown>) => void }).waitUntil;
+    if (typeof waitUntil === "function") {
+      waitUntil.call(this.ctx, promise);
+      return;
+    }
+    void promise;
+  }
+
+  private async recordActiveInvocationContainerStopped(
+    operation: RunnerActiveOperationRecord,
+  ): Promise<void> {
+    const userRunnerNamespace = readRunnerContainerUserRunnerNamespace(this.environment);
+    if (!userRunnerNamespace) {
+      return;
+    }
+
+    try {
+      const stub = userRunnerNamespace.getByName(operation.userId);
+      await stub.recordActiveInvocationContainerStopped?.({
+        attemptId: operation.attemptId,
+        leaseGeneration: operation.leaseGeneration,
+        stoppedAt: new Date().toISOString(),
+        userId: operation.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not record active invocation stop.",
+        phase: "failed",
+        userId: operation.userId,
+      });
+    }
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -557,6 +622,7 @@ export class RunnerContainer extends Container {
     this.currentLogContext = logContext;
     const operationAbortController = new AbortController();
     this.workspaceInvocationAbortController = operationAbortController;
+    this.workspaceInvocationActiveOperation = activeOperation;
     let activeOperationAcquired = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
 
@@ -692,6 +758,9 @@ export class RunnerContainer extends Container {
         }
         if (this.workspaceInvocationAbortController === operationAbortController) {
           this.workspaceInvocationAbortController = null;
+        }
+        if (this.workspaceInvocationActiveOperation === activeOperation) {
+          this.workspaceInvocationActiveOperation = null;
         }
       }
     }
@@ -1773,6 +1842,21 @@ function readOptionalRunnerContainerEnvString(
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readRunnerContainerUserRunnerNamespace(
+  env: RunnerContainerEnvironmentSource,
+): RunnerContainerUserRunnerNamespaceLike | null {
+  const value = env.USER_RUNNER;
+  if (!value || typeof value !== "object" || !("getByName" in value)) {
+    return null;
+  }
+
+  const namespace = value as { getByName?: unknown };
+  if (typeof namespace.getByName !== "function") {
+    return null;
+  }
+  return namespace as RunnerContainerUserRunnerNamespaceLike;
 }
 
 function createRunnerOutboundProxyToken(): string {

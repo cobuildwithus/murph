@@ -212,6 +212,7 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness(setupPreviousSchema);
 
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_last_heartbeat_at");
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_orphan_observed_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_worker_version_id");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_due_at");
@@ -220,7 +221,7 @@ describe("RunnerStateStore schema guard", () => {
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(3);
+    ).toBe(4);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -228,6 +229,98 @@ describe("RunnerStateStore schema guard", () => {
         lastHeartbeatAt: null,
         orphanObservedAt: null,
       },
+    });
+  });
+
+  it("migrates schema v3 active leases to v4 container stop markers", async () => {
+    const setupV3Schema = (database: DatabaseSync) => {
+      database.exec(`
+        DROP TABLE IF EXISTS runner_meta;
+        DROP TABLE IF EXISTS runner_schema_meta;
+        DROP TABLE IF EXISTS runner_bundle_slots;
+        CREATE TABLE runner_schema_meta (
+          key TEXT PRIMARY KEY,
+          value INTEGER NOT NULL
+        );
+        INSERT INTO runner_schema_meta (key, value)
+        VALUES ('runner_state_schema_version', 3);
+        CREATE TABLE runner_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          user_id TEXT NOT NULL,
+          active_invocation_id TEXT,
+          active_invocation_expires_at TEXT,
+          active_invocation_last_heartbeat_at TEXT,
+          active_invocation_orphan_observed_at TEXT,
+          active_invocation_reason TEXT,
+          active_invocation_started_at TEXT,
+          active_invocation_worker_version_id TEXT,
+          active_workspace_version TEXT,
+          alarm_kind TEXT,
+          alarm_due_at TEXT,
+          alarm_workspace_version TEXT,
+          alarm_checkpoint_next_wake_at TEXT,
+          lease_generation INTEGER NOT NULL DEFAULT 0,
+          in_flight INTEGER NOT NULL DEFAULT 0,
+          last_error_at TEXT,
+          last_error_code TEXT,
+          last_invocation_at TEXT,
+          deferred_checkpoint_required INTEGER NOT NULL DEFAULT 0,
+          idle_shutdown_checkpoint_due_at TEXT,
+          idle_shutdown_checkpoint_workspace_version TEXT,
+          next_wake_at TEXT,
+          pending_nudge INTEGER NOT NULL DEFAULT 0,
+          pending_work INTEGER NOT NULL DEFAULT 0,
+          retry_failure_count INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO runner_meta (
+          singleton,
+          user_id,
+          active_invocation_id,
+          active_invocation_expires_at,
+          active_invocation_last_heartbeat_at,
+          active_invocation_reason,
+          active_invocation_started_at,
+          active_invocation_worker_version_id,
+          active_workspace_version,
+          lease_generation,
+          in_flight
+        ) VALUES (
+          1,
+          'user-existing',
+          'workspace-invocation-1',
+          '2026-04-27T00:30:00.000Z',
+          '2026-04-27T00:01:00.000Z',
+          'nudge',
+          '2026-04-27T00:00:00.000Z',
+          'worker-version-previous',
+          '0',
+          1,
+          1
+        );
+      `);
+    };
+
+    const { db, store } = createRunnerStateStoreHarness(setupV3Schema);
+
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
+    expect(
+      (db.prepare(
+        "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
+      ).get() as { value: number }).value,
+    ).toBe(4);
+    await expect(store.readState()).resolves.toMatchObject({
+      userId: "user-existing",
+      workspaceInvocation: {
+        attemptId: "workspace-invocation-1",
+        lastHeartbeatAt: "2026-04-27T00:01:00.000Z",
+      },
+    });
+    expect(db.prepare(`
+      SELECT active_invocation_container_stopped_at
+      FROM runner_meta
+      WHERE singleton = 1
+    `).get()).toEqual({
+      active_invocation_container_stopped_at: null,
     });
   });
 

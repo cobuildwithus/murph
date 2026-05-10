@@ -1751,6 +1751,54 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
+  it("clears a stopped previous-worker invocation even with a fresh heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_container_stopped_at = ?,
+        active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "2026-04-26T23:59:55.000Z",
+      "workspace-invocation-1",
+      "2026-04-26T23:59:59.000Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "worker-version-previous",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: false,
+    });
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message: "Hosted workspace invocation container stopped; clearing stale in-flight state.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
   it("keeps a same-worker persisted-only invocation pending until liveness or grace", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2367,6 +2415,102 @@ describe("HostedUserRunner runtime crypto context", () => {
     })).resolves.toEqual({ recorded: true });
 
     expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("records container stop liveness and schedules immediate recovery for a consumed nudge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.recordActiveInvocationContainerStopped({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      stoppedAt: "2026-04-26T23:59:55.000Z",
+      userId: "member_123",
+    })).resolves.toEqual({ recorded: true });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:00.000Z"]);
+    expect(sql.exec(
+      `SELECT active_invocation_container_stopped_at,
+              active_invocation_id,
+              in_flight,
+              pending_nudge,
+              pending_work
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray()).toEqual([{
+      active_invocation_container_stopped_at: "2026-04-26T23:59:55.000Z",
+      active_invocation_id: "workspace-invocation-1",
+      in_flight: 1,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+  });
+
+  it("records container stop liveness without pushing pending recovery to orphan grace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = ?,
+        pending_nudge = 1,
+        pending_work = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "2026-04-27T00:00:45.000Z",
+      "member_123",
+    );
+
+    await expect(runner.recordActiveInvocationContainerStopped({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      stoppedAt: "2026-04-26T23:59:55.000Z",
+      userId: "member_123",
+    })).resolves.toEqual({ recorded: true });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:00.000Z"]);
+    expect(sql.exec(
+      `SELECT active_invocation_container_stopped_at,
+              active_invocation_id,
+              in_flight,
+              pending_nudge,
+              pending_work
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray()).toEqual([{
+      active_invocation_container_stopped_at: "2026-04-26T23:59:55.000Z",
+      active_invocation_id: "workspace-invocation-1",
+      in_flight: 1,
+      pending_nudge: 1,
+      pending_work: 1,
+    }]);
   });
 
   it("records heartbeat liveness without keeping pending work on the short drain continuation", async () => {
