@@ -1,4 +1,4 @@
-import { rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
 
@@ -565,6 +565,7 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+    vi.mocked(access).mockResolvedValueOnce(undefined);
 
     const { startHostedLocalDevStack } = await import("./stack.ts");
 
@@ -590,6 +591,28 @@ describe("hosted local dev stack", () => {
       expect.arrayContaining(["31001"]),
       expect.any(Object),
       expect.any(Object),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "cloudflare",
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({
+        DOCKER_CONFIG: "/tmp/murph-dev-env-test/docker-config",
+      }),
+      expect.any(Object),
+    );
+    expect(writeFile).toHaveBeenCalledWith(
+      "/tmp/murph-dev-env-test/docker-config/config.json",
+      '{"auths":{}}\n',
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
+    expect(symlink).toHaveBeenCalledWith(
+      expect.stringContaining(".docker/cli-plugins"),
+      "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+      "dir",
     );
     expect(rm).toHaveBeenCalledWith(
       expect.stringContaining("apps/web/.next-smoke-e2e-fixture/dev/cache/fetch-cache"),
