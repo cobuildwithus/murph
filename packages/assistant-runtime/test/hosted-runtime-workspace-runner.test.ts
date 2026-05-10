@@ -171,7 +171,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.browserVaultReplicaRef, null);
   });
 
-  test("imports mailbox locally before the assistant phase without foreground checkpointing", async () => {
+  test("imports mailbox and foreground enrichment before the assistant phase without checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -254,8 +254,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "assistant",
         "mailbox:afterCheckpoint",
+        "assistant",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.deferredCheckpointRequired, true);
@@ -430,13 +430,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("does not wait for mailbox enrichment before assistant reply-started", async () => {
+  test("waits for mailbox enrichment before assistant reply-started", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
       items: [
         createMailboxItem({
-          id: "mailbox_item_runner_never_resolving_effect",
+          id: "mailbox_item_runner_prompt_preparation_effect",
           laneSeq: "1",
         }),
       ],
@@ -447,7 +447,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await withTestTimeout(
         runHostedWorkspaceUntilIdleOrBudget({
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_runner_never_resolving_effect",
+            attemptId: "attempt_synthetic_runner_prompt_preparation_effect",
             expectedWorkspaceVersion: "0",
             leaseGeneration: "1",
             nextWakeAt: null,
@@ -459,8 +459,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             events.push(`import:${item.item.laneSeq}`);
             return {
               afterCheckpoint: async () => {
-                events.push("mailbox:afterCheckpoint");
-                return await new Promise<HostedMailboxPostCheckpointEffectResult>(() => {});
+                events.push("mailbox:afterCheckpoint:start");
+                await Promise.resolve();
+                events.push("mailbox:afterCheckpoint:done");
+                return createInboxProjectionEffectResult({
+                  attachmentEvidenceUpdated: true,
+                  projectionUpdated: true,
+                  status: "succeeded",
+                });
               },
               status: "imported",
             };
@@ -470,7 +476,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             mailboxPort,
             workspacePort: createWorkspacePort({ checkpointRequests }),
           }),
-          requestId: "request_synthetic_runner_never_resolving_effect",
+          requestId: "request_synthetic_runner_prompt_preparation_effect",
           async runAssistantPhase() {
             events.push("assistant:input.reply-started");
             return {
@@ -483,8 +489,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
       );
 
-      assert.deepEqual(events.slice(0, 2), [
+      assert.deepEqual(events, [
         "import:1",
+        "mailbox:afterCheckpoint:start",
+        "mailbox:afterCheckpoint:done",
         "assistant:input.reply-started",
       ]);
       assert.deepEqual(checkpointRequests, []);
@@ -791,7 +799,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("schedules staged mailbox projection effects after assistant input sampling without an extra checkpoint", async () => {
+  test("runs staged mailbox projection effects before assistant input sampling without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -855,8 +863,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "assistant",
         "mailbox:afterCheckpoint",
+        "assistant",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
@@ -1025,9 +1033,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "optional:log",
-        "assistant",
-        "optional:log",
         "optional:projection",
+        "optional:log",
+        "assistant",
         "optional:log",
       ]);
     } finally {
@@ -1039,7 +1047,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("schedules mailbox post-checkpoint effects after assistant failure without an extra checkpoint", async () => {
+  test("runs mailbox post-checkpoint effects before assistant failure without an extra checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({
@@ -1096,8 +1104,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "assistant",
         "mailbox:afterCheckpoint",
+        "assistant",
       ]);
       assert.deepEqual(checkpointRequests, []);
     } finally {
@@ -1710,11 +1718,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "refresh:start",
         "import:2",
         "optional:log",
+        "optional:active-turn-projection",
+        "optional:log",
         "refresh:done",
         "optional:log",
         "accepted",
-        "optional:log",
-        "optional:active-turn-projection",
         "optional:log",
       ]);
     } finally {
