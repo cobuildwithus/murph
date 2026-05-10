@@ -251,7 +251,7 @@ test('formatStructuredErrorMessage expands structured validation details and red
   )
 })
 
-test('formatAssistantRunEventForTerminal shows daemon failure details by default', () => {
+test('formatAssistantRunEventForTerminal hides daemon failure details by default', () => {
   const event: AssistantRunEvent = {
     type: 'daemon.failed',
     details: [
@@ -265,6 +265,10 @@ test('formatAssistantRunEventForTerminal shows daemon failure details by default
 
   assert.equal(
     message,
+    'inbox daemon failed daemon failure details hidden',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal(event, { unsafeDetails: true }),
     [
       'inbox daemon failed Vault metadata failed contract validation.',
       'details:',

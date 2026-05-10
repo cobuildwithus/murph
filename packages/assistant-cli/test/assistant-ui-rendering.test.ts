@@ -216,6 +216,10 @@ test('layout and message helpers wrap plain text, format footer badges, and pars
     wrapAssistantPlainText('alpha\u001B[31m beta\u001B[0m\u0007 gamma', 20),
     'alpha beta gamma',
   )
+  assert.equal(
+    wrapAssistantPlainText('alpha\rbeta\r\ngamma', 20),
+    'alpha\nbeta\ngamma',
+  )
   assert.match(
     renderInkOutput(
       renderWrappedPlainTextBlock({

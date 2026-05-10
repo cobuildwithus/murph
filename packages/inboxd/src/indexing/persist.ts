@@ -82,6 +82,10 @@ interface RecoverableInboxCaptureOperation {
 
 type StoredWriteOperation = Awaited<ReturnType<typeof readStoredWriteOperation>>;
 
+const MAX_INBOX_CAPTURE_ATTACHMENT_COUNT = 64;
+const MAX_INBOX_CAPTURE_ATTACHMENT_BYTES = 128 * 1024 * 1024;
+const MAX_INBOX_CAPTURE_TOTAL_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+
 export interface PersistCanonicalInboxCaptureResult {
   stored: StoredCapture;
   capture: {
@@ -170,6 +174,13 @@ async function prepareRawCapturePersistence({
   const storedAttachments: StoredAttachment[] = [];
   const rawCopies: CanonicalRawCopyInput[] = [];
   const rawContents: CanonicalRawContentInput[] = [];
+  let totalAttachmentBytes = 0;
+
+  if (input.attachments.length > MAX_INBOX_CAPTURE_ATTACHMENT_COUNT) {
+    throw new RangeError(
+      `Inbox capture exceeded ${MAX_INBOX_CAPTURE_ATTACHMENT_COUNT} attachments.`,
+    );
+  }
 
   for (const [index, attachment] of input.attachments.entries()) {
     const ordinal = index + 1;
@@ -207,6 +218,10 @@ async function prepareRawCapturePersistence({
       ),
     );
     if (attachment.data) {
+      totalAttachmentBytes = addInboxCaptureAttachmentBytesToBudget({
+        byteLength: readAttachmentDataByteLength(attachment.data),
+        totalAttachmentBytes,
+      });
       const snapshotBytes = Uint8Array.from(attachment.data);
       const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
       rawContents.push({
@@ -252,6 +267,10 @@ async function prepareRawCapturePersistence({
           continue;
         }
 
+        totalAttachmentBytes = addInboxCaptureAttachmentBytesToBudget({
+          byteLength: sourceStats.size,
+          totalAttachmentBytes,
+        });
         const snapshotBytes = await readFile(sourceAbsolutePath);
         const sha256 = createHash("sha256").update(snapshotBytes).digest("hex");
 
@@ -328,6 +347,30 @@ async function prepareRawCapturePersistence({
     rawCopies,
     rawContents,
   };
+}
+
+function readAttachmentDataByteLength(data: ArrayLike<number>): number {
+  return typeof data.length === "number" ? data.length : 0;
+}
+
+function addInboxCaptureAttachmentBytesToBudget(input: {
+  byteLength: number;
+  totalAttachmentBytes: number;
+}): number {
+  if (input.byteLength > MAX_INBOX_CAPTURE_ATTACHMENT_BYTES) {
+    throw new RangeError(
+      `Inbox capture attachment exceeded ${MAX_INBOX_CAPTURE_ATTACHMENT_BYTES} bytes.`,
+    );
+  }
+
+  const nextTotal = input.totalAttachmentBytes + input.byteLength;
+  if (nextTotal > MAX_INBOX_CAPTURE_TOTAL_ATTACHMENT_BYTES) {
+    throw new RangeError(
+      `Inbox capture attachments exceeded ${MAX_INBOX_CAPTURE_TOTAL_ATTACHMENT_BYTES} total bytes.`,
+    );
+  }
+
+  return nextTotal;
 }
 
 export async function persistCanonicalInboxCapture({

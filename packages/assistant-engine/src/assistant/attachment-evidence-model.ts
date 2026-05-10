@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
 import {
   normalizeRelativeVaultPath,
@@ -36,6 +36,11 @@ const parserManifestSchema = z.object({
     tablesPath: z.string().min(1).nullable().optional(),
   }),
 })
+
+const MAX_ROUTING_IMAGE_BYTES = 50 * 1024 * 1024
+const MAX_ROUTING_IMAGE_TOTAL_BYTES = 200 * 1024 * 1024
+const MAX_DERIVED_TEXT_BYTES = 16 * 1024 * 1024
+const MAX_PARSER_MANIFEST_BYTES = 1024 * 1024
 
 interface PreparedRoutingImage {
   kind: 'image'
@@ -418,6 +423,7 @@ async function readPreparedRoutingEvidence(input: {
 }> {
   const evidence: PreparedRoutingEvidence[] = []
   const errors: string[] = []
+  let totalImageBytes = 0
 
   for (const source of input.attachmentSources) {
     const attachment = source.bundle
@@ -433,7 +439,21 @@ async function readPreparedRoutingEvidence(input: {
         rawPath,
         'file path',
       )
+      const fileStats = await stat(absolutePath)
+      if (!fileStats.isFile()) {
+        throw new TypeError('Attachment image evidence path is not a file.')
+      }
+      if (
+        fileStats.size > MAX_ROUTING_IMAGE_BYTES ||
+        totalImageBytes + fileStats.size > MAX_ROUTING_IMAGE_TOTAL_BYTES
+      ) {
+        throw new RangeError('Attachment image evidence exceeded the model input budget.')
+      }
       const bytes = await readFile(absolutePath)
+      if (bytes.byteLength > MAX_ROUTING_IMAGE_BYTES) {
+        throw new RangeError('Attachment image evidence exceeded the model input budget.')
+      }
+      totalImageBytes += bytes.byteLength
       evidence.push({
         kind: 'image',
         ordinal: attachment.ordinal,
@@ -546,10 +566,11 @@ async function readParserManifest(
   relativePath: string,
 ): Promise<z.infer<typeof parserManifestSchema> | null> {
   try {
-    const raw = await readFile(
-      await resolveAssistantVaultPath(vaultRoot, relativePath),
-      'utf8',
-    )
+    const raw = await readBoundedRelativeTextFile({
+      limitBytes: MAX_PARSER_MANIFEST_BYTES,
+      relativePath,
+      vaultRoot,
+    })
     return parserManifestSchema.parse(JSON.parse(raw))
   } catch {
     return null
@@ -562,10 +583,11 @@ async function readRelativeTextFile(
 ): Promise<string | null> {
   try {
     return normalizeNullableString(
-      await readFile(
-        await resolveAssistantVaultPath(vaultRoot, relativePath),
-        'utf8',
-      ),
+      await readBoundedRelativeTextFile({
+        limitBytes: MAX_DERIVED_TEXT_BYTES,
+        relativePath,
+        vaultRoot,
+      }),
     )
   } catch {
     return null
@@ -579,4 +601,21 @@ async function readMaterializedRelativeTextFile(input: {
 }): Promise<string | null> {
   await input.materializeWorkspaceArtifacts?.([input.relativePath])
   return await readRelativeTextFile(input.vaultRoot, input.relativePath)
+}
+
+async function readBoundedRelativeTextFile(input: {
+  limitBytes: number
+  relativePath: string
+  vaultRoot: string
+}): Promise<string> {
+  const absolutePath = await resolveAssistantVaultPath(input.vaultRoot, input.relativePath)
+  const fileStats = await stat(absolutePath)
+  if (!fileStats.isFile()) {
+    throw new TypeError('Attachment evidence path is not a file.')
+  }
+  if (fileStats.size > input.limitBytes) {
+    throw new RangeError('Attachment evidence exceeded the text read budget.')
+  }
+
+  return await readFile(absolutePath, 'utf8')
 }

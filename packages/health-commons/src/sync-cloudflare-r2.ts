@@ -22,13 +22,20 @@ export interface CliOptions {
 
 interface UploadCandidate {
   artifact: HealthCommonsArtifactPointer;
+  artifactRoot: string;
   absoluteLocalPath: string;
   manifestKey: string;
 }
 
+const ALLOWED_R2_LOCAL_PATH_PREFIXES = [
+  "research-artifacts/",
+  "source-artifacts/",
+] as const;
+
 export async function syncHealthCommonsArtifactsToCloudflareR2(options: CliOptions): Promise<void> {
   const manifests = await readAllHealthCommonsArtifactManifests(options.contentRoot);
   const candidates: UploadCandidate[] = [];
+  const artifactRoot = path.resolve(options.artifactRoot);
 
   for (const manifest of manifests) {
     for (const artifact of manifest.artifacts) {
@@ -40,7 +47,8 @@ export async function syncHealthCommonsArtifactsToCloudflareR2(options: CliOptio
       }
       candidates.push({
         artifact,
-        absoluteLocalPath: path.resolve(options.artifactRoot, artifact.localPath),
+        artifactRoot,
+        absoluteLocalPath: path.resolve(artifactRoot, artifact.localPath),
         manifestKey: manifest.manifestKey,
       });
     }
@@ -104,6 +112,16 @@ function collectPolicyIssues(candidate: UploadCandidate, allowUnclearedRights: b
     issues.push(`rightsStatus=${artifact.rightsStatus}`);
   }
 
+  if (artifact.byteSize === undefined) {
+    issues.push("missing byteSize");
+  }
+
+  if (!artifact.sha256) {
+    issues.push("missing sha256");
+  }
+
+  issues.push(...collectLocalPathPolicyIssues(candidate));
+
   return issues;
 }
 
@@ -114,19 +132,65 @@ async function validateCandidate(candidate: UploadCandidate, allowUnclearedRight
   }
 
   const { artifact } = candidate;
-  const raw = await readFile(candidate.absoluteLocalPath);
   const fileStat = await stat(candidate.absoluteLocalPath);
 
-  if (artifact.byteSize !== undefined && artifact.byteSize !== fileStat.size) {
+  if (artifact.byteSize !== fileStat.size) {
     throw new Error(`${artifact.artifactId} byteSize mismatch. Expected ${artifact.byteSize}, got ${fileStat.size}.`);
   }
 
-  if (artifact.sha256 !== undefined) {
-    const actualSha256 = sha256Buffer(raw);
-    if (artifact.sha256 !== actualSha256) {
-      throw new Error(`${artifact.artifactId} sha256 mismatch. Expected ${artifact.sha256}, got ${actualSha256}.`);
+  const raw = await readFile(candidate.absoluteLocalPath);
+  const actualSha256 = sha256Buffer(raw);
+  if (artifact.sha256 !== actualSha256) {
+    throw new Error(`${artifact.artifactId} sha256 mismatch. Expected ${artifact.sha256}, got ${actualSha256}.`);
+  }
+}
+
+function collectLocalPathPolicyIssues(candidate: UploadCandidate): string[] {
+  const localPath = candidate.artifact.localPath ?? "";
+  const normalizedLocalPath = localPath.replace(/\\/gu, "/");
+  const issues: string[] = [];
+
+  if (!normalizedLocalPath || path.posix.isAbsolute(normalizedLocalPath)) {
+    issues.push("localPath must be relative");
+    return issues;
+  }
+
+  const segments = normalizedLocalPath.split("/");
+  if (
+    segments.some((segment) =>
+      segment.length === 0 ||
+      segment === "." ||
+      segment === ".." ||
+      segment.startsWith(".")
+    )
+  ) {
+    issues.push("localPath contains an unsafe path segment");
+  }
+
+  const allowedPrefix = ALLOWED_R2_LOCAL_PATH_PREFIXES.find((prefix) =>
+    normalizedLocalPath.startsWith(prefix),
+  );
+  if (!allowedPrefix) {
+    issues.push(`localPath must start with ${ALLOWED_R2_LOCAL_PATH_PREFIXES.join(" or ")}`);
+  }
+
+  if (!isPathWithinRoot(candidate.artifactRoot, candidate.absoluteLocalPath)) {
+    issues.push("localPath escapes artifactRoot");
+  }
+
+  if (allowedPrefix) {
+    const allowedRoot = path.resolve(candidate.artifactRoot, allowedPrefix);
+    if (!isPathWithinRoot(allowedRoot, candidate.absoluteLocalPath)) {
+      issues.push("localPath escapes its artifact staging root");
     }
   }
+
+  return issues;
+}
+
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function formatCommand(args: readonly string[]): string {

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma } from "@prisma/client";
 
@@ -8,7 +8,13 @@ import {
 
 export const HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE = "feature.whatsapp-messaging";
 
-type HostedWhatsAppConsentAction = "granted" | "revoked";
+export type HostedWhatsAppConsentAction = "granted" | "revoked";
+
+export interface HostedWhatsAppMessagingConsentWriteResult {
+  applied: boolean;
+  duplicate: boolean;
+  stale: boolean;
+}
 
 export async function readHostedWhatsAppMessagingConsentGrantedTx(input: {
   memberId: string;
@@ -32,12 +38,14 @@ export async function readHostedWhatsAppMessagingConsentGrantedTx(input: {
 }
 
 export async function grantHostedWhatsAppMessagingConsentTx(input: {
+  eventId?: string;
   memberId: string;
   now: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await writeHostedWhatsAppMessagingConsentTx({
+}): Promise<HostedWhatsAppMessagingConsentWriteResult> {
+  return await writeHostedWhatsAppMessagingConsentTx({
     action: "granted",
+    eventId: input.eventId,
     memberId: input.memberId,
     now: input.now,
     prisma: input.prisma,
@@ -45,12 +53,14 @@ export async function grantHostedWhatsAppMessagingConsentTx(input: {
 }
 
 export async function revokeHostedWhatsAppMessagingConsentTx(input: {
+  eventId?: string;
   memberId: string;
   now: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await writeHostedWhatsAppMessagingConsentTx({
+}): Promise<HostedWhatsAppMessagingConsentWriteResult> {
+  return await writeHostedWhatsAppMessagingConsentTx({
     action: "revoked",
+    eventId: input.eventId,
     memberId: input.memberId,
     now: input.now,
     prisma: input.prisma,
@@ -59,10 +69,11 @@ export async function revokeHostedWhatsAppMessagingConsentTx(input: {
 
 async function writeHostedWhatsAppMessagingConsentTx(input: {
   action: HostedWhatsAppConsentAction;
+  eventId?: string;
   memberId: string;
   now: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedWhatsAppMessagingConsentWriteResult> {
   const existingGrant = await input.prisma.hostedConsentGrant.findUnique({
     where: {
       memberId_scope: {
@@ -71,22 +82,45 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
       },
     },
   });
+
+  if (existingGrant && existingGrant.updatedAt > input.now) {
+    return {
+      applied: false,
+      duplicate: false,
+      stale: true,
+    };
+  }
+
   const documentVersions = input.action === "granted"
     ? buildCurrentHostedConsentDocumentVersions(HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE)
     : existingGrant
       ? readHostedWhatsAppConsentDocumentVersions(existingGrant.documentVersionsJson)
       : buildCurrentHostedConsentDocumentVersions(HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE);
-  const event = await input.prisma.hostedConsentEvent.create({
-    data: {
-      action: input.action,
-      createdAt: input.now,
-      documentVersionsJson: documentVersions,
-      id: generateHostedWhatsAppConsentEventId(),
-      memberId: input.memberId,
-      scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
-      source: "whatsapp",
-    },
-  });
+  let event: { id: string };
+
+  try {
+    event = await input.prisma.hostedConsentEvent.create({
+      data: {
+        action: input.action,
+        createdAt: input.now,
+        documentVersionsJson: documentVersions,
+        id: input.eventId ?? generateHostedWhatsAppConsentEventId(),
+        memberId: input.memberId,
+        scope: HOSTED_WHATSAPP_MESSAGING_CONSENT_SCOPE,
+        source: "whatsapp",
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueViolation(error)) {
+      return {
+        applied: false,
+        duplicate: true,
+        stale: false,
+      };
+    }
+
+    throw error;
+  }
 
   if (input.action === "granted") {
     await input.prisma.hostedConsentGrant.upsert({
@@ -118,7 +152,11 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
         },
       },
     });
-    return;
+    return {
+      applied: true,
+      duplicate: false,
+      stale: false,
+    };
   }
 
   if (existingGrant) {
@@ -139,6 +177,12 @@ async function writeHostedWhatsAppMessagingConsentTx(input: {
       },
     });
   }
+
+  return {
+    applied: true,
+    duplicate: false,
+    stale: false,
+  };
 }
 
 function hostedWhatsAppConsentDocumentVersionsAreCurrent(value: unknown): boolean {
@@ -172,4 +216,24 @@ function readHostedWhatsAppConsentDocumentVersions(value: unknown): Record<strin
 
 function generateHostedWhatsAppConsentEventId(): string {
   return `hbce_${randomBytes(12).toString("base64url")}`;
+}
+
+export function buildHostedWhatsAppConsentCommandEventId(input: {
+  action: HostedWhatsAppConsentAction;
+  externalMessageId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update(`${input.action}\u0000${input.externalMessageId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `hbce_whatsapp_${digest}`;
+}
+
+function isPrismaUniqueViolation(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002",
+  );
 }

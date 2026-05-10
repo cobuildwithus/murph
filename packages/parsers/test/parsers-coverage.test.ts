@@ -815,6 +815,10 @@ test("shared parser helpers cover vault path guards, markdown shaping, and recur
   await resetDirectory(nestedDirectory);
   const nestedFile = await writeFile(vaultRoot, "derived/knowledge/page.md", "# Heading\n\n- item");
   assert.equal(await readUtf8IfExists(nestedFile), "# Heading\n\n- item");
+  await assert.rejects(
+    readUtf8IfExists(nestedFile, { maxBytes: 4 }),
+    /exceeded 4 bytes/u,
+  );
   assert.equal(await readUtf8IfExists(path.join(vaultRoot, "missing.txt")), null);
   assert.equal(normalizeRelativePath("derived/knowledge/page.md"), "derived/knowledge/page.md");
   await assert.rejects(

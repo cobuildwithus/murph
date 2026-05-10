@@ -187,6 +187,69 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
+  it("dedupes repeated WhatsApp START commands by provider message id", async () => {
+    const prisma = createWhatsAppPrismaHarness({
+      memberId: "member_whatsapp_123",
+    });
+    prisma.hostedConsentEvent.create.mockRejectedValueOnce({ code: "P2002" });
+    const rawBody = buildWhatsAppInboundTextBody("START");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      duplicate: true,
+      ignored: true,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "duplicate-webhook-event",
+      routedTextCount: 0,
+    });
+
+    expect(prisma.hostedConsentGrant.upsert).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when WhatsApp phone lookup matches multiple members", async () => {
+    const prisma = createWhatsAppPrismaHarness({
+      memberId: "member_whatsapp_123",
+    });
+    prisma.hostedMemberIdentity.findMany.mockResolvedValueOnce([
+      {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_whatsapp_123",
+          suspendedAt: null,
+        },
+      },
+      {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_whatsapp_456",
+          suspendedAt: null,
+        },
+      },
+    ]);
+    const rawBody = buildWhatsAppInboundTextBody("START");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: true,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "unlinked-whatsapp",
+      routedTextCount: 0,
+    });
+
+    expect(prisma.hostedConsentEvent.create).not.toHaveBeenCalled();
+  });
+
   it("revokes WhatsApp consent for STOP without calling the assistant", async () => {
     const prisma = createWhatsAppPrismaHarness({
       consentGranted: true,
@@ -473,7 +536,7 @@ type WhatsAppPrismaHarness = {
     upsert: ReturnType<typeof vi.fn>;
   };
   hostedMemberIdentity: {
-    findFirst: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -517,21 +580,24 @@ function createWhatsAppPrismaHarness(input: {
             grantedAt: now,
             revokedAt: null,
             status: "granted",
+            updatedAt: now,
           }
         : null),
       update: vi.fn(async () => ({})),
       upsert: vi.fn(async () => ({})),
     },
     hostedMemberIdentity: {
-      findFirst: vi.fn(async () => memberId
-        ? {
-            member: {
-              billingStatus: HostedBillingStatus.active,
-              id: memberId,
-              suspendedAt: null,
+      findMany: vi.fn(async () => memberId
+        ? [
+            {
+              member: {
+                billingStatus: HostedBillingStatus.active,
+                id: memberId,
+                suspendedAt: null,
+              },
             },
-          }
-        : null),
+          ]
+        : []),
     },
   } satisfies WhatsAppPrismaHarness;
 

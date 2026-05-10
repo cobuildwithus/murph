@@ -152,6 +152,10 @@ describe("hosted-local harness", () => {
   });
 
   test("redacts identifiers, payload-like env values, and command secrets in state files", async () => {
+    const authorizationHeaderName = "Authorization";
+    const authorizationScheme = "Bearer";
+    const authorizationHeaderSecret = "hosted-local-header-secret";
+    const authorizationFlagSecret = "hosted-local-inline-secret";
     const { profile } = applyHostedLocalProfile({
       env: {},
       profileName: "e2e:stub",
@@ -163,6 +167,9 @@ describe("hosted-local harness", () => {
         "--api-key=sk_test_fixture",
         "--token",
         "split-token-fixture",
+        "-H",
+        `${authorizationHeaderName}: ${authorizationScheme} ${authorizationHeaderSecret}`,
+        `--authorization=${authorizationScheme} ${authorizationFlagSecret}`,
         `${process.cwd()}/local-command-path`,
       ],
       env: {
@@ -182,6 +189,8 @@ describe("hosted-local harness", () => {
       expect(text).not.toContain("hello from fixture");
       expect(text).not.toContain("sk_test_fixture");
       expect(text).not.toContain("split-token-fixture");
+      expect(text).not.toContain(authorizationHeaderSecret);
+      expect(text).not.toContain(authorizationFlagSecret);
       expect(text).not.toContain(process.cwd());
       expect(text).toContain('"HOSTED_MEMBER_ID": "[redacted]"');
       expect(text).toContain('"MURPH_DEV_SKIP_WEB": "1"');

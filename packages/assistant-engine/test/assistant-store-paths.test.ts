@@ -145,7 +145,7 @@ test('normalizeProviderOptions and createAssistantSessionId keep assistant ident
     reasoningEffort: 'medium',
   })
   assert.equal(normalized.approvalPolicy, null)
-  assert.equal(normalized.continuityFingerprint?.includes('"model":"gpt-5.5"'), true)
+  assert.match(normalized.continuityFingerprint ?? '', /^sha256:[a-f0-9]{64}$/u)
   assert.equal(normalized.executionDriver, 'codex-app-server')
   assert.equal(normalized.model, 'gpt-5.5')
   assert.equal(normalized.oss, false)

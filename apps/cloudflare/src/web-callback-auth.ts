@@ -22,6 +22,20 @@ const DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS = 60_000;
 const HOSTED_WEB_CALLBACK_NONCE_MIN_LENGTH = 16;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
+type HostedWebCallbackNonceStoreConsumeInput = {
+  expiresAt: number;
+  keyId: string;
+  method: string;
+  nonceHash: string;
+  now: number;
+  path: string;
+  search: string;
+  userId: string | null;
+};
+
+export interface HostedWebCallbackNonceStore {
+  consume(input: HostedWebCallbackNonceStoreConsumeInput): Promise<boolean>;
+}
 
 export interface HostedWebCallbackSigningEnvironment {
   keyId: string;
@@ -79,6 +93,7 @@ export async function createHostedWebCallbackSignatureHeaders(input: {
 export async function verifyHostedWebCallbackSignatureHeaders(input: {
   environment: HostedWebCallbackSigningEnvironment;
   method?: string;
+  nonceStore?: HostedWebCallbackNonceStore;
   now?: () => Date;
   path?: string;
   payload: string;
@@ -99,11 +114,11 @@ export async function verifyHostedWebCallbackSignatureHeaders(input: {
     return false;
   }
 
-  if (!isFreshCanonicalTimestamp({
-    now: input.now ?? (() => new Date()),
-    timestamp: headers.timestamp,
-    toleranceMs: input.timestampToleranceMs ?? DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS,
-  })) {
+  const now = (input.now ?? (() => new Date()))();
+  const timestampMs = parseCanonicalTimestampMs(headers.timestamp);
+  const toleranceMs = input.timestampToleranceMs ?? DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS;
+
+  if (timestampMs === null || Math.abs(now.getTime() - timestampMs) > toleranceMs) {
     return false;
   }
 
@@ -120,7 +135,7 @@ export async function verifyHostedWebCallbackSignatureHeaders(input: {
     input.environment.keyId,
   );
 
-  return crypto.subtle.verify(
+  const verified = await crypto.subtle.verify(
     HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM,
     publicKey,
     signatureBuffer,
@@ -134,6 +149,21 @@ export async function verifyHostedWebCallbackSignatureHeaders(input: {
       userId: input.userId,
     }),
   );
+
+  if (!verified) {
+    return false;
+  }
+
+  return await (input.nonceStore ?? defaultNonceStore).consume({
+    expiresAt: timestampMs + toleranceMs,
+    keyId: input.environment.keyId,
+    method: input.method?.toUpperCase() ?? "",
+    nonceHash: await sha256Hex(nonce),
+    now: now.getTime(),
+    path: input.path ?? "",
+    search: input.search ?? "",
+    userId: normalizeOptionalString(input.userId),
+  });
 }
 
 async function signHostedWebCallbackRequest(input: {
@@ -295,22 +325,52 @@ function decodeBase64Url(value: string | null): Uint8Array | null {
   }
 }
 
-function isFreshCanonicalTimestamp(input: {
-  now: () => Date;
-  timestamp: string | null;
-  toleranceMs: number;
-}): boolean {
-  if (typeof input.timestamp !== "string" || input.timestamp.trim() !== input.timestamp) {
-    return false;
+class InMemoryHostedWebCallbackNonceStore implements HostedWebCallbackNonceStore {
+  private readonly seenNonces = new Map<string, number>();
+
+  async consume(input: HostedWebCallbackNonceStoreConsumeInput): Promise<boolean> {
+    for (const [key, expiresAt] of this.seenNonces) {
+      if (expiresAt <= input.now) {
+        this.seenNonces.delete(key);
+      }
+    }
+
+    const key = [
+      input.keyId,
+      input.method,
+      input.path,
+      input.search,
+      input.userId ?? "",
+      input.nonceHash,
+    ].join("\u0000");
+    if (this.seenNonces.has(key)) {
+      return false;
+    }
+
+    this.seenNonces.set(key, input.expiresAt);
+    return true;
+  }
+}
+
+const defaultNonceStore = new InMemoryHostedWebCallbackNonceStore();
+
+function parseCanonicalTimestampMs(value: string | null): number | null {
+  if (typeof value !== "string" || value.trim() !== value) {
+    return null;
   }
 
-  const timestampMs = Date.parse(input.timestamp);
+  const timestampMs = Date.parse(value);
 
-  if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== input.timestamp) {
-    return false;
+  if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== value) {
+    return null;
   }
 
-  return Math.abs(input.now().getTime() - timestampMs) <= input.toleranceMs;
+  return timestampMs;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

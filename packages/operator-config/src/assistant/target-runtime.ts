@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { normalizeNullableString } from './shared.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
@@ -361,7 +363,7 @@ function buildAssistantContinuityFingerprint(
     provider: 'codex-cli'
   },
 ): string {
-  return JSON.stringify({
+  const identity = JSON.stringify({
     provider: input.provider,
     executionDriver: 'codex-app-server',
     model: normalizeNullableString(input.model),
@@ -373,6 +375,7 @@ function buildAssistantContinuityFingerprint(
     oss: input.oss === true,
     codexHome: normalizeNullableString(input.codexHome),
   })
+  return `sha256:${createHash('sha256').update(identity).digest('hex')}`
 }
 
 function resolveAssistantRuntimeResolutionProvider(

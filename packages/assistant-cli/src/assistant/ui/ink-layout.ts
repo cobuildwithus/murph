@@ -108,7 +108,7 @@ export function renderWrappedTextBlock(input: {
 
 export function wrapAssistantPlainText(input: string, columns: number): string {
   return sanitizeAssistantTerminalText(input)
-    .replaceAll('\r\n', '\n')
+    .replace(/\r\n?/gu, '\n')
     .split('\n')
     .map((line) => wrapAssistantPlainTextLine(line, columns))
     .join('\n')

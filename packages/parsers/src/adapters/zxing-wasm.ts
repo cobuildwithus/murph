@@ -4,7 +4,11 @@ import path from "node:path";
 
 import type { ParseRequest, ProviderRunResult } from "../contracts/parse.js";
 import type { ParserProvider } from "../contracts/provider.js";
-import { splitTextIntoBlocks } from "../shared.js";
+import {
+  assertFileSizeAtMost,
+  DEFAULT_IMAGE_PROVIDER_MAX_INPUT_BYTES,
+  splitTextIntoBlocks,
+} from "../shared.js";
 
 const require = createRequire(import.meta.url);
 
@@ -40,6 +44,7 @@ interface ZxingReaderModule {
 
 export interface ZxingWasmProviderOptions {
   loadModule?: () => Promise<ZxingReaderModule>;
+  maxInputBytes?: number;
   maxNumberOfSymbols?: number;
   resolveWasmPath?: () => string;
   tryHarder?: boolean;
@@ -123,6 +128,11 @@ export function createZxingWasmProvider(
     },
     async run(request): Promise<ProviderRunResult> {
       const readerModule = await prepareReaderModule();
+      await assertFileSizeAtMost(
+        request.inputPath,
+        options.maxInputBytes ?? DEFAULT_IMAGE_PROVIDER_MAX_INPUT_BYTES,
+        "Image attachment",
+      );
       const imageBytes = await fs.readFile(request.inputPath);
       const readResults = await readerModule.readBarcodes(imageBytes, {
         maxNumberOfSymbols:

@@ -62,6 +62,11 @@ const identifierOrPayloadKeyPattern =
   /(^|[_-])(ACCOUNT|ADDRESS|BODY|CHAT|CONTACT|EMAIL|EVENT|FROM|ID|IDENTITY|INBOX|LINQ|MAIL|MEMBER|MESSAGE|PAYLOAD|PHONE|RAW|RECIPIENT|ROUTE|SENDER|TELEGRAM|THREAD|USER|WORKSPACE)([_-]|$)/iu;
 const commandSensitiveKeyPattern =
   /(^|[-_])(api[-_]?key|auth|contact|credential|database-url|dsn|email|encryption|from|id|inbox|jwk|key|linq|mail|member|message|password|phone|private|raw|recipient|sender|secret|session|telegram|thread|token|user)(=|$)/iu;
+const commandSensitiveHeaderPattern =
+  /(?:^|[\s=])(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]/iu;
+const commandBearerValuePattern =
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/iu;
+const commandSensitiveHeaderFlagNames = new Set(["-H", "--header", "--authorization"]);
 const hostedLocalArtifactRoot = path.join(".artifacts", "hosted-local");
 
 export async function createHostedLocalHarnessState(
@@ -190,7 +195,13 @@ function redactHostedLocalCommand(command: readonly string[]): readonly string[]
       continue;
     }
 
-    if (commandSensitiveKeyPattern.test(redacted)) {
+    if (isSplitSensitiveHeaderFlag(redacted)) {
+      redactedCommand.push(redacted);
+      redactNext = true;
+      continue;
+    }
+
+    if (isSensitiveHostedLocalCommandValue(redacted)) {
       redactedCommand.push("[redacted]");
       redactNext = isSplitSensitiveCommandFlag(redacted);
       continue;
@@ -205,6 +216,20 @@ function redactHostedLocalCommand(command: readonly string[]): readonly string[]
 function isSplitSensitiveCommandFlag(value: string): boolean {
   const normalized = value.trim();
   return normalized.startsWith("-") && !normalized.includes("=");
+}
+
+function isSplitSensitiveHeaderFlag(value: string): boolean {
+  return commandSensitiveHeaderFlagNames.has(value.trim());
+}
+
+function isSensitiveHostedLocalCommandValue(value: string): boolean {
+  return (
+    commandSensitiveKeyPattern.test(value) ||
+    commandSensitiveHeaderPattern.test(value) ||
+    commandBearerValuePattern.test(value) ||
+    value.trim().toLowerCase().startsWith("--authorization=") ||
+    value.trim().toLowerCase().startsWith("-hauthorization:")
+  );
 }
 
 function resolveHostedLocalRepoPath(value: string): string {

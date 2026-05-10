@@ -204,7 +204,7 @@ test('assistant CLI foreground logging skips empty scans and summarizes routing 
       details: 'loopback unavailable',
       type: 'daemon.failed',
     }),
-    'inbox daemon failed loopback unavailable',
+    'inbox daemon failed daemon failure details hidden',
   )
 })
 

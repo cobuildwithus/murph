@@ -1184,7 +1184,7 @@ function parseAllowedString<T extends string>(
     return text as T;
   }
 
-  throw new TypeError(`${label} is not supported: ${text}`);
+  throw new TypeError(`${label} is not supported.`);
 }
 
 function requirePositiveInteger(value: unknown, label: string): number {

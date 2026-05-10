@@ -45,6 +45,19 @@ export class PrismaHostedAgentSessionStore {
   }
 
   async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {
+    const nowDate = new Date(now);
+    const touched = await this.prisma.deviceAgentSession.updateMany({
+      where: {
+        tokenHash,
+        revokedAt: null,
+        expiresAt: {
+          gt: nowDate,
+        },
+      },
+      data: {
+        lastSeenAt: nowDate,
+      },
+    });
     const record = await this.prisma.deviceAgentSession.findUnique({
       where: {
         tokenHash,
@@ -58,6 +71,13 @@ export class PrismaHostedAgentSessionStore {
       };
     }
 
+    if (touched.count === 1 && !record.revokedAt && record.expiresAt.getTime() > nowDate.getTime()) {
+      return {
+        status: "active",
+        session: mapHostedAgentSessionRecord(record),
+      };
+    }
+
     if (record.revokedAt) {
       return {
         status: "revoked",
@@ -65,7 +85,7 @@ export class PrismaHostedAgentSessionStore {
       };
     }
 
-    if (record.expiresAt.getTime() <= Date.parse(now)) {
+    if (record.expiresAt.getTime() <= nowDate.getTime()) {
       return {
         status: "expired",
         session: await this.revokeAgentSession({
@@ -76,18 +96,9 @@ export class PrismaHostedAgentSessionStore {
       };
     }
 
-    const touched = await this.prisma.deviceAgentSession.update({
-      where: {
-        id: record.id,
-      },
-      data: {
-        lastSeenAt: new Date(now),
-      },
-    });
-
     return {
-      status: "active",
-      session: mapHostedAgentSessionRecord(touched),
+      status: "missing",
+      session: null,
     };
   }
 

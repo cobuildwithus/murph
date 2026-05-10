@@ -57,6 +57,7 @@ import {
 } from "./web-callback-auth.ts";
 import {
   json,
+  jsonError,
   methodNotAllowed,
   notFound,
   readOptionalJsonObject,
@@ -120,6 +121,7 @@ interface DeclarativeRoute<Context> {
 }
 
 const INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES = 4 * 1024;
+const DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES = 4 * 1024;
 
 const workerPublicRoutes: readonly DeclarativeRoute<{
   env: WorkerEnvironmentSource;
@@ -527,7 +529,18 @@ async function authorizeRoute(
         return unauthorized();
       }
 
-      const payload = await readCachedRequestText(context);
+      let payload: string;
+      try {
+        payload = await readCachedRequestText(context, {
+          limitBytes: DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES,
+        });
+      } catch (error) {
+        if (isRequestBodyTooLargeError(error)) {
+          return jsonError("Request body too large.", 413);
+        }
+
+        throw error;
+      }
       const verified = await verifyHostedWebCallbackSignatureHeaders({
         environment: callbackSigning,
         method: context.request.method,
@@ -595,6 +608,10 @@ async function authorizeRoute(
     default:
       return null;
   }
+}
+
+function isRequestBodyTooLargeError(error: unknown): error is RangeError {
+  return error instanceof RangeError && error.message.startsWith("Request body exceeded ");
 }
 
 async function handleStatusRoute(
