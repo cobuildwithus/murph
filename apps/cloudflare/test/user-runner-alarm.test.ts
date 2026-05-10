@@ -5041,6 +5041,37 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("schedules idle-shutdown checkpoint at the configured T-minus margin", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-schedule-margin"),
+      version: "4",
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      idleShutdownCheckpointSafetyMarginMs: 60_000,
+      runnerIdleTtlMs: 90_000,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(alarms).toContain("2026-04-27T00:00:30.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:30.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+    }]);
+  });
+
   it("schedules lifecycle idle-shutdown checkpoint even when the workspace is already base-only", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -7345,6 +7376,7 @@ function createRunnerCryptoContextHarness(
     abortBrowserVaultRefresh?: HostedExecutionContainerStubLike["abortBrowserVaultRefresh"];
     destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
     invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
+    idleShutdownCheckpointSafetyMarginMs?: number;
     maxEventAttempts?: number;
     onDeleteAlarm?(input: { alarmCount: number }): Promise<void> | void;
     onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
@@ -7355,6 +7387,7 @@ function createRunnerCryptoContextHarness(
       readCount: number;
     }) => Record<string, unknown>);
     runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
+    runnerIdleTtlMs?: number;
     retryDelayMs?: number;
     runnerTimeoutMs?: number;
     runnerReadyTimeoutMs?: number;
@@ -7483,9 +7516,18 @@ function createRunnerCryptoContextHarness(
         ...(options.maxEventAttempts === undefined
           ? {}
           : { HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: String(options.maxEventAttempts) }),
+        ...(options.idleShutdownCheckpointSafetyMarginMs === undefined
+          ? {}
+          : {
+              HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS:
+                String(options.idleShutdownCheckpointSafetyMarginMs),
+            }),
         ...(options.retryDelayMs === undefined
           ? {}
           : { HOSTED_EXECUTION_RETRY_DELAY_MS: String(options.retryDelayMs) }),
+        ...(options.runnerIdleTtlMs === undefined
+          ? {}
+          : { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(options.runnerIdleTtlMs) }),
         ...(options.runnerTimeoutMs === undefined
           ? {}
           : { HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: String(options.runnerTimeoutMs) }),
