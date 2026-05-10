@@ -995,6 +995,9 @@ export class RunnerContainer extends Container {
     const runnerControlToken = crypto.randomUUID();
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
+    this.runnerControlToken = runnerControlToken;
+    await this.writeRunnerControlToken(runnerControlToken, { failClosed: true });
+
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
@@ -1032,7 +1035,7 @@ export class RunnerContainer extends Container {
       throw error;
     }
     this.runnerControlToken = runnerControlToken;
-    await this.writeRunnerControlToken(runnerControlToken);
+    await this.writeRunnerControlToken(runnerControlToken, { failClosed: true });
 
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -1169,7 +1172,7 @@ export class RunnerContainer extends Container {
 
   private async destroyIfRunning(input: {
     failClosed?: boolean;
-  } = {}): Promise<void> {
+  } = {}): Promise<boolean> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
     const destroyTimeoutMs = readRunnerDestroyTimeoutMs(this.environment);
@@ -1178,7 +1181,7 @@ export class RunnerContainer extends Container {
     try {
       statusBeforeDestroy = await readRunnerContainerStatus(this);
       if (isRunnerContainerStopped(statusBeforeDestroy)) {
-        return;
+        return true;
       }
     } catch (error) {
       emitRunnerContainerLifecycleFailure({
@@ -1194,7 +1197,7 @@ export class RunnerContainer extends Container {
       if (failClosed) {
         throw new Error("Hosted runner container failed to destroy cleanly.");
       }
-      return;
+      return false;
     }
 
     const destroyStartedAt = Date.now();
@@ -1215,7 +1218,7 @@ export class RunnerContainer extends Container {
       await this.destroy();
     } catch (error) {
       if (isMissingRunnerContainerError(error)) {
-        return;
+        return true;
       }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
@@ -1247,9 +1250,10 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: context?.userId,
       });
+      return true;
     } catch (error) {
       if (isMissingRunnerContainerError(error)) {
-        return;
+        return true;
       }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
@@ -1264,7 +1268,7 @@ export class RunnerContainer extends Container {
       if (failClosed) {
         throw new Error("Hosted runner container failed to destroy cleanly.");
       }
-      return;
+      return false;
     }
   }
 
@@ -1272,11 +1276,28 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
-    this.runnerControlToken = null;
+    const runnerControlToken = this.runnerControlToken ?? await this.readRunnerControlToken();
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
-    await this.clearRunnerControlToken();
-    await this.destroyIfRunning({ failClosed });
+    try {
+      const stopped = await this.destroyIfRunning({ failClosed });
+      if (stopped) {
+        this.runnerControlToken = null;
+        await this.clearRunnerControlToken();
+        return;
+      }
+    } catch (error) {
+      if (runnerControlToken) {
+        this.runnerControlToken = runnerControlToken;
+        await this.writeRunnerControlToken(runnerControlToken);
+      }
+      throw error;
+    }
+
+    if (runnerControlToken) {
+      this.runnerControlToken = runnerControlToken;
+      await this.writeRunnerControlToken(runnerControlToken);
+    }
   }
 
   private startRunnerActivityRenewal(): () => void {
@@ -1356,7 +1377,12 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async writeRunnerControlToken(token: string): Promise<void> {
+  private async writeRunnerControlToken(
+    token: string,
+    input?: {
+      failClosed?: boolean;
+    },
+  ): Promise<boolean> {
     const record: RunnerControlTokenRecord = {
       schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
       token,
@@ -1365,6 +1391,7 @@ export class RunnerContainer extends Container {
 
     try {
       await this.ctx.storage.put(RUNNER_CONTROL_TOKEN_STORAGE_KEY, record);
+      return true;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1374,6 +1401,10 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: this.currentLogContext?.userId,
       });
+      if (input?.failClosed) {
+        throw new Error("Hosted runner container control token state could not be persisted.");
+      }
+      return false;
     }
   }
 

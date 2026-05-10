@@ -1941,6 +1941,268 @@ describe("RunnerContainer", () => {
     )).toBe(true);
   });
 
+  it("keeps the durable control token when destroy cannot prove the shell stopped", async () => {
+    vi.useFakeTimers();
+
+    const storage = createContainerStorageDouble();
+    let status: "running" | "stopped" = "stopped";
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const destroy = vi.fn(async () => {});
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+    });
+    const initial = createContainerDouble({
+      destroy,
+      getState,
+      startAndWaitForPorts,
+      state: {
+        storage,
+      },
+    });
+
+    await initial.container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_persist_before_failed_destroy"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    const recoveredControlToken = await readStoredRunnerControlToken(storage);
+    expect(recoveredControlToken).toMatch(/^[0-9a-f-]{36}$/u);
+    if (!recoveredControlToken) {
+      throw new Error("Expected persisted runner control token.");
+    }
+
+    try {
+      const destroyResultPromise = initial.container.destroyInstance().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      const thrown = await destroyResultPromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(readStoredRunnerControlToken(storage)).resolves.toBe(recoveredControlToken);
+
+    const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/control-health")) {
+        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      expect(url).toBe("http://container/internal/workspace-invocation");
+      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const rehydrated = createContainerDouble({
+      containerFetch: rehydratedContainerFetch,
+      initialStatus: "running",
+      state: {
+        storage,
+      },
+    });
+
+    await expect(rehydrated.container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recover_after_failed_destroy"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(rehydrated.destroy).not.toHaveBeenCalled();
+    expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("clears the durable control token after destroy confirms the shell stopped", async () => {
+    const storage = createContainerStorageDouble();
+    const { container, destroy } = createContainerDouble({
+      state: {
+        storage,
+      },
+    });
+
+    await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_clear_control_token_after_confirmed_destroy"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    await expect(readStoredRunnerControlToken(storage)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
+  });
+
+  it("does not start a shell when its control token cannot be persisted", async () => {
+    const storage = createContainerStorageDouble();
+    const put = storage.put.bind(storage);
+    storage.put = vi.fn(async (key: string, value: unknown) => {
+      if (key === "runner-container-control-token:v1") {
+        throw new Error("control token storage unavailable");
+      }
+      await put(key, value);
+    });
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+      state: {
+        storage,
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_control_token_storage_failed"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container control token state could not be persisted.");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("restores the durable control token when destroy races with cold start", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storage = createContainerStorageDouble();
+      const startGate = createDeferred<void>();
+      let status: "running" | "stopped" = "stopped";
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const destroy = vi.fn(async () => {});
+      const startAndWaitForPorts = vi.fn(async (_options: {
+        startOptions?: {
+          envVars?: Record<string, string>;
+        };
+      }) => {
+        await startGate.promise;
+        status = "running";
+      });
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        startAndWaitForPorts,
+        state: {
+          storage,
+        },
+      });
+
+      const invokeResultPromise = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_destroy_during_cold_start"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      }).catch((error: unknown) => error);
+
+      await vi.waitFor(() => expect(startAndWaitForPorts).toHaveBeenCalledTimes(1));
+      const supervisorEnv = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
+      const startedControlToken = supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+      expect(startedControlToken).toMatch(/^[0-9a-f-]{36}$/u);
+      if (!startedControlToken) {
+        throw new Error("Expected cold start to receive a runner control token.");
+      }
+
+      await expect(container.destroyInstance()).resolves.toBeUndefined();
+      await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
+
+      startGate.resolve();
+      await vi.advanceTimersByTimeAsync(5_500);
+      const thrown = await invokeResultPromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+      await expect(readStoredRunnerControlToken(storage)).resolves.toBe(startedControlToken);
+
+      const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/control-health")) {
+          expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${startedControlToken}`);
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        expect(url).toBe("http://container/internal/workspace-invocation");
+        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${startedControlToken}`);
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const rehydrated = createContainerDouble({
+        containerFetch: rehydratedContainerFetch,
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+      });
+
+      await expect(rehydrated.container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_recover_after_cold_start_destroy_race"),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
+
+      expect(rehydrated.destroy).not.toHaveBeenCalled();
+      expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the remaining caller timeout budget when a warm-shell health check fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
@@ -3645,6 +3907,18 @@ interface ContainerStorageDouble {
   get<T>(key: string): Promise<T | undefined>;
   list<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
+}
+
+async function readStoredRunnerControlToken(
+  storage: ContainerStorageDouble,
+): Promise<string | null> {
+  const value = await storage.get<unknown>("runner-container-control-token:v1");
+  if (!value) {
+    return null;
+  }
+
+  const record = requireObject(value, "runner control token record");
+  return typeof record.token === "string" ? record.token : null;
 }
 
 function createContainerStorageDouble(overrides: Partial<ContainerStorageDouble> = {}): ContainerStorageDouble {
