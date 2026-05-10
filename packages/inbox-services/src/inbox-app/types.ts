@@ -115,6 +115,7 @@ export type RuntimeStore = Pick<
   | 'searchCaptures'
   | 'listAttachmentParseJobs'
   | 'getCapture'
+  | 'getAttachment'
 >
 
 export type PersistedCapture = SharedPersistedCapture

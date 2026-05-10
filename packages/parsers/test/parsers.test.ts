@@ -1864,6 +1864,9 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     getCapture(captureId: string) {
       return captureId === capture.captureId ? capture : null;
     },
+    getAttachment(attachmentId: string) {
+      return attachmentId === attachment.attachmentId ? { capture, attachment } : null;
+    },
   };
 
   const results = await runAttachmentParseWorker({

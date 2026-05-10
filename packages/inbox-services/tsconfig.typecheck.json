@@ -30,6 +30,9 @@
       "@murphai/inbox-services": [
         "packages/inbox-services/src/index.ts"
       ],
+      "@murphai/inboxd": [
+        "packages/inboxd/src/index.ts"
+      ],
       "@murphai/inboxd/runtime": [
         "packages/inboxd/src/runtime.ts"
       ],

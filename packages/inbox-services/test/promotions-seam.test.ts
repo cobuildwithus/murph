@@ -177,6 +177,17 @@ function createRuntimeStore(
     getCapture(captureId: string) {
       return captures.find((capture) => capture.captureId === captureId) ?? null
     },
+    getAttachment(attachmentId: string) {
+      for (const capture of captures) {
+        const attachment = capture.attachments.find(
+          (candidate) => candidate.attachmentId === attachmentId,
+        )
+        if (attachment) {
+          return { capture, attachment }
+        }
+      }
+      return null
+    },
     getCursor() {
       return null
     },

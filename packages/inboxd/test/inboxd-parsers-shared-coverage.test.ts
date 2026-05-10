@@ -584,6 +584,7 @@ function createRuntimeStoreStub(): InboxRuntimeStore & { close: ReturnType<typeo
       attachments: [],
       raw: {},
     })),
+    getAttachment: vi.fn(() => null),
     claimNextAttachmentParseJob: vi.fn((): AttachmentParseJobRecord | null => null),
     requeueAttachmentParseJobs: vi.fn((_: RequeueAttachmentParseJobsInput | undefined) => 0),
     completeAttachmentParseJob: vi.fn(
