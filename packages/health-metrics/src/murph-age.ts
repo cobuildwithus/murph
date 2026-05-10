@@ -404,6 +404,15 @@ export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
   return MURPH_AGE_MODEL_CARD_POLICIES.map(cloneMurphAgeModelCardPolicy);
 }
 
+export function listMurphAgeInputBundleMetricKeys(): string[] {
+  return uniqueStrings([
+    ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
+    ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
+    ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+    ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
+  ]);
+}
+
 export function resolveMurphAgeModelCardPolicy(
   cardId: MurphAgeInputBundleAssessment["recommendedCardId"],
 ): MurphAgeModelCardPolicy | null {

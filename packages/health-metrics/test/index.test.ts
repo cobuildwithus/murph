@@ -11,6 +11,7 @@ import {
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
+  listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMetricPoints,
   listMetricDefinitions,
@@ -1682,6 +1683,19 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
   const insufficient = assessMurphAgeInputBundle({ asOf, points: [] });
   assert.equal(insufficient.status, "abstain");
   assert.equal(insufficient.recommendedCardId, "none");
+});
+
+test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
+  const keys = listMurphAgeInputBundleMetricKeys();
+
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(keys.includes("albumin"), true);
+  assert.equal(keys.includes("systolic-blood-pressure"), true);
+  assert.equal(keys.includes("bmi"), true);
+  assert.equal(keys.includes("steps"), true);
+  assert.equal(keys.includes("hrv-rmssd"), true);
+  assert.equal(keys.includes("crp"), false);
+  assert.equal(keys.includes("hs-crp"), false);
 });
 
 test("dispatches Murph Age cards while keeping research and wearable boundaries explicit", () => {
