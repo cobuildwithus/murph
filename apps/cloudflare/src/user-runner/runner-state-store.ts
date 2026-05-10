@@ -480,7 +480,8 @@ export class RunnerStateStore {
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     if (
-      normalizeRetryFailureCount(meta.pending_nudge_generation)
+      meta.pending_nudge !== 1
+      || normalizeRetryFailureCount(meta.pending_nudge_generation)
         !== input.expectedPendingNudgeGeneration
     ) {
       return this.readStateFromMetaSync(meta);
