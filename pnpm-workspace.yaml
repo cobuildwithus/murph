@@ -17,9 +17,16 @@ overrides:
   '@workflow/core@4.2.4>devalue': 5.6.4
   '@workflow/world-local>undici': 7.24.8
   '@workflow/world-vercel>undici': 7.24.8
+  'ajv@8.18.0>fast-uri': 3.1.2
+  'ajv@8.20.0>fast-uri': 3.1.2
+  'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
   'next@16.2.4>postcss': 8.5.13
+  'repomix@1.14.0>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
   - incur@0.4.4
+  - '@cobuild/review-gpt@0.5.88'
+  - fast-uri@3.1.2
+  - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1
 packageManagerStrictVersion: true
 savePrefix: ''
