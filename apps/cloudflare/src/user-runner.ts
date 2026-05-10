@@ -620,6 +620,7 @@ export class HostedUserRunner {
         currentWorkerVersionId: this.currentWorkerVersionId,
         heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
         nowMs: Date.now(),
+        readyTimeoutMs: this.env.runnerReadyTimeoutMs,
         timeoutMs: this.env.runnerTimeoutMs,
       });
       runningRecord = recovery.record;
@@ -643,6 +644,7 @@ export class HostedUserRunner {
       ? resolvePendingNudgeDrainContinuationWakeAt({
           nowMs,
           record: runningRecord,
+          runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
           runnerTimeoutMs: this.env.runnerTimeoutMs,
         })
       : new Date(nowMs + resolveHostedRunnerFailureRetryDelayMs({
@@ -1269,6 +1271,7 @@ export class HostedUserRunner {
       preferredWakeAt: resolvePendingNudgeWakeAt({
         nowMs,
         record: activeRecord,
+        runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
         runnerTimeoutMs: this.env.runnerTimeoutMs,
       }),
     });
@@ -1290,6 +1293,7 @@ export class HostedUserRunner {
     const preferredWakeAt = resolvePendingNudgeWakeAt({
       nowMs,
       record: inputRecord,
+      runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
       runnerTimeoutMs: this.env.runnerTimeoutMs,
     });
     const wakeAt = applyMinimumFutureWakeAt({
@@ -1429,6 +1433,7 @@ export class HostedUserRunner {
       currentWorkerVersionId: this.currentWorkerVersionId,
       heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
       nowMs: Date.now(),
+      readyTimeoutMs: this.env.runnerReadyTimeoutMs,
       timeoutMs: this.env.runnerTimeoutMs,
     });
     if (recovery.cleared) {
@@ -3012,6 +3017,7 @@ function earliestIsoDate(left: string | null, right: string | null): string | nu
 function resolvePendingNudgeWakeAt(input: {
   nowMs: number;
   record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
 }): string {
   const invocation = input.record.workspaceInvocation;
@@ -3030,16 +3036,25 @@ function resolvePendingNudgeWakeAt(input: {
     : Number.NaN;
   const livenessDeadlineMs = Number.isFinite(lastHeartbeatAtMs)
     ? lastHeartbeatAtMs + ACTIVE_INVOCATION_HEARTBEAT_STALE_MS
-    : input.nowMs;
+    : startedAtMs + Math.max(0, Math.floor(input.runnerReadyTimeoutMs));
   return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, livenessDeadlineMs))).toISOString();
 }
 
 function resolvePendingNudgeDrainContinuationWakeAt(input: {
   nowMs: number;
   record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
 }): string {
   const recoveryWakeAt = resolvePendingNudgeWakeAt(input);
+  const invocation = input.record.workspaceInvocation;
+  const lastHeartbeatAtMs = invocation?.lastHeartbeatAt
+    ? Date.parse(invocation.lastHeartbeatAt)
+    : Number.NaN;
+  if (invocation && !Number.isFinite(lastHeartbeatAtMs)) {
+    return recoveryWakeAt;
+  }
+
   const continuationWakeAt = new Date(
     input.nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
   ).toISOString();
