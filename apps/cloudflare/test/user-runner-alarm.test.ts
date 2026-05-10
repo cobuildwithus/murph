@@ -46,6 +46,12 @@ const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-openai-key",
 } as const;
+const TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE = {
+  ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+  CF_VERSION_METADATA: {
+    id: "worker-version-current",
+  },
+} as const;
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -1661,6 +1667,119 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).not.toHaveBeenCalled();
     expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("clears a previous-worker persisted-only invocation immediately and starts a replacement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "worker-version-previous",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: false,
+    });
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message:
+          "Hosted workspace invocation belonged to a previous worker version; clearing stale in-flight state.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("keeps a same-worker persisted-only invocation pending until liveness or grace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "worker-version-current",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("treats legacy unstamped active invocations as previous-worker state once version metadata exists", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = NULL,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: false,
+    });
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
   });
 
   it("clears a persisted-only invocation on the second wake after orphan observation", async () => {
@@ -5415,7 +5534,7 @@ function createRunnerCryptoContextHarness(
     onStoragePut?(input: { key: string; value: unknown }): void | Promise<void>;
     onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
     refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
-    runnerRuntimeEnvSource?: typeof TEST_RUNNER_RUNTIME_ENV_SOURCE & Record<string, string>;
+    runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
     retryDelayMs?: number;
     runnerTimeoutMs?: number;
     usageGateResponse?: Record<string, unknown>;

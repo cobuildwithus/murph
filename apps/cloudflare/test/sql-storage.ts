@@ -75,6 +75,7 @@ function initializeSchema(database: DatabaseSync): void {
       active_invocation_orphan_observed_at TEXT,
       active_invocation_reason TEXT,
       active_invocation_started_at TEXT,
+      active_invocation_worker_version_id TEXT,
       active_workspace_version TEXT,
       lease_generation INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,

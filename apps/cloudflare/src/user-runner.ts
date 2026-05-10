@@ -61,6 +61,7 @@ import {
 } from "./web-control-plane.ts";
 import type {
   RunnerInvocationLease,
+  RunnerStaleInvocationRecoveryResult,
 } from "./user-runner/runner-state-store.js";
 import {
   RunnerInvocationAlreadyActiveError,
@@ -540,13 +541,18 @@ export class HostedUserRunner {
     let runningRecord = await this.stateStore.readState();
     if (!activeInThisIsolate && runningRecord.inFlight) {
       const recovery = await this.stateStore.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: this.currentWorkerVersionId,
         nowMs: Date.now(),
         orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
         timeoutMs: this.env.runnerTimeoutMs,
       });
       runningRecord = recovery.record;
       if (recovery.cleared) {
-        this.logStaleInvocationLeaseCleared(recovery.attemptId, runningRecord.userId);
+        this.logStaleInvocationLeaseCleared(
+          recovery.attemptId,
+          runningRecord.userId,
+          recovery.reason,
+        );
       }
     }
     const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
@@ -741,6 +747,7 @@ export class HostedUserRunner {
     const lease = await this.stateStore.beginInvocation({
       reason: input.reason ?? "manual",
       userId: input.userId,
+      workerVersionId: this.currentWorkerVersionId,
     });
     await this.stateStore.ageActiveInvocationForTest({
       startedAt: "2000-01-01T00:00:00.000Z",
@@ -820,6 +827,7 @@ export class HostedUserRunner {
         expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
         reason: input.reason,
         userId: initialRecord.userId,
+        workerVersionId: this.currentWorkerVersionId,
       });
     } catch (error) {
       if (!(error instanceof RunnerInvocationAlreadyActiveError)) {
@@ -1262,18 +1270,21 @@ export class HostedUserRunner {
     });
   }
 
-  private async clearExpiredActiveInvocationForRecovery(): Promise<{
-    attemptId: string | null;
-    cleared: boolean;
-    record: RunnerStateRecord;
-  }> {
+  private async clearExpiredActiveInvocationForRecovery(): Promise<
+    RunnerStaleInvocationRecoveryResult
+  > {
     const recovery = await this.stateStore.clearStaleInvocationIfExpired({
+      currentWorkerVersionId: this.currentWorkerVersionId,
       nowMs: Date.now(),
       orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
       timeoutMs: this.env.runnerTimeoutMs,
     });
     if (recovery.cleared) {
-      this.logStaleInvocationLeaseCleared(recovery.attemptId, recovery.record.userId);
+      this.logStaleInvocationLeaseCleared(
+        recovery.attemptId,
+        recovery.record.userId,
+        recovery.reason,
+      );
     }
     return recovery;
   }
@@ -1281,6 +1292,7 @@ export class HostedUserRunner {
   private logStaleInvocationLeaseCleared(
     attemptId: string | null,
     userId: string,
+    reason: "expired" | "worker_version_mismatch",
   ): void {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -1288,10 +1300,16 @@ export class HostedUserRunner {
         workspaceAttemptId: attemptId,
       },
       level: "warn",
-      message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+      message: reason === "worker_version_mismatch"
+        ? "Hosted workspace invocation belonged to a previous worker version; clearing stale in-flight state."
+        : "Hosted workspace invocation lease expired; clearing stale in-flight state.",
       phase: "wake.running",
       userId,
     });
+  }
+
+  private get currentWorkerVersionId(): string | null {
+    return readHostedWorkerVersionIdFromSource(this.runnerRuntimeEnvSource);
   }
 
   private async readHostedRuntimeStatusFromWeb(
@@ -2528,6 +2546,23 @@ function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecut
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function readHostedWorkerVersionIdFromSource(
+  source: Readonly<Record<string, unknown>>,
+): string | null {
+  const metadata = source.CF_VERSION_METADATA;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const versionId = (metadata as { id?: unknown }).id;
+  if (typeof versionId !== "string") {
+    return null;
+  }
+
+  const trimmed = versionId.trim();
+  return trimmed ? trimmed : null;
 }
 
 function resolveHostedRunnerFailureRetryDelayMs(input: {
