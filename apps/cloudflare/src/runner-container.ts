@@ -4,6 +4,7 @@ import {
   type HostedAssistantRuntimeConfig,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
@@ -57,6 +58,9 @@ const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
 const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
+const RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX = "runner-container-active-operation:v1:";
+const RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION = 1;
+const RUNNER_ACTIVE_OPERATION_EXPIRY_GRACE_MS = 5_000;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -184,6 +188,18 @@ interface RunnerControlTokenRecord {
   updatedAt: number;
 }
 
+type RunnerActiveOperationKind = "browser-vault-refresh" | "workspace-invocation";
+
+interface RunnerActiveOperationRecord {
+  attemptId: string;
+  expiresAt: number;
+  kind: RunnerActiveOperationKind;
+  leaseGeneration: string;
+  schemaVersion: typeof RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION;
+  startedAt: number;
+  userId: string;
+}
+
 // Cloudflare rolls Worker code ahead of container instances, so keep the
 // worker/container outbound contract to one stable handler method.
 const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
@@ -305,16 +321,72 @@ export class RunnerContainer extends Container {
 
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
+      const now = Date.now();
+      const activeOperations = await this.readRunnerActiveOperations();
+      if (activeOperations === null) {
+        this.noteRunnerActivity("activity-expired-active-operation");
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            lifecycleStage: "activity-expired-active-operation-read-failed",
+          },
+          level: "warn",
+          message: "Hosted execution container activity expiry yielded because active operation state could not be read.",
+          phase: "container.ready",
+          userId: this.currentLogContext?.userId,
+        });
+        return;
+      }
+
+      const liveOperations = activeOperations
+        .filter((operation) => operation.expiresAt > now)
+        .sort(compareRunnerActiveOperationRecords);
+      const staleOperations = activeOperations
+        .filter((operation) => operation.expiresAt <= now)
+        .sort(compareRunnerActiveOperationRecords);
+      const activeOperation = liveOperations[0] ?? null;
+      if (activeOperation) {
+        this.noteRunnerActivity("activity-expired-active-operation");
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            activeOperationAgeMs: Math.max(0, now - activeOperation.startedAt),
+            activeOperationCount: liveOperations.length,
+            activeOperationExpiresInMs: Math.max(0, activeOperation.expiresAt - now),
+            activeOperationKind: activeOperation.kind,
+            lifecycleStage: "activity-expired-active-operation",
+            workspaceAttemptId: activeOperation.attemptId,
+          },
+          message: "Hosted execution container activity expiry yielded to active runner operation.",
+          phase: "container.ready",
+          userId: activeOperation.userId,
+        });
+        return;
+      }
+
+      const staleOperation = staleOperations[0] ?? null;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
+          ...(staleOperation
+            ? {
+                activeOperationAgeMs: Math.max(0, now - staleOperation.startedAt),
+                activeOperationKind: staleOperation.kind,
+                activeOperationStaleCount: staleOperations.length,
+                activeOperationStaleMs: Math.max(0, now - staleOperation.expiresAt),
+                workspaceAttemptId: staleOperation.attemptId,
+              }
+            : {}),
           lifecycleStage: "activity-expired-fallback-cleanup",
         },
         message: "Hosted execution container activity expired; running fallback cleanup.",
         phase: "container.ready",
-        userId: this.currentLogContext?.userId,
+        userId: staleOperation?.userId ?? this.currentLogContext?.userId,
       });
       await this.stopWarmContainer({ failClosed: false });
+      for (const operation of staleOperations) {
+        await this.clearRunnerActiveOperation(operation);
+      }
     });
   }
 
@@ -427,14 +499,25 @@ export class RunnerContainer extends Container {
       token: createRunnerOutboundProxyToken(),
       userId: routeUserId,
     };
+    const activeOperation = createRunnerActiveOperationRecord({
+      attemptId: outboundProxyState.attemptId,
+      kind: "workspace-invocation",
+      leaseGeneration: outboundProxyState.leaseGeneration,
+      timeoutMs: input.timeoutMs,
+      userId: routeUserId,
+    });
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
     const operationAbortController = new AbortController();
     this.workspaceInvocationAbortController = operationAbortController;
-    const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-    this.noteRunnerActivity("invoke-started");
+    let activeOperationAcquired = false;
+    let stopRunnerActivityRenewal: (() => void) | null = null;
 
     try {
+      await this.writeRunnerActiveOperation(activeOperation);
+      activeOperationAcquired = true;
+      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
+      this.noteRunnerActivity("invoke-started");
       const startTime = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -533,7 +616,8 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        error,
+        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        level: "warn",
         message: "Hosted execution container failed.",
         phase: "failed",
         userId: routeUserId,
@@ -541,15 +625,20 @@ export class RunnerContainer extends Container {
       throw error;
     } finally {
       try {
-        const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-        const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
-        if (!shouldKeepWarm) {
-          await this.stopWarmContainer({
-            failClosed: true,
-          });
+        if (activeOperationAcquired) {
+          const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
+          const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
+          if (!shouldKeepWarm) {
+            await this.stopWarmContainer({
+              failClosed: true,
+            });
+          }
         }
       } finally {
-        stopRunnerActivityRenewal();
+        if (activeOperationAcquired) {
+          await this.clearRunnerActiveOperation(activeOperation);
+        }
+        stopRunnerActivityRenewal?.();
         this.noteRunnerActivity("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
@@ -577,6 +666,13 @@ export class RunnerContainer extends Container {
       token: createRunnerOutboundProxyToken(),
       userId: input.userId,
     };
+    const activeOperation = createRunnerActiveOperationRecord({
+      attemptId: outboundProxyState.attemptId,
+      kind: "browser-vault-refresh",
+      leaseGeneration: outboundProxyState.leaseGeneration,
+      timeoutMs: input.timeoutMs,
+      userId: input.userId,
+    });
     const operationAbortController = new AbortController();
     let completeRefresh: () => void = () => undefined;
     this.browserVaultRefreshAbortController = operationAbortController;
@@ -585,10 +681,14 @@ export class RunnerContainer extends Container {
       completeRefresh = resolve;
     });
     this.currentLogContext = logContext;
-    const stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-    this.noteRunnerActivity("browser-vault-refresh-started");
+    let activeOperationAcquired = false;
+    let stopRunnerActivityRenewal: (() => void) | null = null;
 
     try {
+      await this.writeRunnerActiveOperation(activeOperation);
+      activeOperationAcquired = true;
+      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
+      this.noteRunnerActivity("browser-vault-refresh-started");
       const startTime = Date.now();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -649,7 +749,8 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        error,
+        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        level: "warn",
         message: "Hosted execution container browser-vault refresh failed.",
         phase: "failed",
         userId: input.userId,
@@ -657,14 +758,19 @@ export class RunnerContainer extends Container {
       throw error;
     } finally {
       try {
-        const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-        if (!outboundProxyExpired) {
-          await this.stopWarmContainer({
-            failClosed: true,
-          });
+        if (activeOperationAcquired) {
+          const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
+          if (!outboundProxyExpired) {
+            await this.stopWarmContainer({
+              failClosed: true,
+            });
+          }
         }
       } finally {
-        stopRunnerActivityRenewal();
+        if (activeOperationAcquired) {
+          await this.clearRunnerActiveOperation(activeOperation);
+        }
+        stopRunnerActivityRenewal?.();
         this.noteRunnerActivity("browser-vault-refresh-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
@@ -1108,6 +1214,27 @@ export class RunnerContainer extends Container {
     }
   }
 
+  private async readRunnerActiveOperations(): Promise<RunnerActiveOperationRecord[] | null> {
+    try {
+      const values = await this.ctx.storage.list<unknown>({
+        prefix: RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX,
+      });
+      return Array.from(values.values())
+        .map(parseRunnerActiveOperationRecord)
+        .filter((record): record is RunnerActiveOperationRecord => record !== null);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container failed to read active operation state.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+      return null;
+    }
+  }
+
   private async writeRunnerControlToken(token: string): Promise<void> {
     const record: RunnerControlTokenRecord = {
       schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
@@ -1129,6 +1256,22 @@ export class RunnerContainer extends Container {
     }
   }
 
+  private async writeRunnerActiveOperation(record: RunnerActiveOperationRecord): Promise<void> {
+    try {
+      await this.ctx.storage.put(createRunnerActiveOperationStorageKey(record), record);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container failed to write active operation state.",
+        phase: "container.ready",
+        userId: record.userId,
+      });
+      throw new Error("Hosted runner container active operation state could not be persisted.");
+    }
+  }
+
   private async clearRunnerControlToken(): Promise<void> {
     try {
       await this.ctx.storage.delete(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
@@ -1140,6 +1283,28 @@ export class RunnerContainer extends Container {
         message: "Hosted execution container could not clear control token state.",
         phase: "container.ready",
         userId: this.currentLogContext?.userId,
+      });
+    }
+  }
+
+  private async clearRunnerActiveOperation(record: RunnerActiveOperationRecord): Promise<void> {
+    try {
+      const key = createRunnerActiveOperationStorageKey(record);
+      const current = parseRunnerActiveOperationRecord(
+        await this.ctx.storage.get<unknown>(key),
+      );
+      if (!current || !isSameRunnerActiveOperationRecord(current, record)) {
+        return;
+      }
+      await this.ctx.storage.delete(key);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container failed to clear active operation state.",
+        phase: "container.ready",
+        userId: record.userId,
       });
     }
   }
@@ -2016,6 +2181,108 @@ function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord
     schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
     token: record.token,
     updatedAt: record.updatedAt,
+  };
+}
+
+function createRunnerActiveOperationRecord(input: {
+  attemptId: string;
+  kind: RunnerActiveOperationKind;
+  leaseGeneration: string;
+  timeoutMs: number;
+  userId: string;
+}): RunnerActiveOperationRecord {
+  const startedAt = Date.now();
+  return {
+    attemptId: input.attemptId,
+    expiresAt: startedAt + Math.max(1, input.timeoutMs) + RUNNER_ACTIVE_OPERATION_EXPIRY_GRACE_MS,
+    kind: input.kind,
+    leaseGeneration: input.leaseGeneration,
+    schemaVersion: RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION,
+    startedAt,
+    userId: input.userId,
+  };
+}
+
+function createRunnerActiveOperationStorageKey(record: RunnerActiveOperationRecord): string {
+  return `${RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX}${encodeURIComponent(record.kind)}:${
+    encodeURIComponent(record.attemptId)
+  }:${encodeURIComponent(record.leaseGeneration)}:${record.startedAt}`;
+}
+
+function parseRunnerActiveOperationRecord(value: unknown): RunnerActiveOperationRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION
+    || !isRunnerActiveOperationKind(record.kind)
+    || typeof record.attemptId !== "string"
+    || record.attemptId.length === 0
+    || typeof record.leaseGeneration !== "string"
+    || record.leaseGeneration.length === 0
+    || typeof record.userId !== "string"
+    || record.userId.length === 0
+    || !isSafeNonNegativeInteger(record.startedAt)
+    || !isSafeNonNegativeInteger(record.expiresAt)
+    || record.expiresAt <= record.startedAt
+  ) {
+    return null;
+  }
+
+  return {
+    attemptId: record.attemptId,
+    expiresAt: record.expiresAt,
+    kind: record.kind,
+    leaseGeneration: record.leaseGeneration,
+    schemaVersion: RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION,
+    startedAt: record.startedAt,
+    userId: record.userId,
+  };
+}
+
+function isRunnerActiveOperationKind(value: unknown): value is RunnerActiveOperationKind {
+  return value === "browser-vault-refresh" || value === "workspace-invocation";
+}
+
+function isSameRunnerActiveOperationRecord(
+  left: RunnerActiveOperationRecord,
+  right: RunnerActiveOperationRecord,
+): boolean {
+  return left.attemptId === right.attemptId
+    && left.kind === right.kind
+    && left.leaseGeneration === right.leaseGeneration
+    && left.startedAt === right.startedAt
+    && left.userId === right.userId;
+}
+
+function compareRunnerActiveOperationRecords(
+  left: RunnerActiveOperationRecord,
+  right: RunnerActiveOperationRecord,
+): number {
+  return left.startedAt - right.startedAt
+    || left.expiresAt - right.expiresAt
+    || left.kind.localeCompare(right.kind)
+    || left.attemptId.localeCompare(right.attemptId);
+}
+
+function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  if (!diagnostics) {
+    return {};
+  }
+
+  return {
+    detailsKeys: Object.keys(diagnostics).sort(),
+    ...(typeof diagnostics.errorCode === "string" ? { errorCode: diagnostics.errorCode } : {}),
+    ...(typeof diagnostics.errorCodeDetail === "string"
+      ? { errorCodeDetail: diagnostics.errorCodeDetail }
+      : {}),
+    errorDetailPresent: typeof diagnostics.errorDetail === "string",
+    ...(typeof diagnostics.errorMessage === "string" ? { errorMessage: diagnostics.errorMessage } : {}),
+    ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
+    ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
 }
 

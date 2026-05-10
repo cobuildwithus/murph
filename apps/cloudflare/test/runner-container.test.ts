@@ -1,4 +1,5 @@
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
+import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -753,7 +754,7 @@ describe("RunnerContainer", () => {
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
   });
 
-  it("runs fallback cleanup when activity expiry fires from another isolate during active work", async () => {
+  it("yields activity-expiry fallback cleanup to active work from another isolate", async () => {
     vi.useFakeTimers();
 
     try {
@@ -818,6 +819,26 @@ describe("RunnerContainer", () => {
 
       await coldAlarmIsolate.container.onActivityExpired();
 
+      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeOperationKind: "workspace-invocation",
+            lifecycleStage: "activity-expired-active-operation",
+            workspaceAttemptId: "attempt_evt_activity_cold_isolate",
+          }),
+          message: "Hosted execution container activity expiry yielded to active runner operation.",
+          phase: "container.ready",
+          userId: "member_123",
+        }),
+      );
+
+      resolveInvocation();
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
       expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -826,9 +847,357 @@ describe("RunnerContainer", () => {
           phase: "container.ready",
         }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("yields activity-expiry fallback cleanup to an active browser-vault refresh", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storage = createContainerStorageDouble();
+      let resolveRefresh!: () => void;
+      let markRefreshStarted!: () => void;
+      const refreshReady = new Promise<void>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      const refreshStarted = new Promise<void>((resolve) => {
+        markRefreshStarted = resolve;
+      });
+
+      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
+      const active = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        state: {
+          storage,
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          if (url.endsWith("/internal/browser-vault-refresh")) {
+            markRefreshStarted();
+            await refreshReady;
+            return new Response(JSON.stringify({ status: "already_fresh" }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      const coldAlarmIsolate = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+      });
+
+      const attemptId = "browser-vault-refresh:test-activity-cold-isolate";
+      const refreshPromise = active.container.refreshBrowserVaultReplica({
+        attemptId,
+        runtime: {},
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await refreshStarted;
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
+      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeOperationKind: "browser-vault-refresh",
+            lifecycleStage: "activity-expired-active-operation",
+            workspaceAttemptId: attemptId,
+          }),
+          message: "Hosted execution container activity expiry yielded to active runner operation.",
+          phase: "container.ready",
+          userId: "member_123",
+        }),
+      );
+
+      resolveRefresh();
+      await expect(refreshPromise).resolves.toMatchObject({
+        status: "already_fresh",
+      });
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
+      expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          message: "Hosted execution container activity expired; running fallback cleanup.",
+          phase: "container.ready",
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the original active marker when an overlapping operation fails and clears its own marker", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storage = createContainerStorageDouble();
+      let resolveInvocation!: () => void;
+      let markRunnerRequestStarted!: () => void;
+      let markRefreshStarted!: () => void;
+      const invocationReady = new Promise<void>((resolve) => {
+        resolveInvocation = resolve;
+      });
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+      const refreshStarted = new Promise<void>((resolve) => {
+        markRefreshStarted = resolve;
+      });
+
+      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
+      const active = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        state: {
+          storage,
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          markRunnerRequestStarted();
+          await invocationReady;
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      const overlappingRefresh = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          if (url.endsWith("/internal/browser-vault-refresh")) {
+            markRefreshStarted();
+            throw new Error("refresh aborted");
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+      const coldAlarmIsolate = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+        },
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+      });
+
+      const invokePromise = active.container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_original_marker_survives"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await runnerRequestStarted;
+
+      await expect(overlappingRefresh.container.refreshBrowserVaultReplica({
+        attemptId: "browser-vault-refresh:overlap-failure",
+        runtime: {},
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).rejects.toThrow("refresh aborted");
+      await refreshStarted;
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
+      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeOperationKind: "workspace-invocation",
+            lifecycleStage: "activity-expired-active-operation",
+            workspaceAttemptId: "attempt_evt_original_marker_survives",
+          }),
+          message: "Hosted execution container activity expiry yielded to active runner operation.",
+          phase: "container.ready",
+          userId: "member_123",
+        }),
+      );
 
       resolveInvocation();
       await expect(invokePromise).resolves.toEqual(createRunnerResult());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not send runner work when the active operation marker cannot be persisted", async () => {
+    const storage = createContainerStorageDouble({
+      async put() {
+        throw new Error("storage unavailable");
+      },
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      state: {
+        storage,
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_marker_write_failure"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).rejects.toThrow("active operation state could not be persisted");
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("allows activity-expiry fallback cleanup after an active marker expires", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const storage = createContainerStorageDouble();
+      let markRunnerRequestStarted!: () => void;
+      const runnerRequestStarted = new Promise<void>((resolve) => {
+        markRunnerRequestStarted = resolve;
+      });
+
+      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
+      const active = createContainerDouble({
+        state: {
+          storage,
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          markRunnerRequestStarted();
+          return await new Promise<Response>(() => undefined);
+        }),
+      });
+      const coldAlarmIsolate = createContainerDouble({
+        initialStatus: "running",
+        state: {
+          storage,
+        },
+      });
+
+      const invokePromise = active.container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_activity_stale_marker"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await runnerRequestStarted;
+      await vi.advanceTimersByTimeAsync(66_000);
+
+      await coldAlarmIsolate.container.onActivityExpired();
+
+      expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            activeOperationKind: "workspace-invocation",
+            lifecycleStage: "activity-expired-fallback-cleanup",
+            workspaceAttemptId: "attempt_evt_activity_stale_marker",
+          }),
+          message: "Hosted execution container activity expired; running fallback cleanup.",
+          phase: "container.ready",
+          userId: "member_123",
+        }),
+      );
+
+      await expect(invokePromise).rejects.toThrow(/aborted|timed out|timeout/i);
     } finally {
       vi.useRealTimers();
     }
@@ -1568,19 +1937,7 @@ describe("RunnerContainer", () => {
           });
         }
 
-        return new Response(JSON.stringify({
-          code: "type_error",
-          details: {
-            errorDetail: "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
-          },
-          error: "Invalid request.",
-          errorName: "TypeError",
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 400,
-        });
+        return createInvalidRunnerRequestResponse();
       }),
     });
 
@@ -1609,6 +1966,81 @@ describe("RunnerContainer", () => {
       errorDetail:
         "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
     });
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected container failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorCodeDetail: "type_error",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+          errorName: "TypeError",
+          errorStatus: 400,
+        }),
+        level: "warn",
+        message: "Hosted execution container failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+    expect(failureLogInput).not.toHaveProperty("error");
+    expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
+  it("keeps browser-vault refresh container invalid-request logs metadata-only", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return createInvalidRunnerRequestResponse();
+      }),
+    });
+
+    await expect(container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:invalid-request",
+      runtime: {},
+      timeoutMs: 10_000,
+      userId: "member_123",
+    })).rejects.toThrow("Invalid request.");
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container browser-vault refresh failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected browser-vault refresh container failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorCodeDetail: "type_error",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+          errorName: "TypeError",
+          errorStatus: 400,
+        }),
+        level: "warn",
+        message: "Hosted execution container browser-vault refresh failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+    expect(failureLogInput).not.toHaveProperty("error");
+    expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails();
   });
 
   it("bubbles runtime shell detail into the thrown container error message", async () => {
@@ -2848,9 +3280,12 @@ function createContainerDouble(input: {
   setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
-} = {}) {
+  } = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
-  const container = new RunnerContainer(input.state ?? {} as never, {
+  const container = new RunnerContainer({
+    storage: createContainerStorageDouble(),
+    ...(input.state ?? {}),
+  } as never, {
     ...(input.env ?? {}),
   } as never);
   const containerFetch = input.containerFetch ?? vi.fn(async (url: string) => {
@@ -2903,10 +3338,11 @@ function createContainerDouble(input: {
 interface ContainerStorageDouble {
   delete(key: string): Promise<boolean>;
   get<T>(key: string): Promise<T | undefined>;
+  list<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
 }
 
-function createContainerStorageDouble(): ContainerStorageDouble {
+function createContainerStorageDouble(overrides: Partial<ContainerStorageDouble> = {}): ContainerStorageDouble {
   const values = new Map<string, unknown>();
 
   return {
@@ -2916,10 +3352,47 @@ function createContainerStorageDouble(): ContainerStorageDouble {
     async get<T>(key: string): Promise<T | undefined> {
       return values.get(key) as T | undefined;
     },
+    async list<T>(options?: { prefix?: string }): Promise<Map<string, T>> {
+      return new Map(
+        Array.from(values.entries())
+          .filter(([key]) => !options?.prefix || key.startsWith(options.prefix))
+          .map(([key, value]) => [key, value as T]),
+      );
+    },
     async put<T>(key: string, value: T): Promise<void> {
       values.set(key, value);
     },
+    ...overrides,
   };
+}
+
+function createInvalidRunnerRequestResponse(): Response {
+  return new Response(JSON.stringify({
+    code: "type_error",
+    details: {
+      errorDetail: "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+    },
+    error: "Invalid request.",
+    errorName: "TypeError",
+  }), {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    status: 400,
+  });
+}
+
+function expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails(): void {
+  const structuredLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([input]) => buildHostedExecutionStructuredLogRecord(input));
+  const serializedLogs = JSON.stringify(structuredLogs);
+  expect(serializedLogs).not.toContain("OPENAI_API_KEY");
+  expect(serializedLogs).not.toContain("runtime.userEnv");
+  for (const log of structuredLogs) {
+    if (log.details) {
+      expect(log.details).not.toHaveProperty("errorDetail");
+    }
+  }
 }
 
 function createDeferred<T>() {

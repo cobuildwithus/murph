@@ -10,7 +10,9 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeWebStatusResponse,
@@ -353,7 +355,7 @@ export class HostedUserRunner {
         }
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
-          error,
+          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
           level: "warn",
           message: "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state.",
           phase: "wake.running",
@@ -366,7 +368,7 @@ export class HostedUserRunner {
         await this.preservePendingNudgeRetryAfterFailure();
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
-          error,
+          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
           level: "warn",
           message: "Hosted wake nudge failed; pending nudge retry remains scheduled.",
           phase: "wake.running",
@@ -377,7 +379,7 @@ export class HostedUserRunner {
 
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        error,
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
         message: "Hosted wake nudge failed; scheduling a retry.",
         phase: "wake.running",
@@ -852,6 +854,7 @@ export class HostedUserRunner {
       userId: initialRecord.userId,
     });
 
+    let workspaceVersion: string | null = null;
     try {
       if (input.reason === "idle_shutdown_checkpoint") {
         const quietRecord = await this.stateStore.readState();
@@ -884,7 +887,7 @@ export class HostedUserRunner {
       const workspaceRead = preflightWorkspaceRead
         ?? await this.readHostedWorkspaceFromWeb(initialRecord.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
-      const workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      workspaceVersion = workspaceRead.workspace?.version ?? "0";
       lease = await this.stateStore.bindInvocationWorkspaceVersion({
         lease,
         workspaceVersion,
@@ -996,9 +999,14 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          pendingNudgePresent: failure.record.pendingNudge || input.reason === "nudge",
+          retryFailureCount: failure.record.retryFailureCount,
           workspaceAttemptId: lease.attemptId,
+          workspaceLeaseGeneration: lease.leaseGeneration,
+          workspaceReason: input.reason,
+          workspaceVersion,
         },
-        error,
         level: "warn",
         message: "Hosted runner workspace invocation failed.",
         phase: "failed",
@@ -1522,7 +1530,7 @@ export class HostedUserRunner {
       .catch((error) => {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
-          error,
+          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
           level: "warn",
           message: "Hosted runner background browser-vault refresh failed.",
           phase: "failed",
@@ -2176,10 +2184,10 @@ export class HostedUserRunner {
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
             reason: input.reason,
             retryDelayMs,
           },
-          error,
           level: "warn",
           message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
           phase: "failed",
@@ -2501,6 +2509,25 @@ function resolvePreemptingIdleShutdownCheckpointDueAt(input: {
   }
 
   return new Date(Math.max(input.nowMs, nextWakeAtMs - 1)).toISOString();
+}
+
+function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  if (!diagnostics) {
+    return {};
+  }
+
+  return {
+    detailsKeys: Object.keys(diagnostics).sort(),
+    ...(typeof diagnostics.errorCode === "string" ? { errorCode: diagnostics.errorCode } : {}),
+    ...(typeof diagnostics.errorCodeDetail === "string"
+      ? { errorCodeDetail: diagnostics.errorCodeDetail }
+      : {}),
+    errorDetailPresent: typeof diagnostics.errorDetail === "string",
+    ...(typeof diagnostics.errorMessage === "string" ? { errorMessage: diagnostics.errorMessage } : {}),
+    ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
+    ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
+  };
 }
 
 function resolveHostedRunnerFailureRetryDelayMs(input: {
