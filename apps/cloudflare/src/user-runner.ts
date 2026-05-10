@@ -1,16 +1,17 @@
-import type {
-  HostedAiUsageAllowDecision,
-  HostedMailboxLane,
-  HostedMailboxLaneLag,
-  HostedRunnerNudgeResult,
-  HostedRunnerNudgeRequest,
-  HostedRuntimeRedactedJson,
-  HostedRunnerStatusResponse,
-  HostedRuntimeWebStatusResponse,
-  HostedWorkspaceReadResponse,
-  HostedWorkspaceInvocationReason,
-  HostedWorkspaceInvocationResult,
-  HostedWorkspaceState,
+import {
+  HOSTED_MAILBOX_LANES,
+  type HostedAiUsageAllowDecision,
+  type HostedMailboxLane,
+  type HostedMailboxLaneLag,
+  type HostedRunnerNudgeResult,
+  type HostedRunnerNudgeRequest,
+  type HostedRuntimeRedactedJson,
+  type HostedRunnerStatusResponse,
+  type HostedRuntimeWebStatusResponse,
+  type HostedWorkspaceReadResponse,
+  type HostedWorkspaceInvocationReason,
+  type HostedWorkspaceInvocationResult,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -89,6 +90,10 @@ const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;
 const NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER = 2;
 const NUDGE_FAILURE_RETRY_MAX_DELAY_MS = 8_000;
+const STALE_LOCAL_ACTIVE_INVOCATION_ABORT_MESSAGE =
+  "Hosted workspace invocation lost liveness during active work.";
+const CONTAINER_STOPPED_ACTIVE_INVOCATION_ABORT_MESSAGE =
+  "Hosted workspace invocation container stopped during active work.";
 const BROWSER_VAULT_REFRESH_INTENT_STORAGE_KEY = "runner:pending-browser-vault-refresh:v1";
 const BROWSER_VAULT_REFRESH_INTENT_SCHEMA = "murph.hosted-runner.browser-vault-refresh-intent.v1";
 const BROWSER_VAULT_REFRESH_CONTINUATION_DELAY_MS = 1_000;
@@ -812,6 +817,14 @@ export class HostedUserRunner {
 
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
+      const recovered = await this.recoverStaleLocalActiveInvocationForPendingWork();
+      if (recovered) {
+        return {
+          nextWakeAt: recovered.nextWakeAt,
+          status: "scheduled",
+        };
+      }
+
       const runningRecord = await this.stateStore.readState();
       const record = await this.syncInvocationRecoveryAlarm(runningRecord, {
         minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
@@ -1346,8 +1359,9 @@ export class HostedUserRunner {
     record: RunnerStateRecord;
     userId: string;
   }): Promise<RunnerStateRecord> {
-    if (!input.record.pendingNudge) {
-      return input.record;
+    const record = await this.clearStalePendingNudgeIfMailboxLagDrainedBestEffort(input);
+    if (!record.pendingNudge) {
+      return record;
     }
 
     this.pendingRunnerDriveAfterInvocation = {
@@ -1356,7 +1370,7 @@ export class HostedUserRunner {
       userId: input.userId,
     };
 
-    if (input.record.idleShutdownCheckpointDueAt) {
+    if (record.idleShutdownCheckpointDueAt) {
       await this.stateStore.clearIdleShutdownCheckpoint();
     }
 
@@ -1365,6 +1379,59 @@ export class HostedUserRunner {
         Date.now() + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
       ).toISOString(),
     });
+  }
+
+  private async clearStalePendingNudgeIfMailboxLagDrainedBestEffort(input: {
+    record: RunnerStateRecord;
+    userId: string;
+  }): Promise<RunnerStateRecord> {
+    if (!input.record.pendingNudge) {
+      return input.record;
+    }
+
+    try {
+      const webStatus = await this.readHostedRuntimeStatusFromWeb(input.userId);
+      const mailboxLag = mergeHostedRunnerDeferredCheckpointMailboxLag({
+        mailboxLag: webStatus.mailboxLag,
+        redactedStatus: input.record.deferredCheckpointRequired
+          ? input.record.deferredCheckpointMailboxStatus
+          : null,
+      });
+      if (!hostedRunnerMailboxLagDrained(mailboxLag)) {
+        return input.record;
+      }
+
+      const record = await this.stateStore.clearPendingInvocationNudge({
+        expectedPendingNudgeGeneration: input.record.pendingNudgeGeneration,
+      });
+      if (record.pendingNudge) {
+        return record;
+      }
+
+      this.pendingRunnerDriveAfterInvocation = null;
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          mailboxLagDrained: true,
+          pendingNudgeCleared: true,
+        },
+        message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return record;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted runner could not verify pending nudge mailbox lag before follow-up.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return input.record;
+    }
   }
 
   private async clearExpiredActiveInvocationForRecovery(): Promise<
@@ -1386,11 +1453,90 @@ export class HostedUserRunner {
     return recovery;
   }
 
-  private abortActiveWorkspaceInvocationAfterContainerStop(input: {
+  private async recoverStaleLocalActiveInvocationForPendingWork(): Promise<
+    RunnerStateRecord | null
+  > {
+    const active = this.activeWorkspaceInvocationAbort;
+    if (!active) {
+      return null;
+    }
+
+    const record = await this.stateStore.readState();
+    if (!this.shouldRecoverStaleLocalActiveInvocation(record, active)) {
+      return null;
+    }
+
+    const recovery = await this.clearExpiredActiveInvocationForRecovery();
+    if (!recovery.cleared) {
+      return null;
+    }
+
+    const aborted = this.abortActiveWorkspaceInvocation(
+      {
+        attemptId: active.attemptId,
+        leaseGeneration: active.leaseGeneration,
+        userId: active.userId,
+      },
+      new Error(STALE_LOCAL_ACTIVE_INVOCATION_ABORT_MESSAGE),
+    );
+    if (recovery.record.pendingNudge) {
+      const queuedRecord = await this.queuePendingNudgeContinuationAfterInvocation({
+        record: recovery.record,
+        userId: recovery.record.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeWorkspaceInvocationAborted: aborted,
+          pendingNudge: true,
+          workspaceAttemptId: active.attemptId,
+        },
+        level: "warn",
+        message: "Hosted runner cleared stale local invocation so pending nudge can drain.",
+        phase: "scheduled",
+        userId: recovery.record.userId,
+      });
+      return queuedRecord;
+    }
+
+    await this.syncPendingWorkRecoveryAfterFailure(recovery.record);
+    return recovery.record;
+  }
+
+  private shouldRecoverStaleLocalActiveInvocation(
+    record: RunnerStateRecord,
+    active: ActiveWorkspaceInvocationAbort,
+  ): boolean {
+    const invocation = record.workspaceInvocation;
+    if (
+      !record.inFlight
+      || !invocation
+      || invocation.attemptId !== active.attemptId
+      || record.leaseGeneration.toString() !== active.leaseGeneration
+      || record.userId !== active.userId
+      || active.controller.signal.aborted
+    ) {
+      return false;
+    }
+
+    const nowMs = Date.now();
+    const lastHeartbeatAtMs = invocation.lastHeartbeatAt
+      ? Date.parse(invocation.lastHeartbeatAt)
+      : Number.NaN;
+    if (Number.isFinite(lastHeartbeatAtMs)) {
+      return nowMs - lastHeartbeatAtMs >= ACTIVE_INVOCATION_HEARTBEAT_STALE_MS;
+    }
+
+    const startedAtMs = Date.parse(invocation.startedAt);
+    return Number.isFinite(startedAtMs)
+      && nowMs - startedAtMs >= this.env.runnerReadyTimeoutMs;
+  }
+
+  private abortActiveWorkspaceInvocation(input: {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-  }): boolean {
+  }, reason: unknown): boolean {
     const active = this.activeWorkspaceInvocationAbort;
     if (
       !active
@@ -1402,10 +1548,19 @@ export class HostedUserRunner {
       return false;
     }
 
-    active.controller.abort(
-      new Error("Hosted workspace invocation container stopped during active work."),
-    );
+    active.controller.abort(reason);
     return true;
+  }
+
+  private abortActiveWorkspaceInvocationAfterContainerStop(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): boolean {
+    return this.abortActiveWorkspaceInvocation(
+      input,
+      new Error(CONTAINER_STOPPED_ACTIVE_INVOCATION_ABORT_MESSAGE),
+    );
   }
 
   private logStaleInvocationLeaseCleared(
@@ -1602,20 +1757,22 @@ export class HostedUserRunner {
         })
       : await this.stateStore.readState();
     if (record.pendingNudge) {
-      await this.queuePendingNudgeContinuationAfterInvocation({
+      const queuedRecord = await this.queuePendingNudgeContinuationAfterInvocation({
         record,
         userId: input.userId,
       });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          pendingNudge: true,
-        },
-        message: "Hosted runner queued follow-up drive for pending nudge and scheduled delayed continuation alarm.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return;
+      if (queuedRecord.pendingNudge) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            pendingNudge: true,
+          },
+          message: "Hosted runner queued follow-up drive for pending nudge and scheduled delayed continuation alarm.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+        return;
+      }
     }
 
     if (
@@ -2599,6 +2756,33 @@ export class HostedUserRunner {
 
         try {
           if (input.reason === "nudge") {
+            if (isRecoveredActiveInvocationAbortError(error) && record) {
+              const durableRecoverySettled =
+                (record.pendingNudge && record.nextWakeAt !== null)
+                || (
+                  !record.pendingNudge
+                  && !record.inFlight
+                  && record.retryFailureCount === 0
+                );
+              if (!durableRecoverySettled) {
+                await this.preservePendingNudgeRetryAfterFailure({
+                  retryDelayMs,
+                });
+                return;
+              }
+
+              await this.runtimeAlarmScheduler.syncStoredAlarm();
+              return;
+            }
+            if (
+              record
+              && !record.pendingNudge
+              && !record.inFlight
+              && record.retryFailureCount === 0
+            ) {
+              await this.runtimeAlarmScheduler.syncStoredAlarm();
+              return;
+            }
             await this.preservePendingNudgeRetryAfterFailure({
               retryDelayMs,
             });
@@ -3023,6 +3207,20 @@ function mergeHostedRunnerDeferredCheckpointMailboxLag(input: {
   });
 }
 
+function hostedRunnerMailboxLagDrained(
+  mailboxLag: readonly HostedMailboxLaneLag[],
+): boolean {
+  const seenLanes = new Set<HostedMailboxLane>();
+  for (const lag of mailboxLag) {
+    if ((readNonNegativeBigInt(lag.lag) ?? 1n) !== 0n) {
+      return false;
+    }
+    seenLanes.add(lag.lane);
+  }
+
+  return HOSTED_MAILBOX_LANES.every((lane) => seenLanes.has(lane));
+}
+
 function readHostedMailboxImportedSeqForLane(
   redactedStatus: HostedRuntimeRedactedJson,
   lane: HostedMailboxLane,
@@ -3152,6 +3350,14 @@ function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecut
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function isRecoveredActiveInvocationAbortError(error: unknown): boolean {
+  return error instanceof Error
+    && (
+      error.message === STALE_LOCAL_ACTIVE_INVOCATION_ABORT_MESSAGE
+      || error.message === CONTAINER_STOPPED_ACTIVE_INVOCATION_ABORT_MESSAGE
+    );
 }
 
 function readHostedWorkerVersionIdFromSource(

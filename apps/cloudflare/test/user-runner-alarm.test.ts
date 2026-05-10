@@ -7,6 +7,7 @@ import {
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+  HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
@@ -317,6 +318,45 @@ describe("HostedUserRunner alarm routing", () => {
         message: "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled.",
       }),
     );
+  });
+
+  it("preserves nudge retry when a recovered-abort-shaped failure is not durably settled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerHarness();
+    await runner.bindUser("member_123");
+    runner.failRunWith = new Error("Hosted workspace invocation lost liveness during active work.");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = NULL,
+           pending_nudge = 1,
+           pending_work = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    expect(startDetachedRunnerDriveForTest(runner, {
+      aiUsageAllowDecision: null,
+      reason: "nudge",
+      userId: "member_123",
+    })).toBe(true);
+    await flushDetachedRunnerDrive();
+
+    expect(runner.runCalls).toEqual(["nudge"]);
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(
+      sql.exec(
+        `SELECT next_wake_at,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:01.000Z",
+      pending_nudge: 1,
+      pending_work: 1,
+    }]);
   });
 
   it("backs off failed immediate nudge retries after the first failure", async () => {
@@ -1177,6 +1217,397 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("clears stale pending nudge after active invocation drains effective mailbox lag", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      redactedStatus: Record<string, string>;
+      status: "idle";
+    }>();
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "41",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      snapshotRef: createLayeredSnapshotRef("stale-pending-nudge-drained"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      throw new Error("Unexpected stale pending nudge follow-up.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: {
+        mailboxLag: [
+          {
+            importedSeq: "7",
+            lag: "0",
+            lane: "system",
+            maxSeq: "7",
+          },
+          {
+            importedSeq: "41",
+            lag: "1",
+            lane: "conversation",
+            maxSeq: "42",
+          },
+        ],
+        userId: "member_123",
+        workspace,
+      },
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    firstInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "42",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toContain("deleted");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.100Z");
+    expect(
+      sql.exec(
+        `SELECT alarm_kind,
+                idle_shutdown_checkpoint_due_at,
+                next_wake_at,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      alarm_kind: "idle_checkpoint",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.100Z",
+      next_wake_at: null,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          mailboxLagDrained: true,
+          pendingNudgeCleared: true,
+        }),
+        message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("keeps pending nudge follow-up when effective mailbox lag remains nonzero", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      redactedStatus: Record<string, string>;
+      status: "idle";
+    }>();
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "41",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      snapshotRef: createLayeredSnapshotRef("stale-pending-nudge-nonzero"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: {
+        mailboxLag: [
+          {
+            importedSeq: "7",
+            lag: "0",
+            lane: "system",
+            maxSeq: "7",
+          },
+          {
+            importedSeq: "41",
+            lag: "2",
+            lane: "conversation",
+            maxSeq: "43",
+          },
+        ],
+        userId: "member_123",
+        workspace,
+      },
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    firstInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "42",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]));
+  });
+
+  it("keeps pending nudge follow-up when mailbox status omits a lane", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      redactedStatus: Record<string, string>;
+      status: "idle";
+    }>();
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "41",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      snapshotRef: createLayeredSnapshotRef("stale-pending-nudge-partial-status"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: {
+        mailboxLag: [
+          {
+            importedSeq: "41",
+            lag: "1",
+            lane: "conversation",
+            maxSeq: "42",
+          },
+        ],
+        userId: "member_123",
+        workspace,
+      },
+    });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    firstInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "42",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]));
+  });
+
+  it("keeps a newer pending nudge that arrives during drained-lag verification", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      deferredCheckpointRequired: true;
+      nextWakeAt: null;
+      redactedStatus: Record<string, string>;
+      status: "idle";
+    }>();
+    const workspace = createWorkspaceState({
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "41",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      snapshotRef: createLayeredSnapshotRef("stale-pending-nudge-newer-generation"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    let sqlForStatusRead: ReturnType<typeof createTestSqlStorage> | null = null;
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+      runtimeStatusResponse: ({ readCount }) => {
+        if (readCount !== 1) {
+          throw new Error("Unexpected extra hosted runtime status read.");
+        }
+        if (!sqlForStatusRead) {
+          throw new Error("Runner SQL storage was unavailable.");
+        }
+        sqlForStatusRead.exec(
+          `UPDATE runner_meta
+           SET pending_nudge = 1,
+               pending_nudge_generation = pending_nudge_generation + 1,
+               pending_work = 1
+           WHERE user_id = ?`,
+          "member_123",
+        );
+        return {
+          mailboxLag: [
+            {
+              importedSeq: "7",
+              lag: "0",
+              lane: "system",
+              maxSeq: "7",
+            },
+            {
+              importedSeq: "41",
+              lag: "1",
+              lane: "conversation",
+              maxSeq: "42",
+            },
+          ],
+          userId: "member_123",
+          workspace,
+        };
+      },
+    });
+    sqlForStatusRead = sql;
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+
+    firstInvocation.resolve({
+      deferredCheckpointRequired: true,
+      nextWakeAt: null,
+      redactedStatus: {
+        hostedMailboxConversationImportedSeq: "42",
+        hostedMailboxSystemImportedSeq: "7",
+      },
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms).toContain("2026-04-27T00:00:01.100Z");
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]));
+  });
+
   it("starts a pending follow-up after lock release even when the completed pass returned scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1269,6 +1700,88 @@ describe("HostedUserRunner runtime crypto context", () => {
           reason: "alarm",
         }),
         message: "Hosted runner invocation already active; synced recovery wake.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("aborts stale local active invocations so pending nudges can drain", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return firstInvocation.promise;
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_invocation_last_heartbeat_at = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(runner.alarm()).resolves.toBeUndefined();
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+      retry_failure_count: 0,
+    }]));
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          activeWorkspaceInvocationAborted: true,
+          pendingNudge: true,
+        }),
+        message: "Hosted runner cleared stale local invocation so pending nudge can drain.",
         phase: "scheduled",
         userId: "member_123",
       }),
@@ -6375,6 +6888,9 @@ function createRunnerCryptoContextHarness(
     onStoragePut?(input: { key: string; value: unknown }): void | Promise<void>;
     onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
     refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
+    runtimeStatusResponse?: Record<string, unknown> | ((input: {
+      readCount: number;
+    }) => Record<string, unknown>);
     runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
     retryDelayMs?: number;
     runnerTimeoutMs?: number;
@@ -6430,6 +6946,7 @@ function createRunnerCryptoContextHarness(
   const runnerContainerNames: string[] = [];
   const runnerRuntimeEnvSource = options.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE;
   let cryptoContextStatus = options.cryptoContextStatus ?? 200;
+  let runtimeStatusReadCount = 0;
   let workspaceReadCount = 0;
 
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
@@ -6454,6 +6971,17 @@ function createRunnerCryptoContextHarness(
       }, {
         status: options.usageGateStatus ?? 200,
       });
+    }
+
+    if (input.path === HOSTED_RUNTIME_STATUS_PATH) {
+      runtimeStatusReadCount += 1;
+      if (!options.runtimeStatusResponse) {
+        throw new Error("Unexpected hosted runtime status read in runtime crypto context test.");
+      }
+      const response = typeof options.runtimeStatusResponse === "function"
+        ? options.runtimeStatusResponse({ readCount: runtimeStatusReadCount })
+        : options.runtimeStatusResponse;
+      return Response.json(response);
     }
 
     if (input.path === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH) {
@@ -6573,6 +7101,26 @@ async function preservePendingNudgeRetryAfterFailureForTest(
     throw new Error("Hosted pending nudge retry helper did not return a promise.");
   }
   await result;
+}
+
+function startDetachedRunnerDriveForTest(
+  runner: HostedUserRunner,
+  input: {
+    aiUsageAllowDecision: HostedAiUsageAllowDecision | null;
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  },
+): boolean {
+  const value = Reflect.get(runner, "startDetachedRunnerDrive");
+  if (typeof value !== "function") {
+    throw new Error("Hosted detached runner drive helper was unavailable for test.");
+  }
+
+  const result = Reflect.apply(value, runner, [input]);
+  if (typeof result !== "boolean") {
+    throw new Error("Hosted detached runner drive helper did not return a boolean.");
+  }
+  return result;
 }
 
 function mockRuntimeCryptoContextWebControl(status: number): void {
