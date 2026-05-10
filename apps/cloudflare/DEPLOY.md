@@ -85,8 +85,8 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
-- `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS` defaults to `0`
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls the Durable Object-owned idle checkpoint/shutdown window. The runner container treats its own idle TTL as fallback-only and adds grace beyond this window before Cloudflare activity expiry.
+- `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS` defaults to `60000`
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls both the Durable Object-owned idle checkpoint/shutdown window and the runner container activity expiry. The idle checkpoint runs at T-minus the safety margin before that expiry.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 
 `CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is

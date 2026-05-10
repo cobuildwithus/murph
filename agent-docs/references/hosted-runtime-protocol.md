@@ -38,10 +38,11 @@ The live ownership split is:
   workspace wake is due before that T-minus checkpoint, the wake preempts the
   checkpoint; if the wake is later, the checkpoint runs first and preserves the
   later wake. That Durable Object alarm owns checkpoint and shutdown ordering.
-  The runner container's own activity expiry is fallback-only and carries extra
-  grace beyond the idle checkpoint window; it is not a second idle owner. Fresh
-  nudges clear that pending idle checkpoint and foreground input always outranks
-  idle maintenance. When the idle alarm is still current, Cloudflare starts a
+  The runner container's own activity expiry uses the same configured idle
+  lifecycle, leaving the checkpoint at the default T-minus-60 near-shutdown
+  point rather than a separate foreground checkpoint. Fresh nudges clear or
+  abort idle checkpoint work and foreground input always outranks idle
+  maintenance. When the idle alarm is still current, Cloudflare starts a
   normal lease-scoped invocation that renews container liveness, runs checkpoint
   reason `idle_shutdown_checkpoint`, validates the same workspace CAS/user
   fences, writes a full/base checkpoint, and destroys the warm container only if

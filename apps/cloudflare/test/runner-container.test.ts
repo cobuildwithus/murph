@@ -3206,14 +3206,14 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("keeps the container sleepAfter later than the configured idle checkpoint window", () => {
+  it("aligns the container sleepAfter with the configured idle lifecycle", () => {
     const { container } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2500",
       },
     });
 
-    expect(container.sleepAfter).toBe("123s");
+    expect(container.sleepAfter).toBe("3s");
   });
 
   it("rejects runner lifecycle env values with trailing junk", async () => {
@@ -3241,10 +3241,10 @@ describe("RunnerContainer", () => {
     })).rejects.toThrow("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
   });
 
-  it("defaults the warm container idle fallback after the five-minute checkpoint window", () => {
+  it("defaults the warm container idle lifecycle to five minutes", () => {
     const { container } = createContainerDouble();
 
-    expect(container.sleepAfter).toBe("420s");
+    expect(container.sleepAfter).toBe("300s");
   });
 
   it("renews activity before an idle-shutdown checkpoint reaches the warm shell", async () => {
