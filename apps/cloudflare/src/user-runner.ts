@@ -71,6 +71,9 @@ import type {
   RunnerStateRecord,
 } from "./user-runner/types.js";
 import {
+  RETRY_MAX_DELAY_MS,
+} from "./user-runner/types.js";
+import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
@@ -281,6 +284,12 @@ export class HostedUserRunner {
       return;
     }
 
+    const reason = dueAlarm.kind === "idle_checkpoint"
+      ? "idle_shutdown_checkpoint"
+      : record.pendingNudge
+        ? "nudge"
+        : "alarm";
+
     try {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -298,14 +307,15 @@ export class HostedUserRunner {
         idleCheckpointWorkspaceVersion: dueAlarm.kind === "idle_checkpoint"
           ? dueAlarm.idleWorkspaceVersion
           : null,
-        reason: dueAlarm.kind === "idle_checkpoint"
-          ? "idle_shutdown_checkpoint"
-          : "alarm",
+        reason,
       });
     } catch (error) {
       if (dueAlarm.kind === "idle_checkpoint") {
         const latestRecord = await this.stateStore.readState();
-        if (latestRecord.retryFailureCount === record.retryFailureCount) {
+        const pendingWorkOwnsRecovery = latestRecord.pendingNudge || latestRecord.inFlight;
+        if (pendingWorkOwnsRecovery) {
+          await this.syncPendingWorkRecoveryAfterFailure(latestRecord);
+        } else if (latestRecord.retryFailureCount === record.retryFailureCount) {
           const failedRecord = await this.stateStore.recordInvocationStartFailure({
             error,
             failedAt: new Date().toISOString(),
@@ -325,14 +335,40 @@ export class HostedUserRunner {
             });
           }
         }
-        await this.destroyIdleShutdownCheckpointContainerAfterFailureBestEffort({
-          userId: record.userId,
-        });
+        if (pendingWorkOwnsRecovery) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              pendingNudge: latestRecord.pendingNudge,
+              runnerInFlight: latestRecord.inFlight,
+            },
+            message: "Hosted idle-shutdown checkpoint failure cleanup yielded to pending work.",
+            phase: "scheduled",
+            userId: record.userId,
+          });
+        } else {
+          await this.destroyIdleShutdownCheckpointContainerAfterFailureBestEffort({
+            userId: record.userId,
+          });
+        }
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           error,
           level: "warn",
           message: "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state.",
+          phase: "wake.running",
+          userId: record.userId,
+        });
+        return;
+      }
+
+      if (reason === "nudge") {
+        await this.preservePendingNudgeRetryAfterFailure();
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          error,
+          level: "warn",
+          message: "Hosted wake nudge failed; pending nudge retry remains scheduled.",
           phase: "wake.running",
           userId: record.userId,
         });
@@ -927,7 +963,16 @@ export class HostedUserRunner {
           reason: input.reason,
           retryFailureCount: failure.record.retryFailureCount,
         });
-        if (
+        if (failure.record.pendingNudge) {
+          await this.queuePendingNudgeContinuationAfterInvocation({
+            record: failure.record,
+            userId: initialRecord.userId,
+          });
+        } else if (input.reason === "nudge") {
+          await this.preservePendingNudgeRetryAfterFailure({
+            retryDelayMs,
+          });
+        } else if (
           input.reason === "idle_shutdown_checkpoint"
           && input.idleCheckpointWorkspaceVersion
         ) {
@@ -1039,6 +1084,60 @@ export class HostedUserRunner {
       await this.state.storage.setAlarm(new Date(record.nextWakeAt));
     }
     return record;
+  }
+
+  private async preservePendingNudgeRetryAfterFailure(input: {
+    retryDelayMs?: number;
+  } = {}): Promise<void> {
+    const record = await this.tryReadStateForRetryScheduling();
+    const retryFailureCount = record?.retryFailureCount ?? 0;
+    const retryAttemptsExhausted = retryFailureCount >= this.env.maxEventAttempts;
+    if (record?.pendingNudge && record.nextWakeAt && !retryAttemptsExhausted) {
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return;
+    }
+
+    const pendingNudgeRetryDelayMs = resolvePendingNudgeFailureRetryDelayMs({
+      defaultRetryDelayMs: this.env.retryDelayMs,
+      maxEventAttempts: this.env.maxEventAttempts,
+      retryFailureCount,
+    });
+    const retryDelayMs = retryAttemptsExhausted
+      ? pendingNudgeRetryDelayMs
+      : input.retryDelayMs ?? pendingNudgeRetryDelayMs;
+    if (retryAttemptsExhausted) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          maxEventAttempts: this.env.maxEventAttempts,
+          retryDelayMs,
+          retryFailureCount,
+        },
+        level: "warn",
+        message: "Hosted runner pending nudge retry attempts exhausted; throttling retry while waiting for a fresh nudge.",
+        phase: "failed",
+        userId: record?.userId ?? null,
+      });
+    }
+    await this.markPendingNudgeAndApplyAlarm({
+      preferredWakeAt: new Date(Date.now() + retryDelayMs).toISOString(),
+    });
+  }
+
+  private async syncPendingWorkRecoveryAfterFailure(
+    record: RunnerStateRecord,
+  ): Promise<void> {
+    if (record.pendingNudge) {
+      await this.preservePendingNudgeRetryAfterFailure();
+      return;
+    }
+    if (record.inFlight) {
+      await this.syncInvocationRecoveryAlarm(record, {
+        minimumDelayMs: ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS,
+      });
+      return;
+    }
+    await this.runtimeAlarmScheduler.syncStoredAlarm();
   }
 
   private async reschedulePendingNudgeAfterInvocationLiveness(
@@ -1338,16 +1437,9 @@ export class HostedUserRunner {
       ? await this.stateStore.markDeferredCheckpointRequired()
       : await this.stateStore.readState();
     if (record.pendingNudge) {
-      this.pendingRunnerDriveAfterInvocation = {
-        aiUsageAllowDecision: null,
-        reason: "nudge",
+      await this.queuePendingNudgeContinuationAfterInvocation({
+        record,
         userId: input.userId,
-      };
-
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: new Date(
-          Date.now() + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
-        ).toISOString(),
       });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -2069,11 +2161,18 @@ export class HostedUserRunner {
     })
       .then(() => undefined, async (error) => {
         const record = await this.tryReadStateForRetryScheduling();
-        const retryDelayMs = resolveHostedRunnerFailureRetryDelayMs({
-          defaultRetryDelayMs: this.env.retryDelayMs,
-          reason: input.reason,
-          retryFailureCount: record?.retryFailureCount ?? 0,
-        });
+        const retryFailureCount = record?.retryFailureCount ?? 0;
+        const retryDelayMs = input.reason === "nudge"
+          ? resolvePendingNudgeFailureRetryDelayMs({
+              defaultRetryDelayMs: this.env.retryDelayMs,
+              maxEventAttempts: this.env.maxEventAttempts,
+              retryFailureCount,
+            })
+          : resolveHostedRunnerFailureRetryDelayMs({
+              defaultRetryDelayMs: this.env.retryDelayMs,
+              reason: input.reason,
+              retryFailureCount,
+            });
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
@@ -2088,11 +2187,17 @@ export class HostedUserRunner {
         });
 
         try {
-          await this.scheduleHostedWakeRetryAlarm({
-            respectMaxAttempts: input.reason !== "nudge",
-            retryDelayMs,
-            userId: input.userId,
-          });
+          if (input.reason === "nudge") {
+            await this.preservePendingNudgeRetryAfterFailure({
+              retryDelayMs,
+            });
+          } else {
+            await this.scheduleHostedWakeRetryAlarm({
+              respectMaxAttempts: true,
+              retryDelayMs,
+              userId: input.userId,
+            });
+          }
         } catch (retryError) {
           emitHostedExecutionStructuredLog({
             component: "hosted.runner",
@@ -2412,4 +2517,20 @@ function resolveHostedRunnerFailureRetryDelayMs(input: {
   const exponentialDelay = IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS
     * (NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER ** backoffStep);
   return Math.min(input.defaultRetryDelayMs, exponentialDelay);
+}
+
+function resolvePendingNudgeFailureRetryDelayMs(input: {
+  defaultRetryDelayMs: number;
+  maxEventAttempts: number;
+  retryFailureCount: number;
+}): number {
+  if (input.retryFailureCount >= input.maxEventAttempts) {
+    return RETRY_MAX_DELAY_MS;
+  }
+
+  return resolveHostedRunnerFailureRetryDelayMs({
+    defaultRetryDelayMs: input.defaultRetryDelayMs,
+    reason: "nudge",
+    retryFailureCount: input.retryFailureCount,
+  });
 }

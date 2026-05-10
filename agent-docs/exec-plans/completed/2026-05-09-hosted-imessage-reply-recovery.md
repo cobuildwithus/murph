@@ -80,15 +80,23 @@ Done:
 - Pushed the audit-blocker follow-up to main, then received a Pro simplification target: success-path handoff results should not report `runnerNudgeAccepted: false` when the optional direct nudge is merely deferred.
 - Renamed the handoff/read-receipt contract to an explicit `directRunnerNudgeStatus` enum, using `deferred` for success-path deferred observation.
 - Focused hosted-web handoff/Linq dispatch regressions and assistant-runtime typecheck passed for the Pro simplification follow-up.
+- After deploy, live iMessage probing still found a Cloudflare-side wake bug: a direct nudge was accepted immediately while another invocation was active, then pending work degraded into generic retry/exhaustion and delayed mailbox import for minutes.
+- Patched Cloudflare runner alarm/failure recovery so due work with a stored pending nudge runs as `nudge`, nudge failures preserve pending work instead of generic exhaustion, active/manual/idle-checkpoint failures queue pending-nudge continuation when pending work is present, and idle-checkpoint failure cleanup yields to pending work instead of destroying the warm runner.
+- Added bounded poison protection for pending nudges: after the configured fast retry attempts are exhausted, the nudge stays recoverable but moves to the longer capped backoff; fresh external nudges still reset retry state and return to the fast path.
+- Added runner-alarm regressions for pending nudge at retry cap, failed pending-nudge retries staying on the nudge lane, throttled exhausted pending-nudge retries, fresh nudge reset from long backoff, and idle-checkpoint failure yielding to pending work without container destroy.
+- Pro/local review passes after the live bug found no deploy-blocking issue after the Cloudflare fix; simplification/security/coverage audit findings were applied.
+- Final review found low throttle consistency issues only; patched direct nudge failures to ignore fast caller delays after the retry cap and to clamp exhausted pending-nudge backoff to the standard retry maximum.
+- Added a direct nudge failure regression with an oversized configured retry delay.
+- Focused runner-alarm verification passed with 103 tests, Cloudflare typecheck passed, `git diff --check` passed, and full `pnpm --dir apps/cloudflare verify` passed with 70 files / 951 tests.
 
 Now:
-- Commit/push the verified Pro simplification follow-up to main, then run another concise Pro review pass on the latest commit.
+- Close the plan and commit/push the Cloudflare pending-nudge recovery fix to main.
 
 Next:
-- Deploy immediately after Pro review, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs; close the plan only after replies are fast and durable.
+- Run `pnpm cf:deploy:immediate`, verify the Cloudflare deployment, then recheck warm, repeated, and cold/recovery iMessage reply behavior against live Cloudflare/Linq logs.
 
 Open questions (UNCONFIRMED if needed):
-- UNCONFIRMED: live post-deploy iMessage reply latency until the pending-work/admission recovery patch is deployed and the runner drains fresh inbound messages.
+- UNCONFIRMED: live post-deploy iMessage reply latency until the pending-nudge recovery patch is deployed and the runner drains fresh inbound messages.
 
 Working set (files/ids/commands):
 - `apps/cloudflare/src/**`
@@ -112,3 +120,9 @@ Working set (files/ids/commands):
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runtime-bridge-workspace.test.ts`
 - `pnpm -C apps/cloudflare typecheck`
 - `pnpm typecheck`
+- `pnpm --dir apps/cloudflare verify`
+- `git diff --check`
+- `pnpm test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/README.md`
+Status: completed
+Updated: 2026-05-10
+Completed: 2026-05-10
