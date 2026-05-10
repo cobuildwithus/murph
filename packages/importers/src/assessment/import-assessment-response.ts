@@ -52,7 +52,7 @@ export async function prepareAssessmentResponseImport(
     vaultRoot: request.vaultRoot,
     sourcePath: rawArtifact.sourcePath,
     title: request.title ?? basename(rawArtifact.sourcePath),
-    occurredAt: request.occurredAt,
+    recordedAt: request.occurredAt,
     importedAt: request.importedAt,
     source: request.source,
   });

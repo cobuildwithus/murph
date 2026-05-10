@@ -109,7 +109,25 @@ function parseStravaSnapshot(snapshot: unknown): StravaSnapshotInput {
     throw new TypeError("Strava snapshot must be an object.");
   }
 
+  assertOptionalObjectCollection((snapshot as StravaSnapshotInput).activities, "activities");
+  assertOptionalObjectCollection((snapshot as StravaSnapshotInput).deletions, "deletions");
+
   return snapshot as StravaSnapshotInput;
+}
+
+function assertOptionalObjectCollection(value: unknown, fieldName: string): void {
+  if (value === undefined) {
+    return;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Strava snapshot ${fieldName} must be an array.`);
+  }
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new TypeError(`Strava snapshot ${fieldName}[${index}] must be an object.`);
+    }
+  });
 }
 
 function asObjectArray(value: unknown): PlainObject[] {

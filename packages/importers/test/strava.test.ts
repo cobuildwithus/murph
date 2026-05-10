@@ -204,4 +204,20 @@ describe("Strava importer adapter", () => {
       }),
     ).rejects.toThrow(/Strava snapshot must be an object/u);
   });
+
+  it("rejects malformed Strava snapshot collections", async () => {
+    await expect(
+      prepareDeviceProviderSnapshotImport({
+        provider: "strava",
+        snapshot: { activities: { id: 1001 } },
+      }),
+    ).rejects.toThrow(/Strava snapshot activities must be an array/u);
+
+    await expect(
+      prepareDeviceProviderSnapshotImport({
+        provider: "strava",
+        snapshot: { deletions: [null] },
+      }),
+    ).rejects.toThrow(/Strava snapshot deletions\[0\] must be an object/u);
+  });
 });
