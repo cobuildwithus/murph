@@ -150,8 +150,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+      wakeHandoffDirectRunnerNudgeAccepted:
+        wakeHandoff?.directRunnerNudgeAccepted ?? null,
+      wakeHandoffDirectRunnerNudgeDeferred:
+        wakeHandoff?.directRunnerNudgeDeferred ?? false,
       wakeHandoffReason: wakeHandoff?.reason ?? null,
-      wakeHandoffRunnerNudgeAccepted: wakeHandoff?.runnerNudgeAccepted ?? false,
       wakeHandoffStarted: wakeHandoff?.started ?? false,
       wakeHandoffWorkflowStarted: wakeHandoff?.workflowStarted ?? false,
     });
@@ -180,7 +183,10 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   const responseReason = input.plan.response.reason ?? null;
-  const runnerNudgeAccepted = input.wakeHandoff?.runnerNudgeAccepted === true;
+  const directRunnerNudgeAccepted =
+    input.wakeHandoff?.directRunnerNudgeAccepted === true;
+  const directRunnerNudgeDeferred =
+    input.wakeHandoff?.directRunnerNudgeDeferred === true;
   const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
   const wakeHandoffStarted = input.wakeHandoff?.started === true;
   const wakeHandoffWorkflowStarted = input.wakeHandoff?.workflowStarted ?? false;
@@ -189,8 +195,9 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
       chatIdPresent: true,
+      directRunnerNudgeAccepted,
+      directRunnerNudgeDeferred,
       responseReason,
-      runnerNudgeAccepted,
       timeoutMs,
       wakeHandoffReason,
       wakeHandoffStarted,
@@ -198,10 +205,11 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     },
   );
 
-  if (!wakeHandoffStarted && !runnerNudgeAccepted) {
+  if (!wakeHandoffStarted && !directRunnerNudgeAccepted) {
     finishHostedOnboardingTiming(readReceiptTiming, "skipped-handoff-not-started", {
+      directRunnerNudgeAccepted,
+      directRunnerNudgeDeferred,
       responseReason,
-      runnerNudgeAccepted,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
@@ -218,9 +226,10 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     });
 
     finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {
+      directRunnerNudgeAccepted,
+      directRunnerNudgeDeferred,
       httpStatus: result.status,
       responseReason,
-      runnerNudgeAccepted,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
@@ -228,9 +237,10 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     });
   } catch (error) {
     finishHostedOnboardingTiming(readReceiptTiming, "failed", {
+      directRunnerNudgeAccepted,
+      directRunnerNudgeDeferred,
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
-      runnerNudgeAccepted,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,

@@ -22,16 +22,18 @@ import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runti
 
 export type HostedWebhookWakeHandoffResult =
   | {
+      directRunnerNudgeAccepted: boolean | null;
+      directRunnerNudgeDeferred: boolean;
       reason: "workflow-started";
       runId: string;
-      runnerNudgeAccepted: boolean;
       started: true;
       workflowStarted: true;
     }
   | {
+      directRunnerNudgeAccepted: boolean | null;
+      directRunnerNudgeDeferred: boolean;
       errorName?: string | null;
       reason: "missing-mailbox-item" | "workflow-start-failed";
-      runnerNudgeAccepted: boolean;
       started: false;
       workflowStarted: false;
     };
@@ -70,8 +72,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
     });
     return {
+      directRunnerNudgeAccepted: null,
+      directRunnerNudgeDeferred: false,
       reason: "missing-mailbox-item",
-      runnerNudgeAccepted: false,
       started: false,
       workflowStarted: false,
     };
@@ -106,9 +109,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       errorName,
     });
     return {
+      directRunnerNudgeAccepted: directNudge.accepted,
+      directRunnerNudgeDeferred: false,
       errorName,
       reason: "workflow-start-failed",
-      runnerNudgeAccepted: directNudge.accepted,
       started: false,
       workflowStarted: false,
     };
@@ -122,9 +126,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
   });
   return {
+    directRunnerNudgeAccepted: null,
+    directRunnerNudgeDeferred: true,
     reason: "workflow-started",
     runId: workflow.runId,
-    runnerNudgeAccepted: false,
     started: true,
     workflowStarted: true,
   };
