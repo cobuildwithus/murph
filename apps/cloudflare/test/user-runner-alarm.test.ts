@@ -757,7 +757,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
-      "deleted",
+      "2026-04-27T00:04:00.150Z",
     ]));
   });
 
@@ -1109,7 +1109,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       deferred_checkpoint_required: 0,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.100Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.100Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       pending_nudge: 0,
     }]);
@@ -1202,7 +1202,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
-      "deleted",
+      "2026-04-27T00:04:00.150Z",
     ]));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1217,7 +1217,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("clears stale pending nudge after active invocation drains effective mailbox lag", async () => {
+  it("drains a pending nudge instead of clearing it from deprecated deferred checkpoint status", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -1238,7 +1238,13 @@ describe("HostedUserRunner runtime crypto context", () => {
       if (invoke.mock.calls.length === 1) {
         return firstInvocation.promise;
       }
-      throw new Error("Unexpected stale pending nudge follow-up.");
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle" as const,
+        };
+      }
+      throw new Error("Unexpected extra stale pending nudge follow-up.");
     });
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
       invoke,
@@ -1286,9 +1292,9 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await flushDetachedRunnerDrive();
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("deleted");
-    expect(alarms.at(-1)).toBe("2026-04-27T00:05:00.100Z");
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:04:00.100Z");
     expect(
       sql.exec(
         `SELECT alarm_kind,
@@ -1301,21 +1307,14 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       alarm_kind: "idle_checkpoint",
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.100Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.100Z",
       next_wake_at: null,
       pending_nudge: 0,
       pending_work: 0,
     }]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        component: "hosted.runner",
-        details: expect.objectContaining({
-          mailboxLagDrained: true,
-          pendingNudgeCleared: true,
-        }),
         message: "Hosted runner cleared stale pending nudge after mailbox lag drained.",
-        phase: "scheduled",
-        userId: "member_123",
       }),
     );
   });
@@ -1732,7 +1731,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.100Z",
       "2026-04-27T00:00:01.100Z",
-      "deleted",
+      "2026-04-27T00:04:00.150Z",
     ]));
   });
 
@@ -2232,7 +2231,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       expect(alarms).toEqual(expect.arrayContaining([
         "2026-04-27T00:00:01.000Z",
         "2026-04-27T00:00:02.100Z",
-        "2026-04-27T00:05:00.000Z",
+        "2026-04-27T00:04:01.100Z",
       ]))
     );
   });
@@ -4191,7 +4190,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:02.000Z",
       "2026-04-27T00:00:06.000Z",
-      "deleted",
+      "2026-04-27T00:04:06.000Z",
     ]));
     expect(
       sql.exec(
@@ -4768,23 +4767,23 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
-	    expect(
-	      sql.exec(
-	        `SELECT idle_shutdown_checkpoint_due_at,
-	                idle_shutdown_checkpoint_workspace_version,
-	                next_wake_at
-	         FROM runner_meta WHERE user_id = ?`,
-	        "member_123",
-	      ).toArray(),
-	    ).toEqual([{
-	      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
-	      idle_shutdown_checkpoint_workspace_version: "4",
-	      next_wake_at: null,
-	    }]);
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
+    }]);
   });
 
-  it("does not schedule an idle-shutdown checkpoint when the workspace is already base-only", async () => {
+  it("schedules lifecycle idle-shutdown checkpoint even when the workspace is already base-only", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -4798,7 +4797,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms).toContain("deleted");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at, idle_shutdown_checkpoint_workspace_version
@@ -4806,12 +4805,12 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
-      }]);
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+    }]);
   });
 
-  it("runs an idle-shutdown checkpoint after deferred mailbox progress on a base-only workspace", async () => {
+  it("runs a lifecycle idle-shutdown checkpoint on a base-only workspace without deferred scheduler state", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -4862,7 +4861,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("manual");
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -4872,7 +4871,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: null,
     }]);
@@ -4884,16 +4883,9 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     ).toArray();
     expect(deferredMailboxStatusRows).toHaveLength(1);
-    expect(
-      JSON.parse(
-        deferredMailboxStatusRows[0]?.deferred_checkpoint_mailbox_status_json ?? "null",
-      ),
-    ).toEqual({
-      hostedMailboxConversationImportedSeq: "445",
-      hostedMailboxSystemImportedSeq: "0",
-    });
+    expect(deferredMailboxStatusRows[0]?.deferred_checkpoint_mailbox_status_json).toBeNull();
 
-    vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:04:00.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -4921,7 +4913,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("keeps a checkpoint alarm after deferred progress before the first workspace row exists", async () => {
+  it("keeps a lifecycle checkpoint alarm before the first workspace row exists", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const destroyInstance = vi.fn(async () => {});
@@ -4951,7 +4943,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request.workspaceVersion).toBe("0");
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -4962,13 +4954,13 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "0",
       next_wake_at: null,
     }]);
 
-    vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:04:00.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -4992,7 +4984,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("keeps a retry backstop when deferred checkpoint scheduling fails", async () => {
+  it("schedules lifecycle checkpoint without persisting deprecated deferred checkpoint state", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -5020,7 +5012,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:00:30.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5031,21 +5023,20 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
-      next_wake_at: "2026-04-27T00:00:30.000Z",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
     }]);
   });
 
-  it("checkpoints budget-exhausted deferred progress before the retry wake", async () => {
+  it("keeps budget-exhausted work on the retry wake instead of running a 1s checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
       snapshotRef: createBundleRef("base-only-sticky-deferred"),
       version: "4",
     });
-    const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
         return {
@@ -5054,21 +5045,13 @@ describe("HostedUserRunner runtime crypto context", () => {
           status: "budget_exhausted" as const,
         };
       }
-      if (invoke.mock.calls.length === 2) {
-        return {
-          idleShutdownCheckpointed: true,
-          nextWakeAt: "2026-04-27T00:01:00.000Z",
-          status: "idle" as const,
-        };
-      }
 
       return {
         nextWakeAt: null,
         status: "idle" as const,
       };
     });
-    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
       invoke,
     });
     await runner.bindUser("member_123");
@@ -5086,9 +5069,9 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
-      idle_shutdown_checkpoint_workspace_version: "4",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
       next_wake_at: "2026-04-27T00:01:00.000Z",
     }]);
 
@@ -5096,10 +5079,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:01:00.000Z");
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("alarm");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5111,40 +5091,19 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       deferred_checkpoint_required: 0,
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
-      next_wake_at: "2026-04-27T00:01:05.000Z",
-    }]);
-
-    await runner.alarm();
-
-    expect(invoke).toHaveBeenCalledTimes(3);
-    expect(invoke.mock.calls[2]?.[0].job.request.reason).toBe("alarm");
-    expect(
-      sql.exec(
-        `SELECT deferred_checkpoint_required,
-                idle_shutdown_checkpoint_due_at,
-                idle_shutdown_checkpoint_workspace_version,
-                next_wake_at
-         FROM runner_meta WHERE user_id = ?`,
-        "member_123",
-      ).toArray(),
-    ).toEqual([{
-      deferred_checkpoint_required: 0,
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:05.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: null,
     }]);
   });
 
-  it("checkpoints deferred progress before a short non-idle workspace wake", async () => {
+  it("keeps a short non-idle workspace wake instead of running a 1s checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
       snapshotRef: createBundleRef("base-only-short-non-idle-wake"),
       version: "4",
     });
-    const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
         return {
@@ -5155,13 +5114,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       }
 
       return {
-        idleShutdownCheckpointed: true,
-        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        nextWakeAt: null,
         status: "idle" as const,
       };
     });
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
       invoke,
     });
     await runner.bindUser("member_123");
@@ -5169,7 +5126,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
       status: "scheduled",
     });
-    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(alarms).toContain("2026-04-27T00:01:00.000Z");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5180,22 +5137,20 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:00:01.000Z",
-      idle_shutdown_checkpoint_workspace_version: "4",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
       next_wake_at: "2026-04-27T00:01:00.000Z",
     }]);
 
-    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:01:00.000Z");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("alarm");
   });
 
-  it("schedules a deferred checkpoint before a later non-idle workspace wake", async () => {
+  it("schedules a lifecycle checkpoint before a later non-idle workspace wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -5229,7 +5184,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5240,13 +5195,13 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: "2026-04-27T00:10:00.000Z",
     }]);
 
-    vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:04:00.000Z"));
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -5326,7 +5281,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
 
-    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -5336,7 +5291,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: "2026-04-27T00:10:00.000Z",
     }]);
@@ -5487,7 +5442,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("runs due deferred idle-shutdown checkpoints before an already-due workspace wake", async () => {
+  it("lets an already-due workspace wake preempt an idle-shutdown checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -5495,14 +5450,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       snapshotRef: createLayeredSnapshotRef("idle-run-before-due-wake"),
       version: "4",
     });
-    const destroyInstance = vi.fn(async () => {});
     const idleInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
-      idleShutdownCheckpointed: true,
-      nextWakeAt: FIXED_NOW,
+      nextWakeAt: null,
       status: "idle",
     }));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
       invoke: idleInvoke,
     });
     await runner.bindUser("member_123");
@@ -5521,10 +5473,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await runner.alarm();
 
-    expect(idleInvoke).toHaveBeenCalledOnce();
-    expect(idleInvoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(idleInvoke.mock.calls[0]?.[0].job.request.checkpointNextWakeAt).toBe(FIXED_NOW);
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(idleInvoke).not.toHaveBeenCalled();
     expect(alarms.at(-1)).toBe(FIXED_NOW);
     expect(
       sql.exec(
@@ -5547,7 +5496,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("schedules deferred idle-shutdown checkpoints before an already-due workspace wake", async () => {
+  it("keeps an already-due workspace wake instead of scheduling a deferred checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -5555,7 +5504,6 @@ describe("HostedUserRunner runtime crypto context", () => {
       snapshotRef: createLayeredSnapshotRef("deferred-idle-before-due-wake"),
       version: "4",
     });
-    const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
         return {
@@ -5566,13 +5514,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       }
 
       return {
-        idleShutdownCheckpointed: true,
-        nextWakeAt: FIXED_NOW,
+        nextWakeAt: null,
         status: "idle" as const,
       };
     });
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      destroyInstance,
       invoke,
     });
     await runner.bindUser("member_123");
@@ -5592,18 +5538,16 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      deferred_checkpoint_required: 1,
-      idle_shutdown_checkpoint_due_at: FIXED_NOW,
-      idle_shutdown_checkpoint_workspace_version: "4",
+      deferred_checkpoint_required: 0,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
       next_wake_at: FIXED_NOW,
     }]);
 
     await runner.alarm();
 
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe(FIXED_NOW);
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("alarm");
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5615,9 +5559,9 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       deferred_checkpoint_required: 0,
-      idle_shutdown_checkpoint_due_at: null,
-      idle_shutdown_checkpoint_workspace_version: null,
-      next_wake_at: FIXED_NOW,
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      next_wake_at: null,
     }]);
   });
 
@@ -6125,11 +6069,13 @@ describe("HostedUserRunner runtime crypto context", () => {
       snapshotRef: createLayeredSnapshotRef("idle-schedule-race"),
       version: "4",
     });
+    let injectedPendingNudge = false;
     const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      onWorkspaceRead: ({ readCount }) => {
-        if (readCount !== 2) {
+      onSetAlarm: async ({ scheduledTimeIso }) => {
+        if (injectedPendingNudge || scheduledTimeIso !== "2026-04-27T00:04:00.000Z") {
           return;
         }
+        injectedPendingNudge = true;
         sql.exec(
           `UPDATE runner_meta
            SET pending_nudge = 1,
@@ -6178,7 +6124,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	      onSetAlarm: async ({ scheduledTimeIso }) => {
 	        if (
 	          nudgedDuringIdleAlarmApplication
-	          || scheduledTimeIso !== "2026-04-27T00:05:00.000Z"
+	          || scheduledTimeIso !== "2026-04-27T00:04:00.000Z"
 	        ) {
 	          return;
 	        }
@@ -6199,7 +6145,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
 	    expect(nudgedDuringIdleAlarmApplication).toBe(true);
 	    expect(invoke).toHaveBeenCalledTimes(2);
-	    expect(alarms).toContain("2026-04-27T00:05:00.000Z");
+	    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
 	    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
 	    expect(
 	      sql.exec(
@@ -6211,7 +6157,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 	        "member_123",
 	      ).toArray(),
     ).toEqual([{
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:05:00.000Z",
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: null,
       pending_nudge: 0,
@@ -6353,6 +6299,77 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     });
     expect(alarms.length).toBeGreaterThan(0);
+  });
+
+  it("lets foreground nudge recovery outrank a due browser-vault refresh wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        return invocation.promise;
+      }
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner } =
+      createRunnerCryptoContextHarness(null, {
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+    const pendingIntent = readPendingBrowserVaultRefreshStorage();
+    expect(pendingIntent).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
+    setBrowserVaultRefreshIntentNextAttemptAtForTest(pendingIntent, FIXED_NOW);
+
+    alarms.splice(0);
+    const beforeNudgeMs = Date.now();
+    const result = await runner.nudgeHostedRunner();
+    const nextAlarmAt = result.nextAlarmAt;
+
+    expect(result).toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+    expect(nextAlarmAt).not.toBeNull();
+    expect(Date.parse(nextAlarmAt ?? "")).toBeGreaterThan(beforeNudgeMs);
+    expect(alarms.at(-1)).toBe(nextAlarmAt);
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(activeRun).resolves.toMatchObject({
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
   });
 
   it("keeps background browser-vault refresh conflicts best-effort", async () => {
@@ -6590,7 +6607,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       if (invoke.mock.calls.length === 1) {
         return {
           deferredCheckpointRequired: true,
-          nextWakeAt: "2026-04-27T00:01:00.000Z",
+          nextWakeAt: "2026-04-27T00:10:00.000Z",
           status: "scheduled" as const,
         };
       }
@@ -6621,7 +6638,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.runUntilIdleOrBudget({ reason: "manual" })).resolves.toMatchObject({
       status: "scheduled",
     });
-    vi.setSystemTime(new Date("2026-04-27T00:00:02.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:04:00.000Z"));
     await expect(runner.alarm()).resolves.toBeUndefined();
 
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -6669,7 +6686,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(readPendingBrowserVaultRefreshStorage()).toBeUndefined();
   });
 
-  it("keeps a successful invocation successful when idle scheduling cannot read the workspace", async () => {
+  it("keeps a successful invocation successful without rereading the workspace for idle scheduling", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -6690,7 +6707,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toContain("deleted");
+    expect(alarms).toContain("2026-04-27T00:04:00.000Z");
     expect(
       sql.exec(
         `SELECT in_flight,

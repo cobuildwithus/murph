@@ -1186,13 +1186,24 @@ describe("RunnerContainer", () => {
   });
 
   it("does not send runner work when the active operation marker cannot be persisted", async () => {
-    const storage = createContainerStorageDouble({
-      async put() {
+    const storage = createContainerStorageDouble();
+    const put = storage.put.bind(storage);
+    storage.put = vi.fn(async (key: string, value: unknown) => {
+      if (key.startsWith("runner-container-active-operation:v1:")) {
         throw new Error("storage unavailable");
-      },
+      }
+      await put(key, value);
     });
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/control-health")) {
         return new Response(JSON.stringify({ ok: true }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -1224,8 +1235,10 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).rejects.toThrow("active operation state could not be persisted");
 
-    expect(containerFetch).not.toHaveBeenCalled();
-    expect(destroy).not.toHaveBeenCalled();
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toBe(false);
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it("allows activity-expiry fallback cleanup after an active marker expires", async () => {
@@ -1941,7 +1954,7 @@ describe("RunnerContainer", () => {
     )).toBe(true);
   });
 
-  it("keeps the durable control token when destroy cannot prove the shell stopped", async () => {
+  it("invalidates the durable control token when destroy cannot prove the shell stopped", async () => {
     vi.useFakeTimers();
 
     const storage = createContainerStorageDouble();
@@ -1989,7 +2002,7 @@ describe("RunnerContainer", () => {
       vi.useRealTimers();
     }
 
-    await expect(readStoredRunnerControlToken(storage)).resolves.toBe(recoveredControlToken);
+    await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
 
     const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/health")) {
@@ -2002,7 +2015,6 @@ describe("RunnerContainer", () => {
       }
 
       if (url.endsWith("/internal/control-health")) {
-        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
         return new Response(JSON.stringify({ ok: true }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -2012,7 +2024,7 @@ describe("RunnerContainer", () => {
       }
 
       expect(url).toBe("http://container/internal/workspace-invocation");
-      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+      expect(readAuthorizationHeader(init?.headers)).toMatch(/^Bearer [0-9a-f-]{36}$/u);
       return new Response(JSON.stringify(createRunnerResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -2037,8 +2049,8 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(rehydrated.destroy).not.toHaveBeenCalled();
-    expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(rehydrated.destroy).toHaveBeenCalledOnce();
+    expect(rehydrated.startAndWaitForPorts).toHaveBeenCalledOnce();
   });
 
   it("clears the durable control token after destroy confirms the shell stopped", async () => {
@@ -2094,7 +2106,7 @@ describe("RunnerContainer", () => {
     expect(containerFetch).not.toHaveBeenCalled();
   });
 
-  it("restores the durable control token when destroy races with cold start", async () => {
+  it("does not restore the durable control token when destroy races with cold start", async () => {
     vi.useFakeTimers();
 
     try {
@@ -2148,7 +2160,7 @@ describe("RunnerContainer", () => {
       const thrown = await invokeResultPromise;
       expect(thrown).toBeInstanceOf(Error);
       expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
-      await expect(readStoredRunnerControlToken(storage)).resolves.toBe(startedControlToken);
+      await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
 
       const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
@@ -2161,7 +2173,6 @@ describe("RunnerContainer", () => {
         }
 
         if (url.endsWith("/internal/control-health")) {
-          expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${startedControlToken}`);
           return new Response(JSON.stringify({ ok: true }), {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -2171,7 +2182,7 @@ describe("RunnerContainer", () => {
         }
 
         expect(url).toBe("http://container/internal/workspace-invocation");
-        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${startedControlToken}`);
+        expect(readAuthorizationHeader(init?.headers)).toMatch(/^Bearer [0-9a-f-]{36}$/u);
         return new Response(JSON.stringify(createRunnerResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -2196,8 +2207,8 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       })).resolves.toEqual(createRunnerResult());
 
-      expect(rehydrated.destroy).not.toHaveBeenCalled();
-      expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(rehydrated.destroy).toHaveBeenCalledOnce();
+      expect(rehydrated.startAndWaitForPorts).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }

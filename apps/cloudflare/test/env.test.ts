@@ -223,11 +223,11 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(0);
   });
 
-  it("defaults idle-shutdown checkpoints to the five-minute quiet window", () => {
+  it("defaults idle-shutdown checkpoints to T-minus-60 of the five-minute quiet window", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
 
     expect(environment.runnerIdleTtlMs).toBe(300_000);
-    expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(0);
+    expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(60_000);
   });
 
   it("enables idle-shutdown checkpoints by default in worker env", () => {

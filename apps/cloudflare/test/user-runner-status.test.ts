@@ -30,7 +30,7 @@ describe("HostedUserRunner status", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("reports mailbox lag from deferred checkpoint redacted status", async () => {
+  it("reports mailbox lag from web status without deferred checkpoint overlay", async () => {
     const { runner, sql } = createRunnerStatusHarness();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
       boundUserId?: string;
@@ -75,8 +75,8 @@ describe("HostedUserRunner status", () => {
     await expect(runner.runnerStatus()).resolves.toMatchObject({
       mailboxLag: [
         {
-          importedSeq: "2",
-          lag: "0",
+          importedSeq: "0",
+          lag: "2",
           lane: "system",
           maxSeq: "2",
         },
@@ -92,7 +92,7 @@ describe("HostedUserRunner status", () => {
     });
   });
 
-  it("reports effective workspace mailbox status while a checkpoint is deferred", async () => {
+  it("reports workspace mailbox status from web status without deferred overlay", async () => {
     const { runner, sql } = createRunnerStatusHarness();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
       boundUserId?: string;
@@ -147,8 +147,8 @@ describe("HostedUserRunner status", () => {
           maxSeq: "1",
         },
         {
-          importedSeq: "586",
-          lag: "0",
+          importedSeq: "585",
+          lag: "1",
           lane: "conversation",
           maxSeq: "586",
         },
@@ -156,7 +156,7 @@ describe("HostedUserRunner status", () => {
       userId: "member_123",
       workspace: {
         redactedStatus: {
-          hostedMailboxConversationImportedSeq: "586",
+          hostedMailboxConversationImportedSeq: "585",
           hostedMailboxSystemImportedSeq: "1",
           hostedRuntimeOtherStatus: "preserved",
         },
