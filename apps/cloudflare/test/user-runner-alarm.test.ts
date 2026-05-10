@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionStructuredLogRecord,
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution";
 import {
@@ -3073,6 +3074,259 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("logs metadata-only diagnostics for invalid runner invocation requests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invalidRequestError = createInvalidRunnerRequestError();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw invalidRequestError;
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 1,
+           pending_work = 1
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toThrow(
+      "Invalid request.",
+    );
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted runner workspace invocation failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected hosted runner failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          detailsKeys: expect.arrayContaining([
+            "errorCode",
+            "errorCodeDetail",
+            "errorDetail",
+            "errorMessage",
+            "errorName",
+            "errorStatus",
+          ]),
+          errorCode: "invalid_request",
+          errorCodeDetail: "type_error",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+          errorName: "TypeError",
+          errorStatus: 400,
+          pendingNudgePresent: true,
+          retryFailureCount: 1,
+          workspaceAttemptId: expect.any(String),
+          workspaceLeaseGeneration: "1",
+          workspaceReason: "nudge",
+          workspaceVersion: "0",
+        }),
+        level: "warn",
+        message: "Hosted runner workspace invocation failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+    expect(failureLogInput).not.toHaveProperty("error");
+
+    const builtFailureLog = buildHostedExecutionStructuredLogRecord(failureLogInput);
+    expect(builtFailureLog.details).toEqual(
+      expect.objectContaining({
+        errorDetailPresent: true,
+        errorMessage: "Hosted execution rejected an invalid request.",
+      }),
+    );
+    expect(builtFailureLog.details).not.toHaveProperty("errorDetail");
+    expect(JSON.stringify(builtFailureLog)).not.toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(builtFailureLog)).not.toContain("runtime.userEnv");
+  });
+
+  it("keeps detached invalid runner request wrapper logs metadata-only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw createInvalidRunnerRequestError();
+    });
+    const { runner } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await flushDetachedRunnerDrive();
+
+    const immediateFailureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input?.message === "Hosted runner immediate wake drive failed; durable alarm fallback remains scheduled."
+      );
+    if (!immediateFailureLogInput) {
+      throw new Error("Expected immediate runner drive failure log input.");
+    }
+    expect(immediateFailureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+          reason: "nudge",
+          retryDelayMs: 1000,
+        }),
+        level: "warn",
+      }),
+    );
+    expect(immediateFailureLogInput).not.toHaveProperty("error");
+    expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
+  it("keeps alarm invalid runner request wrapper logs metadata-only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw createInvalidRunnerRequestError();
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 0,
+           pending_work = 0
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    const alarmFailureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted wake nudge failed; scheduling a retry.");
+    if (!alarmFailureLogInput) {
+      throw new Error("Expected alarm failure log input.");
+    }
+    expect(alarmFailureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+        }),
+        level: "warn",
+      }),
+    );
+    expect(alarmFailureLogInput).not.toHaveProperty("error");
+    expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
+  it("keeps pending-nudge alarm invalid runner request wrapper logs metadata-only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw createInvalidRunnerRequestError();
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET next_wake_at = ?,
+           pending_nudge = 1,
+           pending_work = 1
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    const alarmFailureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input?.message === "Hosted wake nudge failed; pending nudge retry remains scheduled."
+      );
+    if (!alarmFailureLogInput) {
+      throw new Error("Expected pending nudge alarm failure log input.");
+    }
+    expect(alarmFailureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+        }),
+        level: "warn",
+      }),
+    );
+    expect(alarmFailureLogInput).not.toHaveProperty("error");
+    expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
+  it("keeps idle-checkpoint alarm invalid runner request wrapper logs metadata-only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-invalid-request"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw createInvalidRunnerRequestError();
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    const alarmFailureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input?.message
+          === "Hosted idle-shutdown checkpoint alarm failed; preserving idle checkpoint retry state."
+      );
+    if (!alarmFailureLogInput) {
+      throw new Error("Expected idle checkpoint alarm failure log input.");
+    }
+    expect(alarmFailureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+        }),
+        level: "warn",
+      }),
+    );
+    expect(alarmFailureLogInput).not.toHaveProperty("error");
+    expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
   it("resets exhausted throttled pending nudge retries when a fresh nudge arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4657,6 +4911,58 @@ describe("HostedUserRunner runtime crypto context", () => {
     ]);
   });
 
+  it("keeps background browser-vault refresh invalid-request logs metadata-only", async () => {
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("browser-vault-refresh-invalid-request"),
+      version: "4",
+    });
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => {
+      throw createInvalidRunnerRequestError();
+    });
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { runner } = createRunnerCryptoContextHarness(workspace, {
+      refreshBrowserVaultReplica,
+      waitUntil,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      scheduled: true,
+    });
+    await Promise.all(waitUntilPromises);
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted runner background browser-vault refresh failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected background browser-vault refresh failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          errorCode: "invalid_request",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution rejected an invalid request.",
+        }),
+        level: "warn",
+        message: "Hosted runner background browser-vault refresh failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+    expect(failureLogInput).not.toHaveProperty("error");
+    expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails();
+  });
+
   it("skips detached browser-vault refresh while foreground work is pending", async () => {
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("pending-work-browser-vault-refresh"),
@@ -5334,6 +5640,30 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
 async function flushDetachedRunnerDrive(): Promise<void> {
   for (let index = 0; index < 25; index += 1) {
     await Promise.resolve();
+  }
+}
+
+function createInvalidRunnerRequestError(): Error {
+  return Object.assign(new TypeError("Invalid request."), {
+    code: "type_error",
+    details: {
+      errorDetail: "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+    },
+    status: 400,
+    statusCode: 400,
+  });
+}
+
+function expectHostedRunnerStructuredLogsToOmitInvalidRequestDetails(): void {
+  const structuredLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
+    .map(([input]) => buildHostedExecutionStructuredLogRecord(input));
+  const serializedLogs = JSON.stringify(structuredLogs);
+  expect(serializedLogs).not.toContain("OPENAI_API_KEY");
+  expect(serializedLogs).not.toContain("runtime.userEnv");
+  for (const log of structuredLogs) {
+    if (log.details) {
+      expect(log.details).not.toHaveProperty("errorDetail");
+    }
   }
 }
 
