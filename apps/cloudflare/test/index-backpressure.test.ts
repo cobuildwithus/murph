@@ -7,6 +7,7 @@ import {
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -102,6 +103,35 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+  });
+
+  it("clears deploy-stale active leases through the production Durable Object constructor", async () => {
+    const harness = createUserRunnerDurableObject({
+      CF_VERSION_METADATA: {
+        id: "worker_version_current",
+      },
+    });
+    const stateStore = new RunnerStateStore(harness.storage.state);
+    await stateStore.bindUser("member_123");
+    await stateStore.beginInvocation({
+      expiresAt: "2999-01-01T00:00:00.000Z",
+      reason: "manual",
+      userId: "member_123",
+      workerVersionId: "worker_version_previous",
+    });
+
+    const nudge = await harness.durableObject.nudgeHostedRunnerForUser("member_123");
+    const row = harness.storage.state.storage.sql.exec<{
+      active_invocation_worker_version_id: string | null;
+    }>("SELECT active_invocation_worker_version_id FROM runner_meta WHERE singleton = 1").one();
+
+    expect(nudge).toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: false,
+    });
+    expect(row.active_invocation_worker_version_id).not.toBe("worker_version_previous");
   });
 });
 

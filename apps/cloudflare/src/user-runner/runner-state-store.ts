@@ -696,7 +696,26 @@ export class RunnerStateStore {
     const activeWorkerVersionId = normalizeOptionalString(
       meta.active_invocation_worker_version_id,
     );
-    if (currentWorkerVersionId !== null && activeWorkerVersionId !== currentWorkerVersionId) {
+    const expiresAtMs = meta.active_invocation_expires_at
+      ? Date.parse(meta.active_invocation_expires_at)
+      : Number.NaN;
+    const startedAtMs = Date.parse(startedAt);
+    const isHardExpired = !Number.isFinite(startedAtMs)
+      || (Number.isFinite(expiresAtMs)
+        ? input.nowMs >= expiresAtMs
+        : input.nowMs - startedAtMs >= input.timeoutMs);
+    const orphanGraceMs = input.orphanGraceMs ?? null;
+    const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
+      ? Date.parse(meta.active_invocation_last_heartbeat_at)
+      : Number.NaN;
+    const hasRecentHeartbeat = orphanGraceMs !== null
+      && Number.isFinite(lastHeartbeatAtMs)
+      && input.nowMs - lastHeartbeatAtMs < orphanGraceMs;
+    if (
+      currentWorkerVersionId !== null
+      && activeWorkerVersionId !== currentWorkerVersionId
+      && (isHardExpired || !hasRecentHeartbeat)
+    ) {
       this.clearActiveInvocationMetaSync(meta);
       meta.in_flight = 0;
       meta.last_error_at = new Date(input.nowMs).toISOString();
@@ -714,20 +733,8 @@ export class RunnerStateStore {
       };
     }
 
-    const expiresAtMs = meta.active_invocation_expires_at
-      ? Date.parse(meta.active_invocation_expires_at)
-      : Number.NaN;
-    const startedAtMs = Date.parse(startedAt);
-    const isHardExpired = !Number.isFinite(startedAtMs)
-      || (Number.isFinite(expiresAtMs)
-        ? input.nowMs >= expiresAtMs
-        : input.nowMs - startedAtMs >= input.timeoutMs);
-    const orphanGraceMs = input.orphanGraceMs ?? null;
     let isOrphanExpired = false;
     if (!isHardExpired && orphanGraceMs !== null) {
-      const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
-        ? Date.parse(meta.active_invocation_last_heartbeat_at)
-        : Number.NaN;
       const observedAtMs = meta.active_invocation_orphan_observed_at
         ? Date.parse(meta.active_invocation_orphan_observed_at)
         : Number.NaN;
