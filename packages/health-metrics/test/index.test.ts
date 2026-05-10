@@ -7,9 +7,11 @@ import {
   assessMurphAgeInputBundle,
   buildMetricSeries,
   calculateMurphAge,
+  calculateMurphAgeFromInputBundle,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
+  listMurphAgeModelCardPolicies,
   listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
@@ -18,6 +20,7 @@ import {
   mapRiskToReferenceAge,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveMurphAgeModelCardPolicy,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
@@ -37,6 +40,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.ok(listMetricDefinitions().length > 10);
   assert.equal(resolveMetricDefinition("LDL_C")?.key, "ldl-c");
   assert.equal(resolveMetricDefinition("serum_albumin")?.key, "albumin");
+  assert.equal(resolveMetricDefinition("eGFR")?.key, "egfr");
   assert.equal(resolveMetricDefinition("alk-phos")?.key, "alkaline-phosphatase");
   assert.equal(resolveMetricDefinition("WBC")?.key, "white-blood-cell-count");
   assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
@@ -55,6 +59,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   );
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:blood-oxygen-spo2")?.key, "spo2");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:estimated-vo2max")?.key, "estimated-vo2-max");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:egfr")?.key, "egfr");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:systolic-blood-pressure")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
@@ -216,10 +221,20 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     value: 88.42,
   }).canonicalValue, 1);
   assert.equal(normalizeMetricValue({
+    metricKey: "egfr",
+    unit: "ml/min/1.73m2",
+    value: 92,
+  }).canonicalUnit, "mL/min/1.73m^2");
+  assert.equal(normalizeMetricValue({
     metricKey: "alkaline-phosphatase",
     unit: "u_l",
     value: 72,
   }).canonicalUnit, "U/L");
+  assert.equal(normalizeMetricValue({
+    metricKey: "mvpa-minutes",
+    unit: "min",
+    value: 42,
+  }).canonicalValue, 42);
   assert.equal(normalizeMetricValue({
     metricKey: "white-blood-cell-count",
     unit: "10^9/L",
@@ -1589,7 +1604,7 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
     asOf,
     points: [
       labMetricPoint("glucose", "mg/dL", 92),
-      labMetricPoint("creatinine", "mg/dL", 0.9),
+      labMetricPoint("egfr", "mL/min/1.73m^2", 95),
       labMetricPoint("hdl-c", "mg/dL", 58),
       labMetricPoint("triglycerides", "mg/dL", 95),
       metricPoint({
@@ -1609,6 +1624,7 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
   assert.equal(lab5.bundleId, "lab5-bp-bmi");
   assert.equal(lab5.recommendedCardId, "lab5_bp_bmi_transport_research");
   assert.deepEqual(lab5.availableFeatureKeys.sort(), ["bmi", "creatinine", "glycemia", "hdl-c", "triglycerides"]);
+  assert.equal(lab5.selectedMetricKeys.includes("egfr"), true);
 
   const wearable = assessMurphAgeInputBundle({
     asOf,
@@ -1633,17 +1649,303 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
         unit: "bpm",
         value: 60,
       }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:mvpa-minutes:2026-05-08:wearable:0",
+        metricKey: "mvpa-minutes",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_mvpa_context",
+        sourceKind: "wearable-summary",
+        unit: "minutes",
+        value: 45,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:sleep-regularity-score:2026-05-08:wearable:0",
+        metricKey: "sleep-regularity-score",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_sleep_regularity_context",
+        sourceKind: "wearable-summary",
+        unit: "score",
+        value: 82,
+      }),
     ],
   });
 
   assert.equal(wearable.status, "context-only");
   assert.equal(wearable.bundleId, "wearable-context");
   assert.equal(wearable.recommendedCardId, "wearable_context_no_risk");
+  assert.equal(wearable.availableFeatureKeys.includes("mvpa-minutes"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("sleep-regularity-score"), true);
   assert.equal(wearable.warnings.some((warning) => warning.message.includes("do not score wearables")), true);
 
   const insufficient = assessMurphAgeInputBundle({ asOf, points: [] });
   assert.equal(insufficient.status, "abstain");
   assert.equal(insufficient.recommendedCardId, "none");
+});
+
+test("dispatches Murph Age cards while keeping research and wearable boundaries explicit", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const lab9Points = [
+    labMetricPoint("albumin", "g/dL", 4.4),
+    labMetricPoint("egfr", "mL/min/1.73m^2", 96),
+    labMetricPoint("hba1c", "percent", 5.2),
+    labMetricPoint("alkaline-phosphatase", "U/L", 65),
+    labMetricPoint("white-blood-cell-count", "10^3/uL", 5.5),
+    labMetricPoint("lymphocyte-percentage", "percent", 32),
+    labMetricPoint("red-cell-distribution-width", "percent", 12.5),
+    labMetricPoint("hdl-c", "mg/dL", 58),
+    labMetricPoint("triglycerides", "mg/dL", 95),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:systolic-blood-pressure:2026-05-08:dispatcher:0",
+      metricKey: "systolic-blood-pressure",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_sbp",
+      sourceKind: "measurement",
+      unit: "mmHg",
+      value: 118,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:diastolic-blood-pressure:2026-05-08:dispatcher:0",
+      metricKey: "diastolic-blood-pressure",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_dbp",
+      sourceKind: "measurement",
+      unit: "mmHg",
+      value: 72,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:bmi:2026-05-08:dispatcher:0",
+      metricKey: "bmi",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_bmi",
+      sourceKind: "measurement",
+      unit: "kg/m^2",
+      value: 23.2,
+    }),
+  ];
+  const researchModel = fixtureLab9ResearchModel();
+
+  const lab9Policy = listMurphAgeModelCardPolicies().find((policy) =>
+    policy.cardId === "lab9_bp_body_10y_acm_research"
+  );
+  assert.equal(lab9Policy?.productAuthorized, false);
+  assert.equal(lab9Policy?.wearableScoreBearingAuthorized, false);
+  const resolvedLab9Policy = resolveMurphAgeModelCardPolicy("lab9_bp_body_10y_acm_research");
+  if (resolvedLab9Policy) {
+    (resolvedLab9Policy as { productAuthorized: boolean }).productAuthorized = true;
+    (resolvedLab9Policy.scoreBearingSourceKinds as string[]).push("wearable-summary");
+  }
+
+  const productDefault = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9Points,
+    sex: "female",
+  });
+
+  assert.equal(productDefault.status, "abstain");
+  assert.equal(productDefault.result, null);
+  assert.equal(productDefault.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(productDefault.cardPolicy?.productAuthorized, false);
+  assert.equal(productDefault.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+
+  const research = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9Points,
+    sex: "female",
+  });
+
+  assert.equal(research.status, "ready");
+  assert.equal(research.result?.status, "ready");
+  assert.equal(research.bundleAssessment.bundleId, "lab9-bp-body");
+  assert.equal(research.result?.featureAttributions.find((feature) => feature.featureKey === "hba1c")?.status, "ready");
+  if (research.cardPolicy) {
+    (research.cardPolicy.scoreBearingSourceKinds as string[]).push("wearable-summary");
+  }
+
+  const lab5Points = [
+    labMetricPoint("glucose", "mg/dL", 92),
+    labMetricPoint("egfr", "mL/min/1.73m^2", 95),
+    labMetricPoint("hdl-c", "mg/dL", 58),
+    labMetricPoint("triglycerides", "mg/dL", 95),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:bmi:2026-05-08:dispatcher-lab5:0",
+      metricKey: "bmi",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_lab5_bmi",
+      sourceKind: "measurement",
+      unit: "kg/m^2",
+      value: 23.2,
+    }),
+  ];
+  const lab5WithoutModel = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: lab5Points,
+    sex: "female",
+  });
+
+  assert.equal(lab5WithoutModel.status, "abstain");
+  assert.equal(lab5WithoutModel.bundleAssessment.bundleId, "lab5-bp-bmi");
+  assert.equal(lab5WithoutModel.cardPolicy?.cardId, "lab5_bp_bmi_transport_research");
+  assert.equal(lab5WithoutModel.warnings.some((warning) => warning.code === "MODEL_FEATURE_MISSING"), true);
+
+  const lab5Research = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    points: lab5Points,
+    sex: "female",
+  });
+
+  assert.equal(lab5Research.status, "ready");
+  assert.equal(lab5Research.result?.status, "ready");
+  assert.equal(lab5Research.result?.modelId, "fixture-lab5-research-card-model");
+  assert.equal(lab5Research.result?.featureAttributions.find((feature) => feature.featureKey === "egfr")?.status, "ready");
+
+  const wearableOnly = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:steps:2026-05-08:dispatcher-wearable:0",
+        metricKey: "steps",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "dispatcher_wearable_steps",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 10_000,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(wearableOnly.status, "context-only");
+  assert.equal(wearableOnly.result, null);
+  assert.equal(wearableOnly.cardPolicy?.scoreBearing, false);
+
+  const policyViolation = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: {
+      lab9_bp_body_10y_acm_research: {
+        ...researchModel,
+        features: [
+          ...researchModel.features,
+          {
+            coefficient: -0.1,
+            key: "steps",
+            kind: "metric",
+            label: "Steps",
+            metricKey: "steps",
+            moduleId: "activity",
+          },
+        ],
+      },
+    },
+    points: lab9Points,
+    sex: "female",
+  });
+
+  assert.equal(policyViolation.status, "abstain");
+  assert.equal(policyViolation.result?.status, "abstain");
+  assert.equal(policyViolation.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+
+  const wearableSourcedBmiViolation = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: [
+      ...lab9Points.filter((point) => point.metricKey !== "bmi"),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:bmi:2026-05-08:dispatcher-wearable-source:0",
+        metricKey: "bmi",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "dispatcher_wearable_source_bmi",
+        sourceKind: "wearable-summary",
+        unit: "kg/m^2",
+        value: 23.2,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(wearableSourcedBmiViolation.status, "abstain");
+  assert.equal(
+    wearableSourcedBmiViolation.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("wearable-summary")
+    ),
+    true,
+  );
+
+  const unknownSourceBmiViolation = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: [
+      ...lab9Points.filter((point) => point.metricKey !== "bmi"),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:bmi:2026-05-08:dispatcher-unknown-source:0",
+        metricKey: "bmi",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "dispatcher_unknown_source_bmi",
+        sourceKind: "new-device-summary",
+        unit: "kg/m^2",
+        value: 23.2,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(unknownSourceBmiViolation.status, "abstain");
+  assert.equal(
+    unknownSourceBmiViolation.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("new-device-summary")
+    ),
+    true,
+  );
+
+  const unselectedWearableBmiDoesNotBlock = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: [
+      ...lab9Points,
+      metricPoint({
+        effectiveDate: "2026-05-07",
+        id: "metric-point:bmi:2026-05-07:dispatcher-unselected-wearable:0",
+        metricKey: "bmi",
+        observedAt: "2026-05-07T08:00:00.000Z",
+        recordId: "dispatcher_unselected_wearable_bmi",
+        sourceKind: "wearable-summary",
+        unit: "kg/m^2",
+        value: 23.8,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(unselectedWearableBmiDoesNotBlock.status, "ready");
+  assert.equal(unselectedWearableBmiDoesNotBlock.result?.status, "ready");
 });
 
 test("Murph Age calculator applies model calibration and log feature transforms", () => {
@@ -2024,6 +2326,93 @@ function fixtureMurphAgeModel(): MurphAgeRiskModel {
     uncertainty: {
       baseYears: 1.5,
       perMissingOptionalFeatureYears: 2,
+    },
+  };
+}
+
+function fixtureLab9ResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      { coefficient: 0.04, key: "age", kind: "chronological-age", label: "Age" },
+      { coefficient: 0.12, key: "male", kind: "sex", label: "Male", sex: "male" },
+      {
+        coefficient: 0.18,
+        expectedUnit: "percent",
+        key: "hba1c",
+        kind: "metric",
+        label: "HbA1c",
+        metricKey: "hba1c",
+        moduleId: "metabolic",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 5.5, standardDeviation: 0.5 },
+      },
+      {
+        coefficient: 0.06,
+        expectedUnit: "kg/m^2",
+        key: "bmi",
+        kind: "metric",
+        label: "BMI",
+        metricKey: "bmi",
+        moduleId: "body",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 25, standardDeviation: 4 },
+      },
+    ],
+    horizonYears: 10,
+    intercept: -4.8,
+    modelId: "fixture-lab9-research-card-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: fixtureReferenceRiskCurve(),
+    uncertainty: {
+      baseYears: 2,
+    },
+  };
+}
+
+function fixtureLab5ResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      { coefficient: 0.04, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.12,
+        expectedUnit: "mg/dL",
+        key: "glucose",
+        kind: "metric",
+        label: "Glucose",
+        metricKey: "glucose",
+        moduleId: "metabolic",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 95, standardDeviation: 15 },
+      },
+      {
+        coefficient: -0.08,
+        expectedUnit: "mL/min/1.73m^2",
+        key: "egfr",
+        kind: "metric",
+        label: "eGFR",
+        metricKey: "egfr",
+        moduleId: "renal",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 90, standardDeviation: 15 },
+      },
+      {
+        coefficient: 0.06,
+        expectedUnit: "kg/m^2",
+        key: "bmi",
+        kind: "metric",
+        label: "BMI",
+        metricKey: "bmi",
+        moduleId: "body",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 25, standardDeviation: 4 },
+      },
+    ],
+    horizonYears: 10,
+    intercept: -4.6,
+    modelId: "fixture-lab5-research-card-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: fixtureReferenceRiskCurve(),
+    uncertainty: {
+      baseYears: 2,
     },
   };
 }
