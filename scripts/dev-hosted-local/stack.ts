@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -116,6 +116,7 @@ export interface HostedLocalDevStack {
 const STRIPE_WEBHOOK_FORWARD_PATH = "/api/hosted-onboarding/stripe/webhook";
 const STRIPE_LISTENER_SECRET_CAPTURE_TIMEOUT_MS = 15_000;
 const HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV = "HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN";
+const HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV = "MURPH_DEV_PRESERVE_DOCKER_CONFIG";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 
@@ -177,6 +178,9 @@ export async function startHostedLocalDevStack(input: {
   const workerDevVarsBackupPath = path.join(tempDir, "cloudflare-worker.dev.vars.backup");
   const hostedLocalStateDevVarsPath = path.join(tempDir, "hosted-local-state.dev.vars");
   const workerConfigPath = path.join(tempDir, "cloudflare-worker.local-dev.generated.json");
+  const isolatedDockerConfigDir = shouldUseIsolatedDockerConfig(initialEnv)
+    ? path.join(tempDir, "docker-config")
+    : null;
   const repoEnvPath = path.join(repoRoot, ".env");
   const webEnvPath = path.join(webDir, ".env");
   const webLocalEnvPath = path.join(webDir, ".env.local");
@@ -275,6 +279,7 @@ export async function startHostedLocalDevStack(input: {
       ...localOverrides,
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: oidcToken,
+      ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
     };
     const workerRuntimeSourceEnv = stripHostedLocalHostOnlyCodexEnv({
       ...runtimeEnv,
@@ -288,6 +293,12 @@ export async function startHostedLocalDevStack(input: {
       : null;
     workerProcessEnv = workerRuntimeEnv === null ? null : { ...workerRuntimeEnv };
     if (workerRuntimeEnv !== null) {
+      if (isolatedDockerConfigDir !== null) {
+        await prepareIsolatedDockerConfig({
+          configDir: isolatedDockerConfigDir,
+          sourceEnv: initialEnv,
+        });
+      }
       const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
       const hostedLocalStateEnvText = `${buildHostedLocalStateEnvFileText(cloudflareDevVars)}\n`;
       const persistentCryptoStatePath =
@@ -939,6 +950,60 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
   return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live";
+}
+
+function shouldUseIsolatedDockerConfig(env: NodeJS.ProcessEnv): boolean {
+  return requiresHostedLocalE2eIsolation(env)
+    && env[HOSTED_LOCAL_PRESERVE_DOCKER_CONFIG_ENV]?.trim() !== "1";
+}
+
+async function prepareIsolatedDockerConfig(input: {
+  configDir: string;
+  sourceEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  await mkdir(input.configDir, { mode: 0o700, recursive: true });
+  await writeFile(
+    path.join(input.configDir, "config.json"),
+    '{"auths":{}}\n',
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await symlinkDockerCliPluginsIfPresent({
+    targetConfigDir: input.configDir,
+    sourceEnv: input.sourceEnv,
+  });
+}
+
+async function symlinkDockerCliPluginsIfPresent(input: {
+  targetConfigDir: string;
+  sourceEnv: NodeJS.ProcessEnv;
+}): Promise<void> {
+  const sourceDir = resolveDockerCliPluginSourceDir(input.sourceEnv);
+  const targetDir = path.join(input.targetConfigDir, "cli-plugins");
+  if (path.resolve(sourceDir) === path.resolve(targetDir)) {
+    return;
+  }
+
+  try {
+    await access(sourceDir);
+  } catch {
+    return;
+  }
+
+  try {
+    await symlink(sourceDir, targetDir, "dir");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+  }
+}
+
+function resolveDockerCliPluginSourceDir(env: NodeJS.ProcessEnv): string {
+  const dockerConfig = env.DOCKER_CONFIG?.trim();
+  return path.join(dockerConfig || path.join(os.homedir(), ".docker"), "cli-plugins");
 }
 
 function resolvePreStartHostedRunnerContainerCleanupScope(

@@ -72,6 +72,7 @@ Updated: 2026-05-11
 - Treat DB Hub MCP as unavailable until a callable MCP server/tool appears in this session.
 - Keep the fix in the Cloudflare runner scheduling layer: foreground nudges now abort idle-shutdown checkpoint work instead of waiting behind it, while normal hosted reply handling still flows through the existing mailbox/runtime/outbox path.
 - Align the native container `sleepAfter` with `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` so the existing `runnerIdleTtlMs - safetyMarginMs` checkpoint schedule is the actual default T-minus-60 lifecycle point.
+- Keep hosted-local E2E Docker auth isolated from the operator's normal Docker credential config, while symlinking only Docker CLI plugins into the temporary config so Wrangler retains `buildx`.
 
 ## Verification
 
@@ -90,10 +91,12 @@ Updated: 2026-05-11
 - Local hosted Linq/iMessage full-stack E2E reproduced the production-shaped stall before the fix: a real signed Linq webhook appended conversation input while an active runner invocation had not imported the new mailbox row, and no outbound message was sent until stale recovery.
 - The fix keeps recovery in the Cloudflare runner scheduling layer: when a foreground nudge becomes visible during an `idle_shutdown_checkpoint` invocation, the runner aborts that maintenance invocation and queues the pending foreground drive.
 - The E2E also reproduced a second foreground-blocking path: persisted idle-checkpoint preemption waited for container destroy, and a local destroy timeout kept the real webhook input queued with conversation mailbox lag. Persisted idle-checkpoint preemption now clears the durable active invocation, starts the foreground drive immediately, and runs container cleanup as redacted best-effort background work.
+- Local E2E startup/control-health also reproduced an environment-level failure: Wrangler's Cloudflare proxy image pull could hang when Docker used the operator's normal credential config. The hosted-local E2E lane now writes an isolated empty Docker config and bridges only CLI plugins, which keeps public image pulls prompt without losing `buildx`.
 - The test-only stuck invocation route now supports an explicit workspace invocation reason and uses the same abortable active-invocation plumbing as real runner work, so foreground preemption can be exercised without waiting for the production stale timeout.
 - `pnpm hosted-local e2e stuck-invocation-recovery --no-bundle` passed after the fix, covering real signed Linq webhook ingress, persisted/container-cleanup preemption, foreground nudge preemption of an active idle-shutdown checkpoint, mailbox drain, one assistant provider request, and one outbound reply.
 - `pnpm --dir apps/cloudflare typecheck` passed.
-- `pnpm --dir apps/cloudflare test user-runner-alarm.test.ts` passed all 142 tests.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/runner-container.test.ts --no-coverage` passed all 226 tests.
+- `pnpm exec vitest run --config scripts/vitest.config.ts scripts/dev-hosted-local/stack.test.ts --no-coverage` passed all 42 tests.
 - `pnpm typecheck` passed.
 - `pnpm test:diff` passed the affected `apps/cloudflare` verify lane: 71 test files and 1015 tests.
 - `git diff --check` passed.
