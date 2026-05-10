@@ -27,6 +27,8 @@ export function normalizeMetricValue(input: {
       return normalizePercent(input.value, unit, definition.displayName);
     case "creatinine":
       return normalizeCreatinine(input.value, unit);
+    case "egfr":
+      return normalizeExactUnit(input.value, unit, "mL/min/1.73m^2", definition.displayName);
     case "glucose":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 18.0182, definition.displayName);
     case "ldl-c":
@@ -103,6 +105,14 @@ export function normalizeUnit(value: string | null): string | null {
     "mm hg": "mmHg",
     mmhg: "mmHg",
     "ml/kg/min": "mL/kg/min",
+    "ml/min/1.73m2": "mL/min/1.73m^2",
+    "ml/min/1.73m^2": "mL/min/1.73m^2",
+    "ml/min/1.73 m2": "mL/min/1.73m^2",
+    "ml/min/1.73 m^2": "mL/min/1.73m^2",
+    min: "minutes",
+    mins: "minutes",
+    minute: "minutes",
+    minutes: "minutes",
     mmol_l: "mmol/L",
     "mmol/l": "mmol/L",
     ms: "ms",
