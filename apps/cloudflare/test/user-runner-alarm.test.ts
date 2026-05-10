@@ -3885,6 +3885,22 @@ describe("HostedUserRunner runtime crypto context", () => {
       idle_shutdown_checkpoint_workspace_version: "4",
       next_wake_at: null,
     }]);
+    const deferredMailboxStatusRows = sql.exec<{
+      deferred_checkpoint_mailbox_status_json: string | null;
+    }>(
+      `SELECT deferred_checkpoint_mailbox_status_json
+       FROM runner_meta WHERE user_id = ?`,
+      "member_123",
+    ).toArray();
+    expect(deferredMailboxStatusRows).toHaveLength(1);
+    expect(
+      JSON.parse(
+        deferredMailboxStatusRows[0]?.deferred_checkpoint_mailbox_status_json ?? "null",
+      ),
+    ).toEqual({
+      hostedMailboxConversationImportedSeq: "445",
+      hostedMailboxSystemImportedSeq: "0",
+    });
 
     vi.setSystemTime(new Date("2026-04-27T00:05:00.000Z"));
     await runner.alarm();
@@ -3897,6 +3913,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
                 idle_shutdown_checkpoint_workspace_version,
+                deferred_checkpoint_mailbox_status_json,
                 in_flight,
                 next_wake_at,
                 pending_nudge
@@ -3904,6 +3921,7 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
+      deferred_checkpoint_mailbox_status_json: null,
       idle_shutdown_checkpoint_due_at: null,
       idle_shutdown_checkpoint_workspace_version: null,
       in_flight: 0,

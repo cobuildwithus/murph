@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedWorkspaceInvocationReason,
+  HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -10,6 +11,7 @@ import {
   projectRunnerStateRecord,
   normalizeRetryFailureCount,
   resolveRunnerNextWakeAt,
+  stringifyRunnerDeferredCheckpointMailboxStatus,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
@@ -549,9 +551,13 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async markDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
+  async markDeferredCheckpointRequired(input: {
+    redactedStatus: HostedRuntimeRedactedJson | null;
+  }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.deferred_checkpoint_required = 1;
+    meta.deferred_checkpoint_mailbox_status_json =
+      stringifyRunnerDeferredCheckpointMailboxStatus(input.redactedStatus);
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -560,6 +566,7 @@ export class RunnerStateStore {
   async clearDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.deferred_checkpoint_required = 0;
+    meta.deferred_checkpoint_mailbox_status_json = null;
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -914,6 +921,7 @@ export class RunnerStateStore {
         last_error_code,
         last_invocation_at,
         deferred_checkpoint_required,
+        deferred_checkpoint_mailbox_status_json,
         idle_shutdown_checkpoint_due_at,
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
@@ -955,13 +963,14 @@ export class RunnerStateStore {
         last_error_code,
         last_invocation_at,
         deferred_checkpoint_required,
+        deferred_checkpoint_mailbox_status_json,
         idle_shutdown_checkpoint_due_at,
         idle_shutdown_checkpoint_workspace_version,
         next_wake_at,
         pending_nudge,
         pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
@@ -983,6 +992,7 @@ export class RunnerStateStore {
       meta.last_error_code,
       meta.last_invocation_at,
       meta.deferred_checkpoint_required,
+      meta.deferred_checkpoint_mailbox_status_json,
       meta.idle_shutdown_checkpoint_due_at,
       meta.idle_shutdown_checkpoint_workspace_version,
       meta.next_wake_at,

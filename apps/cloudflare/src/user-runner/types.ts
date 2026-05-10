@@ -1,4 +1,5 @@
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
+import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -66,6 +67,7 @@ export interface RunnerStateRecord {
   };
   schema: "murph.hosted-runner.v2";
   deferredCheckpointRequired: boolean;
+  deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
   idleShutdownCheckpointDueAt: string | null;
   idleShutdownCheckpointWorkspaceVersion: string | null;
   leaseGeneration: number;
