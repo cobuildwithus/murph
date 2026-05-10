@@ -125,7 +125,8 @@ describe("Strava importer adapter", () => {
         }),
       ]),
     );
-    expect(payload.rawArtifacts?.[0]?.role).toContain("deletion:activity:1001");
+    expect(payload.rawArtifacts?.[0]?.role).toMatch(/^deletion:activity:activity.delete:[0-9a-f]{64}$/u);
+    expect(payload.rawArtifacts?.[0]?.role).not.toContain("1001");
   });
 
   it("covers Strava fallback normalization paths and synthetic deletion ids", async () => {
