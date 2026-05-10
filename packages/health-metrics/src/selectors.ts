@@ -174,6 +174,12 @@ function selectDailyAggregatePoint(
       message: `${definition.displayName} daily aggregate excluded values that could not be normalized to ${definition.canonicalUnit}.`,
     });
   }
+  if (candidates.some((point) => point.comparator)) {
+    warnings.push({
+      code: "COMPARATOR_VALUE",
+      message: `${definition.displayName} daily aggregate included at least one comparator value.`,
+    });
+  }
 
   const availablePointCount = policy.statistic === "count" ? candidates.length : values.length;
   if (minimumPoints > 0 && availablePointCount < minimumPoints) {

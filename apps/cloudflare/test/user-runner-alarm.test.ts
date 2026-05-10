@@ -1831,7 +1831,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.alarm()).resolves.toBeUndefined();
     await flushDetachedRunnerDrive();
 
-    expect(invoke).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
     expect(destroyInstance).toHaveBeenCalledOnce();
     expect(
@@ -2339,6 +2339,59 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toEqual([{ in_flight: 0 }]);
   });
 
+  it("retries a previous-worker consumed nudge immediately on worker-version mismatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerReadyTimeoutMs: 20_000,
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        pending_nudge = 0,
+        pending_work = 0
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      FIXED_NOW,
+      "worker-version-previous",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+  });
+
   it("clears a previous-worker persisted-only invocation immediately and starts a replacement", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2818,14 +2871,14 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      alreadyRunning: false,
-      immediateDriveStarted: true,
-      inFlight: false,
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    await flushDetachedRunnerDrive();
 
     expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
     expect(
@@ -2844,6 +2897,64 @@ describe("HostedUserRunner runtime crypto context", () => {
       pending_nudge: 0,
       pending_work: 0,
       retry_failure_count: 0,
+    }]);
+  });
+
+  it("retries a consumed persisted nudge after the active invocation hard timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      runnerReadyTimeoutMs: 20_000,
+      runnerTimeoutMs: 60_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_expires_at = ?,
+        active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        pending_nudge = 0,
+        pending_work = 0
+      WHERE user_id = ?`,
+      "2026-04-27T00:00:00.500Z",
+      "workspace-invocation-expired",
+      "nudge",
+      FIXED_NOW,
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({
+      dueWake: true,
+      reason: "alarm",
+    })).resolves.toMatchObject({
+      nextWakeAt: null,
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
     }]);
   });
 
@@ -3541,6 +3652,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
   });
 
   it("uses the web crypto context before invoking a version-0 workspace without a snapshot", async () => {

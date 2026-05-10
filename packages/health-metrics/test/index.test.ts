@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   buildMetricSeries,
+  calculateMurphAge,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
@@ -13,6 +14,7 @@ import {
   normalizeMetricKey,
   normalizeUnit,
   normalizeMetricValue,
+  mapRiskToReferenceAge,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   selectMetricGoalProgress,
@@ -20,9 +22,11 @@ import {
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
+  validateMurphAgeRiskModel,
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
+  type MurphAgeRiskModel,
 } from "../src/index.ts";
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
@@ -31,6 +35,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(normalizeMetricKey("  hs_CRP / Latest! "), "hs-crp-latest");
   assert.ok(listMetricDefinitions().length > 10);
   assert.equal(resolveMetricDefinition("LDL_C")?.key, "ldl-c");
+  assert.equal(resolveMetricDefinition("serum_albumin")?.key, "albumin");
+  assert.equal(resolveMetricDefinition("alk-phos")?.key, "alkaline-phosphatase");
+  assert.equal(resolveMetricDefinition("WBC")?.key, "white-blood-cell-count");
+  assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
   assert.equal(resolveMetricDefinition("unknown metric"), null);
   assert.equal(
     resolveMetricDefinitionForBiomarker("biomarker:resting-heart-rate")?.key,
@@ -170,6 +178,37 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
   });
   assert.equal(apoB.canonicalValue, 87);
   assert.deepEqual(apoB.warnings, []);
+
+  assert.equal(normalizeMetricValue({
+    metricKey: "albumin",
+    unit: "g/L",
+    value: 42,
+  }).canonicalValue, 4.2);
+  assert.equal(normalizeMetricValue({
+    metricKey: "creatinine",
+    unit: "umol/L",
+    value: 88.42,
+  }).canonicalValue, 1);
+  assert.equal(normalizeMetricValue({
+    metricKey: "alkaline-phosphatase",
+    unit: "u_l",
+    value: 72,
+  }).canonicalUnit, "U/L");
+  assert.equal(normalizeMetricValue({
+    metricKey: "white-blood-cell-count",
+    unit: "10^9/L",
+    value: 5.4,
+  }).canonicalValue, 5.4);
+  assert.equal(normalizeMetricValue({
+    metricKey: "mean-corpuscular-volume",
+    unit: "fl",
+    value: 91.2,
+  }).canonicalUnit, "fL");
+  assert.equal(normalizeMetricValue({
+    metricKey: "red-cell-distribution-width",
+    unit: "%",
+    value: 13.1,
+  }).canonicalValue, 13.1);
 });
 
 test("selects metric points by policy and exposes provenance warnings", () => {
@@ -309,6 +348,7 @@ test("supports daily aggregate policy selections with contributing provenance", 
       value: 52,
     }),
     metricPoint({
+      comparator: ">",
       effectiveDate: "2026-04-28",
       id: "metric-point:resting-heart-rate:2026-04-28:wearable:0",
       metricKey: "resting-heart-rate",
@@ -341,6 +381,7 @@ test("supports daily aggregate policy selections with contributing provenance", 
   assert.equal(selected.point?.source.kind, "metric-selection-summary");
   assert.deepEqual(selected.provenance.pointIds, points.map((point) => point.id));
   assert.deepEqual(selected.provenance.recordIds, ["wearable_rhr_1", "wearable_rhr_2", "wearable_rhr_3"]);
+  assert.equal(selected.warnings.some((warning) => warning.code === "COMPARATOR_VALUE"), true);
 
   const mixedUnitAggregate = selectMetricValue({
     metricKey: "body-weight",
@@ -1378,6 +1419,472 @@ test("goal progress marks rolling windows stale from newest selected point rathe
   assert.equal(progress.status, "stale");
   assert.equal(progress.warnings.some((warning) => warning.code === "SOURCE_STALE"), true);
 });
+
+test("maps calibrated risk to a reference age curve with interpolation and clamping warnings", () => {
+  const curve = fixtureReferenceRiskCurve();
+
+  assert.equal(mapRiskToReferenceAge(0.01, curve).warnings.length, 0);
+  assert.equal(mapRiskToReferenceAge(0.3, curve).warnings.length, 0);
+  assert.equal(mapRiskToReferenceAge(0.065, curve).ageYears, 50);
+
+  const low = mapRiskToReferenceAge(0.001, curve);
+  assert.equal(low.ageYears, 20);
+  assert.equal(low.warnings[0]?.code, "OUT_OF_REFERENCE_RANGE");
+
+  const high = mapRiskToReferenceAge(0.4, curve);
+  assert.equal(high.ageYears, 80);
+  assert.equal(high.warnings[0]?.code, "OUT_OF_REFERENCE_RANGE");
+
+  assert.throws(() => mapRiskToReferenceAge(0.05, [
+    { ageYears: 40, riskProbability: 0.08 },
+    { ageYears: 60, riskProbability: 0.04 },
+  ]), /monotonic/u);
+});
+
+test("calculates Murph Age from calibrated demographic, wearable, and lab features", () => {
+  const result = calculateMurphAge({
+    asOf: "2026-05-10T00:00:00.000Z",
+    chronologicalAgeYears: 45,
+    model: fixtureMurphAgeModel(),
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:steps:2026-05-08:wearable:0",
+        metricKey: "steps",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_steps",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 10_000,
+      }),
+      metricPoint({
+        biomarkerKey: "biomarker:apob",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:apob:2026-05-01:lab:0",
+        metricKey: "apob",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_apob",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 110,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:rhr:2026-05-08:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_rhr",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 62,
+      }),
+    ],
+    sex: "male",
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.modelId, "fixture-calibrated-risk-age-model");
+  assert.equal(result.biologicalAgeYears, 42.1);
+  assert.equal(result.ageDeltaYears, -2.9);
+  assert.equal(result.risk?.probability, 0.037471);
+  assert.deepEqual(result.intervalYears, { high: 45.6, low: 38.6 });
+  assert.equal(result.featureAttributions.find((feature) => feature.featureKey === "apob")?.value, 110);
+  assert.equal(result.featureAttributions.find((feature) => feature.featureKey === "steps")?.contributionYears, -1.1);
+  assert.equal(result.featureAttributions.find((feature) => feature.featureKey === "hrv-optional")?.status, "missing");
+  assert.equal(result.moduleAttributions.find((module) => module.moduleId === "activity")?.contributionYears, -1.1);
+  assert.equal(result.moduleAttributions.find((module) => module.moduleId === "biomarkers")?.contributionYears, 1.7);
+});
+
+test("Murph Age calculator applies model calibration and log feature transforms", () => {
+  const calibratedModel: MurphAgeRiskModel = {
+    calibration: { intercept: 3, slope: 1 },
+    endpoint: "10-year fixture outcome",
+    features: [
+      { coefficient: 0.02, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.1,
+        key: "glucose-log",
+        kind: "metric",
+        label: "Glucose log",
+        metricKey: "glucose",
+        moduleId: "biomarkers",
+        transform: { kind: "ln", offset: 1 },
+      },
+    ],
+    horizonYears: 10,
+    intercept: -3,
+    modelId: "fixture-calibration-log-model",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: [
+      { ageYears: 20, riskProbability: 0.1 },
+      { ageYears: 40, riskProbability: 0.5 },
+      { ageYears: 60, riskProbability: 0.9 },
+    ],
+  };
+
+  const result = calculateMurphAge({
+    chronologicalAgeYears: 50,
+    model: calibratedModel,
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-01",
+        id: "metric-point:glucose:2026-05-01:lab:0",
+        metricKey: "glucose",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_glucose_log",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 99,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.biologicalAgeYears, 55.6);
+  assert.equal(result.ageDeltaYears, 5.6);
+  assert.equal(result.risk?.probability, 0.811612);
+  assert.equal(result.featureAttributions.find((feature) => feature.featureKey === "glucose-log")?.contributionYears, 4);
+});
+
+test("Murph Age calculator requires unit contracts for custom model metrics", () => {
+  const customMetricModel: MurphAgeRiskModel = {
+    endpoint: "10-year fixture outcome",
+    features: [
+      { coefficient: 0, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.2,
+        key: "custom-recovery-index",
+        kind: "metric",
+        label: "Custom recovery index",
+        metricKey: "custom-recovery-index",
+        moduleId: "recovery",
+      },
+    ],
+    horizonYears: 10,
+    intercept: -3,
+    modelId: "fixture-custom-metric-model",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: fixtureReferenceRiskCurve(),
+  };
+  const customMetricPoint = metricPoint({
+    effectiveDate: "2026-05-01",
+    id: "metric-point:custom-recovery-index:2026-05-01:wearable:0",
+    metricKey: "custom-recovery-index",
+    observedAt: "2026-05-01T08:00:00.000Z",
+    recordId: "wearable_custom_recovery_index",
+    sourceKind: "wearable-summary",
+    unit: "score",
+    value: 3,
+  });
+
+  const blocked = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: customMetricModel,
+    points: [customMetricPoint],
+    sex: "female",
+  });
+
+  assert.equal(blocked.status, "abstain");
+  assert.equal(blocked.warnings.some((warning) => warning.message.includes("did not declare an expected unit")), true);
+
+  const explicitUnit = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: {
+      ...customMetricModel,
+      features: customMetricModel.features.map((feature) =>
+        feature.kind === "metric" ? { ...feature, expectedUnit: "score" } : feature
+      ),
+    },
+    points: [customMetricPoint],
+    sex: "female",
+  });
+
+  assert.equal(explicitUnit.status, "ready");
+  assert.equal(
+    explicitUnit.featureAttributions.find((feature) => feature.featureKey === "custom-recovery-index")?.value,
+    3,
+  );
+});
+
+test("Murph Age calculator abstains on invalid external model parameters", () => {
+  assert.equal(validateMurphAgeRiskModel(fixtureMurphAgeModel()).status, "valid");
+
+  const invalidIntercept = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: {
+      ...fixtureMurphAgeModel(),
+      intercept: Number.NaN,
+    },
+    points: [],
+    sex: "female",
+  });
+
+  assert.equal(invalidIntercept.status, "abstain");
+  assert.equal(invalidIntercept.featureAttributions.length, 0);
+  assert.equal(invalidIntercept.warnings.some((warning) => warning.message.includes("intercept")), true);
+
+  const invalidFeature = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: {
+      ...fixtureMurphAgeModel(),
+      features: [
+        { coefficient: 0.05, key: "age", kind: "chronological-age", label: "Age" },
+        {
+          coefficient: 0.1,
+          key: "apob",
+          kind: "metric",
+          label: "ApoB",
+          metricKey: "apob",
+          moduleId: "biomarkers",
+          transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 90, standardDeviation: 0 },
+        },
+      ],
+    },
+    points: [],
+    sex: "female",
+  });
+
+  assert.equal(invalidFeature.status, "abstain");
+  assert.equal(invalidFeature.warnings.some((warning) => warning.featureKey === "apob"), true);
+  assert.equal(validateMurphAgeRiskModel({
+    ...fixtureMurphAgeModel(),
+    features: [
+      { coefficient: 0.05, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.1,
+        key: "apob",
+        kind: "metric",
+        label: "ApoB",
+        metricKey: "apob",
+        moduleId: "biomarkers",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 90, standardDeviation: 0 },
+      },
+    ],
+  }).status, "invalid");
+});
+
+test("Murph Age calculator abstains when required model features are missing or blocked", () => {
+  const missing = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: fixtureMurphAgeModel(),
+    points: [],
+    sex: "female",
+  });
+
+  assert.equal(missing.status, "abstain");
+  assert.equal(missing.biologicalAgeYears, null);
+  assert.equal(missing.warnings.some((warning) => warning.code === "MODEL_FEATURE_MISSING"), true);
+
+  const blockedModel: MurphAgeRiskModel = {
+    ...fixtureMurphAgeModel(),
+    features: [
+      { coefficient: 0.05, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.1,
+        key: "custom-hs-crp-biomarker",
+        kind: "metric",
+        label: "hs-CRP published-clock comparator feature",
+        biomarkerKey: "biomarker:hs-crp",
+        metricKey: "custom-inflammation",
+        moduleId: "published-clock-comparator",
+      },
+    ],
+  };
+  const blocked = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: blockedModel,
+    points: [
+      metricPoint({
+        biomarkerKey: "biomarker:hs-crp",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:custom-inflammation:2026-05-01:lab:0",
+        metricKey: "custom-inflammation",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_hs_crp",
+        sourceKind: "test-result",
+        unit: "mg/L",
+        value: 0.8,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(blocked.status, "abstain");
+  assert.equal(blocked.warnings[0]?.code, "BLOCKED_MODEL_FEATURE");
+  assert.deepEqual(blocked.featureAttributions[1]?.selectedPointIds, []);
+  assert.equal(blocked.featureAttributions[1]?.value, null);
+
+  const unsupportedUnitModel: MurphAgeRiskModel = {
+    ...fixtureMurphAgeModel(),
+    features: [
+      { coefficient: 0.05, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.1,
+        key: "glucose",
+        kind: "metric",
+        label: "Glucose",
+        metricKey: "glucose",
+        moduleId: "biomarkers",
+      },
+    ],
+  };
+  const unsupportedUnit = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: unsupportedUnitModel,
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-01",
+        id: "metric-point:glucose:2026-05-01:lab:0",
+        metricKey: "glucose",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_glucose_bad_unit",
+        sourceKind: "test-result",
+        unit: "stone",
+        value: 90,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(unsupportedUnit.status, "abstain");
+  assert.equal(unsupportedUnit.warnings.some((warning) => warning.message.includes("unit was not normalized")), true);
+
+  const comparatorValue = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: unsupportedUnitModel,
+    points: [
+      metricPoint({
+        comparator: "<",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:glucose:2026-05-01:lab:1",
+        metricKey: "glucose",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_glucose_comparator",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 90,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(comparatorValue.status, "abstain");
+  assert.equal(comparatorValue.warnings.some((warning) => warning.message.includes("censored by a comparator")), true);
+
+  const comparatorAggregateModel: MurphAgeRiskModel = {
+    ...fixtureMurphAgeModel(),
+    features: [
+      { coefficient: 0.05, key: "age", kind: "chronological-age", label: "Age" },
+      {
+        coefficient: 0.1,
+        key: "resting-heart-rate",
+        kind: "metric",
+        label: "Resting heart rate",
+        metricKey: "resting-heart-rate",
+        moduleId: "recovery",
+        selectionPolicy: { kind: "daily-aggregate", latestWindowDays: 2, statistic: "mean" },
+      },
+    ],
+  };
+  const comparatorAggregate = calculateMurphAge({
+    chronologicalAgeYears: 45,
+    model: comparatorAggregateModel,
+    points: [
+      metricPoint({
+        comparator: ">",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:resting-heart-rate:2026-05-01:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "wearable_rhr_comparator_0",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 62,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-02",
+        id: "metric-point:resting-heart-rate:2026-05-02:wearable:0",
+        metricKey: "resting-heart-rate",
+        observedAt: "2026-05-02T08:00:00.000Z",
+        recordId: "wearable_rhr_0",
+        sourceKind: "wearable-summary",
+        unit: "bpm",
+        value: 60,
+      }),
+    ],
+    sex: "female",
+  });
+
+  assert.equal(comparatorAggregate.status, "abstain");
+  assert.equal(comparatorAggregate.warnings.some((warning) => warning.message.includes("censored by a comparator")), true);
+});
+
+function fixtureMurphAgeModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      { coefficient: 0.06, key: "age", kind: "chronological-age", label: "Age" },
+      { coefficient: 0.15, key: "male", kind: "sex", label: "Male", sex: "male" },
+      {
+        coefficient: -0.1,
+        key: "steps",
+        kind: "metric",
+        label: "Steps",
+        metricKey: "steps",
+        moduleId: "activity",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 8_000, standardDeviation: 2_000 },
+      },
+      {
+        coefficient: 0.18,
+        key: "apob",
+        kind: "metric",
+        label: "ApoB",
+        metricKey: "apob",
+        moduleId: "biomarkers",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 90, standardDeviation: 20 },
+      },
+      {
+        coefficient: 0.12,
+        key: "resting-heart-rate",
+        kind: "metric",
+        label: "Resting heart rate",
+        metricKey: "resting-heart-rate",
+        moduleId: "recovery",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 60, standardDeviation: 10 },
+      },
+      {
+        coefficient: -0.04,
+        key: "hrv-optional",
+        kind: "metric",
+        label: "HRV",
+        metricKey: "hrv-rmssd",
+        moduleId: "recovery",
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 45, standardDeviation: 15 },
+      },
+    ],
+    horizonYears: 10,
+    intercept: -6.2,
+    modelId: "fixture-calibrated-risk-age-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture adult reference curve",
+    referenceRiskCurve: fixtureReferenceRiskCurve(),
+    uncertainty: {
+      baseYears: 1.5,
+      perMissingOptionalFeatureYears: 2,
+    },
+  };
+}
+
+function fixtureReferenceRiskCurve(): MurphAgeRiskModel["referenceRiskCurve"] {
+  return [
+    { ageYears: 20, riskProbability: 0.01 },
+    { ageYears: 40, riskProbability: 0.03 },
+    { ageYears: 60, riskProbability: 0.1 },
+    { ageYears: 80, riskProbability: 0.3 },
+  ];
+}
 
 function metricPoint(input: {
   biomarkerKey?: string | null;

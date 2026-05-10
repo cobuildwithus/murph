@@ -14,11 +14,17 @@ export function normalizeMetricValue(input: {
   }
 
   switch (definition.key) {
+    case "albumin":
+      return normalizeAlbumin(input.value, unit);
     case "body-weight":
       return normalizeWeight(input.value, unit);
     case "body-fat-percentage":
     case "hba1c":
+    case "lymphocyte-percentage":
+    case "red-cell-distribution-width":
       return normalizePercent(input.value, unit, definition.displayName);
+    case "creatinine":
+      return normalizeCreatinine(input.value, unit);
     case "glucose":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 18.0182, definition.displayName);
     case "ldl-c":
@@ -32,6 +38,11 @@ export function normalizeMetricValue(input: {
       return normalizeExactUnit(input.value, unit, "mg/L", definition.displayName);
     case "ferritin":
       return normalizeExactUnit(input.value, unit, "ng/mL", definition.displayName);
+    case "mean-corpuscular-volume":
+      return normalizeExactUnit(input.value, unit, "fL", definition.displayName);
+    case "white-blood-cell-count":
+      return normalizeExactUnit(input.value, unit, "10^3/uL", definition.displayName);
+    case "alkaline-phosphatase":
     case "alt":
     case "ast":
     case "ggt":
@@ -62,8 +73,11 @@ export function normalizeUnit(value: string | null): string | null {
     bpm: "bpm",
     count: "count",
     counts: "count",
+    fl: "fL",
     g_l: "g/L",
     "g/l": "g/L",
+    g_dl: "g/dL",
+    "g/dl": "g/dL",
     kg: "kg",
     kilogram: "kg",
     kilograms: "kg",
@@ -89,6 +103,13 @@ export function normalizeUnit(value: string | null): string | null {
     "iu/l": "U/L",
     u_l: "U/L",
     "u/l": "U/L",
+    "10^3/ul": "10^3/uL",
+    "10*3/ul": "10^3/uL",
+    "10^9/l": "10^3/uL",
+    k_ul: "10^3/uL",
+    "k/ul": "10^3/uL",
+    umol_l: "umol/L",
+    "umol/l": "umol/L",
   };
   const alias = Object.prototype.hasOwnProperty.call(aliases, lower)
     ? aliases[lower]
@@ -112,6 +133,16 @@ function normalizeWeight(value: number, unit: string | null): MetricValueNormali
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Body weight", unit, "kg")] };
 }
 
+function normalizeAlbumin(value: number, unit: string | null): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "g/dL")) {
+    return { canonicalUnit: "g/dL", canonicalValue: value, unit: unit ?? "g/dL", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "g/L")) {
+    return { canonicalUnit: "g/dL", canonicalValue: Number((value / 10).toFixed(4)), unit, warnings: [] };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Albumin", unit, "g/dL")] };
+}
+
 function normalizePercent(value: number, unit: string | null, label: string): MetricValueNormalization {
   if (!unit || unitsEquivalent(unit, "percent")) {
     return { canonicalUnit: "percent", canonicalValue: value, unit: unit ?? "percent", warnings: [] };
@@ -127,6 +158,16 @@ function normalizeApoB(value: number, unit: string | null): MetricValueNormaliza
     return { canonicalUnit: "mg/dL", canonicalValue: Number((value * 100).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("ApoB", unit, "mg/dL")] };
+}
+
+function normalizeCreatinine(value: number, unit: string | null): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "mg/dL")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: value, unit: unit ?? "mg/dL", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "umol/L")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: Number((value / 88.42).toFixed(4)), unit, warnings: [] };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning("Creatinine", unit, "mg/dL")] };
 }
 
 function normalizeMassConcentration(
