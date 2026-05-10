@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createHostedBrowserVaultReplicaRefreshFromWorkspace,
-} from "../src/hosted-runtime.ts";
+} from "../src/hosted-runtime/browser-vault-replica.ts";
 
 describe("hosted browser-vault replica refresh preparation", () => {
   it("summarizes restored canonical source separately from default metric selection rows", async () => {
