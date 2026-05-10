@@ -3,9 +3,18 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRunnerStatusResponse,
+  HostedRuntimeLogEntry,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   startHostedLocalFullStackScenario,
@@ -15,7 +24,6 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  requireLinqPhoneLookupKey,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
@@ -47,9 +55,9 @@ afterAll(async () => {
 describe("hosted local stuck invocation recovery e2e", () => {
   beforeAll(async () => {
     await startScenario();
-  }, 300_000);
+  }, 600_000);
 
-  it("replays mailbox work from a durable alarm after the local invocation lock is stale", async () => {
+  it("preempts an active idle-shutdown checkpoint when a real Linq webhook appends foreground input", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -91,30 +99,42 @@ describe("hosted local stuck invocation recovery e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
-    await requireScenario().waitForHostedCompletion(userId);
+    const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
+    expectMailboxLagDrained(firstCompletionStatus);
+    expectDeferredMailboxImportLog(firstCompletionStatus);
 
     const recoveryBaselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
     requireScenario().queueAssistantResponses([replyText]);
 
-    await requireScenario().enqueueWake(buildInboundLinqWake(), userId);
-
-    const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId);
+    const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId, {
+      reason: "idle_shutdown_checkpoint",
+    });
     expect(stuckInvocation.ok).toBe(true);
     expect(stuckInvocation.attemptId).toMatch(/^workspace-invocation-/u);
 
-    await expect(requireScenario().harness.runHostedAlarmForTest(userId)).resolves.toEqual({
+    const recoveryWebhookResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_stuck_invocation_${runId}`,
+        messageId: `msg_stuck_invocation_${runId}`,
+        text: userText,
+      }),
+    );
+    expect(recoveryWebhookResponse.status).toBe(202);
+    await expect(recoveryWebhookResponse.json()).resolves.toMatchObject({
       ok: true,
+      reason: "wake-appended-active-member",
     });
-    const statusAfterAlarm = await waitForHostedCompletionWithoutNudging(userId);
+
+    const statusAfterNudge = await waitForHostedCompletionWithoutNudging(userId);
     if (
-      statusAfterAlarm.inFlight
-      || statusAfterAlarm.lastErrorCode
-      || statusAfterAlarm.mailboxLag.some((lane) => lane.lag !== "0")
+      statusAfterNudge.inFlight
+      || statusAfterNudge.lastErrorCode
+      || statusAfterNudge.mailboxLag.some((lane) => lane.lag !== "0")
     ) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
-        "Hosted runner did not complete after stale invocation recovery alarm.",
-        `statusAfterAlarm: ${JSON.stringify(statusAfterAlarm)}`,
+        "Hosted runner did not complete after foreground input preempted idle checkpoint.",
+        `statusAfterNudge: ${JSON.stringify(statusAfterNudge)}`,
       ]));
     }
 
@@ -139,6 +159,8 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
@@ -146,6 +168,7 @@ async function startScenario(): Promise<void> {
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
@@ -154,26 +177,6 @@ async function startScenario(): Promise<void> {
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted stuck invocation recovery e2e",
     streamLogs: streamDevLogs,
-  });
-}
-
-function buildInboundLinqWake() {
-  return buildHostedExecutionLinqConversationMessageWake({
-    eventId: `evt_stuck_invocation_${runId}`,
-    linqMessage: {
-      chatId,
-      from: buildLinqRecipientPhoneNumber(userId),
-      isFromMe: false,
-      messageId: `msg_stuck_invocation_${runId}`,
-      parts: [{
-        type: "text",
-        value: userText,
-      }],
-      service: "SMS",
-    },
-    occurredAt: new Date().toISOString(),
-    phoneLookupKey: requireLinqPhoneLookupKey(userId),
-    userId,
   });
 }
 
@@ -193,13 +196,103 @@ async function waitForHostedCompletionWithoutNudging(
     ) {
       return status;
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await sleep(250);
   }
 
   if (!lastStatus) {
-    throw new Error("Hosted runner status was unavailable after stale invocation recovery alarm.");
+    throw new Error("Hosted runner status was unavailable after foreground nudge preemption.");
   }
   return lastStatus;
+}
+
+async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastStatus: HostedRunnerStatusResponse | null = null;
+
+  while (Date.now() - startedAt < 120_000) {
+    const status = await readHostedRunnerStatusWithLogLimit(50);
+    lastStatus = status;
+
+    if (status.lastErrorCode) {
+      throw new Error(await requireScenario().buildFailureMessage(userId, [
+        "Hosted runner reported terminal error while waiting for foreground invocation idle.",
+        `last status: ${JSON.stringify(status)}`,
+      ]));
+    }
+
+    if (!status.inFlight && status.workspace !== null) {
+      return status;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for hosted foreground invocation idle.",
+    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+  ]));
+}
+
+function expectMailboxLagDrained(status: Pick<HostedRunnerStatusResponse, "mailboxLag">): void {
+  expect(status.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+}
+
+function expectDeferredMailboxImportLog(
+  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
+): void {
+  const logs = status.recentLogs ?? [];
+  const log = [...logs].reverse().find((entry) =>
+    entry.eventCode === "mailbox.imported"
+    && entry.phase === "import"
+    && entry.redactedJson?.checkpointDeferred === true
+    && entry.redactedJson?.checkpointed === false
+    && entry.redactedJson?.stateChanged === true
+  );
+  if (!log) {
+    throw new Error([
+      "Expected a foreground deferred mailbox import log.",
+      `mailbox logs: ${JSON.stringify(summarizeMailboxImportLogs(logs))}`,
+    ].join("\n"));
+  }
+}
+
+async function readHostedRunnerStatusWithLogLimit(
+  logLimit: number,
+): Promise<HostedRunnerStatusResponse> {
+  const status = parseHostedRunnerStatusResponse(
+    await requireScenario().harness.requestJson(
+      `/internal/users/${encodeURIComponent(userId)}/status?logLimit=${logLimit}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+        },
+      },
+    ),
+  );
+  if (status.userId !== userId) {
+    throw new Error("Hosted runner status read returned a different user.");
+  }
+  return status;
+}
+
+function summarizeMailboxImportLogs(
+  logs: readonly HostedRuntimeLogEntry[],
+): Array<{
+  checkpointDeferred: unknown;
+  checkpointed: unknown;
+  eventCode: HostedRuntimeLogEntry["eventCode"];
+  phase: HostedRuntimeLogEntry["phase"];
+  stateChanged: unknown;
+}> {
+  return logs
+    .filter((entry) => entry.eventCode === "mailbox.imported")
+    .map((entry) => ({
+      checkpointDeferred: entry.redactedJson?.checkpointDeferred,
+      checkpointed: entry.redactedJson?.checkpointed,
+      eventCode: entry.eventCode,
+      phase: entry.phase,
+      stateChanged: entry.redactedJson?.stateChanged,
+    }));
 }
 
 function buildActivationWake(memberId: string) {
@@ -243,6 +336,12 @@ function countAssistantProviderResponsesApiRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
   ).length;
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

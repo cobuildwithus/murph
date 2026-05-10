@@ -16,6 +16,7 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
   parseHostedRunnerNudgeRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -425,6 +426,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async startStuckInvocationForTest(input: {
+    reason?: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.runner.bindUser(input.userId);
@@ -633,6 +635,18 @@ function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefin
   return Number.isSafeInteger(logLimit) && logLimit > 0
     ? { logLimit: Math.min(logLimit, 50) }
     : undefined;
+}
+
+function parseTestWorkspaceInvocationReason(
+  value: string | null,
+): HostedWorkspaceInvocationReason | "invalid" | null {
+  if (value === null || value.trim() === "") {
+    return null;
+  }
+  if (HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)) {
+    return value as HostedWorkspaceInvocationReason;
+  }
+  return "invalid";
 }
 
 async function handleDeployContainerSmokeRoute(
@@ -883,10 +897,18 @@ async function handleTestStartStuckInvocationRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
     startStuckInvocationForTest(input: {
+      reason?: HostedWorkspaceInvocationReason;
       userId: string;
     }): Promise<HostedRunnerStuckInvocationTestResult>;
   };
-  return json(await stub.startStuckInvocationForTest({ userId }));
+  const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
+  if (reason === "invalid") {
+    return json({ error: "Unsupported test stuck invocation reason." }, 400);
+  }
+  return json(await stub.startStuckInvocationForTest({
+    ...(reason ? { reason } : {}),
+    userId,
+  }));
 }
 
 async function handleRunnerNudgeRoute(
