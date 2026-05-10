@@ -1714,6 +1714,43 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("does not replace a previous-worker invocation with a fresh heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:50.000Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "worker-version-previous",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
+  });
+
   it("keeps a same-worker persisted-only invocation pending until liveness or grace", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1780,6 +1817,42 @@ describe("HostedUserRunner runtime crypto context", () => {
     await flushDetachedRunnerDrive();
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
+  it("does not replace a legacy unstamped invocation with a fresh heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = NULL,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-26T23:59:50.000Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
   });
 
   it("clears a persisted-only invocation on the second wake after orphan observation", async () => {
