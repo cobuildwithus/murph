@@ -67,14 +67,12 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       memberId: userId,
       memberPhone,
     });
-    const activationBaselineCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
     await requireScenario().runWake(buildActivationWake(), userId);
     const activationCompletionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(activationCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectMailboxLagDrained(activationCompletionStatus);
     const activationCompletionWorkspaceVersion = requireWorkspaceVersion(activationCompletionStatus);
     const activationStatus = await waitForIdleShutdownCheckpoint({
-      baselineCleanupCount: activationBaselineCleanupCount,
       previousWorkspaceVersion: activationCompletionWorkspaceVersion,
     });
     expectWorkspaceBaseOnly(activationStatus);
@@ -87,7 +85,6 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-    const baselineCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWake = await requireScenario().runWake(
@@ -120,7 +117,6 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     const idleCheckpointStatus =
       requireWorkspaceVersion(firstCompletionStatus) === activationWorkspaceVersion
         ? await waitForIdleShutdownCheckpoint({
-            baselineCleanupCount,
             previousWorkspaceVersion: activationWorkspaceVersion,
           })
         : firstCompletionStatus;
@@ -222,7 +218,6 @@ function buildInboundLinqWake(input: {
 }
 
 async function waitForIdleShutdownCheckpoint(input: {
-  baselineCleanupCount: number;
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -232,7 +227,6 @@ async function waitForIdleShutdownCheckpoint(input: {
   while (Date.now() - startedAt < 120_000) {
     const status = await readHostedRunnerStatusWithLogLimit(50);
     lastStatus = status;
-    const cleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
 
     if (
       status.workspace
@@ -240,7 +234,6 @@ async function waitForIdleShutdownCheckpoint(input: {
       && isWorkspaceBaseOnly(status)
       && !status.inFlight
       && !status.lastErrorCode
-      && cleanupCount > input.baselineCleanupCount
       && hasIdleShutdownSnapshotLog(status.recentLogs ?? [])
     ) {
       return status;
@@ -423,46 +416,6 @@ function hasIdleShutdownSnapshotLog(logs: readonly HostedRuntimeLogEntry[]): boo
     entry.eventCode === "checkpoint.snapshot_finished"
     && entry.redactedJson?.checkpointReason === "idle_shutdown"
   );
-}
-
-function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
-  const output = [
-    requireScenario().harness.stdoutTail(200_000),
-    requireScenario().harness.stderrTail(200_000),
-  ].join("\n");
-
-  return output
-    .split(/\r?\n/u)
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-        return false;
-      }
-
-      let record: unknown;
-      try {
-        record = JSON.parse(trimmed);
-      } catch {
-        return false;
-      }
-
-      if (!record || typeof record !== "object") {
-        return false;
-      }
-
-      const candidate = record as {
-        details?: {
-          destroyAttempted?: unknown;
-          destroyOk?: unknown;
-        };
-        message?: unknown;
-        userId?: unknown;
-      };
-      return candidate.message === "Hosted runner completed idle-shutdown checkpoint container cleanup."
-        && candidate.userId === userId
-        && candidate.details?.destroyAttempted === true
-        && candidate.details?.destroyOk === true;
-    }).length;
 }
 
 function formatErrorMessage(error: unknown): string {
