@@ -139,7 +139,7 @@ test("importAssessmentResponse normalizes the payload and ignores the removed va
   assert.deepEqual(receivedPayload, {
     sourcePath: filePath,
     title: "Sleep Survey",
-    occurredAt: "2026-03-11T19:00:00.000Z",
+    recordedAt: "2026-03-11T19:00:00.000Z",
     importedAt: "2026-03-11T19:05:00.000Z",
     source: "manual",
   });

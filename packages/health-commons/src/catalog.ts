@@ -467,7 +467,9 @@ function assertSourceFindingArtifactReferences(
         continue;
       }
       if (artifactSourceKey !== findingSourceKey) {
-        continue;
+        throw new Error(
+          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId ${finding.extractedFromArtifactId} belongs to ${artifactSourceKey}, not ${findingSourceKey}.`,
+        );
       }
     }
   }

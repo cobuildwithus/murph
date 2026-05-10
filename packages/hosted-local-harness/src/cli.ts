@@ -247,9 +247,10 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
 }
 
 async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promise<void> {
-  const parsed = parseProfileArgs(args, "dev");
-  const separatorIndex = parsed.args.indexOf("--");
-  const commandArgs = separatorIndex >= 0 ? parsed.args.slice(separatorIndex + 1) : parsed.args;
+  const separatorIndex = args.indexOf("--");
+  const parentArgs = separatorIndex >= 0 ? args.slice(0, separatorIndex) : args;
+  const parsed = parseProfileArgs(parentArgs, "dev");
+  const commandArgs = separatorIndex >= 0 ? args.slice(separatorIndex + 1) : parsed.args;
   if (commandArgs.length === 0 || parsed.args.some((arg) => arg === "--help" || arg === "-h")) {
     printRunHelp(io.stdout ?? process.stdout);
     return;

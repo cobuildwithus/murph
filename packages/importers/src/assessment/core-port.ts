@@ -2,7 +2,7 @@ export interface AssessmentResponseImportPayload {
   vaultRoot?: string;
   sourcePath: string;
   title: string;
-  occurredAt?: string;
+  recordedAt?: string;
   importedAt?: string;
   source?: string;
 }

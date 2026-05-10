@@ -242,7 +242,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(publishedRouteIds).toEqual(expect.arrayContaining([
       "estimated-vo2max",
       "resting-heart-rate",
-      "sleep-quality",
+      "deep-sleep-minutes",
     ]));
     expect(
       biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),

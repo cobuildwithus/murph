@@ -1122,4 +1122,40 @@ describe("@murphai/health-commons catalog coverage", () => {
 
     expect(() => validateHealthCommonsContent(content)).not.toThrow();
   });
+
+  it("rejects source finding references to artifacts owned by another source", () => {
+    const ownerSource = sourcePage("source_artifact:example/owned-artifact", "owned-artifact");
+    const source = {
+      ...sourcePage("source_artifact:example/wrong-artifact-owner", "wrong-artifact-owner"),
+      frontmatter: {
+        ...sourcePage("source_artifact:example/wrong-artifact-owner", "wrong-artifact-owner").frontmatter,
+        sourceFindings: [
+          {
+            findingId: "finding:example/wrong-artifact-owner",
+            extractedFromArtifactId: "art_example_pdf",
+            findingKind: "context",
+            summary: "This finding points at an artifact owned by another source.",
+          },
+        ],
+      },
+    } satisfies HealthCommonsSourcePage;
+    const ownedArtifactManifest = {
+      ...artifactManifest,
+      artifacts: artifactManifest.artifacts.map((artifact) => ({
+        ...artifact,
+        sourceKey: ownerSource.frontmatter.key,
+      })),
+    } satisfies HealthCommonsArtifactManifest;
+    const content: HealthCommonsContentSet = {
+      artifactManifests: [ownedArtifactManifest],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [ownerSource, source],
+    };
+
+    expect(() => validateHealthCommonsContent(content)).toThrow(
+      "source_artifact:example/wrong-artifact-owner sourceFindings finding:example/wrong-artifact-owner extractedFromArtifactId art_example_pdf belongs to source_artifact:example/owned-artifact, not source_artifact:example/wrong-artifact-owner.",
+    );
+  });
 });
