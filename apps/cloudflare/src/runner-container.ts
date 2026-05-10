@@ -224,6 +224,7 @@ export class RunnerContainer extends Container {
   private browserVaultRefreshCompletion: Promise<void> | null = null;
   private browserVaultRefreshAttemptId: string | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
+  private readonly browserVaultRefreshAttemptUsers = new Map<string, string>();
   private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
@@ -235,8 +236,10 @@ export class RunnerContainer extends Container {
   async invoke(
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
+    const input = parseHostedExecutionContainerInvokeInput(payload);
+    await this.preemptBrowserVaultRefreshForForegroundInvocation(input.userId);
     return this.withLifecycleLock(async () =>
-      this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload))
+      this.invokeHostedExecution(input)
     );
   }
 
@@ -249,11 +252,16 @@ export class RunnerContainer extends Container {
   async refreshBrowserVaultReplica(
     payload: HostedExecutionContainerBrowserVaultRefreshRequest,
   ): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
-    return this.withLifecycleLock(async () =>
-      this.invokeHostedBrowserVaultRefresh(
-        parseHostedExecutionContainerBrowserVaultRefreshInput(payload),
-      )
-    );
+    const input = parseHostedExecutionContainerBrowserVaultRefreshInput(payload);
+    this.browserVaultRefreshAttemptUsers.set(input.attemptId, input.userId);
+    try {
+      return await this.withLifecycleLock(async () =>
+        this.invokeHostedBrowserVaultRefresh(input)
+      );
+    } finally {
+      this.browserVaultRefreshAttemptUsers.delete(input.attemptId);
+      this.pendingBrowserVaultRefreshAborts.delete(input.attemptId);
+    }
   }
 
   async abortBrowserVaultRefresh(input: { attemptId: string; userId: string }): Promise<void> {
@@ -271,6 +279,26 @@ export class RunnerContainer extends Container {
     }
 
     abortController.abort(new Error("browser-vault refresh preempted"));
+    await this.browserVaultRefreshCompletion;
+  }
+
+  private async preemptBrowserVaultRefreshForForegroundInvocation(userId: string): Promise<void> {
+    for (const [attemptId, attemptUserId] of this.browserVaultRefreshAttemptUsers) {
+      if (attemptUserId === userId) {
+        this.pendingBrowserVaultRefreshAborts.add(attemptId);
+      }
+    }
+
+    const abortController = this.browserVaultRefreshAbortController;
+    if (!abortController) {
+      return;
+    }
+    if (this.currentLogContext?.userId && this.currentLogContext.userId !== userId) {
+      return;
+    }
+    if (!abortController.signal.aborted) {
+      abortController.abort(new Error("browser-vault refresh preempted"));
+    }
     await this.browserVaultRefreshCompletion;
   }
 
@@ -685,6 +713,10 @@ export class RunnerContainer extends Container {
     let stopRunnerActivityRenewal: (() => void) | null = null;
 
     try {
+      if (this.pendingBrowserVaultRefreshAborts.delete(input.attemptId)) {
+        operationAbortController.abort(new Error("browser-vault refresh preempted"));
+      }
+      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       await this.writeRunnerActiveOperation(activeOperation);
       activeOperationAcquired = true;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
@@ -705,9 +737,6 @@ export class RunnerContainer extends Container {
       });
       const runnerControlToken = await this.ensureContainerReady(input);
       this.noteRunnerActivity("container-ready");
-      if (this.pendingBrowserVaultRefreshAborts.delete(input.attemptId)) {
-        operationAbortController.abort(new Error("browser-vault refresh preempted"));
-      }
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       this.runnerOutboundProxyState = outboundProxyState;
       await this.installOutboundHandlers(outboundProxyState);

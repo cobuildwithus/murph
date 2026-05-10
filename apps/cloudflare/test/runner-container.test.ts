@@ -1352,6 +1352,72 @@ describe("RunnerContainer", () => {
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
   });
 
+  it("lets foreground invocation preempt an active browser-vault refresh before lifecycle locking", async () => {
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        return await new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason ?? new Error("refresh aborted"));
+          }, { once: true });
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch,
+      });
+
+    const refresh = container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:test-foreground-preempt",
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/browser-vault-refresh",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+    const refreshRejected = expect(refresh).rejects.toThrow("browser-vault refresh preempted");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_refresh_preempt"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    await refreshRejected;
+
+    const refreshCallIndex = containerFetch.mock.calls.findIndex(([url]) =>
+      String(url).endsWith("/internal/browser-vault-refresh")
+    );
+    const invokeCallIndex = containerFetch.mock.calls.findIndex(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(invokeCallIndex).toBeGreaterThan(refreshCallIndex);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
   it("honors browser-vault refresh aborts recorded before the refresh lifecycle starts", async () => {
     let resolveInvocation!: () => void;
     const activeInvocation = new Promise<void>((resolve) => {
@@ -1421,6 +1487,94 @@ describe("RunnerContainer", () => {
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/browser-vault-refresh")
     )).toBe(false);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
+  });
+
+  it("lets foreground invocation skip a queued browser-vault refresh before it starts runner work", async () => {
+    let releaseFirstInvocation!: () => void;
+    const firstInvocation = new Promise<void>((resolve) => {
+      releaseFirstInvocation = resolve;
+    });
+    let workspaceInvocationCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health") || url.endsWith("/internal/control-health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation")) {
+        workspaceInvocationCount += 1;
+        if (workspaceInvocationCount === 1) {
+          await firstInvocation;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/browser-vault-refresh")) {
+        throw new Error("queued refresh should not reach the container child");
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+      containerFetch,
+    });
+    const firstInvoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_blocks_refresh_queue"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => expect(containerFetch).toHaveBeenCalledWith(
+      "http://container/internal/workspace-invocation",
+      expect.any(Object),
+      expect.any(Number),
+    ));
+
+    const refresh = container.refreshBrowserVaultReplica({
+      attemptId: "browser-vault-refresh:test-queued-foreground-preempt",
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    const refreshRejected = expect(refresh).rejects.toThrow("browser-vault refresh preempted");
+    const secondInvoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_queued_refresh_preempt"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    releaseFirstInvocation();
+    await expect(firstInvoke).resolves.toEqual(createRunnerResult());
+    await refreshRejected;
+    await expect(secondInvoke).resolves.toEqual(createRunnerResult());
+
+    expect(containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/browser-vault-refresh")
+    )).toHaveLength(0);
+    expect(containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toHaveLength(2);
     expect(destroy).not.toHaveBeenCalled();
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
   });
