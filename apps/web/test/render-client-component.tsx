@@ -22,11 +22,15 @@ export async function renderClientComponent(
 ): Promise<RenderClientComponentResult<HTMLButtonElement>>;
 export async function renderClientComponent(
   element: ReactElement,
-  options: { requireButton: false },
+  options: { location?: Record<string, string>; requireButton?: true },
+): Promise<RenderClientComponentResult<HTMLButtonElement>>;
+export async function renderClientComponent(
+  element: ReactElement,
+  options: { location?: Record<string, string>; requireButton: false },
 ): Promise<RenderClientComponentResult<HTMLButtonElement | null>>;
 export async function renderClientComponent(
   element: ReactElement,
-  options: { requireButton?: boolean } = {},
+  options: { location?: Record<string, string>; requireButton?: boolean } = {},
 ): Promise<RenderClientComponentResult<HTMLButtonElement | null>> {
   const { document, window } = loadLinkedom().parseHTML(
     "<html><body><div id='root'></div></body></html>",
@@ -38,6 +42,7 @@ export async function renderClientComponent(
     configurable: true,
     value: {
       assign,
+      ...(options.location ?? {}),
     },
   });
   Object.defineProperty(window, "open", {

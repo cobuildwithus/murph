@@ -1,11 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   claimHostedDeviceConnectIntentForStart: vi.fn(),
-  getHostedAppSessionFromRequest: vi.fn(),
   readHostedDeviceConnectIntent: vi.fn(),
   releaseHostedDeviceConnectIntentStart: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
@@ -23,7 +24,6 @@ vi.mock("@/src/lib/device-sync/hosted-connect-start", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  getHostedAppSessionFromRequest: mocks.getHostedAppSessionFromRequest,
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
@@ -52,12 +52,6 @@ describe("hosted device connect intent route", () => {
     vi.stubEnv("OURA_CLIENT_SECRET", "");
     vi.stubEnv("STRAVA_CLIENT_ID", "");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
-    mocks.getHostedAppSessionFromRequest.mockResolvedValue({
-      member: {
-        id: "member_123",
-      },
-      sessionId: "hws_test",
-    });
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
@@ -77,29 +71,32 @@ describe("hosted device connect intent route", () => {
     mocks.startHostedDeviceSyncConnection.mockResolvedValue({
       authorizationUrl: "https://provider.example.test/oauth/start",
     });
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("renders confirmation only for the member that owns the claim", async () => {
+  it("redirects available direct claim links to the connect page intent flow", async () => {
     const response = await deviceConnectIntentRoute.GET(
       new Request("https://join.example.test/device/connect/dc_opaque"),
       createRouteContext({ claim: "dc_opaque" }),
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Connect WHOOP");
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(mocks.readHostedDeviceConnectIntent).toHaveBeenCalledWith("dc_opaque");
+    expect(mocks.claimHostedDeviceConnectIntentForStart).not.toHaveBeenCalled();
   });
 
-  it("does not reveal confirmation to a different signed-in member", async () => {
-    mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce({
-      member: {
-        id: "member_other",
-      },
-      sessionId: "hws_other",
+  it("returns unavailable claim responses without redirecting", async () => {
+    mocks.readHostedDeviceConnectIntent.mockResolvedValueOnce({
+      status: "expired",
     });
 
     const response = await deviceConnectIntentRoute.GET(
@@ -107,8 +104,9 @@ describe("hosted device connect intent route", () => {
       createRouteContext({ claim: "dc_opaque" }),
     );
 
-    expect(response.status).toBe(403);
-    expect(await response.text()).toContain("different Murph account");
+    expect(response.status).toBe(410);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.text()).toContain("This connection link has expired.");
   });
 
   it("claims the intent for the active member before starting provider OAuth", async () => {
@@ -140,6 +138,55 @@ describe("hosted device connect intent route", () => {
     });
   });
 
+  it("returns JSON for app-page intent starts", async () => {
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        headers: {
+          accept: "application/json",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("maps JSON app-page start failures through the hosted browser mutation guard", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "CSRF_ORIGIN_REQUIRED",
+        httpStatus: 403,
+        message: "Hosted browser mutation routes require an Origin header.",
+      });
+    });
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        headers: {
+          accept: "application/json",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "CSRF_ORIGIN_REQUIRED",
+        details: undefined,
+        message: "Hosted browser mutation routes require an Origin header.",
+        retryable: false,
+      },
+    });
+    expect(mocks.claimHostedDeviceConnectIntentForStart).not.toHaveBeenCalled();
+  });
+
   it("does not start provider OAuth when the claim belongs to another member", async () => {
     mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
       status: "owner_mismatch",
@@ -147,12 +194,22 @@ describe("hosted device connect intent route", () => {
 
     const response = await deviceConnectIntentRoute.POST(
       new Request("https://join.example.test/device/connect/dc_opaque", {
+        headers: {
+          accept: "application/json",
+        },
         method: "POST",
       }),
       createRouteContext({ claim: "dc_opaque" }),
     );
 
     expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_INTENT_OWNER_MISMATCH",
+        message: "This connection link belongs to a different Murph account.",
+        retryable: false,
+      },
+    });
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
     expect(mocks.releaseHostedDeviceConnectIntentStart).not.toHaveBeenCalled();
   });

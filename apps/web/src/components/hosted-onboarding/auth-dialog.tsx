@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 type HostedAuthPanelIslandComponent = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
@@ -97,6 +98,7 @@ export function AuthDialog({
   onOpenChange,
   title = "Log in or sign up",
   description = "Discover what actually makes you healthier.",
+  onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
@@ -104,6 +106,7 @@ export function AuthDialog({
   onOpenChange: (open: boolean) => void;
   title?: string;
   description?: string;
+  onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
 }) {
@@ -154,6 +157,7 @@ export function AuthDialog({
         {AuthPanelIsland ? (
           <AuthPanelIsland
             methods={["phone", "telegram", "email"]}
+            onCompleted={onCompleted}
             requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
             showPassiveLegalNotice={showPassiveLegalNotice}
             size="compact"

@@ -798,6 +798,138 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid redeems an initial device connect intent through the app page", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://provider.example.test/oauth/start");
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+    },
+    method: "POST",
+    keepalive: false,
+  });
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid preserves a device connect intent after consent acceptance", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  let attempts = 0;
+  const fetch = vi.fn(async (
+    input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _init;
+    if (input !== `/device/connect/${claim}`) {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    }
+
+    attempts += 1;
+    if (attempts > 1) {
+      return Response.json({
+        authorizationUrl: "https://provider.example.test/oauth/start",
+      });
+    }
+
+    return Response.json({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        details: {
+          missingScopes: ["launch.health-data"],
+        },
+        message: "Accept the current Murph legal consent before continuing.",
+      },
+    }, { status: 403 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    initialConnectIntent: {
+      claim,
+      connectSource: "whoop",
+    },
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Before you connect Whoop/);
+  });
+
+  const consentButton = rendered.container.querySelector("[data-hosted-legal-consent-card='true']");
+  assert.ok(consentButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    consentButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://provider.example.test/oauth/start");
+  });
+
+  assert.equal(fetch.mock.calls[1]?.[0], `/device/connect/${claim}`);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid disconnects a connected source after confirmation", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,

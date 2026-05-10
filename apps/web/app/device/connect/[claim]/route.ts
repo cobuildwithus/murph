@@ -12,8 +12,8 @@ import {
   type HostedDeviceConnectIntentRecord,
 } from "@/src/lib/device-sync/connect-intents";
 import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
+import { jsonError, jsonOk } from "@/src/lib/device-sync/settings-http";
 import {
-  getHostedAppSessionFromRequest,
   requireActiveHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -32,40 +32,29 @@ export async function GET(
     const result = await readHostedDeviceConnectIntent(claim);
 
     if (result.status !== "available") {
-      return deviceConnectIntentHtml(
-        "Connection link unavailable",
-        describeUnavailableIntentStatus(result.status),
-        410,
-      );
-    }
-
-    const session = await getHostedAppSessionFromRequest(request);
-    if (!session) {
-      return deviceConnectIntentHtml(
-        "Sign in to continue",
-        "Open Murph in this browser, sign in, then reopen this connection link.",
-        401,
-      );
-    }
-
-    if (session.member.id !== result.intent.memberId) {
-      return deviceConnectIntentHtml(
-        "Wrong Murph account",
-        "This connection link belongs to a different Murph account.",
-        403,
-      );
+      return deviceConnectIntentMessageResponse(request, {
+        code: `HOSTED_DEVICE_CONNECT_INTENT_${result.status.toUpperCase()}`,
+        message: describeUnavailableIntentStatus(result.status),
+        status: 410,
+        title: "Connection link unavailable",
+      });
     }
 
     const target = resolveHostedDeviceConnectIntentTarget(result.intent);
     if (!target) {
-      return deviceConnectIntentHtml(
-        "Connection unavailable",
-        "This device source is not currently available.",
-        404,
-      );
+      return deviceConnectIntentMessageResponse(request, {
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        message: "This device source is not currently available.",
+        status: 404,
+        title: "Connection unavailable",
+      });
     }
 
-    return deviceConnectIntentConfirmHtml(target.label);
+    return redirectNoReferrer(buildHostedDeviceConnectPageUrl({
+      claim,
+      connectSourceId: result.intent.connectSourceId,
+      request,
+    }));
   } catch (error) {
     return handleHostedDeviceConnectIntentError(error);
   }
@@ -85,11 +74,12 @@ export async function POST(
     });
 
     if (claimed.status !== "claimed") {
-      return deviceConnectIntentHtml(
-        "Connection link unavailable",
-        describeUnavailableIntentStatus(claimed.status),
-        claimed.status === "owner_mismatch" ? 403 : 410,
-      );
+      return deviceConnectIntentMessageResponse(request, {
+        code: `HOSTED_DEVICE_CONNECT_INTENT_${claimed.status.toUpperCase()}`,
+        message: describeUnavailableIntentStatus(claimed.status),
+        status: claimed.status === "owner_mismatch" ? 403 : 410,
+        title: "Connection link unavailable",
+      });
     }
 
     const target = resolveHostedDeviceConnectIntentTarget(claimed.intent);
@@ -98,11 +88,12 @@ export async function POST(
         claim,
         memberId: session.member.id,
       });
-      return deviceConnectIntentHtml(
-        "Connection unavailable",
-        "This device source is not currently available.",
-        404,
-      );
+      return deviceConnectIntentMessageResponse(request, {
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        message: "This device source is not currently available.",
+        status: 404,
+        title: "Connection unavailable",
+      });
     }
 
     let started: Awaited<ReturnType<typeof startHostedDeviceSyncConnection>>;
@@ -124,9 +115,9 @@ export async function POST(
       throw error;
     }
 
-    return redirectNoReferrer(started.authorizationUrl);
+    return deviceConnectIntentStartResponse(request, started.authorizationUrl);
   } catch (error) {
-    return handleHostedDeviceConnectIntentError(error);
+    return handleHostedDeviceConnectIntentError(error, request);
   }
 }
 
@@ -164,7 +155,24 @@ function describeUnavailableIntentStatus(status: string): string {
   return "This connection link could not be found. Ask Murph for a new one.";
 }
 
-function handleHostedDeviceConnectIntentError(error: unknown): Response {
+function buildHostedDeviceConnectPageUrl(input: {
+  claim: string;
+  connectSourceId: string;
+  request: Request;
+}): string {
+  const url = new URL("/connect", new URL(input.request.url).origin);
+  const fragment = new URLSearchParams();
+  fragment.set("deviceConnectIntent", input.claim);
+  fragment.set("connectSource", input.connectSourceId);
+  url.hash = fragment.toString();
+  return `${url.pathname}${url.hash}`;
+}
+
+function handleHostedDeviceConnectIntentError(error: unknown, request?: Request): Response {
+  if (request && wantsJsonDeviceConnectIntentResponse(request)) {
+    return jsonError(error);
+  }
+
   if (error instanceof InvalidRouteParamEncodingError) {
     return deviceConnectIntentHtml(
       "Connection link unavailable",
@@ -192,15 +200,41 @@ function handleHostedDeviceConnectIntentError(error: unknown): Response {
   );
 }
 
-function deviceConnectIntentConfirmHtml(providerLabel: string): Response {
-  return htmlResponse(
-    "Connect device",
-    `<form method="post">
-      <h1>Connect ${escapeHtml(providerLabel)}</h1>
-      <p>Continue to ${escapeHtml(providerLabel)} to authorize Murph.</p>
-      <button type="submit">Continue</button>
-    </form>`,
-  );
+function deviceConnectIntentStartResponse(request: Request, authorizationUrl: string): Response {
+  if (wantsJsonDeviceConnectIntentResponse(request)) {
+    return jsonOk({
+      authorizationUrl,
+    });
+  }
+
+  return redirectNoReferrer(authorizationUrl);
+}
+
+function deviceConnectIntentMessageResponse(
+  request: Request,
+  input: {
+    code: string;
+    message: string;
+    status: number;
+    title: string;
+  },
+): Response {
+  if (wantsJsonDeviceConnectIntentResponse(request)) {
+    return Response.json({
+      error: {
+        code: input.code,
+        message: input.message,
+        retryable: false,
+      },
+    }, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+      status: input.status,
+    });
+  }
+
+  return deviceConnectIntentHtml(input.title, input.message, input.status);
 }
 
 function deviceConnectIntentHtml(title: string, message: string, status = 200): Response {
@@ -250,6 +284,13 @@ function redirectNoReferrer(location: string): Response {
       "Referrer-Policy": "no-referrer",
     },
   });
+}
+
+function wantsJsonDeviceConnectIntentResponse(request: Request): boolean {
+  const accept = request.headers.get("accept") ?? "";
+  return accept
+    .split(",")
+    .some((entry) => entry.trim().toLowerCase().startsWith("application/json"));
 }
 
 function escapeHtml(value: string): string {

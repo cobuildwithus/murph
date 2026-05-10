@@ -77,7 +77,11 @@ export async function createHostedDeviceConnectIntent(input: {
 
   return {
     claim,
-    connectUrl: buildHostedDeviceConnectIntentUrl(claim, input.request),
+    connectUrl: buildHostedDeviceConnectIntentUrl({
+      claim,
+      connectSourceId: input.connectSourceId,
+      request: input.request,
+    }),
     expiresAt: expiresAt.toISOString(),
   };
 }
@@ -219,9 +223,18 @@ export async function releaseHostedDeviceConnectIntentStart(input: {
   });
 }
 
-function buildHostedDeviceConnectIntentUrl(claim: string, request: Request): string {
-  const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(request.url).origin;
-  return new URL(`/device/connect/${encodeURIComponent(claim)}`, `${baseUrl}/`).toString();
+function buildHostedDeviceConnectIntentUrl(input: {
+  claim: string;
+  connectSourceId: string;
+  request: Request;
+}): string {
+  const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
+  const url = new URL("/connect", `${baseUrl}/`);
+  const fragment = new URLSearchParams();
+  fragment.set("deviceConnectIntent", input.claim);
+  fragment.set("connectSource", input.connectSourceId);
+  url.hash = fragment.toString();
+  return url.toString();
 }
 
 function generateHostedDeviceConnectIntentClaim(): string {

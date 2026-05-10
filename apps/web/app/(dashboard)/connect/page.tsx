@@ -15,7 +15,10 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-import { ConnectSourcesGrid, type ConnectCallbackInput } from "./connect-page-client";
+import {
+  ConnectSourcesGrid,
+  type ConnectCallbackInput,
+} from "./connect-page-client";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 
 export const metadata: Metadata = createMurphPageMetadata({

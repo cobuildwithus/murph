@@ -39,6 +39,7 @@ export interface HostedBillingCheckoutResponse {
 
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
+  headers?: Record<string, string>;
   keepalive?: boolean;
   method?: "GET" | "POST";
   payload?: Record<string, unknown>;
@@ -46,7 +47,9 @@ export async function requestHostedOnboardingJson<T>(input: {
 }): Promise<T> {
   const method = input.method ?? (input.payload ? "POST" : "GET");
   const body = input.payload ? JSON.stringify(input.payload) : undefined;
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    ...(input.headers ?? {}),
+  };
 
   if (input.payload) {
     headers["content-type"] = "application/json";
