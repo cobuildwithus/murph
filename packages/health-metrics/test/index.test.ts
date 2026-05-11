@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
@@ -58,6 +59,7 @@ import {
   toPublicMurphAgeCalculatorReport,
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeLocalModelCardArtifactPolicy,
+  validateMurphAgeIncrementEvaluationCard,
   validateMurphAgeRiskModel,
   validateMurphAgeSourceRouteRegistry,
   validateMurphAgeWearableShadowIncrementResultCard,
@@ -68,6 +70,7 @@ import {
   type MurphAgeRiskModel,
   type MurphAgeSourceRoute,
   type MurphAgeValidationEvidenceTier,
+  type MurphAgeIncrementEvaluationCard,
   type MurphAgeWearableShadowIncrementResultCard,
 } from "../src/index.ts";
 
@@ -2531,6 +2534,195 @@ test("validates aggregate wearable shadow result cards as blocked research evide
     ),
     true,
   );
+});
+
+test("validates aggregate increment evaluation cards across biomarker routes", () => {
+  const evidenceCard = {
+    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+    candidateBatchId: "r399-midus2-first-biomarker-increment-batch",
+    candidateId: "r399-plus-lab3-bmi-increment",
+    evaluation: {
+      aggregateMetricDeltas: {
+        aucDelta: 0.0018,
+        brierDelta: -0.0002,
+        logLossDelta: -0.0001,
+      },
+      aggregateSample: {
+        evaluatedRowCount: 217,
+        eventCount: 17,
+        minimumCellCount: 17,
+        suppressedCellCount: 0,
+      },
+      anchorMetrics: {
+        auc: 0.7644,
+        brier: 0.0627,
+        events: 17,
+        logLoss: 0.2323,
+        meanPrediction: 0.0714,
+        n: 217,
+        observedRate: 0.0783,
+      },
+      candidateMetrics: {
+        auc: 0.7662,
+        brier: 0.0625,
+        events: 17,
+        logLoss: 0.2322,
+        meanPrediction: 0.0718,
+        n: 217,
+        observedRate: 0.0783,
+      },
+      comparator: "anchor-vs-anchor-plus-increment",
+      evidenceTier: "internal-diagnostic",
+      sameDenominator: true,
+    },
+    flatteningAuthorized: false,
+    layer: "biomarker-increment",
+    outputBoundary: {
+      aggregateOnly: true,
+      coefficientsExportAllowed: false,
+      localArtifactPathExportAllowed: false,
+      modelParametersExportAllowed: false,
+      participantIdentifiersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      predictionsExportAllowed: false,
+      productDisplayExportAllowed: false,
+      rowValuesExportAllowed: false,
+      sourceTextExportAllowed: false,
+      splitMembershipExportAllowed: false,
+    },
+    productAuthorized: false,
+    riskEffect: "aggregate-estimated",
+    schemaVersion: MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: "midus-biomarker-mortality",
+  } satisfies MurphAgeIncrementEvaluationCard;
+
+  const validation = validateMurphAgeIncrementEvaluationCard(evidenceCard);
+  assert.equal(validation.status, "valid");
+  assert.deepEqual(validation.warnings, []);
+
+  const notEstimatedValidation = validateMurphAgeIncrementEvaluationCard({
+    ...evidenceCard,
+    evaluation: {
+      ...evidenceCard.evaluation,
+      aggregateMetricDeltas: {},
+    },
+    riskEffect: "not-estimated",
+  });
+  assert.equal(notEstimatedValidation.status, "valid");
+
+  const invalidRouteValidation = validateMurphAgeIncrementEvaluationCard({
+    ...evidenceCard,
+    layer: "wearable-shadow-increment",
+  });
+  assert.equal(invalidRouteValidation.status, "invalid");
+  assert.equal(
+    invalidRouteValidation.warnings.some((warning) => warning.message.includes("requested increment layer")),
+    true,
+  );
+
+  const invalidValidation = validateMurphAgeIncrementEvaluationCard({
+    ...evidenceCard,
+    anchorCardId: "wearable_context_no_risk",
+    candidateBatchId: "bad batch",
+    candidateId: "bad candidate",
+    evaluation: {
+      aggregateMetricDeltas: {},
+      aggregateSample: {
+        evaluatedRowCount: 12.5,
+      },
+      anchorMetrics: {
+        auc: "bad-auc",
+      },
+      candidateMetrics: {
+        logLoss: Number.POSITIVE_INFINITY,
+      },
+      comparator: "candidate-only",
+      evidenceTier: "unsupported-tier",
+      sameDenominator: false,
+    },
+    flatteningAuthorized: true,
+    layer: "unsupported-layer",
+    outputBoundary: {
+      ...evidenceCard.outputBoundary,
+      coefficientsExportAllowed: true,
+      localArtifactPathExportAllowed: true,
+      modelParametersExportAllowed: true,
+      participantIdentifiersExportAllowed: true,
+      predictionsExportAllowed: true,
+      productDisplayExportAllowed: true,
+      rowValuesExportAllowed: true,
+      sourceTextExportAllowed: true,
+      splitMembershipExportAllowed: true,
+    },
+    productAuthorized: true,
+    scoreBearing: true,
+    scoreContributionAuthorized: true,
+    sourceRouteId: "Private Route",
+  });
+  assert.equal(invalidValidation.status, "invalid");
+  for (const expected of [
+    "score-bearing Murph Age model card",
+    "candidate batch id",
+    "candidate id",
+    "layer is not supported",
+    "non-score-bearing",
+    "aggregate-only",
+    "at least one finite aggregate metric delta",
+    "same denominator",
+    "source route id",
+  ]) {
+    assert.equal(
+      invalidValidation.warnings.some((warning) => warning.message.includes(expected)),
+      true,
+      expected,
+    );
+  }
+
+  const leakyValidation = validateMurphAgeIncrementEvaluationCard({
+    ...evidenceCard,
+    participantIds: ["synthetic-participant"],
+    productClaimText: "synthetic claim",
+    evaluation: {
+      ...evidenceCard.evaluation,
+      aggregateMetricDeltas: {
+        ...evidenceCard.evaluation.aggregateMetricDeltas,
+        coefficients: [0.1],
+      },
+      aggregateSample: {
+        ...evidenceCard.evaluation.aggregateSample,
+        rowValues: [1],
+      },
+      anchorMetrics: {
+        ...evidenceCard.evaluation.anchorMetrics,
+        predictionById: { synthetic: 0.1 },
+      },
+      splitMembership: ["synthetic-split"],
+    },
+    outputBoundary: {
+      ...evidenceCard.outputBoundary,
+      localPath: "/tmp/synthetic",
+    },
+  });
+  assert.equal(leakyValidation.status, "invalid");
+  for (const unsupportedField of [
+    "participantIds",
+    "productClaimText",
+    "splitMembership",
+    "coefficients",
+    "rowValues",
+    "predictionById",
+    "localPath",
+  ]) {
+    assert.equal(
+      leakyValidation.warnings.some((warning) =>
+        warning.message.includes(`unsupported field ${unsupportedField}`)
+      ),
+      true,
+      unsupportedField,
+    );
+  }
 });
 
 test("assesses wearable shadow increment readiness without exposing values", () => {

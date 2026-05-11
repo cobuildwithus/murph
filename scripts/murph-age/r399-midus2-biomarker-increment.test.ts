@@ -5,7 +5,11 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION } from "@murphai/health-metrics";
+import {
+  MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  validateMurphAgeIncrementEvaluationCard,
+} from "@murphai/health-metrics";
 
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
 import {
@@ -59,6 +63,34 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(output.dataShape.splitCounts.calibration.n).toBeGreaterThan(0);
       expect(output.dataShape.splitCounts.test.n).toBeGreaterThan(0);
       expect(output.dataShape.r399ProxyFeatureObservedCounts["self-rated-health"]).toBe(180);
+      expect(output.incrementEvaluationCard.schemaVersion).toBe(MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION);
+      expect(output.incrementEvaluationCard.anchorCardId).toBe(R399_RESEARCH_CARD_ID);
+      expect(output.incrementEvaluationCard.candidateBatchId).toBe("r399-midus2-first-biomarker-increment-batch");
+      expect(output.incrementEvaluationCard.candidateId).toBe("r399-plus-lab3-bmi-increment");
+      expect(output.incrementEvaluationCard.layer).toBe("biomarker-increment");
+      expect(output.incrementEvaluationCard.sourceRouteId).toBe("midus-biomarker-mortality");
+      expect(output.incrementEvaluationCard.productAuthorized).toBe(false);
+      expect(output.incrementEvaluationCard.scoreBearing).toBe(false);
+      expect(output.incrementEvaluationCard.scoreContributionAuthorized).toBe(false);
+      expect(output.incrementEvaluationCard.flatteningAuthorized).toBe(false);
+      expect(output.incrementEvaluationCard.evaluation.comparator).toBe("anchor-vs-anchor-plus-increment");
+      expect(output.incrementEvaluationCard.evaluation.sameDenominator).toBe(true);
+      expect(output.incrementEvaluationCard.evaluation.aggregateSample?.evaluatedRowCount).toBe(
+        output.dataShape.splitCounts.test.n,
+      );
+      expect(output.incrementEvaluationCard.evaluation.aggregateSample?.eventCount).toBe(
+        output.dataShape.splitCounts.test.events,
+      );
+      expect(output.incrementEvaluationCard.evaluation.anchorMetrics).toEqual(
+        output.models.r399_anchor_recalibrated?.splitMetrics.test,
+      );
+      expect(output.incrementEvaluationCard.evaluation.candidateMetrics).toEqual(
+        output.models.r399_plus_lab3_bmi_increment?.splitMetrics.test,
+      );
+      expect(validateMurphAgeIncrementEvaluationCard(output.incrementEvaluationCard)).toEqual({
+        status: "valid",
+        warnings: [],
+      });
       expect(output.rowValuesStored).toBe(false);
       expect(output.participantIdentifiersStored).toBe(false);
       expect(output.participantIdentifiersWritten).toBe(false);
@@ -112,7 +144,7 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(serialized).not.toContain("M0001");
       expect(serialized).not.toContain("selectedPointIds");
       expect(serialized).not.toContain("rawRows");
-      expect(serialized).not.toContain("sourceText");
+      expect(serialized).not.toContain("sourceText\":");
       expect(serialized).not.toContain("coefficients\":");
       expect(serialized).not.toContain("predictions\":");
       expect(serialized).not.toContain(tmp);
