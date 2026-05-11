@@ -68,6 +68,7 @@ export { DeploySmokeRunnerContainer, RunnerContainer } from "./runner-container.
 import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerOutboundProxyTokenContext,
 } from "./runner-container.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
@@ -86,7 +87,7 @@ import {
   type HostedRunnerStuckInvocationTestResult,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
-import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
+import { handleRunnerOutboundRequest, type RunnerOutboundProxyContext } from "./runner-outbound.ts";
 import {
   requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
@@ -1353,12 +1354,12 @@ async function maybeHandleLocalInternalProxyRoute(
       error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
     }, 401);
   }
-  const validRunnerProxyToken = await ownsLocalInternalProxyTokenForUser({
+  let runnerProxyContext = await readLocalInternalProxyTokenContextForUser({
     env,
     token: runnerProxyToken,
     userId: boundUserId,
   });
-  if (!validRunnerProxyToken) {
+  if (!runnerProxyContext) {
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
@@ -1399,14 +1400,14 @@ async function maybeHandleLocalInternalProxyRoute(
     const checkpointRequest = parseHostedWorkspaceCheckpointRequest(
       await readOptionalJsonObject(request.clone() as Request),
     );
-    const validCheckpointLease = await ownsLocalInternalProxyTokenForUser({
+    const checkpointProxyContext = await readLocalInternalProxyTokenContextForUser({
       attemptId: checkpointRequest.attemptId,
       env,
       leaseGeneration: checkpointRequest.leaseGeneration,
       token: runnerProxyToken,
       userId: boundUserId,
     });
-    if (!validCheckpointLease) {
+    if (!checkpointProxyContext) {
       emitHostedExecutionStructuredLog({
         component: "worker",
         details: buildWorkerRouteLogDetails({
@@ -1420,38 +1421,70 @@ async function maybeHandleLocalInternalProxyRoute(
       });
       return unauthorized();
     }
+    runnerProxyContext = checkpointProxyContext;
   }
   return await handleRunnerOutboundRequest(
     createLocalInternalProxyRequest(request, internalUrl),
     env,
     boundUserId,
     runnerProxyToken,
+    runnerProxyContext,
   );
 }
 
-async function ownsLocalInternalProxyTokenForUser(input: {
+async function readLocalInternalProxyTokenContextForUser(input: {
   attemptId?: string;
   env: WorkerEnvironmentSource;
   leaseGeneration?: string;
   token: string;
   userId: string;
-}): Promise<boolean> {
+}): Promise<RunnerOutboundProxyContext | null> {
   const stub = input.env.RUNNER_CONTAINER.getByName(
     resolveHostedExecutionRunnerContainerName({
       source: input.env,
       userId: input.userId,
     }),
   );
-  return typeof stub.ownsInternalWorkerProxyToken === "function"
-    ? await stub.ownsInternalWorkerProxyToken({
-        ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
-        ...(input.leaseGeneration === undefined
-          ? {}
-          : { leaseGeneration: input.leaseGeneration }),
-        token: input.token,
-        userId: input.userId,
-      })
+  const tokenInput = {
+    ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
+    ...(input.leaseGeneration === undefined
+      ? {}
+      : { leaseGeneration: input.leaseGeneration }),
+    token: input.token,
+    userId: input.userId,
+  };
+  if (typeof stub.readInternalWorkerProxyTokenContext === "function") {
+    return formatRunnerOutboundProxyTokenContext(
+      await stub.readInternalWorkerProxyTokenContext(tokenInput),
+    );
+  }
+
+  const validToken = typeof stub.ownsInternalWorkerProxyToken === "function"
+    ? await stub.ownsInternalWorkerProxyToken(tokenInput)
     : false;
+  if (!validToken) {
+    return null;
+  }
+
+  return {
+    proxyAttemptId: input.attemptId ?? null,
+    proxyLeaseGeneration: input.leaseGeneration ?? null,
+    proxyScope: "runtime",
+  };
+}
+
+function formatRunnerOutboundProxyTokenContext(
+  context: RunnerOutboundProxyTokenContext | null,
+): RunnerOutboundProxyContext | null {
+  if (!context) {
+    return null;
+  }
+
+  return {
+    proxyAttemptId: context.attemptId,
+    proxyLeaseGeneration: context.leaseGeneration,
+    proxyScope: context.scope,
+  };
 }
 
 function isTrustedLocalHostedInternalProxyIngress(

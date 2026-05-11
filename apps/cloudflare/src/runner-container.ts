@@ -1,4 +1,4 @@
-import { Container, type StopParams } from "@cloudflare/containers";
+import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
 import {
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
@@ -10,8 +10,15 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
+import {
+  buildLocalInternalProxyRouteBaseUrl,
+} from "./local-internal-proxy-route.ts";
 import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
+import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
@@ -32,6 +39,9 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
 const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
+const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
+const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
+const BROWSER_VAULT_BACKGROUND_PROXY_TTL_MS = 60_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
@@ -40,6 +50,10 @@ const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
   "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL";
+const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
+  "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL";
+const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
+const RUNNER_OUTBOUND_HOSTS = Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS);
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -80,7 +94,6 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike {
-  abortBrowserVaultRefresh?(input: { attemptId: string; userId: string }): Promise<void>;
   abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
@@ -93,6 +106,12 @@ export interface HostedExecutionContainerStubLike {
     token: string;
     userId?: string;
   }): Promise<boolean>;
+  readInternalWorkerProxyTokenContext?(input: {
+    attemptId?: string;
+    leaseGeneration?: string;
+    token: string;
+    userId?: string;
+  }): Promise<RunnerOutboundProxyTokenContext | null>;
   refreshBrowserVaultReplica?(input: unknown): Promise<unknown>;
   smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
@@ -101,8 +120,26 @@ export interface HostedExecutionContainerNamespaceLike {
   getByName(name: string): HostedExecutionContainerStubLike;
 }
 
+type RunnerOutboundHandlerContext = OutboundHandlerContext<{
+  attemptId?: unknown;
+  expiresAtMs?: unknown;
+  internalWorkerProxyToken?: unknown;
+  leaseGeneration?: unknown;
+  scope?: unknown;
+  userId?: unknown;
+} | undefined>;
+
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
+
+export interface RunnerOutboundProxyTokenContext {
+  attemptId: string;
+  expiresAtMs: number | null;
+  leaseGeneration: string;
+  scope: "browser_vault_background" | "runtime";
+  token: string;
+  userId: string;
+}
 
 interface RunnerContainerLogContext {
   userId: string;
@@ -184,6 +221,8 @@ export class RunnerContainer extends Container {
   private lifecycleLock: Promise<void> = Promise.resolve();
   private currentLogContext: RunnerContainerLogContext | null = null;
   private runnerControlToken: string | null = null;
+  private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
+  private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
   private pendingIdleCheckpoint: RunnerPendingIdleCheckpoint | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
@@ -235,10 +274,6 @@ export class RunnerContainer extends Container {
     throw new Error("Hosted runner browser-vault refresh side path has been removed.");
   }
 
-  async abortBrowserVaultRefresh(_input?: unknown): Promise<void> {
-    return undefined;
-  }
-
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
@@ -281,8 +316,16 @@ export class RunnerContainer extends Container {
     token: string;
     userId?: string;
   }): Promise<boolean> {
-    void input;
-    return false;
+    return isRunnerOutboundProxyStateMatch(this.runnerOutboundProxyState, input);
+  }
+
+  async readInternalWorkerProxyTokenContext(input: {
+    attemptId?: string;
+    leaseGeneration?: string;
+    token: string;
+    userId?: string;
+  }): Promise<RunnerOutboundProxyTokenContext | null> {
+    return readRunnerOutboundProxyTokenContext(this.runnerOutboundProxyState, input);
   }
 
   override async onActivityExpired(): Promise<void> {
@@ -452,6 +495,10 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
     options: { warmOnly?: boolean } = {},
   ): Promise<HostedExecutionRunnerJobResult> {
+    const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
+      this.environment,
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
+    );
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
     const runtimeCallbackBaseUrl = requireRunnerRuntimeCallbackBaseUrl(
       this.environment,
@@ -463,6 +510,22 @@ export class RunnerContainer extends Container {
     const activeOperation: RunnerActiveOperationRecord = {
       attemptId: input.job.request.attemptId,
       leaseGeneration: input.job.request.leaseGeneration,
+      userId: routeUserId,
+    };
+    const outboundProxyState: RunnerOutboundProxyState = {
+      attemptId: input.job.request.attemptId,
+      expiresAtMs: null,
+      leaseGeneration: input.job.request.leaseGeneration,
+      scope: "runtime",
+      token: createRunnerOutboundProxyToken(),
+      userId: routeUserId,
+    };
+    const browserVaultBackgroundProxyState: RunnerOutboundProxyState = {
+      attemptId: `browser-vault-background:${input.job.request.attemptId}`,
+      expiresAtMs: null,
+      leaseGeneration: "browser-vault-background",
+      scope: "browser_vault_background",
+      token: createRunnerOutboundProxyToken(),
       userId: routeUserId,
     };
     let completedSuccessfully = false;
@@ -478,6 +541,7 @@ export class RunnerContainer extends Container {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
+          hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
           hasRuntimeCallbackBaseUrl: runtimeCallbackBaseUrl !== null,
           readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
           workspaceAttemptId: input.job.request.attemptId,
@@ -504,6 +568,8 @@ export class RunnerContainer extends Container {
       cleanupWarmContainerOnFailure = true;
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
+      this.runnerOutboundProxyState = outboundProxyState;
+      await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       activeOperationAcquired = true;
@@ -529,9 +595,13 @@ export class RunnerContainer extends Container {
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
-            internalWorkerProxyToken: null,
+            browserVaultBackgroundProxyToken: browserVaultBackgroundProxyState.token,
+            internalWorkerProxyToken: outboundProxyState.token,
             job: input.job,
-            localInternalProxyBaseUrl: null,
+            localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
+              localInternalProxyBaseUrl,
+              userId: routeUserId,
+            }),
             runtimeCallbackBaseUrl,
           }),
           headers: {
@@ -597,10 +667,14 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         if (activeOperationAcquired) {
+          const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
+          const browserVaultBackgroundProxyInstalled = completedSuccessfully
+            ? await this.installBrowserVaultBackgroundOutboundHandlers(browserVaultBackgroundProxyState)
+            : false;
           const shouldKeepWarm = (
             completedSuccessfully
             || isWorkspaceInvocationPreemptedAbort(operationAbortController.signal.reason)
-          );
+          ) && (browserVaultBackgroundProxyInstalled || outboundProxyExpired);
           if (!shouldKeepWarm) {
             await this.stopWarmContainer({
               failClosed: true,
@@ -1066,6 +1140,116 @@ export class RunnerContainer extends Container {
     });
   }
 
+  private async installOutboundHandlers(
+    state: RunnerOutboundProxyState,
+  ): Promise<void> {
+    if (isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
+      return;
+    }
+
+    const mapping = createRunnerOutboundHandlerMapping(RUNNER_OUTBOUND_HOSTS, state);
+
+    for (let attempt = 1; attempt <= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT; attempt += 1) {
+      try {
+        await this.setOutboundByHosts(mapping);
+        if (attempt > 1) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              outboundHandlerInstallAttempt: attempt,
+              outboundHandlerInstallRetryCount: attempt - 1,
+            },
+            message: "Hosted execution container outbound handlers recovered after retry.",
+            phase: "container.ready",
+          });
+        }
+        this.installedRunnerOutboundProxyState = state;
+        return;
+      } catch (error) {
+        if (
+          attempt >= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT
+          || !isTransientOutboundHandlerInstallError(error)
+        ) {
+          throw error;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            outboundHandlerInstallAttempt: attempt,
+            outboundHandlerInstallRetryDelayMs: OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS,
+          },
+          error,
+          level: "warn",
+          message:
+            "Hosted execution container outbound handler installation hit a transient sidecar error; retrying.",
+          phase: "container.ready",
+        });
+        await sleep(OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  private async installBrowserVaultBackgroundOutboundHandlers(
+    state: RunnerOutboundProxyState,
+  ): Promise<boolean> {
+    const expiringState: RunnerOutboundProxyState = {
+      ...state,
+      expiresAtMs: Date.now() + BROWSER_VAULT_BACKGROUND_PROXY_TTL_MS,
+    };
+    const mapping = createRunnerOutboundHandlerMapping(
+      [
+        CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
+        CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+      ],
+      expiringState,
+    );
+
+    try {
+      await this.setOutboundByHosts(mapping);
+      this.runnerOutboundProxyState = expiringState;
+      this.installedRunnerOutboundProxyState = expiringState;
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "warn",
+        message: "Hosted execution container could not install browser-vault background outbound handlers.",
+        phase: "container.ready",
+        userId: state.userId,
+      });
+      return false;
+    }
+  }
+
+  private async expireOutboundProxyState(
+    state: RunnerOutboundProxyState,
+  ): Promise<boolean> {
+    if (isSameRunnerOutboundProxyState(this.runnerOutboundProxyState, state)) {
+      this.runnerOutboundProxyState = null;
+    }
+
+    if (!isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
+      return true;
+    }
+
+    try {
+      await this.setOutboundByHosts({});
+      this.installedRunnerOutboundProxyState = null;
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        error,
+        level: "error",
+        message: "Hosted execution container failed to expire outbound handlers.",
+        phase: "failed",
+      });
+      return false;
+    }
+  }
+
   private async destroyIfRunning(input: {
     failClosed?: boolean;
   } = {}): Promise<boolean> {
@@ -1173,6 +1357,8 @@ export class RunnerContainer extends Container {
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
     this.pendingIdleCheckpoint = null;
+    this.runnerOutboundProxyState = null;
+    this.installedRunnerOutboundProxyState = null;
     const hadRunnerControlToken =
       this.runnerControlToken !== null || (await this.readRunnerControlToken()) !== null;
     if (hadRunnerControlToken) {
@@ -1295,6 +1481,10 @@ export class RunnerContainer extends Container {
 }
 
 export class DeploySmokeRunnerContainer extends RunnerContainer {}
+
+RunnerContainer.outboundHandlers = {
+  [RUNNER_OUTBOUND_HANDLER_METHOD]: createRunnerOutboundHandler(),
+};
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
@@ -1759,6 +1949,20 @@ function requireRunnerRuntimeCallbackBaseUrl(
   );
 }
 
+function createChildLocalInternalProxyBaseUrl(input: {
+  localInternalProxyBaseUrl: string | null;
+  userId: string;
+}): string | null {
+  if (!input.localInternalProxyBaseUrl) {
+    return null;
+  }
+
+  return buildLocalInternalProxyRouteBaseUrl({
+    baseUrl: input.localInternalProxyBaseUrl,
+    userId: input.userId,
+  }).toString();
+}
+
 function readRunnerContainerUserRunnerStub(
   env: RunnerContainerEnvironmentSource,
   userId: string,
@@ -1898,6 +2102,152 @@ function parseHostedExecutionContainerInvokeInput(
     job,
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId,
+  };
+}
+
+function createRunnerOutboundHandler() {
+  return async (
+    request: Request,
+    env: RunnerOutboundEnvironmentSource,
+    ctx: RunnerOutboundHandlerContext,
+  ): Promise<Response> => {
+    const userId = readOptionalRunnerContextString(ctx, "userId");
+    const token = readOptionalRunnerContextString(ctx, "internalWorkerProxyToken");
+    if (!userId || !token) {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerOutboundRequest(
+      request,
+      env,
+      userId,
+      token,
+      {
+        proxyAttemptId: readOptionalRunnerContextString(ctx, "attemptId"),
+        proxyExpiresAtMs: readOptionalRunnerContextNumber(ctx, "expiresAtMs"),
+        proxyLeaseGeneration: readOptionalRunnerContextString(ctx, "leaseGeneration"),
+        proxyScope: readRunnerOutboundProxyScope(ctx),
+      },
+    );
+  };
+}
+
+function readOptionalRunnerContextString(
+  ctx: RunnerOutboundHandlerContext,
+  key: "attemptId" | "internalWorkerProxyToken" | "leaseGeneration" | "userId",
+): string | null {
+  const value = ctx.params?.[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readOptionalRunnerContextNumber(
+  ctx: RunnerOutboundHandlerContext,
+  key: "expiresAtMs",
+): number | null {
+  const value = ctx.params?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readRunnerOutboundProxyScope(
+  ctx: RunnerOutboundHandlerContext,
+): RunnerOutboundProxyState["scope"] | undefined {
+  const value = ctx.params?.scope;
+  if (value === "browser_vault_background" || value === "runtime") {
+    return value;
+  }
+  return undefined;
+}
+
+function createRunnerOutboundHandlerMapping(
+  hosts: readonly string[],
+  state: RunnerOutboundProxyState,
+): Record<string, { method: typeof RUNNER_OUTBOUND_HANDLER_METHOD; params: Record<string, unknown> }> {
+  const mapping: Record<string, { method: typeof RUNNER_OUTBOUND_HANDLER_METHOD; params: Record<string, unknown> }> = {};
+  for (const host of hosts) {
+    mapping[host] = {
+      method: RUNNER_OUTBOUND_HANDLER_METHOD,
+      params: {
+        attemptId: state.attemptId,
+        expiresAtMs: state.expiresAtMs,
+        internalWorkerProxyToken: state.token,
+        leaseGeneration: state.leaseGeneration,
+        scope: state.scope,
+        userId: state.userId,
+      },
+    };
+  }
+  return mapping;
+}
+
+interface RunnerOutboundProxyState {
+  attemptId: string;
+  expiresAtMs: number | null;
+  leaseGeneration: string;
+  scope: "browser_vault_background" | "runtime";
+  token: string;
+  userId: string;
+}
+
+function createRunnerOutboundProxyToken(): string {
+  return crypto.randomUUID();
+}
+
+function isSameRunnerOutboundProxyState(
+  left: RunnerOutboundProxyState | null,
+  right: RunnerOutboundProxyState,
+): boolean {
+  return left !== null
+    && left.attemptId === right.attemptId
+    && left.expiresAtMs === right.expiresAtMs
+    && left.leaseGeneration === right.leaseGeneration
+    && left.scope === right.scope
+    && left.token === right.token
+    && left.userId === right.userId;
+}
+
+function isRunnerOutboundProxyStateMatch(
+  state: RunnerOutboundProxyState | null,
+  input: {
+    attemptId?: string;
+    leaseGeneration?: string;
+    token: string;
+    userId?: string;
+  },
+): boolean {
+  return readRunnerOutboundProxyTokenContext(state, input) !== null;
+}
+
+function readRunnerOutboundProxyTokenContext(
+  state: RunnerOutboundProxyState | null,
+  input: {
+    attemptId?: string;
+    leaseGeneration?: string;
+    token: string;
+    userId?: string;
+  },
+): RunnerOutboundProxyTokenContext | null {
+  if (!state || state.token !== input.token) {
+    return null;
+  }
+  if (input.attemptId && state.attemptId !== input.attemptId) {
+    return null;
+  }
+  if (input.leaseGeneration && state.leaseGeneration !== input.leaseGeneration) {
+    return null;
+  }
+  if (input.userId && state.userId !== input.userId) {
+    return null;
+  }
+  if (state.expiresAtMs !== null && state.expiresAtMs <= Date.now()) {
+    return null;
+  }
+  return {
+    attemptId: state.attemptId,
+    expiresAtMs: state.expiresAtMs,
+    leaseGeneration: state.leaseGeneration,
+    scope: state.scope,
+    token: state.token,
+    userId: state.userId,
   };
 }
 
@@ -2241,6 +2591,17 @@ function readStrictPositiveIntegerEnv(raw: string): number {
 function isMissingRunnerContainerError(error: unknown): boolean {
   const message = readErrorMessage(error);
   return message !== null && message.includes("No such container");
+}
+
+function isTransientOutboundHandlerInstallError(error: unknown): boolean {
+  const message = readErrorMessage(error);
+  return message !== null
+    && (
+      message.includes("sidecar")
+      || message.includes("connect")
+      || message.includes("ECONNREFUSED")
+      || message.includes("not ready")
+    );
 }
 
 function readErrorMessage(error: unknown): string | null {

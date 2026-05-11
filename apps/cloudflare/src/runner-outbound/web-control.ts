@@ -12,6 +12,7 @@ import {
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -34,15 +35,30 @@ import {
 
 const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
+interface RunnerOutboundProxyContext {
+  proxyScope?: "browser_vault_background" | "runtime";
+}
+
 export async function handleRunnerWebControlRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  proxyContext?: RunnerOutboundProxyContext;
   request: Request;
   url: URL;
   userId: string;
 }): Promise<Response> {
   if (input.request.method !== "GET" && input.request.method !== "POST") {
     return methodNotAllowed();
+  }
+
+  if (
+    input.proxyContext?.proxyScope === "browser_vault_background"
+    && (
+      input.request.method !== "POST"
+      || input.url.pathname !== HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
+    )
+  ) {
+    return notFound();
   }
 
   if (input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {

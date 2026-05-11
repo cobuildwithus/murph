@@ -56,6 +56,7 @@ export interface HostedRuntimeBrowserVaultReplicaPort {
     replicaRef: HostedBrowserVaultReplicaRef;
   }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {
+    expectedReplicaSourceHash?: string | null;
     replica: unknown;
   }): Promise<HostedBrowserVaultReplicaRef>;
 }

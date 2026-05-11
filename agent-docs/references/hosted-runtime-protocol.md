@@ -102,14 +102,15 @@ without raw payload duplication. Inbox capture and parser state remain useful
 projections for search, display, attachment enrichment, and debugging, but
 hosted callers must not stage hidden runtime-only inbox rows to make Codex
 admission succeed.
-Invocation-local Worker routes such as artifact writes, browser-vault replica
-writes, provider effects, and mailbox payload decode authorize the current
-runner by runtime write-fence identity (`attemptId`, `generation`, and
-`userId`). The transport still carries the generation in the historical
-`leaseGeneration` header until the 2026-05-25 compatibility deletion.
-`workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
-stay on the checkpoint path rather than becoming generic side-effect
-authorization.
+Invocation-local Worker routes such as artifact writes, provider effects, and
+mailbox payload decode authorize the current runner by runtime write-fence
+identity (`attemptId`, `generation`, and `userId`). Browser-vault replica writes
+normally use that same write fence, with one narrow exception for the
+warm-container background refresh token described below. The transport still
+carries the generation in the historical `leaseGeneration` header until the
+2026-05-25 compatibility deletion. `workspaceVersion` is the workspace
+checkpoint compare-and-swap guard and must stay on the checkpoint path rather
+than becoming generic side-effect authorization.
 Legacy active-invocation heartbeat and container-stopped methods are inert
 compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus the Durable
@@ -315,11 +316,20 @@ restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. Foreground work may schedule refresh as ordinary runtime work, but idle/full
-checkpoints write only the workspace snapshot ref; they do not publish browser-vault
-replicas. Browser-vault replica writes require the active runtime write fence and
-publish the latest replica ref separately, without changing the workspace checkpoint
-version.
+state. Foreground work marks refresh dirty from canonical write receipts, but
+idle/full checkpoints write only the workspace snapshot ref; they do not publish
+browser-vault replicas. A successful foreground hosted invocation may leave the
+warm container with a scoped browser-vault background proxy token. The container
+entrypoint then schedules a separate child only when the local dirty marker is
+present, and the next foreground invocation kills that child before accepting new
+work. The background child can write encrypted replicas and publish the latest
+replica ref only; it cannot checkpoint workspaces, call provider effects, mutate
+mailboxes, write artifacts, or access general web-control routes. Replica build
+uses a stable hash over canonical query sources, excluding mtimes, user ids,
+workspace ids, and `.runtime` state. If the query-source hash changes during
+build, the child discards the replica and leaves the marker dirty for a later
+attempt. Browser-vault replica publish changes only the latest replica ref and
+does not change the workspace checkpoint version.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

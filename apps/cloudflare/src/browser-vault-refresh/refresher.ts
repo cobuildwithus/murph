@@ -1,166 +1,148 @@
-import { createHash } from "node:crypto";
-
 import {
-  createHostedBrowserVaultReplicaRefreshFromWorkspace,
-  type HostedBrowserVaultReplicaContentSummary,
-  type HostedBrowserVaultReplicaRestoreSummary,
-  type HostedBrowserVaultReplicaSourceSummary,
+  createHostedBrowserVaultReplicaForSourceState,
+  hashHostedBrowserVaultQuerySources,
+  markHostedBrowserVaultRefreshClean,
+  markHostedBrowserVaultRefreshFailed,
+  readHostedBrowserVaultRefreshState,
+} from "@murphai/assistant-runtime";
+import type {
+  HostedRuntimeBrowserVaultReplicaPort,
 } from "@murphai/assistant-runtime";
 import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedWorkspaceState,
-} from "@murphai/hosted-execution/runtime-control";
-
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
   measureHostedBrowserVaultReplicaBytes,
 } from "../browser-vault-limits.ts";
-import type {
-  buildHostedExecutionRuntimePlatform,
-} from "../runtime-platform.ts";
 
-type HostedRuntimePlatform = ReturnType<typeof buildHostedExecutionRuntimePlatform>;
-
-export type BrowserVaultReplicaRefreshResult =
+export type BrowserVaultBackgroundRefreshResult =
   | {
       byteLength: number;
-      content: HostedBrowserVaultReplicaContentSummary;
       replicaRef: HostedBrowserVaultReplicaRef;
-      restore: HostedBrowserVaultReplicaRestoreSummary;
-      source: HostedBrowserVaultReplicaSourceSummary;
+      sourceHash: string;
       status: "published";
     }
   | {
+      sourceHash: string;
+      status: "already_published";
+    }
+  | {
+      status: "not_dirty";
+    }
+  | {
+      nextAttemptAt: string;
+      status: "backoff";
+    }
+  | {
+      status: "source_changed_during_build";
+    }
+  | {
       byteLength: number;
-      content: HostedBrowserVaultReplicaContentSummary;
       maxBytes: number;
-      restore: HostedBrowserVaultReplicaRestoreSummary;
-      source: HostedBrowserVaultReplicaSourceSummary;
+      sourceHash: string;
       status: "refresh_failed_too_large";
     }
   | {
-      content: HostedBrowserVaultReplicaContentSummary;
-      restore: HostedBrowserVaultReplicaRestoreSummary;
-      source: HostedBrowserVaultReplicaSourceSummary;
-      status: "refresh_failed_empty_source";
-    }
-  | {
-      content: HostedBrowserVaultReplicaContentSummary;
-      restore: HostedBrowserVaultReplicaRestoreSummary;
-      source: HostedBrowserVaultReplicaSourceSummary;
-      status: "refresh_skipped_no_source";
-    }
-  | {
       status: "publish_conflict";
-    }
-  | {
-      status: "workspace_missing";
     };
 
-export type BrowserVaultRefreshResult = BrowserVaultReplicaRefreshResult;
+export type BrowserVaultRefreshResult = BrowserVaultBackgroundRefreshResult;
 
-export async function refreshBrowserVaultReplicaFromLiveWorkspace(input: {
+export async function refreshBrowserVaultReplicaFromWarmVault(input: {
+  beforeSourceHashAfterBuild?: () => Promise<void> | void;
   generatedAt: string;
-  platform: HostedRuntimePlatform;
-  projectionHash: string;
+  port: HostedRuntimeBrowserVaultReplicaPort;
   signal?: AbortSignal;
-  userId: string;
   vaultRoot: string;
-  workspace: HostedWorkspaceState | null;
-}): Promise<BrowserVaultReplicaRefreshResult> {
-  if (!input.platform.browserVaultReplicaPort?.write) {
-    throw new TypeError("Browser-vault refresh requires a browser-vault replica write port.");
+}): Promise<BrowserVaultBackgroundRefreshResult> {
+  if (!input.port.publishRef) {
+    throw new TypeError("Browser-vault background refresh requires a publish port.");
   }
-  if (!input.platform.browserVaultReplicaPort.publishRef) {
-    throw new TypeError("Browser-vault refresh requires a browser-vault replica publish port.");
+
+  const state = await readHostedBrowserVaultRefreshState({ vaultRoot: input.vaultRoot });
+  if (!state.dirty) {
+    return { status: "not_dirty" };
   }
-  if (!input.workspace) {
+  if (state.nextAttemptAt && Date.parse(state.nextAttemptAt) > Date.now()) {
     return {
-      status: "workspace_missing",
+      nextAttemptAt: state.nextAttemptAt,
+      status: "backoff",
     };
   }
 
-  throwIfBrowserVaultRefreshAborted(input.signal);
-  const prepared = await createHostedBrowserVaultReplicaRefreshFromWorkspace({
-    generatedAt: input.generatedAt,
-    platform: input.platform,
-    sourceStateHash: input.projectionHash,
-    vaultRoot: input.vaultRoot,
-    workspace: input.workspace,
-  });
-  throwIfBrowserVaultRefreshAborted(input.signal);
+  try {
+    throwIfBrowserVaultRefreshAborted(input.signal);
+    const sourceBefore = await hashHostedBrowserVaultQuerySources({ vaultRoot: input.vaultRoot });
+    if (sourceBefore.hash === state.lastPublishedSourceHash) {
+      await markHostedBrowserVaultRefreshClean({
+        lastPublishedSourceHash: sourceBefore.hash,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        sourceHash: sourceBefore.hash,
+        status: "already_published",
+      };
+    }
 
-  if (prepared.source.fileCount === 0) {
-    return {
-      content: prepared.content,
-      restore: prepared.restore,
-      source: prepared.source,
-      status: "refresh_skipped_no_source",
-    };
-  }
-
-  if (!prepared.content.hasPrivateContent) {
-    return {
-      content: prepared.content,
-      restore: prepared.restore,
-      source: prepared.source,
-      status: "refresh_failed_empty_source",
-    };
-  }
-
-  const byteLength = measureHostedBrowserVaultReplicaBytes(prepared.replica);
-  if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
-    return {
-      byteLength,
-      content: prepared.content,
-      maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
-      restore: prepared.restore,
-      source: prepared.source,
-      status: "refresh_failed_too_large",
-    };
-  }
-
-  const replicaRef = await input.platform.browserVaultReplicaPort.write({
-    replica: prepared.replica,
-  });
-  assertBrowserVaultReplicaWriteResult({
-    byteLength,
-    projectionHash: input.projectionHash,
-    replicaRef,
-  });
-
-  const publish = await input.platform.browserVaultReplicaPort.publishRef({
-    replicaRef,
-  });
-  if (!publish.published) {
-    return {
-      status: "publish_conflict",
-    };
-  }
-
-  return {
-    byteLength: replicaRef.byteLength,
-    content: prepared.content,
-    replicaRef,
-    restore: prepared.restore,
-    source: prepared.source,
-    status: "published",
-  };
-}
-
-export function createLiveBrowserVaultProjectionHash(input: {
-  generatedAt: string;
-  userId: string;
-}): string {
-  return createHash("sha256")
-    .update(JSON.stringify({
+    const replica = await createHostedBrowserVaultReplicaForSourceState({
       generatedAt: input.generatedAt,
-      schema: "murph.browser-vault-live-projection.v1",
-      userId: input.userId,
-    }))
-    .digest("hex");
+      sourceStateHash: sourceBefore.hash,
+      vaultRoot: input.vaultRoot,
+    });
+    throwIfBrowserVaultRefreshAborted(input.signal);
+
+    await input.beforeSourceHashAfterBuild?.();
+    const sourceAfter = await hashHostedBrowserVaultQuerySources({ vaultRoot: input.vaultRoot });
+    if (sourceBefore.hash !== sourceAfter.hash) {
+      return {
+        status: "source_changed_during_build",
+      };
+    }
+
+    const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
+    if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
+      await markHostedBrowserVaultRefreshFailed({ vaultRoot: input.vaultRoot });
+      return {
+        byteLength,
+        maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+        sourceHash: sourceBefore.hash,
+        status: "refresh_failed_too_large",
+      };
+    }
+
+    const replicaRef = await input.port.write({
+      expectedReplicaSourceHash: sourceBefore.hash,
+      replica,
+    });
+    assertBrowserVaultReplicaWriteResult({
+      byteLength,
+      projectionHash: sourceBefore.hash,
+      replicaRef,
+    });
+    const publish = await input.port.publishRef({
+      replicaRef,
+    });
+    if (!publish.published) {
+      await markHostedBrowserVaultRefreshFailed({ vaultRoot: input.vaultRoot });
+      return { status: "publish_conflict" };
+    }
+    await markHostedBrowserVaultRefreshClean({
+      lastPublishedSourceHash: sourceBefore.hash,
+      vaultRoot: input.vaultRoot,
+    });
+    return {
+      byteLength: replicaRef.byteLength,
+      replicaRef,
+      sourceHash: sourceBefore.hash,
+      status: "published",
+    };
+  } catch (error) {
+    if (!input.signal?.aborted) {
+      await markHostedBrowserVaultRefreshFailed({ vaultRoot: input.vaultRoot });
+    }
+    throw error;
+  }
 }
 
 function assertBrowserVaultReplicaWriteResult(input: {

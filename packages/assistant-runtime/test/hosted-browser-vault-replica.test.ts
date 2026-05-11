@@ -3,6 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  HostedCanonicalWriteReceipt,
+  HostedCanonicalWriteReceiptAction,
+  HostedCanonicalWriteReceiptContentRef,
+} from "@murphai/core";
 
 vi.unmock("@murphai/contracts");
 vi.unmock("@murphai/query");
@@ -63,7 +68,101 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await rm(`${vaultRoot}-operator-home`, { force: true, recursive: true });
     }
   });
+
+  it("marks refresh dirty only for query-source canonical write receipt actions", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const {
+      markHostedBrowserVaultRefreshDirtyForReceiptBestEffort,
+      readHostedBrowserVaultRefreshState,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-dirty-"));
+    try {
+      await markHostedBrowserVaultRefreshDirtyForReceiptBestEffort({
+        now: () => "2026-05-10T00:00:00.000Z",
+        receipt: createReceipt([{
+          kind: "raw_upsert",
+          targetRelativePath: "raw/documents/2026/05/doc/file.pdf",
+          byteLength: 12,
+          effect: "copy",
+          mediaType: "application/pdf",
+          originalFileName: "file.pdf",
+          sha256: "b".repeat(64),
+          contentRef: createContentRef(),
+        }]),
+        vaultRoot,
+      });
+      expect((await readHostedBrowserVaultRefreshState({ vaultRoot })).dirty).toBe(false);
+
+      await markHostedBrowserVaultRefreshDirtyForReceiptBestEffort({
+        now: () => "2026-05-10T00:01:00.000Z",
+        receipt: createReceipt([{
+          kind: "text_upsert",
+          targetRelativePath: VAULT_LAYOUT.coreDocument,
+          byteLength: 12,
+          effect: "reuse",
+          sha256: "c".repeat(64),
+          contentRef: createContentRef(),
+        }]),
+        vaultRoot,
+      });
+      expect((await readHostedBrowserVaultRefreshState({ vaultRoot })).dirty).toBe(false);
+
+      await markHostedBrowserVaultRefreshDirtyForReceiptBestEffort({
+        now: () => "2026-05-10T00:02:00.000Z",
+        receipt: createReceipt([{
+          kind: "jsonl_append",
+          targetRelativePath: path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "2026-05.jsonl"),
+          appendByteLength: 12,
+          appendSha256: "d".repeat(64),
+          baseByteLength: 0,
+          baseSha256: "0".repeat(64),
+          contentRef: createContentRef(),
+          originalSize: 0,
+        }]),
+        vaultRoot,
+      });
+      let state = await readHostedBrowserVaultRefreshState({ vaultRoot });
+      expect(state.dirty).toBe(true);
+      expect(state.dirtyReason).toBe("query_source_changed");
+
+      await markHostedBrowserVaultRefreshDirtyForReceiptBestEffort({
+        now: () => "2026-05-10T00:03:00.000Z",
+        receipt: createReceipt([{
+          kind: "delete",
+          targetRelativePath: VAULT_LAYOUT.coreDocument,
+          existedBefore: true,
+        }]),
+        vaultRoot,
+      });
+      state = await readHostedBrowserVaultRefreshState({ vaultRoot });
+      expect(state.dirtyReason).toBe("query_source_deleted");
+      expect(state.dirtySince).toBe("2026-05-10T00:02:00.000Z");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
 });
+
+function createReceipt(actions: HostedCanonicalWriteReceiptAction[]): HostedCanonicalWriteReceipt {
+  return {
+    schema: "murph.hosted-canonical-write-receipt.v1",
+    operationId: "op_browser_vault_dirty",
+    operationType: "test",
+    summary: "test",
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z",
+    occurredAt: "2026-05-10T00:00:00.000Z",
+    committedAt: "2026-05-10T00:00:00.000Z",
+    actions,
+  };
+}
+
+function createContentRef(): HostedCanonicalWriteReceiptContentRef {
+  return {
+    byteSize: 12,
+    sha256: "a".repeat(64),
+  };
+}
 
 async function writeVaultFile(
   vaultRoot: string,

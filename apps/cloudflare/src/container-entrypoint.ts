@@ -19,6 +19,12 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
+import {
+  BrowserVaultBackgroundRefreshManager,
+} from "./browser-vault-refresh/background-manager.ts";
+import {
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
+} from "./hosted-runner-warm-workspace.ts";
 
 const HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV = "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN";
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
@@ -134,12 +140,14 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   const controlToken = normalizeOptionalString(input.controlToken);
+  const browserVaultBackground = new BrowserVaultBackgroundRefreshManager();
   let activeHostedRunnerJobCount = 0;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
+    let browserVaultBackgroundProxyToken: string | null = null;
     let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       localInternalProxyBaseUrl: null,
@@ -230,6 +238,10 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      if (isWorkspaceInvocationRequest) {
+        browserVaultBackground.abort("foreground invocation starting");
+      }
+
       if (activeHostedRunnerJobCount > 0) {
         discardUnreadRequestBody(request);
         emitHostedExecutionStructuredLog({
@@ -253,6 +265,7 @@ export async function startHostedContainerEntrypoint(input: {
           runtime,
         );
         job = parsed.job;
+        browserVaultBackgroundProxyToken = parsed.browserVaultBackgroundProxyToken;
         internalWorkerProxyToken = parsed.internalWorkerProxyToken;
         localBridge = parsed.localBridge;
       } catch (error) {
@@ -302,6 +315,24 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
+      if (browserVaultBackgroundProxyToken) {
+        const userId = readHostedExecutionRunnerJobUserId(job);
+        void browserVaultBackground.scheduleIfDirty({
+          internalWorkerProxyToken: browserVaultBackgroundProxyToken,
+          localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
+          userId,
+          vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(userId),
+        }).catch((error) => {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container failed to schedule browser-vault background refresh.",
+            phase: "container.ready",
+            userId,
+          });
+        });
+      }
     } catch (error) {
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -377,6 +408,7 @@ async function parseHostedExecutionContainerInvocationRequest(
   value: unknown,
   runtime: HostedContainerRuntimeDependencies,
 ): Promise<{
+  browserVaultBackgroundProxyToken: string | null;
   internalWorkerProxyToken: string | null;
   localBridge: HostedExecutionLocalBridgeConfig;
   job: HostedExecutionRunnerJobInput;
@@ -389,6 +421,10 @@ async function parseHostedExecutionContainerInvocationRequest(
   const assistantRuntime = await runtime.loadRuntimeContracts();
 
   return {
+    browserVaultBackgroundProxyToken: readNullableString(
+      record.browserVaultBackgroundProxyToken,
+      "Hosted container runner request.browserVaultBackgroundProxyToken",
+    ),
     internalWorkerProxyToken: readNullableString(
       record.internalWorkerProxyToken,
       "Hosted container runner request.internalWorkerProxyToken",

@@ -30,7 +30,9 @@ export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.t
 
 export interface RunnerOutboundProxyContext {
   proxyAttemptId?: string | null;
+  proxyExpiresAtMs?: number | null;
   proxyLeaseGeneration?: string | null;
+  proxyScope?: "browser_vault_background" | "runtime";
   writeFenceAuthorized?: boolean;
 }
 
@@ -53,8 +55,19 @@ export async function handleRunnerOutboundRequest(
         return authorizationError;
       }
     }
+    if (runnerOutboundProxyContextIsExpired(proxyContext)) {
+      return unauthorized();
+    }
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+    if (
+      proxyContext.proxyScope === "browser_vault_background"
+      && url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
+      && url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+    ) {
+      return notFound();
+    }
+
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
       return handleRunnerResultsRequest({
         bucket: env.BUNDLES,
@@ -70,6 +83,7 @@ export async function handleRunnerOutboundRequest(
       return handleRunnerWebControlRequest({
         env,
         environment,
+        proxyContext,
         request,
         url,
         userId,
@@ -89,6 +103,7 @@ export async function handleRunnerOutboundRequest(
         bucket: env.BUNDLES,
         env,
         environment,
+        proxyContext,
         request,
         userId,
       });
@@ -140,6 +155,12 @@ export async function handleRunnerOutboundRequest(
       ...(errorName ? { errorName } : {}),
     }, 500);
   }
+}
+
+function runnerOutboundProxyContextIsExpired(proxyContext: RunnerOutboundProxyContext): boolean {
+  return typeof proxyContext.proxyExpiresAtMs === "number"
+    && Number.isFinite(proxyContext.proxyExpiresAtMs)
+    && proxyContext.proxyExpiresAtMs <= Date.now();
 }
 
 function safeRunnerOutboundRequestUrl(value: string): URL | null {
@@ -213,6 +234,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  proxyContext: RunnerOutboundProxyContext;
   request: Request;
   userId: string;
 }): Promise<Response> {
@@ -220,7 +242,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     env: input.env,
     request: input.request,
     userId: input.userId,
-  });
+  }) || isBrowserVaultBackgroundProxy(input.proxyContext);
   if (!authorized) {
     return unauthorized();
   }
@@ -230,6 +252,11 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   });
   if (!Object.hasOwn(body, "replica")) {
     throw new TypeError("Hosted browser-vault replica write request.replica is required.");
+  }
+
+  const expectedReplicaSourceHash = readOptionalExpectedReplicaSourceHash(body);
+  if (input.proxyContext.proxyScope === "browser_vault_background" && !expectedReplicaSourceHash) {
+    return unauthorized();
   }
 
   const crypto = await resolveRunnerOutboundUserCryptoContext({
@@ -248,12 +275,35 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     userId: input.userId,
   });
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
-    expectedReplicaSourceHash: null,
+    expectedReplicaSourceHash,
     replica: body.replica,
     userId: input.userId,
   });
 
   return json({ replicaRef });
+}
+
+function isBrowserVaultBackgroundProxy(
+  proxyContext: RunnerOutboundProxyContext,
+): boolean {
+  return proxyContext.proxyScope === "browser_vault_background";
+}
+
+function readOptionalExpectedReplicaSourceHash(body: Record<string, unknown>): string | null {
+  if (!Object.hasOwn(body, "expectedReplicaSourceHash")) {
+    return null;
+  }
+
+  const value = body.expectedReplicaSourceHash;
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("Hosted browser-vault replica write request.expectedReplicaSourceHash must be a non-empty string.");
+  }
+
+  return value;
 }
 
 async function writeRequestOwnsRuntimeWriteFence(input: {

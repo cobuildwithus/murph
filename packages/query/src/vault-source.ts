@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -45,6 +46,17 @@ export interface QuerySourceManifestEntry {
   relativePath: string;
   sizeBytes: number;
   mtimeMs: number;
+}
+
+export interface CanonicalQuerySourceHashFile {
+  relativePath: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface CanonicalQuerySourceHash {
+  files: CanonicalQuerySourceHashFile[];
+  hash: string;
 }
 
 const CANONICAL_MARKDOWN_ROOTS = VAULT_QUERY_SOURCE.markdownRoots;
@@ -120,6 +132,68 @@ export async function readVaultSourceTolerant(
 export async function listCanonicalSourceManifest(
   vaultRoot: string,
 ): Promise<QuerySourceManifestEntry[]> {
+  const relativePaths = await listCanonicalQuerySourcePaths(vaultRoot);
+
+  const manifest = await Promise.all(
+    relativePaths.map(async (relativePath) => {
+      const fileStats = await stat(path.join(vaultRoot, relativePath));
+      return {
+        relativePath,
+        sizeBytes: fileStats.size,
+        mtimeMs: fileStats.mtimeMs,
+      } satisfies QuerySourceManifestEntry;
+    }),
+  );
+
+  return manifest;
+}
+
+export async function hashCanonicalQuerySources(
+  vaultRoot: string,
+): Promise<CanonicalQuerySourceHash> {
+  const relativePaths = await listCanonicalQuerySourcePaths(vaultRoot);
+  const files = await Promise.all(
+    relativePaths.map(async (relativePath) => {
+      const bytes = await readFile(path.join(vaultRoot, relativePath));
+      return {
+        relativePath,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        sizeBytes: bytes.byteLength,
+      } satisfies CanonicalQuerySourceHashFile;
+    }),
+  );
+  const hash = createHash("sha256");
+  hash.update("murph.canonical-query-sources.v1\n");
+  for (const file of files) {
+    hash.update(file.relativePath);
+    hash.update("\0");
+    hash.update(String(file.sizeBytes));
+    hash.update("\0");
+    hash.update(file.sha256);
+    hash.update("\n");
+  }
+
+  return {
+    files,
+    hash: hash.digest("hex"),
+  };
+}
+
+export function isCanonicalQuerySourcePath(relativePath: string): boolean {
+  const normalized = normalizeQuerySourceRelativePath(relativePath);
+  if (!normalized) {
+    return false;
+  }
+
+  if (CANONICAL_OPTIONAL_FILES.includes(normalized)) {
+    return true;
+  }
+
+  return CANONICAL_MARKDOWN_ROOTS.some((root) => isQuerySourcePathUnderRoot(normalized, root, ".md"))
+    || CANONICAL_JSONL_ROOTS.some((root) => isQuerySourcePathUnderRoot(normalized, root, ".jsonl"));
+}
+
+async function listCanonicalQuerySourcePaths(vaultRoot: string): Promise<string[]> {
   const relativePaths = new Set<string>();
 
   for (const relativePath of CANONICAL_OPTIONAL_FILES) {
@@ -140,18 +214,30 @@ export async function listCanonicalSourceManifest(
     }
   }
 
-  const manifest = await Promise.all(
-    [...relativePaths].sort().map(async (relativePath) => {
-      const fileStats = await stat(path.join(vaultRoot, relativePath));
-      return {
-        relativePath,
-        sizeBytes: fileStats.size,
-        mtimeMs: fileStats.mtimeMs,
-      } satisfies QuerySourceManifestEntry;
-    }),
-  );
+  return [...relativePaths].sort();
+}
 
-  return manifest;
+function normalizeQuerySourceRelativePath(relativePath: string): string | null {
+  if (typeof relativePath !== "string") {
+    return null;
+  }
+
+  const normalized = relativePath.trim().replaceAll("\\", "/");
+  if (!normalized || normalized.startsWith("/") || normalized.includes("\0")) {
+    return null;
+  }
+
+  const collapsed = path.posix.normalize(normalized);
+  if (collapsed === "." || collapsed.startsWith("../") || collapsed === "..") {
+    return null;
+  }
+
+  return collapsed;
+}
+
+function isQuerySourcePathUnderRoot(relativePath: string, root: string, extension: string): boolean {
+  const normalizedRoot = root.endsWith("/") ? root : `${root}/`;
+  return relativePath.startsWith(normalizedRoot) && relativePath.endsWith(extension);
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

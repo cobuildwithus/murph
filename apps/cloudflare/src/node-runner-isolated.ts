@@ -1,9 +1,5 @@
-import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -29,6 +25,11 @@ import {
   redactHostedRuntimeDiagnosticDetails,
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
+import {
+  clearHostedRunnerWarmLauncherRootsForTests,
+  resolveHostedRunnerWarmLauncherRoot,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
+} from "./hosted-runner-warm-workspace.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
@@ -37,10 +38,10 @@ export interface HostedExecutionIsolatedRunnerInput {
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
-const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
-const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
-
-const hostedRunnerWarmLauncherRoots = new Map<string, string>();
+export {
+  clearHostedRunnerWarmLauncherRootsForTests,
+  resolveHostedRunnerWarmWorkspaceVaultRoot,
+};
 
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
@@ -159,14 +160,6 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   }
 }
 
-export async function clearHostedRunnerWarmLauncherRootsForTests(): Promise<void> {
-  const roots = [...new Set(hostedRunnerWarmLauncherRoots.values())];
-  hostedRunnerWarmLauncherRoots.clear();
-  await Promise.all(
-    roots.map((root) => rm(root, { force: true, recursive: true })),
-  );
-}
-
 function resolveNodeRunnerChildEntry(): string {
   const builtPath = fileURLToPath(new URL("./node-runner-child.js", import.meta.url));
 
@@ -175,41 +168,6 @@ function resolveNodeRunnerChildEntry(): string {
   }
 
   return fileURLToPath(new URL("./node-runner-child.ts", import.meta.url));
-}
-
-async function resolveHostedRunnerWarmLauncherRoot(
-  job: HostedExecutionWorkspaceInvocationJobInput,
-): Promise<string> {
-  const root = resolveHostedRunnerWarmLauncherRootPath(job.request.userId);
-  const workspaceId = path.basename(root);
-  const cached = hostedRunnerWarmLauncherRoots.get(workspaceId);
-  if (cached) {
-    await mkdir(cached, { mode: 0o700, recursive: true });
-    return cached;
-  }
-
-  await mkdir(root, { mode: 0o700, recursive: true });
-  hostedRunnerWarmLauncherRoots.set(workspaceId, root);
-  return root;
-}
-
-export function resolveHostedRunnerWarmWorkspaceVaultRoot(userId: string): string {
-  return path.join(resolveHostedRunnerWarmLauncherRootPath(userId), "vault");
-}
-
-function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {
-  return path.join(
-    tmpdir(),
-    HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY,
-    createHostedRunnerWarmWorkspaceId(userId),
-  );
-}
-
-function createHostedRunnerWarmWorkspaceId(userId: string): string {
-  return createHash("sha256")
-    .update(userId)
-    .digest("hex")
-    .slice(0, HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH);
 }
 
 function terminateChildProcess(pid: number | undefined): void {

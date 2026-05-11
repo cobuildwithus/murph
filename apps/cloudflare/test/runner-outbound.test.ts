@@ -20,6 +20,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -336,10 +337,267 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it.skip("records active invocation heartbeats and surfaces pending input", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "yield" as const,
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled" as const,
+      },
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true as const,
+      pendingNudge: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-1",
+          leaseGeneration: "1",
+          requestId: "hosted-workspace-invocation:workspace-invocation-1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "workspace-invocation-1",
+          "x-hosted-runtime-lease-generation": "1",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      },
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
 
+  it.skip("records body-only active invocation heartbeats for warm runners", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-1",
+          leaseGeneration: "1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
 
+  it.skip("records header-only active invocation heartbeats when the bridge drops the body", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-runtime-attempt-id": "workspace-invocation-1",
+          "x-hosted-runtime-lease-generation": "1",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
+
+  it.skip("rejects active invocation heartbeats when body and headers disagree", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn();
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-stale",
+          leaseGeneration: "1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "workspace-invocation-1",
+          "x-hosted-runtime-lease-generation": "1",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      reason: "stale_attempt",
+    });
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it.skip("records proxy-context active invocation heartbeats when the request has no body or lease headers", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true as const,
+      pendingNudge: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "workspace-invocation-1",
+        proxyLeaseGeneration: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
+      inputAvailable: false,
+      nextAlarmAt: null,
+      ok: true,
+      pendingNudge: false,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
 
   it("rejects heartbeat proxy traffic when the invocation proxy token does not match", async () => {
     const response = await handleRunnerOutboundRequest(
@@ -360,6 +618,54 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it.skip("returns non-retryable liveness rejection for malformed heartbeat payloads", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn();
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return {
+            async bindUser(userId: string) {
+              return { userId };
+            },
+            recordActiveInvocationHeartbeat,
+          };
+        },
+      },
+    });
+
+    for (const body of [
+      "{",
+      JSON.stringify({
+        attemptId: "workspace-invocation-1",
+        workspaceVersion: "0",
+      }),
+      JSON.stringify({
+        attemptId: "workspace-invocation-1",
+        requestId: "hosted-workspace-invocation:workspace-invocation-1",
+      }),
+    ]) {
+      const response = await handleRunnerOutboundRequest(
+        new Request(HEARTBEAT_URL, {
+          body,
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+          }),
+          method: "POST",
+        }),
+        env,
+        "member_123",
+        RUNNER_PROXY_TOKEN,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        reason: "malformed_request",
+      });
+    }
+
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+  });
 
   it("returns 404 for removed Cloudflare-owned device-sync runtime hosts", async () => {
     const fetchMock = vi.fn();
@@ -2494,10 +2800,255 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
+  it("writes background browser-vault refresh replicas with browser-vault-only proxy authority", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const sourceBundleHash = "d".repeat(64);
 
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica(sourceBundleHash),
+        sourceStateHash: sourceBundleHash,
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:attempt_1",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      replicaRef: expect.objectContaining({
+        replicaSchema: "murph.browser-vault-replica",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash,
+      }),
+    });
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
 
+  it("rejects background browser-vault refresh replicas without the expected source hash", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const env = createRunnerOutboundEnv(fixture.env);
+    vi.stubGlobal("fetch", fixture.fetchMock);
 
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica("c".repeat(64)),
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:missing-source-hash",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects background browser-vault refresh replicas without browser-vault proxy scope", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const sourceBundleHash = "e".repeat(64);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica(sourceBundleHash),
+        sourceStateHash: sourceBundleHash,
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:attempt_1",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "runtime",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects expired browser-vault background proxy authority", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const env = createRunnerOutboundEnv(fixture.env);
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaRefreshWriteRequest({
+        replica: createBrowserVaultReplica("1".repeat(64)),
+        sourceStateHash: "1".repeat(64),
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:expired",
+        proxyExpiresAtMs: Date.now() - 1,
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-vault background authority on general web-control routes", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-runtime/log", {
+        body: JSON.stringify({
+          entries: [],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:web-control-log",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-vault background authority on mailbox payload decode", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`, {
+        body: JSON.stringify({}),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:mailbox-decode",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-vault background authority on workspace reads", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      Response.json({
+        fetchedAt: "2026-04-26T00:00:05.000Z",
+        workspace: null,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:workspace-read",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows browser-vault background authority to publish the latest replica ref", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        published: false,
+        workspace: null,
+      }, {
+        status: 409,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH}`, {
+        body: JSON.stringify({
+          replicaRef: createBrowserVaultReplicaRef("live-refresh"),
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "browser-vault-background:attempt_1",
+        proxyLeaseGeneration: "browser-vault-background",
+        proxyScope: "browser_vault_background",
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 
   it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
@@ -3204,6 +3755,26 @@ function createBrowserVaultReplicaWriteRequest(input: {
   });
 }
 
+function createBrowserVaultReplicaRefreshWriteRequest(input: {
+  replica: unknown;
+  sourceStateHash?: string;
+}): Request {
+  return new Request("http://browser-vault.worker/replicas", {
+    body: JSON.stringify({
+      ...(input.sourceStateHash
+        ? {
+            expectedReplicaSourceHash: input.sourceStateHash,
+          }
+        : {}),
+      replica: input.replica,
+    }),
+    headers: createRunnerProxyHeaders({
+      "content-type": "application/json; charset=utf-8",
+    }),
+    method: "POST",
+  });
+}
+
 function createBrowserVaultReplica(sourceBundleHash: string) {
   return {
     generatedAt: "2026-04-26T00:00:00.000Z",
@@ -3213,6 +3784,20 @@ function createBrowserVaultReplica(sourceBundleHash: string) {
       sourceBundleHash,
     },
   };
+}
+
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "runner-outbound-test",
+    generatedAt: "2026-04-26T00:00:00.000Z",
+    keyId: "browser-key-runner-outbound",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:runner-outbound",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
 }
 
 function createWorkspaceVersionAwareUserRunner(input: {

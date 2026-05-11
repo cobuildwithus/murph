@@ -7,7 +7,11 @@ import { afterEach, test } from "vitest";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 
-import { listCanonicalSourceManifest } from "../src/vault-source.ts";
+import {
+  hashCanonicalQuerySources,
+  isCanonicalQuerySourcePath,
+  listCanonicalSourceManifest,
+} from "../src/vault-source.ts";
 
 const tempRoots: string[] = [];
 
@@ -31,6 +35,40 @@ afterEach(async () => {
   await Promise.all(
     tempRoots.splice(0).map((vaultRoot) => rm(vaultRoot, { recursive: true, force: true })),
   );
+});
+
+test("hashCanonicalQuerySources is stable across mtime-only changes", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  const corePath = VAULT_LAYOUT.coreDocument;
+  await writeVaultFile(vaultRoot, corePath, "---\ntitle: Core\n---\n# Core\n");
+
+  const first = await hashCanonicalQuerySources(vaultRoot);
+  await writeVaultFile(vaultRoot, "raw/documents/2026/05/ignored.txt", "ignored\n");
+  const second = await hashCanonicalQuerySources(vaultRoot);
+
+  assert.equal(first.hash, second.hash);
+  assert.equal(first.files.length, 1);
+  const [file] = first.files;
+  assert.ok(file);
+  assert.deepEqual(first.files, [{
+    relativePath: corePath,
+    sha256: file.sha256,
+    sizeBytes: file.sizeBytes,
+  }]);
+
+  await writeVaultFile(vaultRoot, corePath, "---\ntitle: Core\n---\n# Core changed\n");
+  const third = await hashCanonicalQuerySources(vaultRoot);
+  assert.notEqual(third.hash, first.hash);
+});
+
+test("isCanonicalQuerySourcePath follows query source roots", () => {
+  assert.equal(isCanonicalQuerySourcePath(VAULT_LAYOUT.coreDocument), true);
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "2026-05.jsonl")),
+    true,
+  );
+  assert.equal(isCanonicalQuerySourcePath("raw/documents/2026/05/ignored.json"), false);
+  assert.equal(isCanonicalQuerySourcePath("../bank/core.md"), false);
 });
 
 test("listCanonicalSourceManifest uses shared vault family inclusion rules", async () => {

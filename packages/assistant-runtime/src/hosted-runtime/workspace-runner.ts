@@ -49,6 +49,9 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
+import {
+  markHostedBrowserVaultRefreshDirtyForReceiptBestEffort,
+} from "./browser-vault-replica.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -645,7 +648,12 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   input: HostedWorkspaceRunnerInput;
 }): HostedCanonicalWritePort {
   return {
-    async persistCanonicalWrite() {
+    async persistCanonicalWrite(writeInput) {
+      await markHostedBrowserVaultRefreshDirtyForReceiptBestEffort({
+        now: input.input.now,
+        receipt: writeInput.receipt,
+        vaultRoot: input.input.vaultRoot,
+      });
       await writeHostedForegroundCheckpointDeferredLog({
         checkpointPhase: "canonical_write",
         now: input.input.now,

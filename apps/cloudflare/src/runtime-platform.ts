@@ -582,10 +582,14 @@ function createCloudflareBrowserVaultReplicaPort(input: {
         }
       : {}),
     async write(writeInput: {
+      expectedReplicaSourceHash?: string | null;
       replica: unknown;
     }) {
       const payload = await fetchHostedJson({
         body: {
+          ...(writeInput.expectedReplicaSourceHash
+            ? { expectedReplicaSourceHash: writeInput.expectedReplicaSourceHash }
+            : {}),
           replica: writeInput.replica,
         },
         description: "Hosted browser-vault replica write",

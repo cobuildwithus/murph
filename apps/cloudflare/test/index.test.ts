@@ -33,9 +33,6 @@ import type {
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
-  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
-import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -483,7 +480,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("keeps the legacy active-invocation heartbeat unavailable through the local internal proxy", async () => {
+  it("preserves local internal proxy heartbeat liveness when the body is absent", async () => {
     installOidcJwksFetch();
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
       inputAvailable: true,
@@ -513,11 +510,18 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: "Not found",
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
     });
-    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "attempt_current",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
   });
 
   it("checks local internal proxy tokens against the version-scoped runner container", async () => {
@@ -581,11 +585,23 @@ describe("cloudflare worker routes", () => {
         throw new Error("Runner container should not be invoked by route tests.");
       },
       async ownsInternalWorkerProxyToken(input: {
-        leaseGeneration?: string;
         token: string;
       }): Promise<boolean> {
+        return input.token === RUNNER_PROXY_TOKEN;
+      },
+      async readInternalWorkerProxyTokenContext(input: {
+        token: string;
+      }) {
         return input.token === RUNNER_PROXY_TOKEN
-          && input.leaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION;
+          ? {
+              attemptId: "browser-vault-background:attempt_local_internal_proxy",
+              expiresAtMs: null,
+              leaseGeneration: "browser-vault-background",
+              scope: "browser_vault_background" as const,
+              token: input.token,
+              userId: "member_123",
+            }
+          : null;
       },
       async smokeHealth() {
         return {
@@ -618,7 +634,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(404);
     expect(getByName).toHaveBeenCalledWith("member_123");
   });
 
