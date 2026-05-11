@@ -20,6 +20,8 @@ import {
   formatMetricDisplayValue,
   formatTargetValue,
   isMurphAgeInputBundleMetricPointAllowed,
+  isMurphAgeModelCardProductAuthorized,
+  isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeWearableBridgeFeatureSpecs,
@@ -51,6 +53,7 @@ import {
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
+  type MurphAgeModelCardPolicy,
   type MurphAgeRiskModel,
 } from "../src/index.ts";
 
@@ -1891,6 +1894,62 @@ test("keeps Murph Age card metrics reachable while wearable research signals sta
       );
     }
   }
+});
+
+test("requires explicit validation-gate evidence before product-authorizing Murph Age cards", () => {
+  const policies = listMurphAgeModelCardPolicies();
+
+  for (const policy of policies) {
+    assert.equal(policy.validationGate.status, "blocked");
+    assert.equal(policy.validationGate.productPromotionEvidence, false);
+    assert.equal(isMurphAgeModelCardProductAuthorized(policy), false);
+    assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy), false);
+  }
+
+  const lab9Policy = assertDefined(
+    policies.find((policy) => policy.cardId === "lab9_bp_body_10y_acm_research"),
+    "lab9 policy must resolve",
+  );
+  const rawProductFlagOnly: MurphAgeModelCardPolicy = {
+    ...lab9Policy,
+    productAuthorized: true,
+    riskToAgeDisplayAuthorized: true,
+    validationGate: {
+      ...lab9Policy.validationGate,
+      productPromotionEvidence: false,
+      status: "blocked",
+    },
+  };
+  assert.equal(isMurphAgeModelCardProductAuthorized(rawProductFlagOnly), false);
+  assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(rawProductFlagOnly), false);
+
+  const productValidatedPolicy: MurphAgeModelCardPolicy = {
+    ...lab9Policy,
+    productAuthorized: true,
+    riskToAgeDisplayAuthorized: true,
+    validationGate: {
+      evidenceTiers: ["true-external-validation", "partner-aggregate-validation"],
+      productPromotionEvidence: true,
+      status: "passed",
+      summary: "Test-only product validation fixture.",
+    },
+  };
+  assert.equal(isMurphAgeModelCardProductAuthorized(productValidatedPolicy), true);
+  assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(productValidatedPolicy), true);
+
+  const riskToAgeHeldPolicy: MurphAgeModelCardPolicy = {
+    ...productValidatedPolicy,
+    riskToAgeDisplayAuthorized: false,
+  };
+  assert.equal(isMurphAgeModelCardProductAuthorized(riskToAgeHeldPolicy), true);
+  assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(riskToAgeHeldPolicy), false);
+
+  if (lab9Policy.validationGate) {
+    (lab9Policy.validationGate.evidenceTiers as string[]).push("true-external-validation");
+  }
+  const freshLab9Policy = resolveMurphAgeModelCardPolicy("lab9_bp_body_10y_acm_research");
+  assert.ok(freshLab9Policy, "fresh lab9 policy must resolve");
+  assert.equal(freshLab9Policy.validationGate.evidenceTiers.includes("true-external-validation"), false);
 });
 
 test("exposes non-score-bearing wearable bridge feature specs for research routing", () => {

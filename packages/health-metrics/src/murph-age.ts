@@ -122,6 +122,13 @@ export type MurphAgeModelCardId =
 
 export type MurphAgeScoreBearingCardId = Exclude<MurphAgeModelCardId, "wearable_context_no_risk">;
 export type MurphAgeCalculatorMode = "product" | "research";
+export type MurphAgeValidationGateStatus = "blocked" | "passed";
+export type MurphAgeValidationEvidenceTier =
+  | "internal-anchor"
+  | "murph-native-prospective-validation"
+  | "partner-aggregate-validation"
+  | "same-family-sanity"
+  | "true-external-validation";
 
 export interface MurphAgeLocalModelCardArtifact {
   cardId: MurphAgeScoreBearingCardId;
@@ -134,6 +141,13 @@ export interface MurphAgeLocalModelCardArtifactParseResult {
   warnings: MurphAgeWarning[];
 }
 
+export interface MurphAgeValidationGateSummary {
+  evidenceTiers: readonly MurphAgeValidationEvidenceTier[];
+  productPromotionEvidence: boolean;
+  status: MurphAgeValidationGateStatus;
+  summary: string;
+}
+
 export interface MurphAgeModelCardPolicy {
   acceptedBundleIds: readonly MurphAgeInputBundleId[];
   cardId: MurphAgeModelCardId;
@@ -144,6 +158,7 @@ export interface MurphAgeModelCardPolicy {
   scoreBearing: boolean;
   scoreBearingMetricKeys: readonly string[];
   scoreBearingSourceKinds: readonly string[];
+  validationGate: MurphAgeValidationGateSummary;
   wearableScoreBearingAuthorized: boolean;
 }
 
@@ -948,6 +963,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
       "waist-circumference",
     ],
     scoreBearingSourceKinds: ["measurement", "test-result"],
+    validationGate: {
+      evidenceTiers: ["internal-anchor"],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Internal research anchor only; product promotion requires external validation evidence.",
+    },
     wearableScoreBearingAuthorized: false,
   },
   {
@@ -971,6 +992,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
       "waist-circumference",
     ],
     scoreBearingSourceKinds: ["measurement", "test-result"],
+    validationGate: {
+      evidenceTiers: ["internal-anchor", "same-family-sanity"],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Transport research card only; product promotion requires external validation evidence.",
+    },
     wearableScoreBearingAuthorized: false,
   },
   {
@@ -983,6 +1010,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     scoreBearing: false,
     scoreBearingMetricKeys: [],
     scoreBearingSourceKinds: [],
+    validationGate: {
+      evidenceTiers: [],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Wearable context card is not a score-bearing Murph Age model.",
+    },
     wearableScoreBearingAuthorized: false,
   },
 ] satisfies readonly MurphAgeModelCardPolicy[];
@@ -1129,6 +1162,16 @@ export function resolveMurphAgeModelCardPolicy(
   return policy ? cloneMurphAgeModelCardPolicy(policy) : null;
 }
 
+export function isMurphAgeModelCardProductAuthorized(policy: MurphAgeModelCardPolicy): boolean {
+  return policy.productAuthorized
+    && policy.validationGate.status === "passed"
+    && policy.validationGate.productPromotionEvidence;
+}
+
+export function isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy: MurphAgeModelCardPolicy): boolean {
+  return policy.riskToAgeDisplayAuthorized && isMurphAgeModelCardProductAuthorized(policy);
+}
+
 export function resolveMurphAgeWearableShadowIncrementPolicy(
   family: MurphAgeWearableShadowIncrementFamily,
 ): MurphAgeWearableShadowIncrementPolicy | null {
@@ -1234,7 +1277,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     });
   }
 
-  if (mode === "product" && !cardPolicy.productAuthorized) {
+  if (mode === "product" && !authorization.productAuthorized) {
     warnings.push({
       code: "MODEL_CARD_NOT_AUTHORIZED",
       message: `${cardPolicy.cardId} is research-only and is not authorized as a product Murph Age calculator model.`,
@@ -2284,6 +2327,14 @@ function cloneMurphAgeModelCardPolicy(policy: MurphAgeModelCardPolicy): MurphAge
     acceptedBundleIds: [...policy.acceptedBundleIds],
     scoreBearingMetricKeys: [...policy.scoreBearingMetricKeys],
     scoreBearingSourceKinds: [...policy.scoreBearingSourceKinds],
+    validationGate: cloneMurphAgeValidationGateSummary(policy.validationGate),
+  };
+}
+
+function cloneMurphAgeValidationGateSummary(summary: MurphAgeValidationGateSummary): MurphAgeValidationGateSummary {
+  return {
+    ...summary,
+    evidenceTiers: [...summary.evidenceTiers],
   };
 }
 
@@ -2375,8 +2426,8 @@ function createMurphAgeCardPolicyAuthorization(input: {
     contextOnlyMetricKeys,
     evidenceClass: input.cardPolicy.evidenceClass,
     evidenceSummary: input.cardPolicy.evidenceSummary,
-    productAuthorized: input.cardPolicy.productAuthorized,
-    riskToAgeDisplayAuthorized: input.cardPolicy.riskToAgeDisplayAuthorized,
+    productAuthorized: isMurphAgeModelCardProductAuthorized(input.cardPolicy),
+    riskToAgeDisplayAuthorized: isMurphAgeModelCardRiskToAgeDisplayAuthorized(input.cardPolicy),
     scoreBearing: input.cardPolicy.scoreBearing,
     scoreBearingMetricKeys: [...input.cardPolicy.scoreBearingMetricKeys],
     scoreBearingSourceKinds: [...input.cardPolicy.scoreBearingSourceKinds],
