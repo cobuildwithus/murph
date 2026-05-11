@@ -2,6 +2,7 @@ import { ACTIVITY_METRICS } from "./definitions/activity.ts";
 import { BODY_METRICS } from "./definitions/body.ts";
 import { FUNCTION_METRICS } from "./definitions/function.ts";
 import { LAB_METRICS } from "./definitions/labs.ts";
+import { PROXY_METRICS } from "./definitions/proxy.ts";
 import { RECOVERY_METRICS } from "./definitions/recovery.ts";
 import { SLEEP_METRICS } from "./definitions/sleep.ts";
 import { VITAL_METRICS } from "./definitions/vitals.ts";
@@ -18,6 +19,7 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   ...SLEEP_METRICS,
   ...BODY_METRICS,
   ...FUNCTION_METRICS,
+  ...PROXY_METRICS,
   ...LAB_METRICS,
 ];
 
