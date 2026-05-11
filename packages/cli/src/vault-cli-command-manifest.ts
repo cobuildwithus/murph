@@ -83,6 +83,7 @@ import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import {
+  murphAgeInputReadinessResultSchema,
   murphAgeReportResultSchema,
   registerMurphAgeCommands,
 } from './commands/murph-age.js'
@@ -653,6 +654,14 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'none',
     rootCommandNames: ['age'],
     leafCommands: [
+      {
+        path: ['age', 'inputs'],
+        description:
+          'Return metadata-only Murph Age input readiness for labs, body metrics, blood pressure, and wearable context in the selected vault.',
+        hint:
+          'This command reports input readiness only. It does not calculate an age, expose metric values, or make product claims.',
+        output: murphAgeInputReadinessResultSchema,
+      },
       {
         path: ['age', 'report'],
         description:

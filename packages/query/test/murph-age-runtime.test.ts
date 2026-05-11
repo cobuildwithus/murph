@@ -21,6 +21,7 @@ import { test } from "vitest";
 
 import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  assessMurphAgeInputReadinessFromVault,
   calculateMurphAgeFromVaultInputBundle,
   calculateMurphAgePublicReportFromVaultInputBundle,
   calculateMurphAgeForVault,
@@ -402,6 +403,78 @@ test("calculateMurphAgeFromVaultInputBundle loads ignored local research model-c
     assert.equal(output.result?.modelId, "fixture-lab9-research-model");
     assert.equal(output.result?.authorization.evidenceClass, "research-internal");
     assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assessMurphAgeInputReadinessFromVault reports input readiness without values or point ids", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+
+    const readiness = await assessMurphAgeInputReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v1");
+    assert.equal(readiness.bundle.bundleId, "lab9-bp-body");
+    assert.equal(readiness.bundle.status, "ready");
+    assert.equal(readiness.bundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(readiness.bundle.availableFeatureKeys.includes("albumin"), true);
+    assert.equal(readiness.bundle.selectedMetricKeys.includes("albumin"), true);
+    assert.equal(readiness.contextBundles[0]?.bundleId, "wearable-context");
+    assert.equal(readiness.contextBundles[0]?.selectedMetricKeys.includes("steps"), true);
+
+    const encoded = JSON.stringify(readiness);
+    for (const forbidden of [
+      "selectedPointIds",
+      "metric-point:",
+      "\"value\"",
+      "\"unit\"",
+      vaultRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assessMurphAgeInputReadinessFromVault reports empty vault readiness without leaking paths", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const readiness = await assessMurphAgeInputReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v1");
+    assert.equal(readiness.bundle.bundleId, "insufficient");
+    assert.equal(readiness.bundle.status, "abstain");
+    assert.equal(readiness.bundle.recommendedCardId, "none");
+    assert.deepEqual(readiness.bundle.availableFeatureKeys, []);
+    assert.deepEqual(readiness.bundle.selectedMetricKeys, []);
+    assert.equal(readiness.contextBundles.length, 0);
+
+    const encoded = JSON.stringify(readiness);
+    for (const forbidden of [
+      "selectedPointIds",
+      "metric-point:",
+      "\"value\"",
+      "\"unit\"",
+      vaultRoot,
+      "ledger/events",
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

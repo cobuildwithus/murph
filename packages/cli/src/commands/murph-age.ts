@@ -5,6 +5,7 @@ import {
 } from '@murphai/operator-config/command-helpers'
 import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  assessMurphAgeInputReadinessFromVault,
   calculateMurphAgePublicReportFromVaultInputBundle,
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
@@ -32,6 +33,10 @@ const murphAgeModelCardIdSchema = z.enum([
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
   'wearable_context_no_risk',
+])
+const murphAgeRecommendedModelCardIdSchema = z.union([
+  murphAgeModelCardIdSchema,
+  z.literal('none'),
 ])
 const murphAgeWarningCodeSchema = z.enum([
   'BLOCKED_MODEL_FEATURE',
@@ -96,6 +101,43 @@ export const murphAgeModelCardStatusResultSchema = z.object({
   warnings: z.array(z.object({
     code: murphAgeWarningCodeSchema,
   })),
+})
+
+const murphAgeInputBundleIdSchema = z.enum([
+  'insufficient',
+  'lab5-bp-bmi',
+  'lab9-bp-body',
+  'wearable-context',
+])
+const murphAgeInputFeatureReadinessSchema = z.object({
+  featureKey: z.string().min(1),
+  label: z.string().min(1),
+  metricKeys: z.array(z.string().min(1)),
+  requiredFor: z.enum([
+    'lab5-fallback',
+    'lab9-mainline',
+    'optional-context',
+    'wearable-context',
+  ]),
+  selectedMetricKey: z.string().min(1).nullable(),
+  status: z.enum(['missing', 'ready']),
+})
+const murphAgeInputBundleReadinessSchema = z.object({
+  availableFeatureKeys: z.array(z.string().min(1)),
+  bundleId: murphAgeInputBundleIdSchema,
+  featureStatuses: z.array(murphAgeInputFeatureReadinessSchema),
+  missingFeatureKeys: z.array(z.string().min(1)),
+  recommendedCardId: murphAgeRecommendedModelCardIdSchema,
+  schemaVersion: z.literal('murph.age.input-bundle.v1'),
+  selectedMetricKeys: z.array(z.string().min(1)),
+  status: murphAgeInputBundleStatusSchema,
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+
+export const murphAgeInputReadinessResultSchema = z.object({
+  bundle: murphAgeInputBundleReadinessSchema,
+  contextBundles: z.array(murphAgeInputBundleReadinessSchema),
+  schemaVersion: z.literal('murph.age.input-readiness.v1'),
 })
 
 const murphAgePublicAuthorizationSchema = z.object({
@@ -307,6 +349,37 @@ export function registerMurphAgeCommands(
         chronologicalAgeYears: options.chronologicalAgeYears,
         mode: options.mode,
         sex: options.sex,
+        vaultRoot: options.vault,
+      })
+    },
+  })
+
+  age.command('inputs', {
+    description:
+      'Return metadata-only Murph Age input readiness for labs, body metrics, blood pressure, and wearable context in the selected vault.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      asOf: strictUtcTimestampSchema
+        .describe('UTC timestamp for the readiness cutoff, such as 2026-05-10T00:00:00.000Z.'),
+    }),
+    examples: [
+      {
+        description:
+          'Show which Murph Age input features are ready or missing without exposing metric values or point ids.',
+        options: {
+          asOf: '2026-05-10T00:00:00.000Z',
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'This command reports input readiness only. It does not calculate an age, expose metric values, or make product claims.',
+    output: murphAgeInputReadinessResultSchema,
+    async run({ options }) {
+      await assertInitializedVaultRoot(options.vault)
+
+      return assessMurphAgeInputReadinessFromVault({
+        asOf: options.asOf,
         vaultRoot: options.vault,
       })
     },
