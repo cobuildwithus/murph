@@ -1,6 +1,6 @@
 # Active invocation compatibility deletion window
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -65,3 +65,4 @@ Updated: 2026-05-11
   worktree state allow.
 - Expected outcomes: green focused tests and no type errors from the touched
   Cloudflare surface.
+Completed: 2026-05-11

@@ -64,25 +64,8 @@ export async function requireRunnerRuntimeWriteFence(input: {
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const validateRuntimeWriteFence = stub.validateRuntimeWriteFence
-    ?? ((legacyInput: {
-      attemptId: string;
-      generation: string;
-      userId: string;
-    }) => {
-      // Legacy deployed-caller fallback. Delete after 2026-05-25.
-      const legacy = requireRunnerOutboundUserStubMethod(
-        stub,
-        "ownsActiveInvocationLease",
-      );
-      return legacy({
-        attemptId: legacyInput.attemptId,
-        leaseGeneration: legacyInput.generation,
-        userId: legacyInput.userId,
-      });
-    });
   // Workspace version is enforced by the checkpoint route, not by invocation-local side effects.
-  const ownsWriteFence = await validateRuntimeWriteFence({
+  const ownsWriteFence = await validateRunnerRuntimeWriteFenceWithDeployFallback(stub, {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
@@ -92,6 +75,43 @@ export async function requireRunnerRuntimeWriteFence(input: {
   }
 
   return headers;
+}
+
+async function validateRunnerRuntimeWriteFenceWithDeployFallback(
+  stub: Awaited<ReturnType<typeof resolveRunnerOutboundUserRunnerStub>>,
+  input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  },
+): Promise<boolean> {
+  try {
+    const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;
+    if (typeof validateRuntimeWriteFence === "function") {
+      return await validateRuntimeWriteFence(input);
+    }
+  } catch (error) {
+    if (!isMissingRuntimeWriteFenceRpcMethod(error)) {
+      throw error;
+    }
+  }
+
+  // Legacy deployed-caller fallback. Delete after 2026-05-25.
+  const legacy = requireRunnerOutboundUserStubMethod(
+    stub,
+    "ownsActiveInvocationLease",
+  );
+  return await legacy({
+    attemptId: input.attemptId,
+    leaseGeneration: input.generation,
+    userId: input.userId,
+  });
+}
+
+function isMissingRuntimeWriteFenceRpcMethod(error: unknown): boolean {
+  return error instanceof TypeError
+    && error.message.includes("validateRuntimeWriteFence")
+    && error.message.includes("does not implement");
 }
 
 export function requireRunnerRuntimeWriteFenceHeaders(

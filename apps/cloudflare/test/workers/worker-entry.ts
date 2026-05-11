@@ -27,10 +27,10 @@ import {
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  requireRunnerActiveInvocationLeaseHeaders,
-  writeRunnerActiveInvocationLeaseHeaders,
-} from "../../src/runner-outbound/active-lease.ts";
+  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceHeaders,
+  writeRunnerRuntimeWriteFenceHeaders,
+} from "../../src/runner-outbound/write-fence.ts";
 import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
@@ -122,6 +122,15 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     workspaceVersion?: string | null;
   }): Promise<boolean> {
     return await this.runner.ownsActiveInvocationLease(input);
+  }
+
+  async validateRuntimeWriteFence(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean> {
+    return await this.runner.validateRuntimeWriteFence(input);
   }
 
   async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
@@ -388,6 +397,12 @@ function getUserRunnerStub(userId: string) {
             userId: string;
             workspaceVersion?: string | null;
           }): Promise<boolean>;
+          validateRuntimeWriteFence(input: {
+            attemptId: string;
+            generation: string;
+            userId: string;
+            workspaceVersion?: string | null;
+          }): Promise<boolean>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
           runnerStatus(): Promise<HostedRunnerStatusResponse>;
@@ -427,13 +442,13 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
     userId,
     workspaceVersion: "7",
   });
-  const leaseRequest = createLeaseLatencyRequest(lease);
+  const writeFenceRequest = createWriteFenceLatencyRequest(lease);
 
   for (let index = 0; index < warmupIterations; index += 1) {
-    requireRunnerActiveInvocationLeaseHeaders(leaseRequest);
-    await requireRunnerActiveInvocationLease({
+    requireRunnerRuntimeWriteFenceHeaders(writeFenceRequest);
+    await requireRunnerRuntimeWriteFence({
       env: readWorkerEnvironmentSource(),
-      request: leaseRequest,
+      request: writeFenceRequest,
       userId,
     });
   }
@@ -443,13 +458,13 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
   const addedSamples: number[] = [];
   for (let index = 0; index < iterations; index += 1) {
     const headerStartedAt = performance.now();
-    requireRunnerActiveInvocationLeaseHeaders(leaseRequest);
+    requireRunnerRuntimeWriteFenceHeaders(writeFenceRequest);
     const headerElapsed = performance.now() - headerStartedAt;
 
     const liveStartedAt = performance.now();
-    await requireRunnerActiveInvocationLease({
+    await requireRunnerRuntimeWriteFence({
       env: readWorkerEnvironmentSource(),
-      request: leaseRequest,
+      request: writeFenceRequest,
       userId,
     });
     const liveElapsed = performance.now() - liveStartedAt;
@@ -478,11 +493,11 @@ type LatencySummary = {
   totalMs: number;
 };
 
-function createLeaseLatencyRequest(lease: RunnerInvocationLease): Request {
+function createWriteFenceLatencyRequest(lease: RunnerInvocationLease): Request {
   const headers = new Headers();
-  writeRunnerActiveInvocationLeaseHeaders(headers, {
+  writeRunnerRuntimeWriteFenceHeaders(headers, {
     attemptId: lease.attemptId,
-    leaseGeneration: lease.leaseGeneration,
+    generation: lease.leaseGeneration,
     workspaceVersion: lease.workspaceVersion ?? "7",
   });
   return new Request("http://results.worker/__test/lease-latency", {
