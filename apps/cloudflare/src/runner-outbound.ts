@@ -32,6 +32,7 @@ export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.t
 export interface RunnerOutboundProxyContext {
   proxyAttemptId?: string | null;
   proxyLeaseGeneration?: string | null;
+  writeFenceAuthorized?: boolean;
 }
 
 export async function handleRunnerOutboundRequest(
@@ -43,13 +44,15 @@ export async function handleRunnerOutboundRequest(
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
-    const authorizationError = requireRunnerInternalProxyAuthorization(
-      request,
-      url.hostname,
-      internalWorkerProxyToken,
-    );
-    if (authorizationError) {
-      return authorizationError;
+    if (proxyContext.writeFenceAuthorized !== true) {
+      const authorizationError = requireRunnerInternalProxyAuthorization(
+        request,
+        url.hostname,
+        internalWorkerProxyToken,
+      );
+      if (authorizationError) {
+        return authorizationError;
+      }
     }
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));

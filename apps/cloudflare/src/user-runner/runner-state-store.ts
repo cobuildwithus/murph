@@ -14,7 +14,6 @@ import {
   normalizeNonNegativeInteger,
   normalizePreferredWakeAt,
   projectRunnerStateRecord,
-  stringifyRunnerDeferredCheckpointMailboxStatus,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
@@ -61,14 +60,8 @@ export type RunnerDueWork =
     }
   | {
       kind: "runtime";
-      reason: "next_wake" | "retry" | "wake_pending";
+      reason: "retry" | "wake";
       record: RunnerStateRecord;
-    }
-  | {
-      checkpointNextWakeAt: string | null;
-      kind: "idle_checkpoint";
-      record: RunnerStateRecord;
-      workspaceVersion: string;
     };
 
 export type RunnerExpiredActiveRunResult =
@@ -146,27 +139,24 @@ export class RunnerStateStore {
     resetRetry?: boolean;
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.wake_pending = 1;
+    meta.wake_at = normalizePreferredWakeAt(input.preferredWakeAt ?? new Date().toISOString())
+      ?? new Date().toISOString();
     if (input.resetRetry === true) {
-      meta.retry_at = null;
-      meta.retry_count = 0;
-      meta.retry_last_error_code = null;
+      meta.backoff_until = null;
+      meta.failure_count = 0;
       meta.last_error_at = null;
       meta.last_error_code = null;
     }
     if (input.clearIdleCheckpoint !== false) {
       this.clearIdleCheckpointMetaSync(meta);
     }
-    const nextWakeAt = normalizePreferredWakeAt(input.preferredWakeAt ?? new Date().toISOString())
-      ?? new Date().toISOString();
-    meta.next_wake_at = nextWakeAt;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
 
   async clearWakePending(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.wake_pending = 0;
+    meta.wake_at = null;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
@@ -183,21 +173,13 @@ export class RunnerStateStore {
     if (record.writeFence) {
       return { kind: "idle", record };
     }
-    if (record.wakePending) {
-      return { kind: "runtime", reason: "wake_pending", record };
-    }
-    if (record.retry.at && Date.parse(record.retry.at) <= nowMs) {
-      return { kind: "runtime", reason: "retry", record };
-    }
-    if (record.nextWakeAt && Date.parse(record.nextWakeAt) <= nowMs) {
-      return { kind: "runtime", reason: "next_wake", record };
-    }
-    if (record.idleCheckpoint && Date.parse(record.idleCheckpoint.dueAt) <= nowMs) {
+
+    const runtimeDueAt = readRuntimeDueAt(record);
+    if (runtimeDueAt && Date.parse(runtimeDueAt) <= nowMs) {
       return {
-        checkpointNextWakeAt: record.idleCheckpoint.checkpointNextWakeAt,
-        kind: "idle_checkpoint",
+        kind: "runtime",
+        reason: readRuntimeDueReason(record) ?? "wake",
         record,
-        workspaceVersion: record.idleCheckpoint.workspaceVersion,
       };
     }
     return { kind: "idle", record };
@@ -245,9 +227,7 @@ export class RunnerStateStore {
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     if (meta.active_kind === "runtime") {
-      meta.wake_pending = 0;
-      meta.retry_at = null;
-      meta.next_wake_at = null;
+      meta.wake_at = null;
     }
     this.writeMetaRowSync(meta);
 
@@ -322,14 +302,43 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    meta.retry_count = 0;
-    meta.retry_at = null;
-    meta.retry_last_error_code = null;
+    meta.failure_count = 0;
+    meta.backoff_until = null;
     meta.last_error_at = null;
     meta.last_error_code = null;
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
 
+    return {
+      completed: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
+  async clearWriteFenceIdentityAfterCompletion(input: {
+    attemptId: string;
+    finishedAt?: string | null;
+    generation: string;
+    userId: string;
+  }): Promise<{
+    completed: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const meta = this.requireMetaRowSync();
+    if (
+      meta.active_attempt_id !== input.attemptId
+      || normalizeNonNegativeInteger(meta.active_generation).toString() !== input.generation
+      || meta.user_id !== input.userId
+    ) {
+      return {
+        completed: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    this.clearActiveRunMetaSync(meta);
+    meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
+    this.writeMetaRowSync(meta);
     return {
       completed: true,
       record: this.readStateFromMetaSync(meta),
@@ -366,12 +375,12 @@ export class RunnerStateStore {
       };
     }
     const errorCode = deriveHostedExecutionErrorCode(input.error);
-    meta.last_error_at = input.finishedAt ?? new Date().toISOString();
+    const finishedAt = input.finishedAt ?? new Date().toISOString();
+    meta.last_error_at = finishedAt;
     meta.last_error_code = errorCode;
-    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
-    meta.retry_at = normalizeIsoDate(input.retryAt ?? new Date(Date.now() + 1_000).toISOString());
-    meta.retry_last_error_code = errorCode;
-    meta.wake_pending = 1;
+    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
+    meta.backoff_until = normalizeIsoDate(input.retryAt ?? new Date(Date.now() + 1_000).toISOString());
+    meta.wake_at = meta.wake_at ?? normalizeIsoDate(finishedAt);
     this.writeMetaRowSync(meta);
 
     return {
@@ -464,7 +473,7 @@ export class RunnerStateStore {
 
     const attemptId = meta.active_attempt_id;
     this.clearActiveRunMetaSync(meta);
-    meta.wake_pending = 0;
+    meta.wake_at = null;
     this.writeMetaRowSync(meta);
 
     return {
@@ -477,7 +486,10 @@ export class RunnerStateStore {
     nextWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.next_wake_at = normalizePreferredWakeAt(input.nextWakeAt ?? null);
+    meta.wake_at = earliestIsoDate(
+      meta.wake_at,
+      normalizePreferredWakeAt(input.nextWakeAt ?? null),
+    );
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
@@ -488,12 +500,12 @@ export class RunnerStateStore {
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     const errorCode = deriveHostedExecutionErrorCode(input.error);
-    meta.retry_at = normalizeIsoDate(input.retryAt);
-    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
-    meta.retry_last_error_code = errorCode;
-    meta.last_error_at = new Date().toISOString();
+    const lastErrorAt = new Date().toISOString();
+    meta.backoff_until = normalizeIsoDate(input.retryAt);
+    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
+    meta.last_error_at = lastErrorAt;
     meta.last_error_code = errorCode;
-    meta.wake_pending = 1;
+    meta.wake_at = meta.wake_at ?? lastErrorAt;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
@@ -503,40 +515,23 @@ export class RunnerStateStore {
     dueAt: string;
     workspaceVersion: string;
   }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.idle_checkpoint_due_at = normalizeIsoDate(input.dueAt);
-    meta.idle_checkpoint_workspace_version = input.workspaceVersion;
-    meta.idle_checkpoint_next_wake_at = normalizeIsoDateOrNull(input.checkpointNextWakeAt ?? null);
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
+    void input;
+    return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
   async clearIdleCheckpoint(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    this.clearIdleCheckpointMetaSync(meta);
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
+    return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
   async markDeferredCheckpointRequired(input: {
     redactedStatus: HostedRuntimeRedactedJson | null;
   }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.deferred_checkpoint_required = 1;
-    meta.deferred_checkpoint_mailbox_status_json =
-      stringifyRunnerDeferredCheckpointMailboxStatus(input.redactedStatus);
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
+    void input;
+    return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
   async clearDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.deferred_checkpoint_required = 0;
-    meta.deferred_checkpoint_mailbox_status_json = null;
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
+    return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {
@@ -658,11 +653,11 @@ export class RunnerStateStore {
     const error = new Error("Hosted runtime write fence timed out.");
     const errorCode = deriveHostedExecutionErrorCode(error);
     this.clearActiveRunMetaSync(meta);
-    meta.wake_pending = 1;
-    meta.retry_at = new Date(nowMs).toISOString();
-    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
-    meta.retry_last_error_code = errorCode;
-    meta.last_error_at = new Date(nowMs).toISOString();
+    const failedAt = new Date(nowMs).toISOString();
+    meta.wake_at = meta.wake_at ?? failedAt;
+    meta.backoff_until = failedAt;
+    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
+    meta.last_error_at = failedAt;
     meta.last_error_code = errorCode;
     return true;
   }
@@ -712,25 +707,18 @@ export class RunnerStateStore {
     const row = this.sql.exec<RunnerMetaBundleRow>(
       `SELECT
         user_id,
-        wake_pending,
-        next_wake_at,
+        wake_at,
         active_attempt_id,
         active_generation,
         active_kind,
         active_started_at,
         active_expires_at,
         active_workspace_version,
-        idle_checkpoint_due_at,
-        idle_checkpoint_workspace_version,
-        idle_checkpoint_next_wake_at,
-        retry_at,
-        retry_count,
-        retry_last_error_code,
+        backoff_until,
+        failure_count,
         last_error_at,
         last_error_code,
-        last_invocation_at,
-        deferred_checkpoint_required,
-        deferred_checkpoint_mailbox_status_json
+        last_invocation_at
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -747,47 +735,33 @@ export class RunnerStateStore {
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
-        wake_pending,
-        next_wake_at,
+        wake_at,
         active_attempt_id,
         active_generation,
         active_kind,
         active_started_at,
         active_expires_at,
         active_workspace_version,
-        idle_checkpoint_due_at,
-        idle_checkpoint_workspace_version,
-        idle_checkpoint_next_wake_at,
-        retry_at,
-        retry_count,
-        retry_last_error_code,
+        backoff_until,
+        failure_count,
         last_error_at,
         last_error_code,
-        last_invocation_at,
-        deferred_checkpoint_required,
-        deferred_checkpoint_mailbox_status_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        last_invocation_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
-      meta.wake_pending === 1 ? 1 : 0,
-      meta.next_wake_at,
+      meta.wake_at,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
       meta.active_started_at,
       meta.active_expires_at,
       meta.active_workspace_version,
-      meta.idle_checkpoint_due_at,
-      meta.idle_checkpoint_workspace_version,
-      meta.idle_checkpoint_next_wake_at,
-      meta.retry_at,
-      normalizeNonNegativeInteger(meta.retry_count),
-      meta.retry_last_error_code,
+      meta.backoff_until,
+      normalizeNonNegativeInteger(meta.failure_count),
       meta.last_error_at,
       meta.last_error_code,
       meta.last_invocation_at,
-      meta.deferred_checkpoint_required === 1 ? 1 : 0,
-      meta.deferred_checkpoint_mailbox_status_json,
     );
   }
 
@@ -817,9 +791,7 @@ export class RunnerStateStore {
   }
 
   private clearIdleCheckpointMetaSync(meta: RunnerMetaRow): void {
-    meta.idle_checkpoint_due_at = null;
-    meta.idle_checkpoint_workspace_version = null;
-    meta.idle_checkpoint_next_wake_at = null;
+    void meta;
   }
 
   private hasWriteFenceTokenSync(
@@ -865,6 +837,67 @@ export class RunnerStateStore {
 
     return sql;
   }
+}
+
+function readRuntimeDueAt(record: RunnerStateRecord): string | null {
+  if (!record.wakeAt) {
+    return null;
+  }
+  return latestIsoDate(record.wakeAt, record.backoffUntil);
+}
+
+function readRuntimeDueReason(record: RunnerStateRecord): "retry" | "wake" | null {
+  if (!record.wakeAt) {
+    return null;
+  }
+  if (!record.backoffUntil) {
+    return "wake";
+  }
+
+  const wakeMs = Date.parse(record.wakeAt);
+  const backoffMs = Date.parse(record.backoffUntil);
+  if (!Number.isFinite(wakeMs) || !Number.isFinite(backoffMs)) {
+    return "wake";
+  }
+  return backoffMs >= wakeMs ? "retry" : "wake";
+}
+
+function earliestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs < leftMs ? right : left;
+}
+
+function latestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs > leftMs ? right : left;
 }
 
 function createRuntimeWriteAttemptId(): string {

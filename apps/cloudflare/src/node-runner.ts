@@ -52,6 +52,7 @@ export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 export interface HostedWorkspaceInvocationOptions {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
+  runtimeCallbackBaseUrl?: string | null;
   signal?: AbortSignal;
 }
 
@@ -153,6 +154,7 @@ export function createHostedWorkspaceInvocationRunner(
     onBeforeRun?.();
     const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
     const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
+    const runtimeCallbackBaseUrl = options?.runtimeCallbackBaseUrl ?? null;
     const runtime = buildRuntime(input.runtime ?? {});
     const boundUserId = readHostedExecutionRunnerJobUserId(input);
     if (runMode === "in-process") {
@@ -165,14 +167,20 @@ export function createHostedWorkspaceInvocationRunner(
         commitTimeoutMs: runtime.commitTimeoutMs,
         internalWorkerProxyToken,
         localInternalProxyBaseUrl,
+        runtimeCallbackBaseUrl,
         workspaceCheckpointBridge,
       });
       const webControlFetch = internalWorkerProxyToken
+        || runtimeCallbackBaseUrl
         ? createCloudflareHostedRuntimeFetch(
             boundUserId,
             internalWorkerProxyToken,
             localInternalProxyBaseUrl,
             fetch,
+            {
+              readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+              runtimeCallbackBaseUrl,
+            },
           )
         : undefined;
       const decodeMailboxPayload = webControlFetch
@@ -211,6 +219,7 @@ export function createHostedWorkspaceInvocationRunner(
     return await runIsolated({
       internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
       localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
+      runtimeCallbackBaseUrl: options?.runtimeCallbackBaseUrl ?? null,
       job: {
         ...input,
         runtime,

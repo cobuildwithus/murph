@@ -390,6 +390,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("GET");
   });
 
+  it("routes internal runtime requests through the stable callback authority with write-fence headers", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      runtimeCallbackBaseUrl: "https://worker.example.test",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await platform.effectsPort.readRawEmailMessage("raw/message#1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "runtime callback effects port fetch");
+    expect(request.url).toBe(
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/messages/raw%2Fmessage%231",
+    );
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(request.method).toBe("GET");
+  });
+
   it("fails closed before issuing internal-host requests when the invocation proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

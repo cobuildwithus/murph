@@ -33,6 +33,7 @@ import {
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
+  runtimeCallbackBaseUrl?: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 

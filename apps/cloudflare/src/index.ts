@@ -88,6 +88,10 @@ import {
 } from "./user-runner.ts";
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
 import {
+  requireRunnerRuntimeWriteFence,
+  RunnerRuntimeWriteFenceError,
+} from "./runner-outbound/write-fence.ts";
+import {
   asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
 import {
@@ -279,6 +283,14 @@ export default {
       assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
 
       const url = new URL(request.url);
+      const runtimeCallbackResponse = await maybeHandleRuntimeCallbackRoute(
+        request,
+        url,
+        env,
+      );
+      if (runtimeCallbackResponse) {
+        return runtimeCallbackResponse;
+      }
       const localInternalProxyResponse = await maybeHandleLocalInternalProxyRoute(
         request,
         url,
@@ -1221,6 +1233,73 @@ function requireNonEmptyString(value: unknown, label: string): string {
 
 interface InternalProxyRequestInit extends RequestInit {
   duplex?: "half";
+}
+
+async function maybeHandleRuntimeCallbackRoute(
+  request: Request,
+  url: URL,
+  env: WorkerEnvironmentSource,
+): Promise<Response | null> {
+  const match =
+    /^\/__murph\/runtime-callback\/users\/(?<userId>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
+      url.pathname,
+    );
+  if (!match?.groups) {
+    return null;
+  }
+
+  const boundUserId = decodeRouteParam(match.groups.userId);
+  const targetHost = decodeRouteParam(match.groups.host);
+  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(targetHost)) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-callback-target-host-not-found",
+        routeName: "runtime-callback",
+        targetHost,
+      }, request, boundUserId),
+      level: "warn",
+      message: "Hosted worker rejected a runtime callback request for an unknown internal host.",
+      phase: "failed",
+      userId: boundUserId,
+    });
+    return notFound();
+  }
+
+  try {
+    await requireRunnerRuntimeWriteFence({
+      env,
+      request,
+      userId: boundUserId,
+    });
+  } catch (error) {
+    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
+      throw error;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-callback-write-fence-verification-failed",
+        routeName: "runtime-callback",
+        targetHost,
+      }, request, boundUserId),
+      level: "warn",
+      message: "Hosted worker rejected a runtime callback request after write-fence verification failed.",
+      phase: "failed",
+      userId: boundUserId,
+    });
+    return unauthorized();
+  }
+
+  const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
+  internalUrl.search = url.search;
+  return await handleRunnerOutboundRequest(
+    createLocalInternalProxyRequest(request, internalUrl),
+    env,
+    boundUserId,
+    null,
+    { writeFenceAuthorized: true },
+  );
 }
 
 async function maybeHandleLocalInternalProxyRoute(

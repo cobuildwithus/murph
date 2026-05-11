@@ -1,4 +1,4 @@
-import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
+import { Container, type StopParams } from "@cloudflare/containers";
 import {
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
@@ -10,15 +10,8 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
-import {
-  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
-} from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
-import {
-  buildLocalInternalProxyRouteBaseUrl,
-} from "./local-internal-proxy-route.ts";
 import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
-import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
@@ -39,17 +32,14 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
 const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
-const OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT = 5;
-const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
 const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
-const RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX = "runner-container-active-operation:v1:";
-const RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION = 1;
-const RUNNER_ACTIVE_OPERATION_EXPIRY_GRACE_MS = 5_000;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
+const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
+  "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL";
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -111,13 +101,6 @@ export interface HostedExecutionContainerNamespaceLike {
   getByName(name: string): HostedExecutionContainerStubLike;
 }
 
-type RunnerOutboundHandlerContext = OutboundHandlerContext<{
-  attemptId?: unknown;
-  internalWorkerProxyToken?: unknown;
-  leaseGeneration?: unknown;
-  userId?: unknown;
-} | undefined>;
-
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
 
@@ -154,25 +137,37 @@ interface RunnerControlTokenRecord {
   updatedAt: number;
 }
 
-type RunnerActiveOperationKind = "browser-vault-refresh" | "workspace-invocation";
-
 interface RunnerActiveOperationRecord {
   attemptId: string;
-  expiresAt: number;
-  kind: RunnerActiveOperationKind;
   leaseGeneration: string;
-  schemaVersion: typeof RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION;
-  startedAt: number;
   userId: string;
 }
 
-// Cloudflare rolls Worker code ahead of container instances, so keep the
-// worker/container outbound contract to one stable handler method.
-const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
+interface RunnerPendingIdleCheckpoint {
+  checkpointNextWakeAt: string | null;
+  job: HostedExecutionWorkspaceInvocationJobInput;
+  timeoutMs: number;
+  userId: string;
+  workspaceVersion: string;
+}
 
-const RUNNER_OUTBOUND_HOSTS = Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS);
-const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
-  "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL";
+interface RunnerContainerUserRunnerStubLike {
+  beginIdleCheckpointLease?(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{
+    attemptId: string;
+    generation: string;
+    userId: string;
+    workspaceVersion: string | null;
+  }>;
+  finishIdleCheckpointLease?(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt?: string | null;
+    userId: string;
+  }): Promise<{ completed: boolean }>;
+}
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -184,8 +179,7 @@ export class RunnerContainer extends Container {
   private lifecycleLock: Promise<void> = Promise.resolve();
   private currentLogContext: RunnerContainerLogContext | null = null;
   private runnerControlToken: string | null = null;
-  private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
-  private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
+  private pendingIdleCheckpoint: RunnerPendingIdleCheckpoint | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
 
@@ -282,44 +276,19 @@ export class RunnerContainer extends Container {
     token: string;
     userId?: string;
   }): Promise<boolean> {
-    return isRunnerOutboundProxyStateMatch(this.runnerOutboundProxyState, input);
+    void input;
+    return false;
   }
 
   override async onActivityExpired(): Promise<void> {
     await this.withLifecycleLock(async () => {
-      const now = Date.now();
-      const activeOperations = await this.readRunnerActiveOperations();
-      if (activeOperations === null) {
-        this.noteRunnerActivity("activity-expired-active-operation");
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            lifecycleStage: "activity-expired-active-operation-read-failed",
-          },
-          level: "warn",
-          message: "Hosted execution container activity expiry yielded because active operation state could not be read.",
-          phase: "container.ready",
-          userId: this.currentLogContext?.userId,
-        });
-        return;
-      }
-
-      const liveOperations = activeOperations
-        .filter((operation) => operation.expiresAt > now)
-        .sort(compareRunnerActiveOperationRecords);
-      const staleOperations = activeOperations
-        .filter((operation) => operation.expiresAt <= now)
-        .sort(compareRunnerActiveOperationRecords);
-      const activeOperation = liveOperations[0] ?? null;
+      const activeOperation = this.workspaceInvocationActiveOperation;
       if (activeOperation) {
         this.noteRunnerActivity("activity-expired-active-operation");
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
-            activeOperationAgeMs: Math.max(0, now - activeOperation.startedAt),
-            activeOperationCount: liveOperations.length,
-            activeOperationExpiresInMs: Math.max(0, activeOperation.expiresAt - now),
-            activeOperationKind: activeOperation.kind,
+            activeOperationKind: "workspace-invocation",
             lifecycleStage: "activity-expired-active-operation",
             workspaceAttemptId: activeOperation.attemptId,
           },
@@ -330,29 +299,21 @@ export class RunnerContainer extends Container {
         return;
       }
 
-      const staleOperation = staleOperations[0] ?? null;
+      const pendingIdleCheckpoint = this.pendingIdleCheckpoint;
+      if (pendingIdleCheckpoint) {
+        await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+      }
+
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          ...(staleOperation
-            ? {
-                activeOperationAgeMs: Math.max(0, now - staleOperation.startedAt),
-                activeOperationKind: staleOperation.kind,
-                activeOperationStaleCount: staleOperations.length,
-                activeOperationStaleMs: Math.max(0, now - staleOperation.expiresAt),
-                workspaceAttemptId: staleOperation.attemptId,
-              }
-            : {}),
           lifecycleStage: "activity-expired-fallback-cleanup",
         },
         message: "Hosted execution container activity expired; running fallback cleanup.",
         phase: "container.ready",
-        userId: staleOperation?.userId ?? this.currentLogContext?.userId,
+        userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
       });
       await this.stopWarmContainer({ failClosed: false });
-      for (const operation of staleOperations) {
-        await this.clearRunnerActiveOperation(operation);
-      }
     });
   }
 
@@ -454,27 +415,19 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
     options: { warmOnly?: boolean } = {},
   ): Promise<HostedExecutionRunnerJobResult> {
-    const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
-      this.environment,
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
-    );
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
+    const runtimeCallbackBaseUrl = readRunnerRuntimeCallbackBaseUrl(
+      this.environment,
+      routeUserId,
+    );
     const logContext: RunnerContainerLogContext = {
       userId: routeUserId,
     };
-    const outboundProxyState: RunnerOutboundProxyState = {
+    const activeOperation: RunnerActiveOperationRecord = {
       attemptId: input.job.request.attemptId,
       leaseGeneration: input.job.request.leaseGeneration,
-      token: createRunnerOutboundProxyToken(),
       userId: routeUserId,
     };
-    const activeOperation = createRunnerActiveOperationRecord({
-      attemptId: outboundProxyState.attemptId,
-      kind: "workspace-invocation",
-      leaseGeneration: outboundProxyState.leaseGeneration,
-      timeoutMs: input.timeoutMs,
-      userId: routeUserId,
-    });
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
     const operationAbortController = new AbortController();
@@ -488,7 +441,7 @@ export class RunnerContainer extends Container {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
+          hasRuntimeCallbackBaseUrl: runtimeCallbackBaseUrl !== null,
           readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
           workspaceAttemptId: input.job.request.attemptId,
           workspaceLeaseGeneration: input.job.request.leaseGeneration,
@@ -514,11 +467,8 @@ export class RunnerContainer extends Container {
       cleanupWarmContainerOnFailure = true;
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
-      this.runnerOutboundProxyState = outboundProxyState;
-      await this.installOutboundHandlers(outboundProxyState);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      await this.writeRunnerActiveOperation(activeOperation);
       activeOperationAcquired = true;
       this.workspaceInvocationAbortController = operationAbortController;
       this.workspaceInvocationActiveOperation = activeOperation;
@@ -542,12 +492,10 @@ export class RunnerContainer extends Container {
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
-            internalWorkerProxyToken: outboundProxyState.token,
-            localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
-              localInternalProxyBaseUrl,
-              userId: routeUserId,
-            }),
+            internalWorkerProxyToken: null,
             job: input.job,
+            localInternalProxyBaseUrl: null,
+            runtimeCallbackBaseUrl,
           }),
           headers: {
             authorization: `Bearer ${runnerControlToken}`,
@@ -592,6 +540,11 @@ export class RunnerContainer extends Container {
 
       const responsePayload = await response.json();
       const result = assertHostedExecutionRunnerJobResult(responsePayload, input.job);
+      this.rememberIdleCheckpointIfNeeded({
+        input,
+        result,
+        userId: routeUserId,
+      });
       completedSuccessfully = true;
       return result;
     } catch (error) {
@@ -607,11 +560,10 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         if (activeOperationAcquired) {
-          const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
           const shouldKeepWarm = (
             completedSuccessfully
             || isWorkspaceInvocationPreemptedAbort(operationAbortController.signal.reason)
-          ) && outboundProxyExpired;
+          );
           if (!shouldKeepWarm) {
             await this.stopWarmContainer({
               failClosed: true,
@@ -623,9 +575,6 @@ export class RunnerContainer extends Container {
           });
         }
       } finally {
-        if (activeOperationAcquired) {
-          await this.clearRunnerActiveOperation(activeOperation);
-        }
         stopRunnerActivityRenewal?.();
         this.noteRunnerActivity("invoke-finished");
         if (this.currentLogContext === logContext) {
@@ -639,6 +588,170 @@ export class RunnerContainer extends Container {
         }
       }
     }
+  }
+
+  private rememberIdleCheckpointIfNeeded(input: {
+    input: HostedExecutionContainerInvokeInput;
+    result: HostedExecutionRunnerJobResult;
+    userId: string;
+  }): void {
+    if (
+      input.input.job.kind !== HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND
+      || input.input.job.request.reason === "idle_shutdown_checkpoint"
+    ) {
+      return;
+    }
+
+    if (
+      input.result.deferredCheckpointRequired === true
+      && input.result.status !== "failed"
+    ) {
+      this.pendingIdleCheckpoint = {
+        checkpointNextWakeAt: input.result.nextWakeAt ?? null,
+        job: input.input.job,
+        timeoutMs: input.input.timeoutMs,
+        userId: input.userId,
+        workspaceVersion: input.input.job.request.workspaceVersion,
+      };
+      return;
+    }
+
+    this.pendingIdleCheckpoint = null;
+  }
+
+  private async runPendingIdleCheckpoint(
+    pending: RunnerPendingIdleCheckpoint,
+  ): Promise<void> {
+    const runnerControlToken = this.runnerControlToken ?? await this.readRunnerControlToken();
+    if (!runnerControlToken) {
+      this.pendingIdleCheckpoint = null;
+      return;
+    }
+
+    const lease = await this.beginIdleCheckpointLease(pending);
+    if (!lease) {
+      this.pendingIdleCheckpoint = null;
+      return;
+    }
+
+    let nextWakeAt = pending.checkpointNextWakeAt;
+    try {
+      const result = await this.postRunnerRequest({
+        job: {
+          ...pending.job,
+          request: {
+            attemptId: lease.attemptId,
+            checkpointNextWakeAt: pending.checkpointNextWakeAt,
+            leaseGeneration: lease.generation,
+            reason: "idle_shutdown_checkpoint",
+            userId: pending.userId,
+            workspaceVersion: pending.workspaceVersion,
+          },
+        },
+        runnerControlToken,
+        timeoutMs: pending.timeoutMs,
+        userId: pending.userId,
+      });
+      nextWakeAt = result.nextWakeAt ?? pending.checkpointNextWakeAt;
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          idleShutdownCheckpointed: Boolean(result.idleShutdownCheckpointed),
+          idleShutdownCheckpointSkipped: result.idleShutdownCheckpointSkipped ?? null,
+          workspaceAttemptId: lease.attemptId,
+        },
+        message: "Hosted execution container ran pending idle-shutdown checkpoint.",
+        phase: "checkpoint",
+        userId: pending.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted execution container idle-shutdown checkpoint failed best-effort.",
+        phase: "failed",
+        userId: pending.userId,
+      });
+    } finally {
+      this.pendingIdleCheckpoint = null;
+      await this.finishIdleCheckpointLease({
+        attemptId: lease.attemptId,
+        generation: lease.generation,
+        nextWakeAt,
+        userId: pending.userId,
+      });
+    }
+  }
+
+  private async postRunnerRequest(input: {
+    job: HostedExecutionRunnerJobInput;
+    runnerControlToken: string;
+    timeoutMs: number;
+    userId: string;
+  }): Promise<HostedExecutionRunnerJobResult> {
+    const runtimeCallbackBaseUrl = readRunnerRuntimeCallbackBaseUrl(
+      this.environment,
+      input.userId,
+    );
+    const response = await this.containerFetch(
+      RUNNER_EXECUTE_URL,
+      {
+        body: JSON.stringify({
+          internalWorkerProxyToken: null,
+          job: input.job,
+          localInternalProxyBaseUrl: null,
+          runtimeCallbackBaseUrl,
+        }),
+        headers: {
+          authorization: `Bearer ${input.runnerControlToken}`,
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(input.timeoutMs),
+      },
+      RUNNER_PORT,
+    );
+    if (!response.ok) {
+      throw await classifyHostedRunnerContainerErrorResponse(response);
+    }
+    return assertHostedExecutionRunnerJobResult(await response.json(), input.job);
+  }
+
+  private async beginIdleCheckpointLease(input: RunnerPendingIdleCheckpoint): Promise<{
+    attemptId: string;
+    generation: string;
+  } | null> {
+    const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
+    const beginIdleCheckpointLease = stub?.beginIdleCheckpointLease;
+    if (typeof beginIdleCheckpointLease !== "function") {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted execution container skipped idle-shutdown checkpoint because lease RPC is unavailable.",
+        phase: "failed",
+        userId: input.userId,
+      });
+      return null;
+    }
+    return await beginIdleCheckpointLease.call(stub, {
+      userId: input.userId,
+      workspaceVersion: input.workspaceVersion,
+    });
+  }
+
+  private async finishIdleCheckpointLease(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt: string | null;
+    userId: string;
+  }): Promise<void> {
+    const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
+    const finishIdleCheckpointLease = stub?.finishIdleCheckpointLease;
+    if (typeof finishIdleCheckpointLease !== "function") {
+      return;
+    }
+    await finishIdleCheckpointLease.call(stub, input);
   }
 
   private async ensureContainerReady(
@@ -873,96 +986,6 @@ export class RunnerContainer extends Container {
     });
   }
 
-  private async installOutboundHandlers(
-    state: RunnerOutboundProxyState,
-  ): Promise<void> {
-    if (isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
-      return;
-    }
-
-    const mapping = Object.fromEntries(
-      RUNNER_OUTBOUND_HOSTS.map((host) => [
-        host,
-        {
-          method: RUNNER_OUTBOUND_HANDLER_METHOD,
-          params: {
-            attemptId: state.attemptId,
-            internalWorkerProxyToken: state.token,
-            leaseGeneration: state.leaseGeneration,
-            userId: state.userId,
-          },
-        },
-      ]),
-    );
-
-    for (let attempt = 1; attempt <= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT; attempt += 1) {
-      try {
-        await this.setOutboundByHosts(mapping);
-        if (attempt > 1) {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            details: {
-              outboundHandlerInstallAttempt: attempt,
-              outboundHandlerInstallRetryCount: attempt - 1,
-            },
-            message: "Hosted execution container outbound handlers recovered after retry.",
-            phase: "container.ready",
-          });
-        }
-        this.installedRunnerOutboundProxyState = state;
-        return;
-      } catch (error) {
-        if (
-          attempt >= OUTBOUND_HANDLER_INSTALL_RETRY_LIMIT
-          || !isTransientOutboundHandlerInstallError(error)
-        ) {
-          throw error;
-        }
-
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            outboundHandlerInstallAttempt: attempt,
-            outboundHandlerInstallRetryDelayMs: OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS,
-          },
-          error,
-          level: "warn",
-          message:
-            "Hosted execution container outbound handler installation hit a transient sidecar error; retrying.",
-          phase: "container.ready",
-        });
-        await sleep(OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS);
-      }
-    }
-  }
-
-  private async expireOutboundProxyState(
-    state: RunnerOutboundProxyState,
-  ): Promise<boolean> {
-    if (isSameRunnerOutboundProxyState(this.runnerOutboundProxyState, state)) {
-      this.runnerOutboundProxyState = null;
-    }
-
-    if (!isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
-      return true;
-    }
-
-    try {
-      await this.setOutboundByHosts({});
-      this.installedRunnerOutboundProxyState = null;
-      return true;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "error",
-        message: "Hosted execution container failed to expire outbound handlers.",
-        phase: "failed",
-      });
-      return false;
-    }
-  }
-
   private async destroyIfRunning(input: {
     failClosed?: boolean;
   } = {}): Promise<boolean> {
@@ -1069,8 +1092,7 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
-    this.runnerOutboundProxyState = null;
-    this.installedRunnerOutboundProxyState = null;
+    this.pendingIdleCheckpoint = null;
     const hadRunnerControlToken =
       this.runnerControlToken !== null || (await this.readRunnerControlToken()) !== null;
     if (hadRunnerControlToken) {
@@ -1136,27 +1158,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async readRunnerActiveOperations(): Promise<RunnerActiveOperationRecord[] | null> {
-    try {
-      const values = await this.ctx.storage.list<unknown>({
-        prefix: RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX,
-      });
-      return Array.from(values.values())
-        .map(parseRunnerActiveOperationRecord)
-        .filter((record): record is RunnerActiveOperationRecord => record !== null);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container failed to read active operation state.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-      return null;
-    }
-  }
-
   private async writeRunnerControlToken(
     token: string,
     input?: {
@@ -1188,22 +1189,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async writeRunnerActiveOperation(record: RunnerActiveOperationRecord): Promise<void> {
-    try {
-      await this.ctx.storage.put(createRunnerActiveOperationStorageKey(record), record);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container failed to write active operation state.",
-        phase: "container.ready",
-        userId: record.userId,
-      });
-      throw new Error("Hosted runner container active operation state could not be persisted.");
-    }
-  }
-
   private async clearRunnerControlToken(): Promise<void> {
     try {
       await this.ctx.storage.delete(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
@@ -1219,28 +1204,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async clearRunnerActiveOperation(record: RunnerActiveOperationRecord): Promise<void> {
-    try {
-      const key = createRunnerActiveOperationStorageKey(record);
-      const current = parseRunnerActiveOperationRecord(
-        await this.ctx.storage.get<unknown>(key),
-      );
-      if (!current || !isSameRunnerActiveOperationRecord(current, record)) {
-        return;
-      }
-      await this.ctx.storage.delete(key);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container failed to clear active operation state.",
-        phase: "container.ready",
-        userId: record.userId,
-      });
-    }
-  }
-
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
     const next = this.lifecycleLock.then(work, work);
     this.lifecycleLock = next.then(
@@ -1252,10 +1215,6 @@ export class RunnerContainer extends Container {
 }
 
 export class DeploySmokeRunnerContainer extends RunnerContainer {}
-
-RunnerContainer.outboundHandlers = {
-  [RUNNER_OUTBOUND_HANDLER_METHOD]: createRunnerOutboundHandler(),
-};
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
@@ -1677,31 +1636,6 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
-function createRunnerOutboundHandler() {
-  return async (
-    request: Request,
-    env: unknown,
-    ctx: RunnerOutboundHandlerContext,
-  ): Promise<Response> => {
-    return handleRunnerOutboundRequest(
-      request,
-      env as RunnerOutboundEnvironmentSource,
-      requireString(ctx.params?.userId, "ctx.params.userId"),
-      requireString(
-        ctx.params?.internalWorkerProxyToken,
-        "ctx.params.internalWorkerProxyToken",
-      ),
-      {
-        proxyAttemptId: requireString(ctx.params?.attemptId, "ctx.params.attemptId"),
-        proxyLeaseGeneration: requireString(
-          ctx.params?.leaseGeneration,
-          "ctx.params.leaseGeneration",
-        ),
-      },
-    );
-  };
-}
-
 function readOptionalRunnerContainerEnvString(
   env: RunnerContainerEnvironmentSource,
   key: string,
@@ -1715,8 +1649,46 @@ function readOptionalRunnerContainerEnvString(
   return normalized.length > 0 ? normalized : null;
 }
 
-function createRunnerOutboundProxyToken(): string {
-  return crypto.randomUUID();
+function readRunnerRuntimeCallbackBaseUrl(
+  env: RunnerContainerEnvironmentSource,
+  _userId: string,
+): string | null {
+  const configured = readOptionalRunnerContainerEnvString(
+    env,
+    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV,
+  );
+  if (!configured) {
+    return null;
+  }
+
+  return ensureTrailingSlash(new URL(configured)).toString();
+}
+
+function readRunnerContainerUserRunnerStub(
+  env: RunnerContainerEnvironmentSource,
+  userId: string,
+): RunnerContainerUserRunnerStubLike | null {
+  const namespace = env.USER_RUNNER;
+  if (
+    !namespace
+    || typeof namespace !== "object"
+    || typeof (namespace as { getByName?: unknown }).getByName !== "function"
+  ) {
+    return null;
+  }
+
+  return (namespace as {
+    getByName(name: string): RunnerContainerUserRunnerStubLike;
+  }).getByName(userId);
+}
+
+function ensureTrailingSlash(value: URL): URL {
+  if (value.pathname.endsWith("/")) {
+    return value;
+  }
+  const next = new URL(value.toString());
+  next.pathname = `${next.pathname}/`;
+  return next;
 }
 
 function emitRunnerContainerLifecycleFailure(input: {
@@ -1743,20 +1715,6 @@ function emitRunnerContainerLifecycleFailure(input: {
     message: input.message,
     phase: "failed",
     userId: input.context?.userId,
-  });
-}
-
-function createChildLocalInternalProxyBaseUrl(input: {
-  localInternalProxyBaseUrl: string | null;
-  userId: string;
-}): string | null {
-  if (!input.localInternalProxyBaseUrl) {
-    return null;
-  }
-
-  return buildLocalInternalProxyRouteBaseUrl({
-    baseUrl: input.localInternalProxyBaseUrl,
-    userId: input.userId,
   });
 }
 
@@ -2115,89 +2073,6 @@ function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord
   };
 }
 
-function createRunnerActiveOperationRecord(input: {
-  attemptId: string;
-  kind: RunnerActiveOperationKind;
-  leaseGeneration: string;
-  timeoutMs: number;
-  userId: string;
-}): RunnerActiveOperationRecord {
-  const startedAt = Date.now();
-  return {
-    attemptId: input.attemptId,
-    expiresAt: startedAt + Math.max(1, input.timeoutMs) + RUNNER_ACTIVE_OPERATION_EXPIRY_GRACE_MS,
-    kind: input.kind,
-    leaseGeneration: input.leaseGeneration,
-    schemaVersion: RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION,
-    startedAt,
-    userId: input.userId,
-  };
-}
-
-function createRunnerActiveOperationStorageKey(record: RunnerActiveOperationRecord): string {
-  return `${RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX}${encodeURIComponent(record.kind)}:${
-    encodeURIComponent(record.attemptId)
-  }:${encodeURIComponent(record.leaseGeneration)}:${record.startedAt}`;
-}
-
-function parseRunnerActiveOperationRecord(value: unknown): RunnerActiveOperationRecord | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (
-    record.schemaVersion !== RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION
-    || !isRunnerActiveOperationKind(record.kind)
-    || typeof record.attemptId !== "string"
-    || record.attemptId.length === 0
-    || typeof record.leaseGeneration !== "string"
-    || record.leaseGeneration.length === 0
-    || typeof record.userId !== "string"
-    || record.userId.length === 0
-    || !isSafeNonNegativeInteger(record.startedAt)
-    || !isSafeNonNegativeInteger(record.expiresAt)
-    || record.expiresAt <= record.startedAt
-  ) {
-    return null;
-  }
-
-  return {
-    attemptId: record.attemptId,
-    expiresAt: record.expiresAt,
-    kind: record.kind,
-    leaseGeneration: record.leaseGeneration,
-    schemaVersion: RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION,
-    startedAt: record.startedAt,
-    userId: record.userId,
-  };
-}
-
-function isRunnerActiveOperationKind(value: unknown): value is RunnerActiveOperationKind {
-  return value === "browser-vault-refresh" || value === "workspace-invocation";
-}
-
-function isSameRunnerActiveOperationRecord(
-  left: RunnerActiveOperationRecord,
-  right: RunnerActiveOperationRecord,
-): boolean {
-  return left.attemptId === right.attemptId
-    && left.kind === right.kind
-    && left.leaseGeneration === right.leaseGeneration
-    && left.startedAt === right.startedAt
-    && left.userId === right.userId;
-}
-
-function compareRunnerActiveOperationRecords(
-  left: RunnerActiveOperationRecord,
-  right: RunnerActiveOperationRecord,
-): number {
-  return left.startedAt - right.startedAt
-    || left.expiresAt - right.expiresAt
-    || left.kind.localeCompare(right.kind)
-    || left.attemptId.localeCompare(right.attemptId);
-}
-
 function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
   if (!diagnostics) {
@@ -2268,18 +2143,6 @@ function readStrictPositiveIntegerEnv(raw: string): number {
   return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
-function isTransientOutboundHandlerInstallError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return [
-    "Updating sidecar egress port failed",
-    "Connecting to container port through proxy-everything failed",
-    "Monitoring container failed with: 404",
-  ].some((needle) => error.message.includes(needle));
-}
-
 function isMissingRunnerContainerError(error: unknown): boolean {
   const message = readErrorMessage(error);
   return message !== null && message.includes("No such container");
@@ -2323,41 +2186,6 @@ function parseRunnerContainerSmokeBundle(
     ...(typeof record.schemaVersion === "number" ? { schemaVersion: record.schemaVersion } : {}),
     ...(typeof record.sourceFingerprint === "string" ? { sourceFingerprint: record.sourceFingerprint } : {}),
   };
-}
-
-interface RunnerOutboundProxyState {
-  attemptId: string;
-  leaseGeneration: string;
-  token: string;
-  userId: string;
-}
-
-function isSameRunnerOutboundProxyState(
-  left: RunnerOutboundProxyState | null,
-  right: RunnerOutboundProxyState | null,
-): boolean {
-  return left !== null
-    && right !== null
-    && left.attemptId === right.attemptId
-    && left.leaseGeneration === right.leaseGeneration
-    && left.token === right.token
-    && left.userId === right.userId;
-}
-
-function isRunnerOutboundProxyStateMatch(
-  state: RunnerOutboundProxyState | null,
-  input: {
-    attemptId?: string;
-    leaseGeneration?: string;
-    token: string;
-    userId?: string;
-  },
-): boolean {
-  return state !== null
-    && state.token === input.token
-    && (input.attemptId === undefined || state.attemptId === input.attemptId)
-    && (input.leaseGeneration === undefined || state.leaseGeneration === input.leaseGeneration)
-    && (input.userId === undefined || state.userId === input.userId);
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {

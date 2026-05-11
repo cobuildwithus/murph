@@ -79,6 +79,7 @@ interface HostedContainerRuntimeDependencies {
 
 interface HostedExecutionLocalBridgeConfig {
   localInternalProxyBaseUrl: string | null;
+  runtimeCallbackBaseUrl: string | null;
 }
 
 interface HostedRunnerBundleManifestSummary {
@@ -142,6 +143,7 @@ export async function startHostedContainerEntrypoint(input: {
     let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       localInternalProxyBaseUrl: null,
+      runtimeCallbackBaseUrl: null,
     };
 
     try {
@@ -280,6 +282,7 @@ export async function startHostedContainerEntrypoint(input: {
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
         internalWorkerProxyToken,
         localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
+        runtimeCallbackBaseUrl: localBridge.runtimeCallbackBaseUrl,
         signal: requestAbort.signal,
       });
 
@@ -394,6 +397,10 @@ async function parseHostedExecutionContainerInvocationRequest(
       localInternalProxyBaseUrl: readNullableString(
         record.localInternalProxyBaseUrl,
         "Hosted container runner request.localInternalProxyBaseUrl",
+      ),
+      runtimeCallbackBaseUrl: readNullableString(
+        record.runtimeCallbackBaseUrl,
+        "Hosted container runner request.runtimeCallbackBaseUrl",
       ),
     },
     job: parseHostedExecutionRunnerJobInput(record.job, {
@@ -938,6 +945,7 @@ async function runHostedWorkspaceInvocation(
   options?: {
     internalWorkerProxyToken?: string | null;
     localInternalProxyBaseUrl?: string | null;
+    runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
@@ -951,6 +959,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   options?: {
     internalWorkerProxyToken?: string | null;
     localInternalProxyBaseUrl?: string | null;
+    runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {

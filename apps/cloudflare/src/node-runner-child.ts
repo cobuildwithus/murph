@@ -61,6 +61,7 @@ interface HostedExecutionChildDependencies {
 interface HostedExecutionChildInput {
   internalWorkerProxyToken: string | null;
   localInternalProxyBaseUrl: string | null;
+  runtimeCallbackBaseUrl: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
@@ -123,6 +124,7 @@ export async function runHostedExecutionChild(
       internalWorkerProxyToken: input.internalWorkerProxyToken,
       job: input.job,
       localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+      runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
       runWorkspaceInProcess,
     });
     emitHostedRunnerChildDebug({
@@ -163,6 +165,7 @@ async function runWorkspaceChildJob(input: {
   internalWorkerProxyToken: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
   localInternalProxyBaseUrl: string | null;
+  runtimeCallbackBaseUrl: string | null;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
@@ -172,6 +175,7 @@ async function runWorkspaceChildJob(input: {
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
     internalWorkerProxyToken: input.internalWorkerProxyToken,
     localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+    runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,
       recordCheckpoint: ({ workspaceVersion }) => {
@@ -182,12 +186,16 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
-  const webControlFetch = input.internalWorkerProxyToken
+  const webControlFetch = input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl
     ? createCloudflareHostedRuntimeFetch(
         boundUserId,
         input.internalWorkerProxyToken,
         input.localInternalProxyBaseUrl ?? null,
         fetch,
+        {
+          readCurrentLease: () => currentLease,
+          runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
+        },
       )
     : undefined;
   const decodeMailboxPayload = webControlFetch
@@ -203,7 +211,7 @@ async function runWorkspaceChildJob(input: {
     createHostedWorkspaceRuntimeBridgeJobOptions({
       ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
       platform,
-      requireMailboxPayloadDecoder: Boolean(input.internalWorkerProxyToken),
+      requireMailboxPayloadDecoder: Boolean(input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl),
       request: input.job.request,
       runtime: input.job.runtime ?? {},
       vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
@@ -254,6 +262,10 @@ function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInp
     localInternalProxyBaseUrl: readNullableString(
       record.localInternalProxyBaseUrl,
       "Hosted node runner child input.localInternalProxyBaseUrl",
+    ),
+    runtimeCallbackBaseUrl: readNullableString(
+      record.runtimeCallbackBaseUrl,
+      "Hosted node runner child input.runtimeCallbackBaseUrl",
     ),
     job: parseHostedExecutionRunnerJobInput(record.job),
   };
