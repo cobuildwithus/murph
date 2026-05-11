@@ -162,7 +162,7 @@ test('age model-cards reports local research readiness without model internals',
       vaultRoot,
     ]))
 
-    assert.equal(status.schemaVersion, 'murph.age.model-card-status.v1')
+    assert.equal(status.schemaVersion, 'murph.age.model-card-status.v2')
     assert.deepEqual(status.loadedCardIds, ['lab9_bp_body_10y_acm_research'])
     assert.deepEqual(status.researchReadyCardIds, ['lab9_bp_body_10y_acm_research'])
     assert.deepEqual(status.productReadyCardIds, [])
