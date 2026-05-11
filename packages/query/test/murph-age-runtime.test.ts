@@ -498,11 +498,22 @@ test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary w
     assert.equal(summary.wearableContext.availableFeatureFamilies.includes("recovery"), true);
     assert.equal(summary.wearableContext.availableFeatureFamilies.includes("quality"), true);
     assert.equal(summary.wearableContext.missingQualityFeatureKeys.length, 0);
+    assert.equal(summary.wearableBridge.scoreBearing, false);
+    assert.equal(summary.wearableBridge.scoreContributionAuthorized, false);
+    assert.equal(summary.wearableBridge.productAuthorized, false);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("hrv-rmssd"), true);
+    assert.equal(summary.wearableBridge.deferredFeatureKeys.includes("hrv-rmssd"), true);
+    assert.equal(summary.wearableBridge.missingFeatureKeys.includes("estimated-vo2-max"), true);
 
     const publicSummary = summarizeMurphAgeCalculatorPublicOutput(output);
     assert.equal(publicSummary.displayStatus, "context-only");
     assert.equal(publicSummary.contextOnlyMetricKeys.includes("wearable-coverage-index"), true);
     assert.equal(publicSummary.wearableContext.readyPointCount, 9);
+    assert.equal(publicSummary.wearableBridge.readyFeatureKeys.includes("hrv-rmssd"), true);
+    assert.equal(publicSummary.wearableBridge.features.some((feature) => "selectedPointIds" in feature), false);
+    assert.equal(publicSummary.wearableBridge.features.every((feature) => feature.productAuthorized === false), true);
     assert.equal("contextOnlyPointIds" in publicSummary, false);
     assert.equal("selectedScoreBearingPointIds" in publicSummary, false);
 

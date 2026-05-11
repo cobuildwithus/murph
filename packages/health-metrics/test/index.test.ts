@@ -39,6 +39,7 @@ import {
   selectMetricWindowComparison,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
+  toPublicMurphAgeDisplaySummary,
   validateMurphAgeRiskModel,
   type GoalMetricTarget,
   type MetricPoint,
@@ -2250,6 +2251,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("sleep"), true);
   assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("recovery"), true);
   assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("quality"), true);
+  assert.equal(productDefaultSummary.wearableBridge.scoreBearing, false);
+  assert.equal(productDefaultSummary.wearableBridge.scoreContributionAuthorized, false);
+  assert.equal(productDefaultSummary.wearableBridge.productAuthorized, false);
+  assert.equal(productDefaultSummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(productDefaultSummary.wearableBridge.readyFeatureKeys.includes("resting-heart-rate"), true);
+  assert.equal(productDefaultSummary.wearableBridge.missingFeatureKeys.includes("estimated-vo2-max"), true);
 
   const research = calculateMurphAgeFromInputBundle({
     asOf,
@@ -2360,10 +2367,90 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.wearableContext.uncertaintyAction, "context-only");
   assert.equal(researchSummary.wearableContext.scoreBearing, false);
   assert.equal(researchSummary.wearableContext.scoreContributionAuthorized, false);
+  assert.equal(researchSummary.wearableBridge.candidateFeatureCount, 7);
+  assert.deepEqual(researchSummary.wearableBridge.firstPriorityReadyFeatureKeys, [
+    "wearable-coverage-quality",
+    "activity-volume",
+  ]);
+  assert.deepEqual(researchSummary.wearableBridge.firstPriorityIncompleteFeatureKeys, [
+    "sedentary-time",
+  ]);
+  assert.deepEqual(researchSummary.wearableBridge.secondPriorityReadyFeatureKeys, [
+    "sleep-duration-regularity",
+    "resting-heart-rate",
+  ]);
+  assert.deepEqual(researchSummary.wearableBridge.secondPriorityIncompleteFeatureKeys, []);
+  assert.equal(researchSummary.wearableBridge.deferredFeatureKeys.includes("hrv-rmssd"), true);
+  assert.equal(researchSummary.wearableBridge.deferredFeatureKeys.includes("estimated-vo2-max"), true);
+  assert.equal(
+    researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "activity-volume")?.qualityReady,
+    true,
+  );
+  assert.equal(
+    researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "hrv-rmssd")?.status,
+    "missing",
+  );
+  assert.equal(researchSummary.wearableBridge.riskEffect, "not-estimated");
+  assert.equal(researchSummary.wearableBridge.scoreBearing, false);
+  assert.equal(researchSummary.wearableBridge.scoreContributionAuthorized, false);
+  assert.equal(researchSummary.wearableBridge.productAuthorized, false);
   const publicResearchSummary = summarizeMurphAgeCalculatorPublicOutput(research);
   assert.equal(publicResearchSummary.schemaVersion, MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION);
   assert.equal(publicResearchSummary.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(publicResearchSummary.wearableContext.readyPointCount, 7);
+  assert.equal(publicResearchSummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(publicResearchSummary.wearableBridge.productAuthorized, false);
+  assert.equal(
+    publicResearchSummary.wearableBridge.features.some((feature) => "selectedPointIds" in feature),
+    false,
+  );
+  for (const forbiddenFeatureKey of [
+    "value",
+    "unit",
+    "prediction",
+    "coefficient",
+    "contributionLogit",
+    "contributionYears",
+  ]) {
+    assert.equal(
+      publicResearchSummary.wearableBridge.features.some((feature) => forbiddenFeatureKey in feature),
+      false,
+    );
+  }
+  assert.equal(
+    publicResearchSummary.wearableBridge.features.every((feature) => feature.productAuthorized === false),
+    true,
+  );
+  const publicFromLeakyBridgeSummary = toPublicMurphAgeDisplaySummary({
+    ...researchSummary,
+    wearableBridge: {
+      ...researchSummary.wearableBridge,
+      features: researchSummary.wearableBridge.features.map((feature) => ({
+        ...feature,
+        coefficient: 1,
+        contributionLogit: 1,
+        contributionYears: 1,
+        prediction: 1,
+        selectedPointIds: ["metric-point:private-row:0"],
+        unit: "count",
+        value: 1,
+      })),
+    },
+  });
+  for (const forbiddenFeatureKey of [
+    "selectedPointIds",
+    "value",
+    "unit",
+    "prediction",
+    "coefficient",
+    "contributionLogit",
+    "contributionYears",
+  ]) {
+    assert.equal(
+      publicFromLeakyBridgeSummary.wearableBridge.features.some((feature) => forbiddenFeatureKey in feature),
+      false,
+    );
+  }
   assert.equal("contextOnlyPointIds" in publicResearchSummary, false);
   assert.equal("selectedScoreBearingPointIds" in publicResearchSummary, false);
   assert.equal("wearableShadowIncrementAssessments" in publicResearchSummary, false);
@@ -2536,6 +2623,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnlySummary.wearableContext.riskEffect, "not-estimated");
   assert.equal(wearableOnlySummary.wearableContext.scoreBearing, false);
   assert.equal(wearableOnlySummary.wearableContext.scoreContributionAuthorized, false);
+  assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
+  assert.equal(wearableOnlySummary.wearableBridge.missingFeatureKeys.includes("hrv-rmssd"), true);
 
   const thinWearableOnly = calculateMurphAgeFromInputBundle({
     asOf,
@@ -2552,6 +2642,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(thinWearableSummary.wearableContext.missingQualityFeatureKeys.includes("wearable-coverage-index"), true);
   assert.equal(thinWearableSummary.wearableContext.readyFeatureCount, 1);
   assert.equal(thinWearableSummary.wearableContext.scoreContributionAuthorized, false);
+  assert.equal(thinWearableSummary.wearableBridge.readyFeatureKeys.length, 0);
+  assert.deepEqual(thinWearableSummary.wearableBridge.partialFeatureKeys, ["activity-volume"]);
+  assert.equal(
+    thinWearableSummary.wearableBridge.features.find((feature) => feature.featureKey === "activity-volume")
+      ?.missingQualityMetricKeys.includes("wearable-valid-day-count-28d"),
+    true,
+  );
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,
