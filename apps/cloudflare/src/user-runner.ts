@@ -330,7 +330,13 @@ export class HostedUserRunner {
       return;
     }
 
-    const alarmDecision = await this.stateStore.consumeDueRunnerAlarmAndDecide(Date.now());
+    const alarmDecision = await this.stateStore.consumeDueRunnerAlarmAndDecide({
+      currentWorkerVersionId: this.currentWorkerVersionId,
+      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+      nowMs: Date.now(),
+      runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
+      runnerTimeoutMs: this.env.runnerTimeoutMs,
+    });
     record = alarmDecision.record;
 
     if (alarmDecision.kind === "idle_checkpoint" && !this.env.idleShutdownCheckpointsEnabled) {
@@ -2026,6 +2032,10 @@ export class HostedUserRunner {
   }
 
   private async runDuePendingBrowserVaultRefreshFromAlarm(userId: string): Promise<boolean> {
+    if (this.invocationLock !== null) {
+      return false;
+    }
+
     const intent = await this.readPendingBrowserVaultRefreshIntent();
     if (!intent || intent.userId !== userId) {
       return false;
@@ -2047,7 +2057,10 @@ export class HostedUserRunner {
   private async runPendingBrowserVaultRefreshBeforeFutureRunnerAlarm(
     record: RunnerStateRecord,
   ): Promise<boolean> {
-    if (hasActiveRunnerInvocation(record) || record.alarm?.kind !== "work") {
+    if (
+      this.shouldDeferBrowserVaultRefreshForForegroundWork(record)
+      || record.alarm?.kind !== "work"
+    ) {
       return false;
     }
 
@@ -2209,6 +2222,10 @@ export class HostedUserRunner {
       return null;
     }
 
+    if (this.invocationLock !== null) {
+      return null;
+    }
+
     const record = await this.tryReadStateForRetryScheduling();
     if (record && hasPendingOrActiveWork(record)) {
       return null;
@@ -2225,6 +2242,13 @@ export class HostedUserRunner {
 
   private shouldSkipBackgroundBrowserVaultRefresh(): boolean {
     return this.readWorkerStringEnvSource().MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1";
+  }
+
+  private shouldDeferBrowserVaultRefreshForForegroundWork(record: RunnerStateRecord): boolean {
+    return record.pendingWork
+      || record.pendingNudge
+      || record.active !== null
+      || this.invocationLock !== null;
   }
 
   private async preflightIdleShutdownCheckpoint(input: {

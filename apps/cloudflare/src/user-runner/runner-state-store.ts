@@ -85,6 +85,14 @@ export type RunnerDueAlarmDecision =
     record: RunnerStateRecord;
   };
 
+export interface RunnerDueAlarmDecisionInput {
+  currentWorkerVersionId?: string | null;
+  heartbeatStaleMs: number;
+  nowMs: number;
+  runnerReadyTimeoutMs: number;
+  runnerTimeoutMs: number;
+}
+
 export interface RunnerInvocationCheckpointResult {
   clearedOrphanObservation: boolean;
   recorded: boolean;
@@ -332,6 +340,7 @@ export class RunnerStateStore {
 
   async consumeDueRunnerAlarm(nowMs: number): Promise<RunnerDueAlarm> {
     const meta = this.requireMetaRowSync();
+    const hadStoredAlarm = meta.alarm_kind !== null;
     this.syncLegacyAlarmIntoV2MetaSync(meta);
     const hasPendingWork = meta.pending_work === 1 || meta.pending_nudge === 1;
     const alarm = this.readStateFromMetaSync(meta).alarm;
@@ -351,8 +360,8 @@ export class RunnerStateStore {
 
     if (alarm.kind === "work") {
       if (
-        !hasPendingWork
-        && (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)
+        (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)
+        && (!hasPendingWork || hadStoredAlarm)
       ) {
         return {
           kind: "none",
@@ -400,7 +409,13 @@ export class RunnerStateStore {
     };
   }
 
-  async consumeDueRunnerAlarmAndDecide(nowMs: number): Promise<RunnerDueAlarmDecision> {
+  async consumeDueRunnerAlarmAndDecide(
+    input: number | RunnerDueAlarmDecisionInput,
+  ): Promise<RunnerDueAlarmDecision> {
+    const decisionInput = typeof input === "number"
+      ? null
+      : input;
+    const nowMs = typeof input === "number" ? input : input.nowMs;
     const dueAlarm = await this.consumeDueRunnerAlarm(nowMs);
     if (dueAlarm.kind === "none") {
       return {
@@ -416,6 +431,72 @@ export class RunnerStateStore {
         kind: "work",
         reason: hasPendingForegroundWork(dueAlarm.record) ? "nudge" : "alarm",
         record: dueAlarm.record,
+      };
+    }
+
+    if (dueAlarm.record.active !== null) {
+      if (!decisionInput) {
+        return {
+          activeInvocationPresent: true,
+          kind: "none",
+          record: dueAlarm.record,
+        };
+      }
+
+      const recovery = await this.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: decisionInput.currentWorkerVersionId ?? null,
+        heartbeatStaleMs: decisionInput.heartbeatStaleMs,
+        nowMs,
+        readyTimeoutMs: decisionInput.runnerReadyTimeoutMs,
+        timeoutMs: decisionInput.runnerTimeoutMs,
+      });
+      if (!recovery.cleared) {
+        const meta = this.requireMetaRowSync();
+        const activeRecord = this.readStateFromMetaSync(meta);
+        if (
+          activeRecord.active !== null
+          && recovery.nextRecoveryAt
+          && this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint"
+        ) {
+          this.setAlarmMetaSync(meta, {
+            dueAt: recovery.nextRecoveryAt,
+            kind: "work",
+            workspaceVersion: null,
+          });
+          this.writeMetaRowSync(meta);
+        }
+        return {
+          activeInvocationPresent: activeRecord.active !== null,
+          kind: "none",
+          record: this.readStateFromMetaSync(meta),
+        };
+      }
+
+      if (hasPendingForegroundWork(recovery.record)) {
+        const meta = this.requireMetaRowSync();
+        this.setAlarmMetaSync(meta, {
+          dueAt: new Date(nowMs).toISOString(),
+          kind: "work",
+          workspaceVersion: null,
+        });
+        this.writeMetaRowSync(meta);
+        return {
+          dueWake: true,
+          kind: "work",
+          reason: "nudge",
+          record: this.readStateFromMetaSync(meta),
+        };
+      }
+
+      const meta = this.requireMetaRowSync();
+      if (this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint") {
+        this.clearAlarmMetaSync(meta);
+        this.writeMetaRowSync(meta);
+      }
+      return {
+        activeInvocationPresent: false,
+        kind: "none",
+        record: this.readStateFromMetaSync(meta),
       };
     }
 
@@ -570,6 +651,10 @@ export class RunnerStateStore {
     meta.active_invocation_id = attemptId;
     meta.active_invocation_expires_at = expiresAt;
     meta.active_invocation_container_stopped_at = null;
+    meta.active_invocation_consumed_pending_work = input.consumePendingNudge !== false
+      && (meta.pending_nudge === 1 || meta.pending_work === 1)
+      ? 1
+      : 0;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = input.reason;
@@ -709,7 +794,7 @@ export class RunnerStateStore {
       };
     }
 
-    preserveConsumedNudgeAfterActiveInvocationClears(meta);
+    preserveConsumedPendingWorkAfterActiveInvocationClears(meta);
     meta.active_invocation_container_stopped_at = normalizeOptionalIsoDateString(
       input.stoppedAt ?? null,
     ) ?? new Date().toISOString();
@@ -1202,6 +1287,7 @@ export class RunnerStateStore {
         active_invocation_id,
         active_invocation_expires_at,
         active_invocation_container_stopped_at,
+        active_invocation_consumed_pending_work,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
@@ -1245,6 +1331,7 @@ export class RunnerStateStore {
         active_invocation_id,
         active_invocation_expires_at,
         active_invocation_container_stopped_at,
+        active_invocation_consumed_pending_work,
         active_invocation_last_heartbeat_at,
         active_invocation_orphan_observed_at,
         active_invocation_reason,
@@ -1269,12 +1356,13 @@ export class RunnerStateStore {
         pending_nudge_generation,
         pending_work,
         retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
       meta.active_invocation_expires_at,
       meta.active_invocation_container_stopped_at,
+      meta.active_invocation_consumed_pending_work === 1 ? 1 : 0,
       meta.active_invocation_last_heartbeat_at,
       meta.active_invocation_orphan_observed_at,
       meta.active_invocation_reason,
@@ -1370,7 +1458,7 @@ export class RunnerStateStore {
       reason: ActiveInvocationRecoveryClearReason;
     },
   ): void {
-    preserveConsumedNudgeAfterActiveInvocationClears(meta);
+    preserveConsumedPendingWorkAfterActiveInvocationClears(meta);
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
     meta.last_error_at = new Date(input.nowMs).toISOString();
@@ -1384,6 +1472,7 @@ export class RunnerStateStore {
     meta.active_invocation_id = null;
     meta.active_invocation_expires_at = null;
     meta.active_invocation_container_stopped_at = null;
+    meta.active_invocation_consumed_pending_work = 0;
     meta.active_invocation_last_heartbeat_at = null;
     meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = null;
@@ -1536,14 +1625,14 @@ function activeInvocationRecoveryClearMessage(
     case "startup_timeout":
       return "Hosted workspace invocation startup timed out.";
     case "heartbeat_stale":
-      return "Hosted workspace invocation heartbeat went stale.";
+      return "Hosted workspace invocation heartbeat timed out.";
     case "hard_timeout":
       return "Hosted workspace invocation timed out.";
   }
 }
 
-function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): void {
-  if (meta.active_invocation_reason !== "nudge") {
+function preserveConsumedPendingWorkAfterActiveInvocationClears(meta: RunnerMetaRow): void {
+  if (meta.active_invocation_consumed_pending_work !== 1) {
     return;
   }
 
@@ -1551,6 +1640,7 @@ function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): 
   meta.pending_nudge_generation =
     normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
   meta.pending_work = 1;
+  meta.active_invocation_consumed_pending_work = 0;
 }
 
 function resolvePendingWorkWakeAt(input: {

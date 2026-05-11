@@ -3,10 +3,7 @@ import type { SQLInputValue } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  resolveActiveInvocationRecoveryDecision,
-  RunnerStateStore,
-} from "../src/user-runner/runner-state-store.js";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
   DurableObjectSqlCursorLike,
   DurableObjectSqlValue,
@@ -138,118 +135,6 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   return row?.name === "runner_bundle_slots";
 }
 
-describe("resolveActiveInvocationRecoveryDecision", () => {
-  const baseInput = {
-    heartbeatStaleMs: 5_000,
-    nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
-    readyTimeoutMs: 5_000,
-    timeoutMs: 60_000,
-  };
-
-  it.each([
-    {
-      expected: {
-        kind: "live",
-        nextRecoveryAt: "2026-04-27T00:00:13.000Z",
-        reason: "starting",
-      },
-      input: {
-        startedAt: "2026-04-27T00:00:08.000Z",
-      },
-      name: "keeps a startup without a heartbeat live before the ready timeout",
-    },
-    {
-      expected: {
-        kind: "recover",
-        reason: "startup_timeout",
-      },
-      input: {
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "recovers a startup without a heartbeat after the ready timeout",
-    },
-    {
-      expected: {
-        kind: "live",
-        nextRecoveryAt: "2026-04-27T00:00:13.000Z",
-        reason: "heartbeating",
-      },
-      input: {
-        lastHeartbeatAt: "2026-04-27T00:00:08.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "keeps a recent heartbeat live",
-    },
-    {
-      expected: {
-        kind: "recover",
-        reason: "heartbeat_stale",
-      },
-      input: {
-        lastHeartbeatAt: "2026-04-27T00:00:04.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "recovers a stale heartbeat",
-    },
-    {
-      expected: {
-        kind: "recover",
-        reason: "hard_timeout",
-      },
-      input: {
-        expiresAt: "2026-04-27T00:00:09.000Z",
-        lastHeartbeatAt: "2026-04-27T00:00:08.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "recovers hard timeout before the heartbeat deadline",
-    },
-    {
-      expected: {
-        kind: "recover",
-        reason: "container_stopped",
-      },
-      input: {
-        containerStopped: true,
-        lastHeartbeatAt: "2026-04-27T00:00:08.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "recovers container stopped immediately",
-    },
-    {
-      expected: {
-        kind: "live",
-        nextRecoveryAt: "2026-04-27T00:00:13.000Z",
-        reason: "heartbeating",
-      },
-      input: {
-        activeWorkerVersionId: "worker-old",
-        currentWorkerVersionId: "worker-new",
-        lastHeartbeatAt: "2026-04-27T00:00:08.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "does not let worker version mismatch bypass a recent heartbeat",
-    },
-    {
-      expected: {
-        kind: "recover",
-        reason: "worker_version_mismatch",
-      },
-      input: {
-        activeWorkerVersionId: "worker-old",
-        currentWorkerVersionId: "worker-new",
-        lastHeartbeatAt: "2026-04-27T00:00:04.000Z",
-        startedAt: "2026-04-27T00:00:00.000Z",
-      },
-      name: "recovers worker version mismatch when no heartbeat is recent",
-    },
-  ])("$name", ({ expected, input }) => {
-    expect(resolveActiveInvocationRecoveryDecision({
-      ...baseInput,
-      ...input,
-    })).toEqual(expected);
-  });
-});
-
 describe("RunnerStateStore schema guard", () => {
   it("fails closed when the legacy split runner bundle schema is still present", () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
@@ -330,6 +215,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_orphan_observed_at");
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_worker_version_id");
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_consumed_pending_work");
     expect(readRunnerMetaColumns(db)).toContain("deferred_checkpoint_mailbox_status_json");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_due_at");
     expect(readRunnerMetaColumns(db)).toContain("idle_shutdown_checkpoint_workspace_version");
@@ -337,7 +223,7 @@ describe("RunnerStateStore schema guard", () => {
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(6);
+    ).toBe(7);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -420,11 +306,12 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(readRunnerMetaColumns(db)).toContain("active_invocation_container_stopped_at");
     expect(readRunnerMetaColumns(db)).toContain("deferred_checkpoint_mailbox_status_json");
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_consumed_pending_work");
     expect(
       (db.prepare(
         "SELECT value FROM runner_schema_meta WHERE key = 'runner_state_schema_version'",
       ).get() as { value: number }).value,
-    ).toBe(6);
+    ).toBe(7);
     await expect(store.readState()).resolves.toMatchObject({
       userId: "user-existing",
       workspaceInvocation: {
@@ -639,23 +526,35 @@ describe("RunnerStateStore schema guard", () => {
     }
   });
 
-  it("preserves a consumed nudge when clearing a stopped active invocation", async () => {
+  it("preserves consumed foreground work when clearing a stopped active invocation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
     try {
       const { db, store } = createRunnerStateStoreHarness();
       await store.bindUser("user-existing");
+      db.prepare(`
+        UPDATE runner_meta
+        SET pending_nudge = 0,
+            pending_nudge_generation = 4,
+            pending_work = 1
+        WHERE singleton = 1
+      `).run();
       const lease = await store.beginInvocation({
         expiresAt: "2026-04-27T00:00:45.000Z",
-        reason: "nudge",
+        reason: "alarm",
         userId: "user-existing",
       });
       expect(db.prepare(`
-        SELECT pending_nudge, pending_work
+        SELECT active_invocation_consumed_pending_work,
+               pending_nudge,
+               pending_nudge_generation,
+               pending_work
         FROM runner_meta
         WHERE singleton = 1
       `).get()).toEqual({
+        active_invocation_consumed_pending_work: 1,
         pending_nudge: 0,
+        pending_nudge_generation: 4,
         pending_work: 0,
       });
 
@@ -690,13 +589,164 @@ describe("RunnerStateStore schema guard", () => {
         },
       });
       expect(db.prepare(`
-        SELECT in_flight, pending_nudge, pending_work
+        SELECT in_flight, pending_nudge, pending_nudge_generation, pending_work
         FROM runner_meta
         WHERE singleton = 1
       `).get()).toEqual({
         in_flight: 0,
         pending_nudge: 1,
+        pending_nudge_generation: 5,
         pending_work: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not preserve idle checkpoint work when the invocation did not consume foreground work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    try {
+      const { db, store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      await store.markPendingInvocationNudge();
+      const lease = await store.beginInvocation({
+        consumePendingNudge: false,
+        expiresAt: "2026-04-27T00:00:45.000Z",
+        reason: "idle_shutdown_checkpoint",
+        userId: "user-existing",
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_consumed_pending_work,
+               pending_nudge,
+               pending_nudge_generation,
+               pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_consumed_pending_work: 0,
+        pending_nudge: 1,
+        pending_nudge_generation: 1,
+        pending_work: 1,
+      });
+
+      await expect(store.recordActiveInvocationContainerStopped({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        stoppedAt: "2026-04-27T00:00:05.000Z",
+        userId: "user-existing",
+      })).resolves.toMatchObject({
+        recorded: true,
+        record: {
+          inFlight: true,
+          pendingNudge: true,
+          pendingWork: true,
+        },
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_consumed_pending_work, pending_nudge_generation
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_consumed_pending_work: 0,
+        pending_nudge_generation: 1,
+      });
+
+      await expect(store.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: null,
+        heartbeatStaleMs: 3_000,
+        nowMs: Date.parse("2026-04-27T00:00:06.000Z"),
+        readyTimeoutMs: 20_000,
+        timeoutMs: 45_000,
+      })).resolves.toMatchObject({
+        cleared: true,
+        reason: "container_stopped",
+        record: {
+          inFlight: false,
+          pendingNudge: true,
+          pendingWork: true,
+          workspaceInvocation: null,
+        },
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_consumed_pending_work,
+               in_flight,
+               pending_nudge,
+               pending_nudge_generation,
+               pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_consumed_pending_work: 0,
+        in_flight: 0,
+        pending_nudge: 1,
+        pending_nudge_generation: 1,
+        pending_work: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not recreate foreground work for a nudge invocation that consumed none", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    try {
+      const { db, store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        expiresAt: "2026-04-27T00:00:45.000Z",
+        reason: "nudge",
+        userId: "user-existing",
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_consumed_pending_work, pending_nudge, pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_consumed_pending_work: 0,
+        pending_nudge: 0,
+        pending_work: 0,
+      });
+
+      await expect(store.recordActiveInvocationContainerStopped({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        stoppedAt: "2026-04-27T00:00:05.000Z",
+        userId: "user-existing",
+      })).resolves.toMatchObject({
+        recorded: true,
+        record: {
+          inFlight: true,
+          pendingNudge: false,
+          pendingWork: false,
+        },
+      });
+
+      await expect(store.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: null,
+        heartbeatStaleMs: 3_000,
+        nowMs: Date.parse("2026-04-27T00:00:06.000Z"),
+        readyTimeoutMs: 20_000,
+        timeoutMs: 45_000,
+      })).resolves.toMatchObject({
+        cleared: true,
+        reason: "container_stopped",
+        record: {
+          inFlight: false,
+          pendingNudge: false,
+          pendingWork: false,
+          workspaceInvocation: null,
+        },
+      });
+      expect(db.prepare(`
+        SELECT in_flight, pending_nudge, pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        in_flight: 0,
+        pending_nudge: 0,
+        pending_work: 0,
       });
     } finally {
       vi.useRealTimers();
@@ -795,6 +845,144 @@ describe("RunnerStateStore schema guard", () => {
         pendingWork: true,
       },
     });
+  });
+
+  it("routes a due idle checkpoint behind a live active invocation", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-27T00:00:08.000Z"));
+      const { db, store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        expiresAt: "2026-04-27T00:01:00.000Z",
+        reason: "nudge",
+        userId: "user-existing",
+      });
+      db.prepare(`
+        UPDATE runner_meta
+        SET alarm_kind = 'idle_checkpoint',
+            alarm_due_at = ?,
+            alarm_workspace_version = ?,
+            alarm_checkpoint_next_wake_at = NULL,
+            idle_shutdown_checkpoint_due_at = ?,
+            idle_shutdown_checkpoint_workspace_version = ?
+        WHERE singleton = 1
+      `).run(
+        "2026-04-27T00:00:10.000Z",
+        "4",
+        "2026-04-27T00:00:10.000Z",
+        "4",
+      );
+
+      await expect(store.consumeDueRunnerAlarmAndDecide({
+        currentWorkerVersionId: null,
+        heartbeatStaleMs: 5_000,
+        nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+        runnerReadyTimeoutMs: 5_000,
+        runnerTimeoutMs: 60_000,
+      })).resolves.toMatchObject({
+        activeInvocationPresent: true,
+        kind: "none",
+        record: {
+          active: {
+            attemptId: lease.attemptId,
+          },
+          alarm: {
+            dueAt: "2026-04-27T00:00:13.000Z",
+            kind: "work",
+          },
+        },
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_id,
+               alarm_due_at,
+               alarm_kind,
+               idle_shutdown_checkpoint_due_at,
+               idle_shutdown_checkpoint_workspace_version
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_id: lease.attemptId,
+        alarm_due_at: "2026-04-27T00:00:13.000Z",
+        alarm_kind: "work",
+        idle_shutdown_checkpoint_due_at: null,
+        idle_shutdown_checkpoint_workspace_version: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers a stale active invocation before starting a due idle checkpoint", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const { db, store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      await store.markPendingInvocationNudge();
+      await store.beginInvocation({
+        expiresAt: "2026-04-27T00:01:00.000Z",
+        reason: "nudge",
+        userId: "user-existing",
+      });
+      db.prepare(`
+        UPDATE runner_meta
+        SET alarm_kind = 'idle_checkpoint',
+            alarm_due_at = ?,
+            alarm_workspace_version = ?,
+            alarm_checkpoint_next_wake_at = NULL,
+            idle_shutdown_checkpoint_due_at = ?,
+            idle_shutdown_checkpoint_workspace_version = ?
+        WHERE singleton = 1
+      `).run(
+        "2026-04-27T00:00:10.000Z",
+        "4",
+        "2026-04-27T00:00:10.000Z",
+        "4",
+      );
+
+      await expect(store.consumeDueRunnerAlarmAndDecide({
+        currentWorkerVersionId: null,
+        heartbeatStaleMs: 5_000,
+        nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+        runnerReadyTimeoutMs: 5_000,
+        runnerTimeoutMs: 60_000,
+      })).resolves.toMatchObject({
+        dueWake: true,
+        kind: "work",
+        reason: "nudge",
+        record: {
+          active: null,
+          alarm: {
+            dueAt: "2026-04-27T00:00:10.000Z",
+            kind: "work",
+          },
+          pendingNudge: true,
+          pendingWork: true,
+        },
+      });
+      expect(db.prepare(`
+        SELECT active_invocation_id,
+               alarm_due_at,
+               alarm_kind,
+               idle_shutdown_checkpoint_due_at,
+               idle_shutdown_checkpoint_workspace_version,
+               pending_nudge,
+               pending_work
+        FROM runner_meta
+        WHERE singleton = 1
+      `).get()).toEqual({
+        active_invocation_id: null,
+        alarm_due_at: "2026-04-27T00:00:10.000Z",
+        alarm_kind: "work",
+        idle_shutdown_checkpoint_due_at: null,
+        idle_shutdown_checkpoint_workspace_version: null,
+        pending_nudge: 1,
+        pending_work: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not schedule idle checkpoint when legacy pending_nudge mirror drift exists", async () => {

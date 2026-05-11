@@ -1247,7 +1247,11 @@ describe("RunnerContainer", () => {
 
     try {
       const storage = createContainerStorageDouble();
+      let resolveRunnerRequest!: () => void;
       let markRunnerRequestStarted!: () => void;
+      const runnerRequestRelease = new Promise<void>((resolve) => {
+        resolveRunnerRequest = resolve;
+      });
       const runnerRequestStarted = new Promise<void>((resolve) => {
         markRunnerRequestStarted = resolve;
       });
@@ -1268,7 +1272,13 @@ describe("RunnerContainer", () => {
           }
 
           markRunnerRequestStarted();
-          return await new Promise<Response>(() => undefined);
+          await runnerRequestRelease;
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
         }),
       });
       const coldAlarmIsolate = createContainerDouble({
@@ -1306,7 +1316,8 @@ describe("RunnerContainer", () => {
         }),
       );
 
-      await expect(invokePromise).rejects.toThrow(/aborted|timed out|timeout/i);
+      resolveRunnerRequest();
+      await expect(invokePromise).resolves.toEqual(createRunnerResult());
     } finally {
       vi.useRealTimers();
     }
