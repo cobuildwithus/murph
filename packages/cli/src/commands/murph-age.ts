@@ -157,13 +157,6 @@ const murphAgeRuntimeInputReadinessSchema = z.object({
   status: z.literal('required'),
 })
 
-export const murphAgeInputReadinessResultSchema = z.object({
-  bundle: murphAgeInputBundleReadinessSchema,
-  contextBundles: z.array(murphAgeInputBundleReadinessSchema),
-  runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
-  schemaVersion: z.literal('murph.age.input-readiness.v2'),
-})
-
 const murphAgePublicAuthorizationSchema = z.object({
   cardId: murphAgeModelCardIdSchema.nullable(),
   contextOnlyMetricKeys: z.array(z.string().min(1)),
@@ -266,6 +259,14 @@ const murphAgePublicWearableBridgeSummarySchema = z.object({
   scoreContributionAuthorized: z.literal(false),
   secondPriorityIncompleteFeatureKeys: z.array(z.string().min(1)),
   secondPriorityReadyFeatureKeys: z.array(z.string().min(1)),
+})
+
+export const murphAgeInputReadinessResultSchema = z.object({
+  bundle: murphAgeInputBundleReadinessSchema,
+  contextBundles: z.array(murphAgeInputBundleReadinessSchema),
+  runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
+  schemaVersion: z.literal('murph.age.input-readiness.v3'),
+  wearableBridge: murphAgePublicWearableBridgeSummarySchema,
 })
 
 const murphAgePublicDisplaySummarySchema = z.object({
