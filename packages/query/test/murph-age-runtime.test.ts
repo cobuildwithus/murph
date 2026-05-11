@@ -436,7 +436,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v3");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v4");
     assert.deepEqual(readiness.runtimeInputs, [
       {
         key: "chronological-age-years",
@@ -456,6 +456,33 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
     assert.equal(readiness.bundle.bundleId, "lab9-bp-body");
     assert.equal(readiness.bundle.status, "ready");
     assert.equal(readiness.bundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
+    assert.deepEqual(readiness.scoreReadiness, {
+      bundleId: "lab9-bp-body",
+      contextOnly: false,
+      inputReady: true,
+      productAgeReady: false,
+      productBlockedReasons: [
+        "PRODUCT_POLICY_NOT_AUTHORIZED",
+        "VALIDATION_GATE_BLOCKED",
+        "PRODUCT_PROMOTION_EVIDENCE_MISSING",
+        "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
+        "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
+      ],
+      productPromotionBlockers: [
+        "PRODUCT_POLICY_NOT_AUTHORIZED",
+        "VALIDATION_GATE_BLOCKED",
+        "PRODUCT_PROMOTION_EVIDENCE_MISSING",
+        "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
+        "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
+      ],
+      productRiskReady: false,
+      recommendedCardId: "lab9_bp_body_10y_acm_research",
+      researchModelCardRequired: true,
+      researchReadiness: "ready-if-local-model-card-loaded",
+      researchUsableIfModelLoaded: true,
+      scoreBearingInput: true,
+      status: "research-ready-product-blocked",
+    });
     assert.equal(readiness.bundle.availableFeatureKeys.includes("albumin"), true);
     assert.equal(readiness.bundle.selectedMetricKeys.includes("albumin"), true);
     assert.equal(readiness.contextBundles[0]?.bundleId, "wearable-context");
@@ -499,11 +526,26 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v3");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v4");
     assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ["chronological-age-years", "sex"]);
     assert.equal(readiness.bundle.bundleId, "insufficient");
     assert.equal(readiness.bundle.status, "abstain");
     assert.equal(readiness.bundle.recommendedCardId, "none");
+    assert.deepEqual(readiness.scoreReadiness, {
+      bundleId: "insufficient",
+      contextOnly: false,
+      inputReady: false,
+      productAgeReady: false,
+      productBlockedReasons: ["INPUT_BUNDLE_INCOMPLETE"],
+      productPromotionBlockers: [],
+      productRiskReady: false,
+      recommendedCardId: "none",
+      researchModelCardRequired: false,
+      researchReadiness: "input-incomplete",
+      researchUsableIfModelLoaded: false,
+      scoreBearingInput: false,
+      status: "input-incomplete",
+    });
     assert.deepEqual(readiness.bundle.availableFeatureKeys, []);
     assert.deepEqual(readiness.bundle.selectedMetricKeys, []);
     assert.equal(readiness.contextBundles.length, 0);
