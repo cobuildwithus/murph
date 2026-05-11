@@ -181,6 +181,9 @@ export type ActiveInvocationRecoveryDecision =
       | "worker_version_mismatch";
   };
 
+type ActiveInvocationRecoveryClearReason =
+  Extract<ActiveInvocationRecoveryDecision, { kind: "recover" }>["reason"];
+
 export function resolveActiveInvocationRecoveryDecision(input: {
   activeWorkerVersionId?: string | null;
   containerStopped?: boolean | null;
@@ -1110,61 +1113,21 @@ export class RunnerStateStore {
       };
     }
 
-    if (decision.reason === "container_stopped") {
-      preserveConsumedNudgeAfterActiveInvocationClears(meta);
-      this.clearActiveInvocationMetaSync(meta);
-      meta.in_flight = 0;
-      meta.last_error_at = new Date(input.nowMs).toISOString();
-      meta.last_error_code = deriveHostedExecutionErrorCode(
-        new Error("Hosted workspace invocation container stopped during active work."),
-      );
-      meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
-      this.writeMetaRowSync(meta);
-
-      return {
-        attemptId,
-        cleared: true,
-        nextRecoveryAt: null,
-        reason: "container_stopped",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    if (decision.reason === "worker_version_mismatch") {
-      preserveConsumedNudgeAfterActiveInvocationClears(meta);
-      this.clearActiveInvocationMetaSync(meta);
-      meta.in_flight = 0;
-      meta.last_error_at = new Date(input.nowMs).toISOString();
-      meta.last_error_code = deriveHostedExecutionErrorCode(
-        new Error("Hosted workspace invocation belonged to a previous worker version."),
-      );
-      meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
-      this.writeMetaRowSync(meta);
-
-      return {
-        attemptId,
-        cleared: true,
-        nextRecoveryAt: null,
-        reason: "worker_version_mismatch",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    preserveConsumedNudgeAfterActiveInvocationClears(meta);
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
-    meta.last_error_at = new Date(input.nowMs).toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(
-      new Error("Hosted workspace invocation timed out."),
-    );
-    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+    this.clearActiveInvocationForRecoverySync(meta, {
+      nowMs: input.nowMs,
+      reason: decision.reason,
+    });
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
       cleared: true,
       nextRecoveryAt: null,
-      reason: "expired",
+      reason: decision.reason === "container_stopped"
+        ? "container_stopped"
+        : decision.reason === "worker_version_mismatch"
+        ? "worker_version_mismatch"
+        : "expired",
       record: this.readStateFromMetaSync(meta),
     };
   }
@@ -1392,16 +1355,29 @@ export class RunnerStateStore {
       return false;
     }
 
+    this.clearActiveInvocationForRecoverySync(meta, {
+      nowMs,
+      reason: "hard_timeout",
+    });
+    this.writeMetaRowSync(meta);
+    return true;
+  }
+
+  private clearActiveInvocationForRecoverySync(
+    meta: RunnerMetaRow,
+    input: {
+      nowMs: number;
+      reason: ActiveInvocationRecoveryClearReason;
+    },
+  ): void {
     preserveConsumedNudgeAfterActiveInvocationClears(meta);
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
-    meta.last_error_at = new Date(nowMs).toISOString();
+    meta.last_error_at = new Date(input.nowMs).toISOString();
     meta.last_error_code = deriveHostedExecutionErrorCode(
-      new Error("Hosted workspace invocation timed out."),
+      new Error(activeInvocationRecoveryClearMessage(input.reason)),
     );
     meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
-    this.writeMetaRowSync(meta);
-    return true;
   }
 
   private clearActiveInvocationMetaSync(meta: RunnerMetaRow): void {
@@ -1547,6 +1523,23 @@ function isHostedWorkspaceInvocationReasonValue(
 
 function hasPendingForegroundWork(record: RunnerStateRecord): boolean {
   return record.pendingWork || record.pendingNudge;
+}
+
+function activeInvocationRecoveryClearMessage(
+  reason: ActiveInvocationRecoveryClearReason,
+): string {
+  switch (reason) {
+    case "container_stopped":
+      return "Hosted workspace invocation container stopped during active work.";
+    case "worker_version_mismatch":
+      return "Hosted workspace invocation belonged to a previous worker version.";
+    case "startup_timeout":
+      return "Hosted workspace invocation startup timed out.";
+    case "heartbeat_stale":
+      return "Hosted workspace invocation heartbeat went stale.";
+    case "hard_timeout":
+      return "Hosted workspace invocation timed out.";
+  }
 }
 
 function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): void {
