@@ -67,6 +67,15 @@ export type MurphAgeInputFeatureReadiness =
   | Omit<MurphAgeInputBundleFeatureStatus, "selectedPointIds" | "unit" | "value">;
 
 export type MurphAgeInputReadinessWarning = Pick<MurphAgeWarning, "code" | "featureKey" | "metricKey">;
+export type MurphAgeRuntimeInputKey = "chronological-age-years" | "sex";
+
+export interface MurphAgeRuntimeInputReadiness {
+  key: MurphAgeRuntimeInputKey;
+  label: string;
+  required: true;
+  source: "runtime-option";
+  status: "required";
+}
 
 export type MurphAgeInputBundleReadiness = Omit<
   MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
@@ -79,7 +88,8 @@ export type MurphAgeInputBundleReadiness = Omit<
 export interface MurphAgeInputReadinessForVault {
   bundle: MurphAgeInputBundleReadiness;
   contextBundles: MurphAgeInputBundleReadiness[];
-  schemaVersion: "murph.age.input-readiness.v1";
+  runtimeInputs: MurphAgeRuntimeInputReadiness[];
+  schemaVersion: "murph.age.input-readiness.v2";
 }
 
 export interface MurphAgeLocalModelCardLoadResult {
@@ -112,6 +122,22 @@ const MURPH_AGE_WEARABLE_SUMMARY_VALID_NIGHT_METRIC_KEYS = new Set([
   "spo2",
   "total-sleep-minutes",
 ]);
+const MURPH_AGE_RUNTIME_INPUT_READINESS = [
+  {
+    key: "chronological-age-years",
+    label: "Chronological age",
+    required: true,
+    source: "runtime-option",
+    status: "required",
+  },
+  {
+    key: "sex",
+    label: "Sex",
+    required: true,
+    source: "runtime-option",
+    status: "required",
+  },
+] satisfies readonly MurphAgeRuntimeInputReadiness[];
 
 export async function calculateMurphAgeForVault(
   input: CalculateMurphAgeForVaultInput,
@@ -219,7 +245,8 @@ export async function assessMurphAgeInputReadinessFromVault(
         }],
       },
       contextBundles: [],
-      schemaVersion: "murph.age.input-readiness.v1",
+      runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
+      schemaVersion: "murph.age.input-readiness.v2",
     };
   }
 
@@ -240,8 +267,13 @@ export async function assessMurphAgeInputReadinessFromVault(
   return {
     bundle: sanitizeMurphAgeInputBundleAssessment(bundleAssessment),
     contextBundles: contextAssessments.map(sanitizeMurphAgeInputBundleAssessment),
-    schemaVersion: "murph.age.input-readiness.v1",
+    runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
+    schemaVersion: "murph.age.input-readiness.v2",
   };
+}
+
+function buildMurphAgeRuntimeInputReadiness(): MurphAgeRuntimeInputReadiness[] {
+  return MURPH_AGE_RUNTIME_INPUT_READINESS.map((input) => ({ ...input }));
 }
 
 function sanitizeMurphAgeInputBundleAssessment(

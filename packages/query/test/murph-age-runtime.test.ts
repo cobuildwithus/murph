@@ -422,7 +422,23 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v1");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v2");
+    assert.deepEqual(readiness.runtimeInputs, [
+      {
+        key: "chronological-age-years",
+        label: "Chronological age",
+        required: true,
+        source: "runtime-option",
+        status: "required",
+      },
+      {
+        key: "sex",
+        label: "Sex",
+        required: true,
+        source: "runtime-option",
+        status: "required",
+      },
+    ]);
     assert.equal(readiness.bundle.bundleId, "lab9-bp-body");
     assert.equal(readiness.bundle.status, "ready");
     assert.equal(readiness.bundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
@@ -456,7 +472,8 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v1");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v2");
+    assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ["chronological-age-years", "sex"]);
     assert.equal(readiness.bundle.bundleId, "insufficient");
     assert.equal(readiness.bundle.status, "abstain");
     assert.equal(readiness.bundle.recommendedCardId, "none");

@@ -144,6 +144,13 @@ interface MurphAgeInputReadinessReport {
     selectedMetricKeys: string[]
     status: string
   }>
+  runtimeInputs: Array<{
+    key: string
+    label: string
+    required: true
+    source: string
+    status: string
+  }>
   schemaVersion: string
 }
 
@@ -284,7 +291,23 @@ test('age inputs reports feature readiness without metric values or point ids', 
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v1')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v2')
+    assert.deepEqual(readiness.runtimeInputs, [
+      {
+        key: 'chronological-age-years',
+        label: 'Chronological age',
+        required: true,
+        source: 'runtime-option',
+        status: 'required',
+      },
+      {
+        key: 'sex',
+        label: 'Sex',
+        required: true,
+        source: 'runtime-option',
+        status: 'required',
+      },
+    ])
     assert.equal(readiness.bundle.bundleId, 'lab9-bp-body')
     assert.equal(readiness.bundle.status, 'ready')
     assert.equal(readiness.bundle.recommendedCardId, 'lab9_bp_body_10y_acm_research')
@@ -332,7 +355,8 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v1')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v2')
+    assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ['chronological-age-years', 'sex'])
     assert.equal(readiness.bundle.bundleId, 'insufficient')
     assert.equal(readiness.bundle.status, 'abstain')
     assert.equal(readiness.bundle.recommendedCardId, 'none')
