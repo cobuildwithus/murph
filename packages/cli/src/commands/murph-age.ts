@@ -10,6 +10,8 @@ import {
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
 import {
+  isMurphAgePublicFeatureKey,
+  isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardPolicies,
@@ -52,10 +54,18 @@ const murphAgeWarningCodeSchema = z.enum([
   'TRANSFORM_UNSUPPORTED',
 ])
 
+const murphAgePublicFeatureKeySchema = z.string().min(1).refine(
+  isMurphAgePublicFeatureKey,
+  'Expected a public Murph Age feature key.',
+)
+const murphAgePublicMetricKeySchema = z.string().min(1).refine(
+  isMurphAgePublicMetricKey,
+  'Expected a public Murph Age metric key.',
+)
 const murphAgePublicWarningSchema = z.object({
   code: murphAgeWarningCodeSchema,
-  featureKey: z.string().min(1).optional(),
-  metricKey: z.string().min(1).optional(),
+  featureKey: murphAgePublicFeatureKeySchema.optional(),
+  metricKey: murphAgePublicMetricKeySchema.optional(),
 })
 
 const murphAgeValidationEvidenceTierSchema = z.enum([
@@ -165,6 +175,30 @@ const murphAgeInputBundleReadinessSchema = z.object({
   selectedMetricKeys: z.array(z.string().min(1)),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
+})
+const murphAgePublicInputFeatureReadinessSchema = murphAgeInputFeatureReadinessSchema.omit({
+  label: true,
+  metricKeys: true,
+  selectedMetricKey: true,
+}).extend({
+  featureKey: murphAgePublicFeatureKeySchema,
+  metricKeys: z.array(murphAgePublicMetricKeySchema),
+  selectedMetricKey: murphAgePublicMetricKeySchema.nullable(),
+})
+const murphAgePublicInputBundleReadinessSchema = z.object({
+  availableFeatureKeys: z.array(murphAgePublicFeatureKeySchema),
+  bundleId: murphAgeInputBundleIdSchema,
+  featureStatuses: z.array(murphAgePublicInputFeatureReadinessSchema),
+  missingFeatureKeys: z.array(murphAgePublicFeatureKeySchema),
+  recommendedCardId: murphAgeRecommendedModelCardIdSchema,
+  schemaVersion: z.literal('murph.age.input-bundle.v1'),
+  selectedMetricKeys: z.array(murphAgePublicMetricKeySchema),
+  status: murphAgeInputBundleStatusSchema,
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+const murphAgePublicInputReadinessSummarySchema = z.object({
+  bundle: murphAgePublicInputBundleReadinessSchema,
+  contextBundles: z.array(murphAgePublicInputBundleReadinessSchema),
 })
 const murphAgeRuntimeInputReadinessSchema = z.object({
   key: z.enum(['chronological-age-years', 'sex']),
@@ -323,9 +357,10 @@ const murphAgePublicDisplaySummarySchema = z.object({
 export const murphAgeReportResultSchema = z.object({
   authorization: murphAgePublicAuthorizationSchema,
   displaySummary: murphAgePublicDisplaySummarySchema,
+  inputReadiness: murphAgePublicInputReadinessSummarySchema,
   mode: murphAgeModeSchema,
   result: murphAgePublicResultSchema.nullable(),
-  schemaVersion: z.literal('murph.age.public-calculator-report.v1'),
+  schemaVersion: z.literal('murph.age.public-calculator-report.v2'),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
 })

@@ -2991,6 +2991,28 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   const productDefaultReport = toPublicMurphAgeCalculatorReport(productDefault);
   assert.equal(productDefaultReport.status, "abstain");
   assert.equal(productDefaultReport.result, null);
+  assert.equal(productDefaultReport.inputReadiness.bundle.bundleId, "lab9-bp-body");
+  assert.equal(productDefaultReport.inputReadiness.bundle.availableFeatureKeys.includes("glycemia"), true);
+  assert.equal(productDefaultReport.inputReadiness.bundle.selectedMetricKeys.includes("hba1c"), true);
+  assert.equal(productDefaultReport.inputReadiness.bundle.selectedMetricKeys.includes("steps"), false);
+  assert.equal(productDefaultReport.inputReadiness.contextBundles[0]?.bundleId, "wearable-context");
+  assert.equal(productDefaultReport.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes("steps"), true);
+  const productDefaultReadinessJson = JSON.stringify(productDefaultReport.inputReadiness);
+  for (const forbidden of [
+    "selectedPointIds",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"label\"",
+    "\"message\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "contributionYears",
+    "prediction",
+  ]) {
+    assert.equal(productDefaultReadinessJson.includes(forbidden), false, forbidden);
+  }
   assert.equal(productDefaultReport.displaySummary.displayStatus, "abstain");
   assert.equal(productDefaultReport.displaySummary.displayBlockedReason, "product-not-authorized");
   assert.equal(productDefaultReport.displaySummary.validationGate?.status, "blocked");
