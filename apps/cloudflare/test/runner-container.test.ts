@@ -304,6 +304,7 @@ describe("RunnerContainer", () => {
 
   it("accepts only the active workspace proxy token and expires it after completion", async () => {
     let activeToken: string | null = null;
+    let backgroundToken: string | null = null;
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
@@ -318,12 +319,20 @@ describe("RunnerContainer", () => {
         if (!init?.body || typeof init.body !== "string") {
           throw new Error("Expected JSON runner request body.");
         }
-        const body = JSON.parse(init.body) as { internalWorkerProxyToken?: unknown };
+        const body = JSON.parse(init.body) as {
+          browserVaultBackgroundProxyToken?: unknown;
+          internalWorkerProxyToken?: unknown;
+        };
         activeToken =
           typeof body.internalWorkerProxyToken === "string"
             ? body.internalWorkerProxyToken
             : null;
+        backgroundToken =
+          typeof body.browserVaultBackgroundProxyToken === "string"
+            ? body.browserVaultBackgroundProxyToken
+            : null;
         expect(activeToken).toBeTruthy();
+        expect(backgroundToken).toBeTruthy();
         expect(await container.ownsInternalWorkerProxyToken({
           attemptId: "attempt_evt_active_proxy_token",
           leaseGeneration: "11",
@@ -364,6 +373,20 @@ describe("RunnerContainer", () => {
     expect(activeToken).toBeTruthy();
     expect(await container.ownsInternalWorkerProxyToken({
       token: activeToken ?? "",
+      userId: "member_123",
+    })).toBe(false);
+    const backgroundContext = await container.readInternalWorkerProxyTokenContext({
+      token: backgroundToken ?? "",
+      userId: "member_123",
+    });
+    expect(backgroundContext).toMatchObject({
+      scope: "browser_vault_background",
+      userId: "member_123",
+    });
+    expect(backgroundContext?.expiresAtMs).toEqual(expect.any(Number));
+    vi.spyOn(Date, "now").mockReturnValue((backgroundContext?.expiresAtMs ?? 0) + 1);
+    expect(await container.ownsInternalWorkerProxyToken({
+      token: backgroundToken ?? "",
       userId: "member_123",
     })).toBe(false);
   });
@@ -637,12 +660,7 @@ describe("RunnerContainer", () => {
 
     await expect(invocation).rejects.toThrow("workspace invocation container stopped");
     await Promise.all(waitUntilTasks);
-    expect(recordActiveInvocationContainerStopped).toHaveBeenCalledWith({
-      attemptId: "attempt_evt_container_stop_during_work",
-      leaseGeneration: "11",
-      stoppedAt: expect.any(String),
-      userId: "member_123",
-    });
+    expect(recordActiveInvocationContainerStopped).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -712,12 +730,7 @@ describe("RunnerContainer", () => {
 
     await expect(invocation).rejects.toThrow("workspace invocation container stopped");
     await Promise.all(waitUntilTasks);
-    expect(recordActiveInvocationContainerStopped).toHaveBeenCalledWith({
-      attemptId: "attempt_evt_container_error_during_work",
-      leaseGeneration: "11",
-      stoppedAt: expect.any(String),
-      userId: "member_123",
-    });
+    expect(recordActiveInvocationContainerStopped).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(

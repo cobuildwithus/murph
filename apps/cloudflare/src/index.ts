@@ -1482,6 +1482,7 @@ function formatRunnerOutboundProxyTokenContext(
 
   return {
     proxyAttemptId: context.attemptId,
+    proxyExpiresAtMs: context.expiresAtMs,
     proxyLeaseGeneration: context.leaseGeneration,
     proxyScope: context.scope,
   };

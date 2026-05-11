@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
@@ -21,6 +23,10 @@ import {
 import {
   measureHostedBrowserVaultReplicaBytes,
 } from "../src/browser-vault-limits.ts";
+import {
+  resolveHostedRunnerTsconfigPath,
+  resolveHostedRunnerTsxImportSpecifier,
+} from "../src/runner-child-launcher.ts";
 
 describe("browser-vault background refresh", () => {
   it("publishes a valid empty/current replica after query-visible content is deleted", async () => {
@@ -122,6 +128,67 @@ describe("browser-vault background refresh", () => {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
+
+  it("keeps stale publish conflicts dirty without entering backoff", async () => {
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-conflict-"));
+    try {
+      await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "---\ntitle: Core\n---\n# Core\n");
+      await markHostedBrowserVaultRefreshDirty({
+        dirtyReason: "query_source_changed",
+        vaultRoot,
+      });
+
+      const result = await refreshBrowserVaultReplicaFromWarmVault({
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        port: {
+          async write(input) {
+            return createReplicaRef({
+              byteLength: measureHostedBrowserVaultReplicaBytes(parseBrowserVaultReplica(input.replica)),
+              sourceBundleHash: input.expectedReplicaSourceHash ?? "missing",
+            });
+          },
+          async publishRef() {
+            return {
+              published: false,
+              workspace: null,
+            };
+          },
+        },
+        vaultRoot,
+      });
+
+      expect(result.status).toBe("publish_conflict");
+      await expect(readHostedBrowserVaultRefreshState({ vaultRoot })).resolves.toMatchObject({
+        dirty: true,
+        failureCount: 0,
+        inProgressSince: null,
+        nextAttemptAt: null,
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("logs sanitized structured errors from the child entrypoint", async () => {
+    const result = await runBackgroundChildEntrypoint({
+      internalWorkerProxyToken: "",
+      localInternalProxyBaseUrl: null,
+      userId: "member_123",
+      vaultRoot: "vault-root-token-should-not-leak",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    const stderrLine = result.stderr.trim();
+    expect(stderrLine).toBeTruthy();
+    expect(stderrLine).not.toContain("vault-root-token-should-not-leak");
+    expect(stderrLine).not.toContain("internalWorkerProxyToken");
+    expect(JSON.parse(stderrLine)).toEqual({
+      errorName: "TypeError",
+      message: "Hosted execution runtime failed.",
+      service: "browser-vault-background-refresh",
+    });
+  });
 });
 
 async function writeVaultFile(vaultRoot: string, relativePath: string, contents: string): Promise<void> {
@@ -144,5 +211,46 @@ function createReplicaRef(input: {
     runtimeRootKeyId: "test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: input.sourceBundleHash,
+  };
+}
+
+async function runBackgroundChildEntrypoint(input: unknown): Promise<{
+  exitCode: number | null;
+  stderr: string;
+  stdout: string;
+}> {
+  const childEntry = fileURLToPath(
+    new URL("../src/browser-vault-refresh/background-child.ts", import.meta.url),
+  );
+  const child = spawn(
+    process.execPath,
+    ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry],
+    {
+      env: {
+        ...process.env,
+        TSX_TSCONFIG_PATH: resolveHostedRunnerTsconfigPath(),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout.on("data", (chunk) => {
+    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  child.stderr.on("data", (chunk) => {
+    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  child.stdin.end(JSON.stringify(input));
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+
+  return {
+    exitCode,
+    stderr: Buffer.concat(stderrChunks).toString("utf8"),
+    stdout: Buffer.concat(stdoutChunks).toString("utf8"),
   };
 }

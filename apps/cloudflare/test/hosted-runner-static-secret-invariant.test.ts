@@ -140,6 +140,7 @@ const TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST = new Set<string>([
     CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES,
   ),
   "job payload sent to container.internalWorkerProxyToken",
+  "job payload sent to container.browserVaultBackgroundProxyToken",
   "child stdin payload.internalWorkerProxyToken",
 ]);
 

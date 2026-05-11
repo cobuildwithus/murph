@@ -9,11 +9,11 @@ The simplest maintainable shape is a **container-local, killable background refr
 
 The current foreground invocation path installs an outbound proxy/write authority for one workspace invocation, sends the runner request, parses the result, then expires/cleans up the active operation/proxy in `finally`.  So a naive `void refreshBrowserVault()` started inside the foreground runtime cannot safely keep using the normal runtime ports after the foreground request returns.
 
-The current browser-vault replica port also requires the workspace checkpoint bridge / runtime write fence. That is correct for foreground runtime writes, but it means background browser-vault writes need a different, narrower authority. 
+The current browser-vault replica port also requires the workspace checkpoint bridge / runtime write fence. That is correct for foreground runtime writes, but it means background browser-vault writes need a different, narrower authority.
 
 The good news: you already have a warm per-user workspace root in the isolated runner path, and the hosted runtime restore layer has warm/local workspace cache semantics.   That makes same-container warm-workspace refresh natural.
 
-Also good: the old detached `/internal/browser-vault-refresh` side path is gone and now returns `410`, which is the right baseline. Do not bring that old path back. 
+Also good: the old detached `/internal/browser-vault-refresh` side path is gone and now returns `410`, which is the right baseline. Do not bring that old path back.
 
 ## Final recommended shape
 
@@ -69,7 +69,7 @@ Also avoid expanding `HostedWorkspaceInvocationResult` just to carry a browser-v
 
 ### Phase 1 — add stable query-source hashing
 
-Current `listCanonicalSourceManifest` includes `mtimeMs`, which is useful as a manifest but wrong as a stable source identity. 
+Current `listCanonicalSourceManifest` includes `mtimeMs`, which is useful as a manifest but wrong as a stable source identity.
 
 Add a query helper:
 
@@ -129,7 +129,7 @@ This is local runtime state, not canonical truth.
 
 ### Phase 3 — mark dirty from canonical write receipts
 
-The canonical write receipt action shape already gives you the needed data: `text_upsert`, `jsonl_append`, `raw_upsert`, and `delete`, with `effect` / `existedBefore` fields. 
+The canonical write receipt action shape already gives you the needed data: `text_upsert`, `jsonl_append`, `raw_upsert`, and `delete`, with `effect` / `existedBefore` fields.
 
 Dirty rules:
 
