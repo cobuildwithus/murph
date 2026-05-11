@@ -39,6 +39,7 @@ const murphAgeModelCardIdSchema = z.enum([
   'function_context_no_risk',
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
+  'r399_nhis_proxy_10y_acm_research',
   'wearable_context_no_risk',
 ])
 const murphAgeRecommendedModelCardIdSchema = z.union([
@@ -154,6 +155,7 @@ const murphAgeInputBundleIdSchema = z.enum([
   'insufficient',
   'lab5-bp-bmi',
   'lab9-bp-body',
+  'r399-nhis-proxy-anchor',
   'wearable-context',
 ])
 const murphAgeInputFeatureReadinessSchema = z.object({
@@ -165,6 +167,7 @@ const murphAgeInputFeatureReadinessSchema = z.object({
     'lab5-fallback',
     'lab9-mainline',
     'optional-context',
+    'r399-proxy-anchor',
     'wearable-context',
   ]),
   selectedMetricKey: z.string().min(1).nullable(),
@@ -268,7 +271,7 @@ const murphAgePublicFeatureAttributionSchema = z.object({
   featureKey: z.string().min(1),
   metricKey: z.string().min(1).nullable(),
   moduleId: z.string().min(1),
-  status: z.enum(['blocked', 'missing', 'ready']),
+  status: z.enum(['blocked', 'imputed', 'missing', 'ready']),
   warnings: z.array(murphAgePublicWarningSchema),
 })
 
@@ -460,6 +463,9 @@ export const murphAgeReportResultSchema = z.object({
 
 const strictUtcTimestampSchema = isoTimestampSchema
   .refine((value) => value.endsWith('Z'), 'Expected a UTC timestamp ending in Z.')
+const murphAgeReportCardIdSchema = z.enum([
+  'r399_nhis_proxy_10y_acm_research',
+])
 
 export function registerMurphAgeCommands(
   cli: Cli.Cli,
@@ -487,6 +493,9 @@ export function registerMurphAgeCommands(
       mode: murphAgeModeSchema
         .default('product')
         .describe('Use product for normal safe display, or explicit research for local research-only model-card artifacts.'),
+      cardId: murphAgeReportCardIdSchema
+        .optional()
+        .describe('Explicit research card override. Currently only the frozen R399 NHIS proxy anchor is selectable.'),
     }),
     examples: [
       {
@@ -505,6 +514,7 @@ export function registerMurphAgeCommands(
         options: {
           asOf: '2026-05-10T00:00:00.000Z',
           chronologicalAgeYears: 45,
+          cardId: 'r399_nhis_proxy_10y_acm_research',
           mode: 'research',
           sex: 'female',
           vault: './vault',
@@ -519,6 +529,7 @@ export function registerMurphAgeCommands(
 
       return calculateMurphAgePublicReportFromVaultInputBundle({
         asOf: options.asOf,
+        cardId: options.cardId,
         chronologicalAgeYears: options.chronologicalAgeYears,
         mode: options.mode,
         sex: options.sex,

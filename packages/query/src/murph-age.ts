@@ -282,6 +282,7 @@ export async function calculateMurphAgeFromVaultInputBundle(
 
   const output = calculateMurphAgeFromInputBundle({
     asOf,
+    cardId: input.cardId,
     chronologicalAgeYears: input.chronologicalAgeYears,
     mode,
     models: { ...localModelCards.models, ...input.models },
