@@ -392,6 +392,11 @@ export interface MurphAgeCalculatorOutput {
   wearableShadowIncrementAssessments: MurphAgeWearableShadowIncrementAssessment[];
 }
 
+interface MurphAgePrimaryBundleResolution {
+  bundleAssessment: MurphAgeInputBundleAssessment;
+  cardId: MurphAgeInputBundleAssessment["recommendedCardId"] | MurphAgeModelCardId;
+}
+
 export interface MurphAgePublicFeatureAttribution {
   contributionYears: number | null;
   featureKey: string;
@@ -2467,23 +2472,27 @@ export function createMurphAgeCustomModelAuthorization(model: MurphAgeRiskModel)
   };
 }
 
+const MURPH_AGE_EXPLICIT_PRIMARY_BUNDLE_RESOLVERS: Partial<Record<
+  MurphAgeModelCardId,
+  (input: MurphAgeInputBundleAssessmentInput) => MurphAgeInputBundleAssessment
+>> = {
+  r399_nhis_proxy_10y_acm_research: assessMurphAgeR399ProxyAnchor,
+};
+
 export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput): MurphAgeCalculatorOutput {
   const mode = input.mode ?? "product";
-  const bundleAssessment = input.cardId === "r399_nhis_proxy_10y_acm_research"
-    ? assessMurphAgeR399ProxyAnchor({
-      asOf: input.asOf,
-      points: input.points,
-    })
-    : assessMurphAgeInputBundle({
-      asOf: input.asOf,
-      points: input.points,
-    });
+  const primaryBundle = resolveMurphAgePrimaryBundle({
+    asOf: input.asOf,
+    points: input.points,
+    requestedCardId: input.cardId ?? null,
+  });
+  const bundleAssessment = primaryBundle.bundleAssessment;
   const contextAssessments = assessMurphAgeSecondaryContextBundles({
     asOf: input.asOf,
     points: input.points,
     primaryBundleId: bundleAssessment.bundleId,
   });
-  const cardPolicy = resolveMurphAgeModelCardPolicy(input.cardId ?? bundleAssessment.recommendedCardId);
+  const cardPolicy = resolveMurphAgeModelCardPolicy(primaryBundle.cardId);
   const wearableShadowIncrementAssessments = cardPolicy && isScoreBearingCardId(cardPolicy.cardId)
     ? assessMurphAgeWearableShadowIncrements({
       anchorCardId: cardPolicy.cardId,
@@ -2637,6 +2646,27 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     warnings: [...warnings, ...result.warnings],
     wearableShadowIncrementAssessments,
   });
+}
+
+function resolveMurphAgePrimaryBundle(input: MurphAgeInputBundleAssessmentInput & {
+  requestedCardId: MurphAgeModelCardId | null;
+}): MurphAgePrimaryBundleResolution {
+  const explicitResolver = input.requestedCardId
+    ? MURPH_AGE_EXPLICIT_PRIMARY_BUNDLE_RESOLVERS[input.requestedCardId]
+    : undefined;
+  const bundleAssessment = explicitResolver
+    ? explicitResolver({
+      asOf: input.asOf,
+      points: input.points,
+    })
+    : assessMurphAgeInputBundle({
+      asOf: input.asOf,
+      points: input.points,
+    });
+  return {
+    bundleAssessment,
+    cardId: input.requestedCardId ?? bundleAssessment.recommendedCardId,
+  };
 }
 
 export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResult {
