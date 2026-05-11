@@ -81,6 +81,9 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("self_rated_health")?.key, "self-rated-health");
+  assert.equal(resolveMetricDefinition("hypertension_history_proxy_yes")?.key, "hypertension-history-proxy-yes");
+  assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
@@ -1804,6 +1807,11 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("iadl-limitation-count"), true);
   assert.equal(keys.includes("mobility-limitation-count"), true);
   assert.equal(keys.includes("frailty-symptom-count"), true);
+  assert.equal(keys.includes("self-rated-health"), true);
+  assert.equal(keys.includes("hypertension-history-proxy-yes"), true);
+  assert.equal(keys.includes("diabetes-history-proxy-yes"), true);
+  assert.equal(keys.includes("smoking-status-proxy"), true);
+  assert.equal(keys.includes("physical-activity-proxy"), true);
   assert.equal(keys.includes("crp"), false);
   assert.equal(keys.includes("hs-crp"), false);
   assert.equal(
@@ -1842,6 +1850,14 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
     isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("apob", "test-result")),
     false,
   );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("self-rated-health", "survey-response")),
+    true,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("self-rated-health", "wearable-summary")),
+    false,
+  );
 });
 
 test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
@@ -1849,6 +1865,7 @@ test("keeps Murph Age card metrics reachable while wearable research signals sta
   const bundleMetricKeysById = new Map<string, Set<string>>([
     ["lab9-bp-body", assessedBundleMetricKeys("lab9-bp-body", completeLab9BpBodyPolicyPoints())],
     ["lab5-bp-bmi", assessedBundleMetricKeys("lab5-bp-bmi", completeLab5BpBmiPolicyPoints())],
+    ["r399-nhis-proxy-anchor", assessedR399ProxyAnchorMetricKeys()],
     ["function-context", assessedBundleMetricKeys("function-context", completeFunctionContextPoints())],
     ["wearable-context", bundleMetricKeys],
   ]);
@@ -3599,6 +3616,169 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   assert.equal(unselectedWearableBmiDoesNotBlock.status, "ready");
   assert.equal(unselectedWearableBmiDoesNotBlock.result?.status, "ready");
+
+  const explicitR399WithLab9BundleDoesNotScore = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: fixtureR399ProxyResearchModel() },
+    points: lab9Points.filter((point) => point.metricKey !== "bmi"),
+    sex: "female",
+  });
+  assert.equal(explicitR399WithLab9BundleDoesNotScore.status, "abstain");
+  assert.equal(explicitR399WithLab9BundleDoesNotScore.result, null);
+  assert.equal(
+    explicitR399WithLab9BundleDoesNotScore.warnings.some((warning) =>
+      warning.code === "MODEL_FEATURE_MISSING" && warning.message.includes("at least one observed proxy input")
+    ),
+    true,
+  );
+});
+
+test("dispatches the R399 NHIS proxy anchor as an explicit research-only base model", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const r399Points = [
+    measurementMetricPoint("bmi", "kg/m^2", 24.2),
+    surveyMetricPoint("self-rated-health", "score", 2),
+  ];
+  const wearableContextPoints = [
+    wearableMetricPoint("steps", "wearable-summary"),
+    wearableMetricPoint("wearable-valid-day-count-28d", "wearable-summary"),
+    wearableMetricPoint("wearable-coverage-index", "wearable-summary"),
+  ];
+  const r399Model = fixtureR399ProxyResearchModel();
+
+  const product = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: [...r399Points, ...wearableContextPoints],
+    sex: "female",
+  });
+
+  assert.equal(product.status, "abstain");
+  assert.equal(product.result, null);
+  assert.equal(product.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(product.cardPolicy?.cardId, "r399_nhis_proxy_10y_acm_research");
+  assert.equal(product.authorization.evidenceClass, "research-internal");
+  assert.equal(product.authorization.productAuthorized, false);
+  assert.equal(product.authorization.riskToAgeDisplayAuthorized, false);
+  assert.equal(product.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+
+  const research = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: [...r399Points, ...wearableContextPoints],
+    sex: "female",
+  });
+
+  assert.equal(research.status, "ready");
+  assert.equal(research.result?.status, "ready");
+  assert.equal(research.result?.modelId, "fixture-r399-proxy-anchor-model");
+  assert.equal(research.result?.authorization.cardId, "r399_nhis_proxy_10y_acm_research");
+  assert.equal(research.result?.authorization.productAuthorized, false);
+  assert.equal(research.result?.authorization.riskToAgeDisplayAuthorized, false);
+  assert.equal(research.bundleAssessment.availableFeatureKeys.includes("bmi"), true);
+  assert.equal(research.bundleAssessment.availableFeatureKeys.includes("self-rated-health"), true);
+  assert.equal(research.bundleAssessment.missingFeatureKeys.includes("smoking-status"), true);
+  assert.equal(research.bundleAssessment.selectedMetricKeys.includes("steps"), false);
+  assert.equal(research.contextAssessments[0]?.bundleId, "wearable-context");
+  assert.equal(research.authorization.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(
+    research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.anchorCardId,
+    "r399_nhis_proxy_10y_acm_research",
+  );
+  assert.equal(
+    research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.scoreBearing,
+    false,
+  );
+  assert.equal(research.result?.featureAttributions.find((feature) => feature.featureKey === "age-squared")?.status, "ready");
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "age-x-female")?.status,
+    "ready",
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "age-squared")?.contributionLogit,
+    -0.0014,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "age-x-female")?.contributionLogit,
+    -0.02,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "bmi-missing")?.value,
+    0,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "self-rated-health-missing")
+      ?.value,
+    0,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "smoking-status")?.status,
+    "imputed",
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "smoking-status")
+      ?.contributionLogit,
+    0,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "smoking-status")
+      ?.valueLabel,
+    "imputed",
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.featureKey === "smoking-status-missing")
+      ?.value,
+    1,
+  );
+  assert.equal(
+    research.result?.featureAttributions.find((feature) => feature.metricKey === "steps"),
+    undefined,
+  );
+  assert.equal(research.result?.moduleAttributions.some((module) => module.moduleId === "demographics"), true);
+  assert.equal(research.result?.moduleAttributions.some((module) => module.moduleId === "behavior"), true);
+
+  const summary = summarizeMurphAgeCalculatorOutput(research);
+  assert.equal(summary.displayStatus, "research-only");
+  assert.equal(summary.displayBlockedReason, "product-not-authorized");
+  assert.equal(summary.ageEstimateAvailable, true);
+  assert.equal(summary.productAgeDisplayReady, false);
+  assert.equal(summary.selectedScoreBearingMetricKeys.includes("smoking-status-proxy"), true);
+  assert.equal(summary.selectedScoreBearingPointIds.includes("metric-point:steps:2026-05-08:wearable-summary:0"), false);
+  assert.equal(summary.contextOnlyMetricKeys.includes("steps"), true);
+
+  const publicReport = toPublicMurphAgeCalculatorReport(research);
+  assert.equal(publicReport.inputReadiness.bundle.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.status === "imputed"), true);
+  assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  assert.equal(publicReport.result ? "modelId" in publicReport.result : true, false);
+
+  const noProxyResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: wearableContextPoints,
+    sex: "female",
+  });
+  assert.equal(noProxyResearch.status, "abstain");
+  assert.equal(noProxyResearch.result, null);
+  assert.equal(noProxyResearch.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(noProxyResearch.bundleAssessment.availableFeatureKeys.length, 0);
+  assert.equal(
+    noProxyResearch.warnings.some((warning) =>
+      warning.code === "MODEL_FEATURE_MISSING" && warning.message.includes("at least one observed proxy input")
+    ),
+    true,
+  );
 });
 
 test("Murph Age calculator applies model calibration and log feature transforms", () => {
@@ -3788,6 +3968,17 @@ test("Murph Age model-card artifact parser and policy validator stay with model 
   );
   assert.equal(validateMurphAgeLocalModelCardArtifactPolicy(validArtifact.value).length, 0);
 
+  const r399Artifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    model: fixtureR399ProxyResearchModel(),
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+
+  assert.equal(r399Artifact.warnings.length, 0);
+  assert.ok(r399Artifact.value);
+  assert.equal(r399Artifact.value?.cardId, "r399_nhis_proxy_10y_acm_research");
+  assert.equal(validateMurphAgeLocalModelCardArtifactPolicy(r399Artifact.value).length, 0);
+
   const invalidSchema = parseMurphAgeLocalModelCardArtifact({ schemaVersion: "wrong" });
   assert.equal(invalidSchema.value, null);
   assert.equal(invalidSchema.warnings[0]?.code, "INVALID_INPUT");
@@ -3833,6 +4024,63 @@ test("Murph Age model-card artifact parser and policy validator stay with model 
   const warnings = validateMurphAgeLocalModelCardArtifactPolicy(unauthorizedArtifact.value);
   assert.equal(warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
   assert.equal(warnings.some((warning) => warning.message.includes("Steps")), false);
+
+  const unauthorizedR399MissingnessArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    model: {
+      ...fixtureR399ProxyResearchModel(),
+      features: [
+        ...fixtureR399ProxyResearchModel().features,
+        {
+          coefficient: 0.1,
+          key: "steps-missing",
+          kind: "metric-missingness",
+          label: "Steps missing",
+          metricKey: "steps",
+          moduleId: "activity",
+        },
+      ],
+      modelId: "fixture-r399-invalid-wearable-missingness-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(unauthorizedR399MissingnessArtifact.value);
+  const r399MissingnessWarnings = validateMurphAgeLocalModelCardArtifactPolicy(
+    unauthorizedR399MissingnessArtifact.value,
+  );
+  assert.equal(r399MissingnessWarnings.some((warning) =>
+    warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.metricKey === "steps"
+  ), true);
+
+  const wrongR399EndpointArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    model: {
+      ...fixtureR399ProxyResearchModel(),
+      endpoint: "five-year cardiovascular event",
+      modelId: "fixture-r399-wrong-endpoint-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(wrongR399EndpointArtifact.value);
+  const r399EndpointWarnings = validateMurphAgeLocalModelCardArtifactPolicy(wrongR399EndpointArtifact.value);
+  assert.equal(r399EndpointWarnings.some((warning) =>
+    warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("endpoint")
+  ), true);
+
+  const wrongR399HorizonArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    model: {
+      ...fixtureR399ProxyResearchModel(),
+      horizonYears: 5,
+      modelId: "fixture-r399-wrong-horizon-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(wrongR399HorizonArtifact.value);
+  const r399HorizonWarnings = validateMurphAgeLocalModelCardArtifactPolicy(wrongR399HorizonArtifact.value);
+  assert.equal(r399HorizonWarnings.some((warning) =>
+    warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("horizon")
+  ), true);
 
   const wrongEndpointArtifact = parseMurphAgeLocalModelCardArtifact({
     cardId: "lab9_bp_body_10y_acm_research",
@@ -4165,6 +4413,170 @@ function fixtureLab5ResearchModel(): MurphAgeRiskModel {
   };
 }
 
+function fixtureR399ProxyResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: "10-year all-cause mortality",
+    features: [
+      {
+        coefficient: 0.035,
+        key: "age",
+        kind: "chronological-age",
+        label: "Age",
+        moduleId: "demographics",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 52, standardDeviation: 14 },
+      },
+      {
+        coefficient: 0.01,
+        key: "age-squared",
+        kind: "chronological-age-squared",
+        label: "Age squared",
+        moduleId: "demographics",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 2900, standardDeviation: 1400 },
+      },
+      {
+        coefficient: -0.12,
+        key: "female",
+        kind: "sex",
+        label: "Female",
+        moduleId: "demographics",
+        sex: "female",
+      },
+      {
+        coefficient: -0.02,
+        key: "age-x-female",
+        kind: "age-sex-interaction",
+        label: "Age by female",
+        moduleId: "demographics",
+        sex: "female",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 27, standardDeviation: 25 },
+      },
+      {
+        coefficient: 0.05,
+        expectedUnit: "kg/m^2",
+        key: "bmi",
+        kind: "metric",
+        label: "BMI",
+        metricKey: "bmi",
+        missingValue: 27,
+        moduleId: "body",
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 27, standardDeviation: 5 },
+      },
+      {
+        coefficient: 0.02,
+        key: "bmi-missing",
+        kind: "metric-missingness",
+        label: "BMI missing",
+        metricKey: "bmi",
+        moduleId: "data-quality",
+      },
+      {
+        coefficient: 0.09,
+        key: "self-rated-health",
+        kind: "metric",
+        label: "Self-rated health",
+        metricKey: "self-rated-health",
+        missingValue: 3,
+        moduleId: "function",
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 3, standardDeviation: 1 },
+      },
+      {
+        coefficient: 0.03,
+        key: "self-rated-health-missing",
+        kind: "metric-missingness",
+        label: "Self-rated health missing",
+        metricKey: "self-rated-health",
+        moduleId: "data-quality",
+      },
+      {
+        coefficient: 0.08,
+        key: "hypertension-history",
+        kind: "metric",
+        label: "Hypertension history",
+        metricKey: "hypertension-history-proxy-yes",
+        missingValue: 0,
+        moduleId: "cardiovascular",
+        required: false,
+      },
+      {
+        coefficient: 0.03,
+        key: "hypertension-history-missing",
+        kind: "metric-missingness",
+        label: "Hypertension history missing",
+        metricKey: "hypertension-history-proxy-yes",
+        moduleId: "data-quality",
+      },
+      {
+        coefficient: 0.1,
+        key: "diabetes-history",
+        kind: "metric",
+        label: "Diabetes history",
+        metricKey: "diabetes-history-proxy-yes",
+        missingValue: 0,
+        moduleId: "metabolic",
+        required: false,
+      },
+      {
+        coefficient: 0.03,
+        key: "diabetes-history-missing",
+        kind: "metric-missingness",
+        label: "Diabetes history missing",
+        metricKey: "diabetes-history-proxy-yes",
+        moduleId: "data-quality",
+      },
+      {
+        coefficient: 0.06,
+        key: "smoking-status",
+        kind: "metric",
+        label: "Smoking status",
+        metricKey: "smoking-status-proxy",
+        missingValue: 1,
+        moduleId: "behavior",
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 1, standardDeviation: 0.8 },
+      },
+      {
+        coefficient: 0.02,
+        key: "smoking-status-missing",
+        kind: "metric-missingness",
+        label: "Smoking status missing",
+        metricKey: "smoking-status-proxy",
+        moduleId: "data-quality",
+      },
+      {
+        coefficient: -0.05,
+        key: "physical-activity-proxy",
+        kind: "metric",
+        label: "Physical activity",
+        metricKey: "physical-activity-proxy",
+        missingValue: 2,
+        moduleId: "activity",
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 2, standardDeviation: 1 },
+      },
+      {
+        coefficient: 0.02,
+        key: "physical-activity-proxy-missing",
+        kind: "metric-missingness",
+        label: "Physical activity missing",
+        metricKey: "physical-activity-proxy",
+        moduleId: "data-quality",
+      },
+    ],
+    horizonYears: 10,
+    intercept: -4.4,
+    modelId: "fixture-r399-proxy-anchor-model",
+    modelVersion: "test.0",
+    referencePopulation: "fixture NHIS proxy reference curve",
+    referenceRiskCurve: fixtureReferenceRiskCurve(),
+    uncertainty: {
+      baseYears: 2,
+      perMissingOptionalFeatureYears: 0.5,
+    },
+  };
+}
+
 function fixtureReferenceRiskCurve(): MurphAgeRiskModel["referenceRiskCurve"] {
   return [
     { ageYears: 20, riskProbability: 0.01 },
@@ -4240,6 +4652,17 @@ function completeFunctionContextPoints(): MetricPoint[] {
   ];
 }
 
+function completeR399ProxyAnchorPolicyPoints(): MetricPoint[] {
+  return [
+    measurementMetricPoint("bmi", "kg/m^2", 24.2),
+    surveyMetricPoint("self-rated-health", "score", 2),
+    surveyMetricPoint("hypertension-history-proxy-yes", "binary", 0),
+    surveyMetricPoint("diabetes-history-proxy-yes", "binary", 0),
+    surveyMetricPoint("smoking-status-proxy", "score", 1),
+    surveyMetricPoint("physical-activity-proxy", "score", 3),
+  ];
+}
+
 function measurementMetricPoint(metricKey: string, unit: string, value: number): MetricPoint {
   return metricPoint({
     effectiveDate: "2026-05-08",
@@ -4251,6 +4674,32 @@ function measurementMetricPoint(metricKey: string, unit: string, value: number):
     unit,
     value,
   });
+}
+
+function surveyMetricPoint(metricKey: string, unit: string, value: number): MetricPoint {
+  return metricPoint({
+    effectiveDate: "2026-05-08",
+    id: `metric-point:${metricKey}:2026-05-08:survey:0`,
+    metricKey,
+    observedAt: "2026-05-08T08:00:00.000Z",
+    recordId: `survey_${metricKey.replaceAll("-", "_")}`,
+    sourceKind: "survey-response",
+    unit,
+    value,
+  });
+}
+
+function assessedR399ProxyAnchorMetricKeys(): Set<string> {
+  const output = calculateMurphAgeFromInputBundle({
+    asOf: "2026-05-10T00:00:00.000Z",
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    points: completeR399ProxyAnchorPolicyPoints(),
+    sex: "female",
+  });
+  assert.equal(output.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  return new Set(output.bundleAssessment.featureStatuses.flatMap((status) => status.metricKeys));
 }
 
 function wearableMetricPoint(metricKey: string, sourceKind: MetricPoint["source"]["kind"]): MetricPoint {

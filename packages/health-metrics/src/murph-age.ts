@@ -29,6 +29,7 @@ export type MurphAgeInputBundleId =
   | "insufficient"
   | "lab5-bp-bmi"
   | "lab9-bp-body"
+  | "r399-nhis-proxy-anchor"
   | "wearable-context";
 export type MurphAgeEvidenceClass =
   | "abstained"
@@ -71,13 +72,22 @@ export interface MurphAgeModelFeatureBase {
 
 export type MurphAgeModelFeature =
   | (MurphAgeModelFeatureBase & { kind: "chronological-age" })
+  | (MurphAgeModelFeatureBase & { kind: "chronological-age-squared" })
+  | (MurphAgeModelFeatureBase & { kind: "age-sex-interaction"; sex: MurphAgeSex })
   | (MurphAgeModelFeatureBase & { kind: "sex"; sex: MurphAgeSex })
   | (MurphAgeModelFeatureBase & {
       biomarkerKey?: string;
       expectedUnit?: string;
       kind: "metric";
       metricKey: string;
+      missingValue?: number;
       required?: boolean;
+      selectionPolicy?: MetricSelectionPolicy;
+    })
+  | (MurphAgeModelFeatureBase & {
+      biomarkerKey?: string;
+      kind: "metric-missingness";
+      metricKey: string;
       selectionPolicy?: MetricSelectionPolicy;
     });
 
@@ -120,6 +130,7 @@ export type MurphAgeModelCardId =
   | "function_context_no_risk"
   | "lab5_bp_bmi_transport_research"
   | "lab9_bp_body_10y_acm_research"
+  | "r399_nhis_proxy_10y_acm_research"
   | "wearable_context_no_risk";
 
 export type MurphAgeScoreBearingCardId = Exclude<
@@ -226,6 +237,7 @@ export const MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT = {
 
 export interface MurphAgeCalculatorInput {
   asOf?: string;
+  cardId?: "r399_nhis_proxy_10y_acm_research";
   chronologicalAgeYears: number;
   mode?: MurphAgeCalculatorMode;
   models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
@@ -242,7 +254,13 @@ export interface MurphAgeInputBundleFeatureStatus {
   featureKey: string;
   label: string;
   metricKeys: string[];
-  requiredFor: "function-context" | "lab5-fallback" | "lab9-mainline" | "optional-context" | "wearable-context";
+  requiredFor:
+    | "function-context"
+    | "lab5-fallback"
+    | "lab9-mainline"
+    | "optional-context"
+    | "r399-proxy-anchor"
+    | "wearable-context";
   selectedMetricKey: string | null;
   selectedPointIds: string[];
   status: "missing" | "ready";
@@ -260,6 +278,7 @@ export interface MurphAgeInputBundleAssessment {
     | "lab5_bp_bmi_transport_research"
     | "lab9_bp_body_10y_acm_research"
     | "none"
+    | "r399_nhis_proxy_10y_acm_research"
     | "wearable_context_no_risk";
   schemaVersion: typeof MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION;
   selectedMetricKeys: string[];
@@ -298,7 +317,7 @@ export interface MurphAgeFeatureAttribution {
   metricKey: string | null;
   moduleId: string;
   selectedPointIds: string[];
-  status: "blocked" | "missing" | "ready";
+  status: "blocked" | "imputed" | "missing" | "ready";
   unit: string | null;
   value: number | null;
   valueLabel: string | null;
@@ -359,7 +378,7 @@ export interface MurphAgePublicFeatureAttribution {
   featureKey: string;
   metricKey: string | null;
   moduleId: string;
-  status: "blocked" | "missing" | "ready";
+  status: "blocked" | "imputed" | "missing" | "ready";
   warnings: MurphAgePublicWarning[];
 }
 
@@ -890,6 +909,48 @@ const MURPH_AGE_FUNCTION_CONTEXT_FEATURES = [
   },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
 
+const MURPH_AGE_R399_PROXY_SOURCE_KINDS = [
+  "measurement",
+  "profile",
+  "questionnaire",
+  "survey-response",
+  "test-result",
+] as const;
+
+const MURPH_AGE_R399_PROXY_FEATURES = [
+  { featureKey: "bmi", label: "BMI", metricKeys: ["bmi"], requiredFor: "r399-proxy-anchor" },
+  {
+    featureKey: "self-rated-health",
+    label: "Self-rated health",
+    metricKeys: ["self-rated-health"],
+    requiredFor: "r399-proxy-anchor",
+  },
+  {
+    featureKey: "hypertension-history",
+    label: "Hypertension history",
+    metricKeys: ["hypertension-history-proxy-yes"],
+    requiredFor: "r399-proxy-anchor",
+  },
+  {
+    featureKey: "diabetes-history",
+    label: "Diabetes history",
+    metricKeys: ["diabetes-history-proxy-yes"],
+    requiredFor: "r399-proxy-anchor",
+  },
+  {
+    featureKey: "smoking-status",
+    label: "Smoking status",
+    metricKeys: ["smoking-status-proxy"],
+    requiredFor: "r399-proxy-anchor",
+  },
+  {
+    featureKey: "physical-activity-proxy",
+    label: "Physical activity proxy",
+    metricKeys: ["physical-activity-proxy"],
+    requiredFor: "r399-proxy-anchor",
+  },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
 const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
   activity: [
     "activity-minutes",
@@ -943,6 +1004,7 @@ const MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY = {
 } satisfies MurphAgeWearableShadowIncrementOutputBoundary;
 
 const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
+  "r399_nhis_proxy_10y_acm_research",
   "lab9_bp_body_10y_acm_research",
   "lab5_bp_bmi_transport_research",
 ] satisfies readonly MurphAgeScoreBearingCardId[];
@@ -1089,6 +1151,30 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     wearableScoreBearingAuthorized: false,
   },
   {
+    acceptedBundleIds: ["r399-nhis-proxy-anchor"],
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    evidenceClass: "research-internal",
+    evidenceSummary: "Frozen NHIS/R399 proxy outcome-risk anchor; research-only base model for later biomarker and wearable increments.",
+    outcome: {
+      ageEstimateBasis: "risk-age-equivalent",
+      horizonYears: 10,
+      modelEndpoint: "10-year all-cause mortality",
+      riskEndpoint: "all-cause-mortality",
+    },
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: true,
+    scoreBearingMetricKeys: MURPH_AGE_R399_PROXY_FEATURES.flatMap((feature) => feature.metricKeys),
+    scoreBearingSourceKinds: MURPH_AGE_R399_PROXY_SOURCE_KINDS,
+    validationGate: {
+      evidenceTiers: ["internal-anchor"],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Large NHIS outcome-risk anchor only; product promotion and risk-age display require external validation plus locked user-input mapping.",
+    },
+    wearableScoreBearingAuthorized: false,
+  },
+  {
     acceptedBundleIds: ["lab9-bp-body"],
     cardId: "lab9_bp_body_10y_acm_research",
     evidenceClass: "research-internal",
@@ -1192,7 +1278,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
 const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Activity features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
+    evidenceSummary: "Activity features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
     family: "activity",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -1211,7 +1297,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Sleep features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
+    evidenceSummary: "Sleep features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
     family: "sleep",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -1230,7 +1316,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "Resting-heart-rate features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
+    evidenceSummary: "Resting-heart-rate features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
     family: "resting-heart-rate",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -1245,7 +1331,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   },
   {
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
-    evidenceSummary: "HRV features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
+    evidenceSummary: "HRV features may be evaluated as a shadow increment over the active research anchor, but they are not score-bearing.",
     family: "hrv",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
@@ -1271,10 +1357,15 @@ const MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS = new Set(
   MURPH_AGE_FUNCTION_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 );
 
+const MURPH_AGE_R399_PROXY_METRIC_KEYS = new Set(
+  MURPH_AGE_R399_PROXY_FEATURES.flatMap((feature) => feature.metricKeys),
+);
+
 const MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_R399_PROXY_METRIC_KEYS,
   ...MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS,
   ...MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS,
 ]);
@@ -1283,9 +1374,13 @@ const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_BP_BODY_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_LAB5_FEATURES.map((feature) => feature.featureKey),
+  ...MURPH_AGE_R399_PROXY_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES.map((feature) => feature.featureKey),
   "chronological-age",
+  "chronological-age-squared",
+  "age-sex-interaction",
+  "metric-missingness",
   "sex",
 ]);
 
@@ -1318,6 +1413,7 @@ const MURPH_AGE_PUBLIC_METRIC_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_R399_PROXY_METRIC_KEYS,
   ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 ]);
@@ -1362,11 +1458,16 @@ export function isMurphAgeInputBundleMetricPointAllowed(
   if (MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS.has(metricKey)) {
     return point.source.kind === "measurement";
   }
+  if (MURPH_AGE_R399_PROXY_METRIC_KEYS.has(metricKey)) {
+    return MURPH_AGE_R399_PROXY_SOURCE_KINDS.includes(
+      point.source.kind as typeof MURPH_AGE_R399_PROXY_SOURCE_KINDS[number],
+    );
+  }
   return point.source.kind === "measurement" || point.source.kind === "test-result";
 }
 
 export function resolveMurphAgeModelCardPolicy(
-  cardId: MurphAgeInputBundleAssessment["recommendedCardId"],
+  cardId: MurphAgeInputBundleAssessment["recommendedCardId"] | MurphAgeModelCardId,
 ): MurphAgeModelCardPolicy | null {
   if (cardId === "none") return null;
   const policy = MURPH_AGE_MODEL_CARD_POLICIES.find((candidate) => candidate.cardId === cardId) ?? null;
@@ -1456,8 +1557,8 @@ export function createMurphAgeCustomModelAuthorization(model: MurphAgeRiskModel)
     scoreBearing: true,
     scoreBearingMetricKeys: uniqueStrings(
       model.features
-        .filter((feature) => feature.kind === "metric")
-        .map((feature) => resolveMetricInputKey(feature.metricKey)),
+        .map(modelFeatureMetricKey)
+        .filter(isString),
     ),
     scoreBearingSourceKinds: [],
     wearableScoreBearingAuthorized: false,
@@ -1466,16 +1567,21 @@ export function createMurphAgeCustomModelAuthorization(model: MurphAgeRiskModel)
 
 export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput): MurphAgeCalculatorOutput {
   const mode = input.mode ?? "product";
-  const bundleAssessment = assessMurphAgeInputBundle({
-    asOf: input.asOf,
-    points: input.points,
-  });
+  const bundleAssessment = input.cardId === "r399_nhis_proxy_10y_acm_research"
+    ? assessMurphAgeR399ProxyAnchor({
+      asOf: input.asOf,
+      points: input.points,
+    })
+    : assessMurphAgeInputBundle({
+      asOf: input.asOf,
+      points: input.points,
+    });
   const contextAssessments = assessMurphAgeSecondaryContextBundles({
     asOf: input.asOf,
     points: input.points,
     primaryBundleId: bundleAssessment.bundleId,
   });
-  const cardPolicy = resolveMurphAgeModelCardPolicy(bundleAssessment.recommendedCardId);
+  const cardPolicy = resolveMurphAgeModelCardPolicy(input.cardId ?? bundleAssessment.recommendedCardId);
   const wearableShadowIncrementAssessments = cardPolicy && isScoreBearingCardId(cardPolicy.cardId)
     ? assessMurphAgeWearableShadowIncrements({
       anchorCardId: cardPolicy.cardId,
@@ -1494,6 +1600,38 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
   ];
 
   if (!cardPolicy || !cardPolicy.scoreBearing || !isScoreBearingCardId(cardPolicy.cardId)) {
+    return buildCalculatorOutput({
+      bundleAssessment,
+      cardPolicy,
+      contextAssessments,
+      mode,
+      result: null,
+      status: bundleAssessment.status,
+      authorization,
+      warnings,
+      wearableShadowIncrementAssessments,
+    });
+  }
+
+  if (!cardPolicy.acceptedBundleIds.includes(bundleAssessment.bundleId)) {
+    warnings.push({
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${cardPolicy.cardId} does not authorize the selected ${bundleAssessment.bundleId} input bundle.`,
+    });
+    return buildCalculatorOutput({
+      bundleAssessment,
+      cardPolicy,
+      contextAssessments,
+      mode,
+      result: null,
+      status: "abstain",
+      authorization,
+      warnings,
+      wearableShadowIncrementAssessments,
+    });
+  }
+
+  if (bundleAssessment.status !== "ready") {
     return buildCalculatorOutput({
       bundleAssessment,
       cardPolicy,
@@ -1646,7 +1784,7 @@ export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResu
     });
   }
 
-  const readyFeatures = evaluatedFeatures.filter((feature) => feature.attribution.status === "ready");
+  const readyFeatures = evaluatedFeatures.filter(isScoreContributingEvaluatedFeature);
   const linearScore = input.model.intercept + readyFeatures.reduce((sum, feature) => sum + feature.contributionLogit, 0);
   const calibratedLogit = applyCalibration(linearScore, input.model.calibration);
   const riskProbability = logistic(calibratedLogit);
@@ -1699,7 +1837,7 @@ export function summarizeMurphAgeCalculatorOutput(
   output: MurphAgeCalculatorOutput,
 ): MurphAgeDisplaySummary {
   const readyAttributions = output.result?.featureAttributions.filter((feature) =>
-    feature.status === "ready" && feature.metricKey !== null
+    (feature.status === "ready" || feature.status === "imputed") && feature.metricKey !== null
   ) ?? [];
   const missingAttributions = output.result?.featureAttributions.filter((feature) =>
     feature.status === "missing"
@@ -1934,7 +2072,9 @@ function toPublicMurphAgeModuleAttribution(
   const moduleId = toPublicModuleId(module.moduleId);
   const featureKeys = uniqueStrings(
     features
-      .filter((feature) => feature.status === "ready" && toPublicModuleId(feature.moduleId) === moduleId)
+      .filter((feature) =>
+        (feature.status === "ready" || feature.status === "imputed") && toPublicModuleId(feature.moduleId) === moduleId
+      )
       .map(toPublicFeatureKey),
   );
   return {
@@ -2138,6 +2278,33 @@ export function assessMurphAgeSecondaryContextBundles(input: MurphAgeInputBundle
       assessment.status === "context-only" && assessment.bundleId !== input.primaryBundleId
     )
     .map(toContextBundleAssessment);
+}
+
+function assessMurphAgeR399ProxyAnchor(
+  input: MurphAgeInputBundleAssessmentInput,
+): MurphAgeInputBundleAssessment {
+  const proxyStatuses = assessInputFeatureRequirements(input, MURPH_AGE_R399_PROXY_FEATURES, {
+    isPointAllowed: isMurphAgeInputBundleMetricPointAllowed,
+  });
+  const readyProxyCount = proxyStatuses.filter((status) => status.status === "ready").length;
+  const warnings = readyProxyCount === 0
+    ? [{
+      code: "MODEL_FEATURE_MISSING",
+      message: "R399 proxy anchor requires at least one observed proxy input before research scoring.",
+    } satisfies MurphAgeWarning]
+    : proxyStatuses.some((status) => status.status === "missing")
+      ? [{
+        code: "MODEL_FEATURE_MISSING",
+        message: "R399 proxy anchor can score with imputation, but some proxy inputs are missing and should be treated as lower-confidence research output.",
+      } satisfies MurphAgeWarning]
+      : [];
+  return buildInputBundleAssessment({
+    bundleId: "r399-nhis-proxy-anchor",
+    featureStatuses: proxyStatuses,
+    recommendedCardId: "r399_nhis_proxy_10y_acm_research",
+    status: readyProxyCount > 0 ? "ready" : "abstain",
+    warnings,
+  });
 }
 
 export function mapRiskToReferenceAge(
@@ -2896,7 +3063,7 @@ function findModelCardPolicyViolation(input: {
 
   const allowedMetricKeys = new Set(input.cardPolicy.scoreBearingMetricKeys.map(resolveMetricInputKey));
   for (const feature of input.model.features) {
-    if (feature.kind !== "metric") continue;
+    if (!isMetricLikeModelFeature(feature)) continue;
     const metricKey = resolveMetricInputKey(feature.metricKey);
     if (!allowedMetricKeys.has(metricKey)) {
       return {
@@ -2968,7 +3135,7 @@ function evaluateFeature(input: {
   input: MurphAgeCalculationInput;
 }): EvaluatedFeature {
   const moduleId = input.feature.moduleId ?? "demographics";
-  const required = input.feature.kind === "metric" ? input.feature.required !== false : true;
+  const required = isModelFeatureRequired(input.feature);
   const baseAttribution = {
     contributionLogit: null,
     contributionYears: null,
@@ -2996,6 +3163,34 @@ function evaluateFeature(input: {
         rawValue: input.input.chronologicalAgeYears,
         required,
       });
+    case "chronological-age-squared":
+      return evaluateRawFeature({
+        attribution: {
+          ...baseAttribution,
+          metricKey: null,
+          value: input.input.chronologicalAgeYears,
+          valueLabel: input.input.chronologicalAgeYears.toFixed(1),
+        },
+        feature: input.feature,
+        moduleId,
+        rawValue: input.input.chronologicalAgeYears ** 2,
+        required,
+      });
+    case "age-sex-interaction": {
+      const sexValue = input.input.sex === input.feature.sex ? 1 : 0;
+      return evaluateRawFeature({
+        attribution: {
+          ...baseAttribution,
+          metricKey: null,
+          value: sexValue,
+          valueLabel: `${input.input.chronologicalAgeYears.toFixed(1)} x ${input.input.sex}`,
+        },
+        feature: input.feature,
+        moduleId,
+        rawValue: input.input.chronologicalAgeYears * sexValue,
+        required,
+      });
+    }
     case "sex": {
       const sexValue = input.input.sex === input.feature.sex ? 1 : 0;
       return evaluateRawFeature({
@@ -3011,6 +3206,15 @@ function evaluateFeature(input: {
         required,
       });
     }
+    case "metric-missingness":
+      return evaluateMetricMissingnessFeature({
+        baseAttribution,
+        blockedIdentifiers: input.blockedIdentifiers,
+        feature: input.feature,
+        input: input.input,
+        moduleId,
+        required,
+      });
     case "metric": {
       const metricKey = resolveMetricInputKey(input.feature.metricKey);
       const metricDefinition = resolveMetricDefinition(metricKey);
@@ -3089,6 +3293,16 @@ function evaluateFeature(input: {
       }
 
       if (selection.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED")) {
+        const imputed = evaluateImputedMetricFeature({
+          baseAttribution,
+          feature: input.feature,
+          metricKey,
+          moduleId,
+          reason: `${input.feature.label} was imputed because its unit was not normalized for this model.`,
+          selection,
+          selectionWarnings,
+        });
+        if (imputed) return imputed;
         return {
           attribution: {
             ...baseAttribution,
@@ -3110,6 +3324,18 @@ function evaluateFeature(input: {
 
       const value = selection.value;
       if (selection.status !== "ready" || value === null || !Number.isFinite(value)) {
+        const imputed = evaluateImputedMetricFeature({
+          baseAttribution,
+          feature: input.feature,
+          metricKey,
+          moduleId,
+          reason: required
+            ? `${input.feature.label} is required by this model but was not available as a ready normalized metric.`
+            : `${input.feature.label} is optional in this model and was not available as a ready normalized metric.`,
+          selection,
+          selectionWarnings,
+        });
+        if (imputed) return imputed;
         return {
           attribution: {
             ...baseAttribution,
@@ -3132,6 +3358,16 @@ function evaluateFeature(input: {
       }
 
       if (selection.warnings.some((warning) => warning.code === "COMPARATOR_VALUE")) {
+        const imputed = evaluateImputedMetricFeature({
+          baseAttribution,
+          feature: input.feature,
+          metricKey,
+          moduleId,
+          reason: `${input.feature.label} was imputed because its selected value is censored by a comparator.`,
+          selection,
+          selectionWarnings,
+        });
+        if (imputed) return imputed;
         return {
           attribution: {
             ...baseAttribution,
@@ -3152,6 +3388,16 @@ function evaluateFeature(input: {
       }
 
       if (expectedUnit && !unitsEquivalent(selection.unit, expectedUnit)) {
+        const imputed = evaluateImputedMetricFeature({
+          baseAttribution,
+          feature: input.feature,
+          metricKey,
+          moduleId,
+          reason: `${input.feature.label} was imputed because its selected unit was not ${normalizeUnit(expectedUnit) ?? expectedUnit}.`,
+          selection,
+          selectionWarnings,
+        });
+        if (imputed) return imputed;
         return {
           attribution: {
             ...baseAttribution,
@@ -3191,6 +3437,107 @@ function evaluateFeature(input: {
   }
 }
 
+function isModelFeatureRequired(feature: MurphAgeModelFeature): boolean {
+  return feature.kind === "metric" ? feature.required !== false : true;
+}
+
+function evaluateMetricMissingnessFeature(input: {
+  baseAttribution: Omit<MurphAgeFeatureAttribution, "metricKey" | "status">;
+  blockedIdentifiers: BlockedIdentifiers;
+  feature: MurphAgeModelFeature & { kind: "metric-missingness" };
+  input: MurphAgeCalculationInput;
+  moduleId: string;
+  required: boolean;
+}): EvaluatedFeature {
+  const metricKey = resolveMetricInputKey(input.feature.metricKey);
+  if (isBlockedMetricFeature({
+    biomarkerKey: input.feature.biomarkerKey ?? null,
+    blockedIdentifiers: input.blockedIdentifiers,
+    metricKey,
+  })) {
+    return {
+      attribution: {
+        ...input.baseAttribution,
+        metricKey,
+        status: "blocked",
+        warnings: [{
+          code: "BLOCKED_MODEL_FEATURE",
+          featureKey: input.feature.key,
+          message: `${input.feature.label} is blocked for Murph Age calculator models until separately validated.`,
+          metricKey,
+        }],
+      },
+      confidence: null,
+      contributionLogit: 0,
+      required: input.required,
+    };
+  }
+
+  const selection = selectMetricValue({
+    biomarkerKey: input.feature.biomarkerKey,
+    metricKey,
+    now: input.input.asOf,
+    points: input.input.points,
+    policyOverride: input.feature.selectionPolicy,
+  });
+  const selectionWarnings = mapMetricSelectionWarnings(input.feature, selection);
+  const usableSelection = selection.status === "ready"
+    && selection.value !== null
+    && Number.isFinite(selection.value)
+    && !selection.warnings.some((warning) => warning.code === "COMPARATOR_VALUE")
+    && !selection.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED");
+  const missingnessValue = usableSelection ? 0 : 1;
+  return evaluateRawFeature({
+    attribution: {
+      ...input.baseAttribution,
+      metricKey,
+      selectedPointIds: usableSelection ? selection.provenance.pointIds : [],
+      unit: "binary",
+      value: missingnessValue,
+      valueLabel: missingnessValue === 1 ? "missing" : "available",
+      warnings: selectionWarnings,
+    },
+    confidence: usableSelection ? selection.confidence : null,
+    feature: input.feature,
+    moduleId: input.moduleId,
+    rawValue: missingnessValue,
+    required: input.required,
+  });
+}
+
+function evaluateImputedMetricFeature(input: {
+  baseAttribution: Omit<MurphAgeFeatureAttribution, "metricKey" | "status">;
+  feature: MurphAgeModelFeature & { kind: "metric" };
+  metricKey: string;
+  moduleId: string;
+  reason: string;
+  selection: MetricSelection;
+  selectionWarnings: MurphAgeWarning[];
+}): EvaluatedFeature | null {
+  if (input.feature.missingValue === undefined) return null;
+  return evaluateRawFeature({
+    attribution: {
+      ...input.baseAttribution,
+      metricKey: input.metricKey,
+      unit: input.selection.unit,
+      value: null,
+      valueLabel: "imputed",
+      warnings: [{
+        code: "MODEL_FEATURE_MISSING",
+        featureKey: input.feature.key,
+        message: input.reason,
+        metricKey: input.metricKey,
+      }, ...input.selectionWarnings],
+    },
+    confidence: null,
+    feature: input.feature,
+    moduleId: input.moduleId,
+    rawValue: input.feature.missingValue,
+    required: false,
+    status: "imputed",
+  });
+}
+
 function evaluateRawFeature(input: {
   attribution: Omit<MurphAgeFeatureAttribution, "status">;
   confidence?: MetricConfidence | null;
@@ -3198,6 +3545,7 @@ function evaluateRawFeature(input: {
   moduleId: string;
   rawValue: number;
   required: boolean;
+  status?: "imputed" | "ready";
 }): EvaluatedFeature {
   const transformed = transformFeatureValue(input.rawValue, input.feature.transform ?? { kind: "identity" });
   if (transformed.warning) {
@@ -3224,7 +3572,7 @@ function evaluateRawFeature(input: {
     attribution: {
       ...input.attribution,
       contributionLogit: roundContribution(contributionLogit),
-      status: "ready",
+      status: input.status ?? "ready",
     },
     confidence: input.confidence ?? null,
     contributionLogit,
@@ -3264,7 +3612,7 @@ function withContributionYears(input: {
   model: MurphAgeRiskModel;
 }): MurphAgeFeatureAttribution[] {
   return input.features.map((feature) => {
-    if (feature.attribution.status !== "ready") {
+    if (!isScoreContributingEvaluatedFeature(feature)) {
       return feature.attribution;
     }
     const omittedLogit = input.calibratedLogit - calibratedContribution(feature.contributionLogit, input.model.calibration);
@@ -3302,6 +3650,10 @@ function buildModuleAttributions(input: {
       moduleId,
     };
   });
+}
+
+function isScoreContributingEvaluatedFeature(feature: EvaluatedFeature): boolean {
+  return feature.attribution.status === "ready" || feature.attribution.status === "imputed";
 }
 
 function buildAgeInterval(input: {
@@ -3384,6 +3736,9 @@ export function validateMurphAgeRiskModel(model: MurphAgeRiskModel): MurphAgeMod
     }
     if (feature.kind === "metric" && feature.expectedUnit !== undefined && normalizeUnit(feature.expectedUnit) === null) {
       warnings.push(invalidModelWarning(`${feature.label} expected unit must be a non-empty string.`, feature));
+    }
+    if (feature.kind === "metric" && feature.missingValue !== undefined && !Number.isFinite(feature.missingValue)) {
+      warnings.push(invalidModelWarning(`${feature.label} missing value must be finite.`, feature));
     }
     warnings.push(...validateFeatureTransform(feature));
   }
@@ -3523,7 +3878,7 @@ export function validateMurphAgeLocalModelCardArtifactPolicy(
 
   const allowedMetricKeys = new Set(policy.scoreBearingMetricKeys.map(resolveMetricInputKey));
   for (const feature of artifact.model.features) {
-    if (feature.kind !== "metric") continue;
+    if (!isMetricLikeModelFeature(feature)) continue;
     const metricKey = resolveMetricInputKey(feature.metricKey);
     if (!allowedMetricKeys.has(metricKey)) {
       warnings.push({
@@ -3535,6 +3890,18 @@ export function validateMurphAgeLocalModelCardArtifactPolicy(
     }
   }
   return warnings;
+}
+
+function modelFeatureMetricKey(feature: MurphAgeModelFeature): string | null {
+  return isMetricLikeModelFeature(feature)
+    ? resolveMetricInputKey(feature.metricKey)
+    : null;
+}
+
+function isMetricLikeModelFeature(
+  feature: MurphAgeModelFeature,
+): feature is MurphAgeModelFeature & { kind: "metric" | "metric-missingness" } {
+  return feature.kind === "metric" || feature.kind === "metric-missingness";
 }
 
 function validateFeatureTransform(feature: MurphAgeModelFeature): MurphAgeWarning[] {
@@ -3592,10 +3959,16 @@ function parseModelFeatureArtifact(value: unknown): MurphAgeModelFeature | null 
   switch (feature.kind) {
     case "chronological-age":
       return parseChronologicalAgeFeature(feature);
+    case "chronological-age-squared":
+      return parseChronologicalAgeSquaredFeature(feature);
+    case "age-sex-interaction":
+      return parseAgeSexInteractionFeature(feature);
     case "sex":
       return parseSexFeature(feature);
     case "metric":
       return parseMetricFeature(feature);
+    case "metric-missingness":
+      return parseMetricMissingnessFeature(feature);
     default:
       return null;
   }
@@ -3615,6 +3988,40 @@ function parseChronologicalAgeFeature(feature: Record<string, unknown>): MurphAg
   const base = parseFeatureBase(feature);
   if (!base) return null;
   return { ...base, kind: "chronological-age" };
+}
+
+function parseChronologicalAgeSquaredFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "coefficient",
+    "key",
+    "kind",
+    "label",
+    "moduleId",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  if (!base) return null;
+  return { ...base, kind: "chronological-age-squared" };
+}
+
+function parseAgeSexInteractionFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "coefficient",
+    "key",
+    "kind",
+    "label",
+    "moduleId",
+    "sex",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  const sex = parseMurphAgeSex(feature.sex);
+  if (!base || !sex) return null;
+  return { ...base, kind: "age-sex-interaction", sex };
 }
 
 function parseSexFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
@@ -3644,6 +4051,7 @@ function parseMetricFeature(feature: Record<string, unknown>): MurphAgeModelFeat
     "kind",
     "label",
     "metricKey",
+    "missingValue",
     "moduleId",
     "required",
     "selectionPolicy",
@@ -3655,6 +4063,7 @@ function parseMetricFeature(feature: Record<string, unknown>): MurphAgeModelFeat
   const metricKey = parseNonEmptyString(feature.metricKey);
   const biomarkerKey = parseOptionalNonEmptyString(feature.biomarkerKey);
   const expectedUnit = parseOptionalNonEmptyString(feature.expectedUnit);
+  const missingValue = parseOptionalFiniteNumber(feature.missingValue);
   const required = parseOptionalBoolean(feature.required);
   const selectionPolicy = parseOptionalMetricSelectionPolicy(feature.selectionPolicy);
   if (
@@ -3662,6 +4071,7 @@ function parseMetricFeature(feature: Record<string, unknown>): MurphAgeModelFeat
     metricKey === null ||
     biomarkerKey === null ||
     expectedUnit === null ||
+    missingValue === null ||
     required === null ||
     selectionPolicy === null
   ) {
@@ -3675,7 +4085,40 @@ function parseMetricFeature(feature: Record<string, unknown>): MurphAgeModelFeat
   };
   if (biomarkerKey !== undefined) parsed.biomarkerKey = biomarkerKey;
   if (expectedUnit !== undefined) parsed.expectedUnit = expectedUnit;
+  if (missingValue !== undefined) parsed.missingValue = missingValue;
   if (required !== undefined) parsed.required = required;
+  if (selectionPolicy !== undefined) parsed.selectionPolicy = selectionPolicy;
+  return parsed;
+}
+
+function parseMetricMissingnessFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "biomarkerKey",
+    "coefficient",
+    "key",
+    "kind",
+    "label",
+    "metricKey",
+    "moduleId",
+    "selectionPolicy",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  const metricKey = parseNonEmptyString(feature.metricKey);
+  const biomarkerKey = parseOptionalNonEmptyString(feature.biomarkerKey);
+  const selectionPolicy = parseOptionalMetricSelectionPolicy(feature.selectionPolicy);
+  if (!base || metricKey === null || biomarkerKey === null || selectionPolicy === null) {
+    return null;
+  }
+
+  const parsed: MurphAgeModelFeature & { kind: "metric-missingness" } = {
+    ...base,
+    kind: "metric-missingness",
+    metricKey,
+  };
+  if (biomarkerKey !== undefined) parsed.biomarkerKey = biomarkerKey;
   if (selectionPolicy !== undefined) parsed.selectionPolicy = selectionPolicy;
   return parsed;
 }
@@ -3965,7 +4408,9 @@ function invalidModelWarning(message: string, feature?: MurphAgeModelFeature): M
     code: "INVALID_INPUT",
     featureKey: feature?.key,
     message,
-    metricKey: feature?.kind === "metric" ? resolveMetricInputKey(feature.metricKey) : undefined,
+    metricKey: feature?.kind === "metric" || feature?.kind === "metric-missingness"
+      ? resolveMetricInputKey(feature.metricKey)
+      : undefined,
   };
 }
 
@@ -3992,7 +4437,7 @@ function isBlockedMetricFeature(input: {
 }
 
 function mapMetricSelectionWarnings(
-  feature: MurphAgeModelFeature & { kind: "metric" },
+  feature: MurphAgeModelFeature & { kind: "metric" | "metric-missingness" },
   selection: MetricSelection,
 ): MurphAgeWarning[] {
   return selection.warnings.map((warning: MetricSelectionWarning) => ({
