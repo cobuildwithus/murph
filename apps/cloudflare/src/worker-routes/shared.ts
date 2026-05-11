@@ -5,6 +5,7 @@ import type {
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
+import type { RuntimeLivenessInstruction } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -48,6 +49,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     userId: string;
   }): Promise<
     | {
+      instruction?: RuntimeLivenessInstruction;
       inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;

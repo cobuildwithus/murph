@@ -2,6 +2,7 @@ import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
+  type RuntimeLivenessInstruction,
   type RuntimeLivenessTouchResult,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimeEffectsPort,
@@ -1688,11 +1689,15 @@ function parseRuntimeLivenessTouchResult(value: unknown): RuntimeLivenessTouchRe
   const ok = record.ok;
   if (ok === true) {
     const response: {
+      instruction: RuntimeLivenessInstruction;
       inputAvailable?: boolean;
       nextAlarmAt?: string | null;
       ok: true;
       pendingNudge?: boolean;
-    } = { ok: true };
+    } = {
+      instruction: parseRuntimeLivenessInstruction(record.instruction, record),
+      ok: true,
+    };
 
     const inputAvailable = readOptionalBooleanField(value, "inputAvailable");
     if (inputAvailable !== null) {
@@ -1728,6 +1733,50 @@ function parseRuntimeLivenessTouchResult(value: unknown): RuntimeLivenessTouchRe
   }
 
   throw new TypeError("Runtime liveness response.reason is unsupported.");
+}
+
+function parseRuntimeLivenessInstruction(
+  value: unknown,
+  record: Record<string, unknown>,
+): RuntimeLivenessInstruction {
+  if (value === undefined || value === null) {
+    if (record.inputAvailable === true) {
+      return {
+        kind: "yield",
+        nextWakeAt: "nextAlarmAt" in record
+          ? readOptionalStringField(record, "nextAlarmAt")
+          : null,
+        status: "scheduled",
+      };
+    }
+
+    return { kind: "continue" };
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Runtime liveness response.instruction must be an object.");
+  }
+
+  const instruction = value as Record<string, unknown>;
+  if (instruction.kind === "continue") {
+    return { kind: "continue" };
+  }
+
+  if (instruction.kind === "yield") {
+    const nextWakeAt = "nextWakeAt" in instruction
+      ? readOptionalStringField(instruction, "nextWakeAt")
+      : null;
+    if (instruction.status !== "scheduled") {
+      throw new TypeError("Runtime liveness response.instruction.status must be scheduled.");
+    }
+    return {
+      kind: "yield",
+      nextWakeAt,
+      status: "scheduled",
+    };
+  }
+
+  throw new TypeError("Runtime liveness response.instruction.kind is unsupported.");
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

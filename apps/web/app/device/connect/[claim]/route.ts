@@ -1,8 +1,8 @@
-import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 
 import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
 import {
@@ -123,7 +123,7 @@ export async function POST(
 
 function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectIntentRecord) {
   const target = resolveConfiguredDeviceSyncConnectTarget(
-    readConfiguredDeviceSyncProviderConfigs(process.env),
+    readConfiguredDeviceSyncConnectTargetConfigs(process.env),
     intent.connectTarget,
   );
 

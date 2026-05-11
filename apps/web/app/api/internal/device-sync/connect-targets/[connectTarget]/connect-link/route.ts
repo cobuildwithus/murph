@@ -1,4 +1,4 @@
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   configuredDeviceSyncProviderKeys,
   listConfiguredDeviceSyncConnectTargets,

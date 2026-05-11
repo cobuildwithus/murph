@@ -595,7 +595,7 @@ describe("RunnerStateStore schema guard", () => {
     db.prepare(`
       UPDATE runner_meta
       SET pending_nudge = 0,
-          pending_work = 0,
+          pending_work = 1,
           pending_nudge_generation = 3,
           alarm_kind = 'work',
           alarm_due_at = ?,
@@ -612,7 +612,7 @@ describe("RunnerStateStore schema guard", () => {
         kind: "work",
       },
       pendingNudge: false,
-      pendingWork: false,
+      pendingWork: true,
     });
     expect(db.prepare(`
       SELECT pending_nudge, pending_work, pending_nudge_generation, alarm_kind, alarm_due_at
@@ -623,7 +623,7 @@ describe("RunnerStateStore schema guard", () => {
       alarm_kind: "work",
       pending_nudge: 0,
       pending_nudge_generation: 3,
-      pending_work: 0,
+      pending_work: 1,
     });
   });
 
@@ -639,13 +639,16 @@ describe("RunnerStateStore schema guard", () => {
       workspaceVersion: "0",
     });
 
-    await expect(store.recordActiveInvocationHeartbeat({
+    await expect(store.recordActiveInvocationHeartbeatInstruction({
       attemptId: lease.attemptId,
+      heartbeatStaleMs: 3_000,
       leaseGeneration: lease.leaseGeneration,
       nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+      runnerReadyTimeoutMs: 20_000,
+      runnerTimeoutMs: 45_000,
       userId: lease.userId,
     })).resolves.toMatchObject({
-      ok: true,
+      kind: "continue",
       record: {
         workspaceInvocation: {
           lastHeartbeatAt: "2026-04-27T00:00:10.000Z",
@@ -654,13 +657,16 @@ describe("RunnerStateStore schema guard", () => {
       },
     });
 
-    await expect(store.recordActiveInvocationHeartbeat({
+    await expect(store.recordActiveInvocationHeartbeatInstruction({
       attemptId: lease.attemptId,
+      heartbeatStaleMs: 3_000,
       leaseGeneration: lease.leaseGeneration,
       nowMs: Date.parse("2026-04-27T00:00:20.000Z"),
+      runnerReadyTimeoutMs: 20_000,
+      runnerTimeoutMs: 45_000,
       userId: lease.userId,
     })).resolves.toMatchObject({
-      ok: true,
+      kind: "continue",
       record: {
         workspaceInvocation: {
           lastHeartbeatAt: "2026-04-27T00:00:20.000Z",
@@ -678,13 +684,16 @@ describe("RunnerStateStore schema guard", () => {
       userId: "user-existing",
     });
 
-    await expect(store.recordActiveInvocationHeartbeat({
+    await expect(store.recordActiveInvocationHeartbeatInstruction({
       attemptId: lease.attemptId,
+      heartbeatStaleMs: 3_000,
       leaseGeneration: lease.leaseGeneration,
       nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+      runnerReadyTimeoutMs: 20_000,
+      runnerTimeoutMs: 45_000,
       userId: lease.userId,
     })).resolves.toMatchObject({
-      ok: false,
+      kind: "abort",
       reason: "no_active_invocation",
       record: {
         active: null,

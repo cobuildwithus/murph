@@ -1,5 +1,6 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
+import type { RuntimeLivenessInstruction } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -20,6 +21,7 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
   }): Promise<
     | {
+      instruction?: RuntimeLivenessInstruction;
       inputAvailable: boolean;
       nextAlarmAt: string | null;
       ok: true;

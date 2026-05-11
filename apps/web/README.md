@@ -27,6 +27,9 @@ canonical owner of hosted product facts.
 Hosted device-sync provider registration is intentionally shared with
 `@murphai/device-syncd/config`; `apps/web` should reuse that assembly path
 instead of maintaining an app-local provider list or provider-config object.
+Routes and pages that only need connect-target metadata should use the narrower
+`@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
+runtime factories into static analysis.
 
 ## Experiment detail data sources
 

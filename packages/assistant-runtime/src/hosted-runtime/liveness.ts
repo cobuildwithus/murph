@@ -6,7 +6,18 @@ export type RuntimeLivenessRejectionReason =
   | "unauthorized"
   | "wrong_user";
 
+export type RuntimeLivenessInstruction =
+  | {
+    kind: "continue";
+  }
+  | {
+    kind: "yield";
+    nextWakeAt: string | null;
+    status: "scheduled";
+  };
+
 export type RuntimeLivenessAcceptedResult = {
+  instruction?: RuntimeLivenessInstruction;
   inputAvailable?: boolean;
   nextAlarmAt?: string | null;
   ok: true;
@@ -30,6 +41,31 @@ export interface RuntimeLivenessPort {
 export interface RuntimeLivenessHeartbeat {
   readonly initialTouch: Promise<RuntimeLivenessTouchResult>;
   stop(): Promise<void>;
+}
+
+export function readRuntimeLivenessInstruction(
+  result: RuntimeLivenessAcceptedResult,
+): RuntimeLivenessInstruction {
+  if (result.instruction) {
+    return result.instruction;
+  }
+
+  if (result.inputAvailable === true) {
+    return {
+      kind: "yield",
+      nextWakeAt: result.nextAlarmAt ?? null,
+      status: "scheduled",
+    };
+  }
+
+  return { kind: "continue" };
+}
+
+export function readRuntimeLivenessNextWakeAt(
+  result: RuntimeLivenessAcceptedResult,
+): string | null {
+  const instruction = readRuntimeLivenessInstruction(result);
+  return instruction.kind === "yield" ? instruction.nextWakeAt : null;
 }
 
 export function startRuntimeLivenessHeartbeat(input: {
@@ -130,7 +166,8 @@ export function startRuntimeLivenessHeartbeat(input: {
         return;
       }
       settleInitialTouch(result);
-      if (result.inputAvailable === true && !stopped && !input.signal?.aborted) {
+      const instruction = readRuntimeLivenessInstruction(result);
+      if (instruction.kind === "yield" && !stopped && !input.signal?.aborted) {
         void Promise.resolve(input.onInputAvailable?.(result))
           .catch((error: unknown) => {
             if (!stopped && !input.signal?.aborted) {

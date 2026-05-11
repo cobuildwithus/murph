@@ -143,7 +143,7 @@ export function projectRunnerStateRecord(input: {
       nextWakeAt: alarm?.kind === "work"
         ? alarm.dueAt
         : input.meta.next_wake_at,
-      pendingNudge: pendingWork,
+      pendingNudge: input.meta.pending_nudge === 1,
       pendingNudgeGeneration: normalizeRetryFailureCount(
         input.meta.pending_nudge_generation,
       ),
