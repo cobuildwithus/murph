@@ -52,6 +52,11 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
+  assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
+  assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
+  assert.equal(resolveMetricDefinition("wearable_valid_day_count_28d")?.key, "wearable-valid-day-count-28d");
+  assert.equal(resolveMetricDefinition("wearable_valid_night_count_28d")?.key, "wearable-valid-night-count-28d");
+  assert.equal(resolveMetricDefinition("wearable_coverage_index_28d")?.key, "wearable-coverage-index");
   assert.equal(resolveMetricDefinition("unknown metric"), null);
   assert.equal(
     resolveMetricDefinitionForBiomarker("biomarker:resting-heart-rate")?.key,
@@ -1679,6 +1684,56 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
         unit: "score",
         value: 82,
       }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:sleep-efficiency:2026-05-08:wearable:0",
+        metricKey: "sleep-efficiency",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_sleep_efficiency_context",
+        sourceKind: "wearable-summary",
+        unit: "percent",
+        value: 88,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:sleep-duration-variability:2026-05-08:wearable:0",
+        metricKey: "sleep-duration-variability-minutes",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_sleep_variability_context",
+        sourceKind: "wearable-summary",
+        unit: "minutes",
+        value: 42,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-valid-days:2026-05-08:wearable:0",
+        metricKey: "wearable-valid-day-count-28d",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_valid_days_context",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 24,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-valid-nights:2026-05-08:wearable:0",
+        metricKey: "wearable-valid-night-count-28d",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_valid_nights_context",
+        sourceKind: "wearable-summary",
+        unit: "count",
+        value: 22,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-coverage:2026-05-08:wearable:0",
+        metricKey: "wearable-coverage-index",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "wearable_coverage_context",
+        sourceKind: "wearable-summary",
+        unit: "score",
+        value: 0.82,
+      }),
     ],
   });
 
@@ -1687,6 +1742,11 @@ test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wea
   assert.equal(wearable.recommendedCardId, "wearable_context_no_risk");
   assert.equal(wearable.availableFeatureKeys.includes("mvpa-minutes"), true);
   assert.equal(wearable.availableFeatureKeys.includes("sleep-regularity-score"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("sleep-duration-variability-minutes"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("sleep-efficiency"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("wearable-valid-day-count-28d"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("wearable-valid-night-count-28d"), true);
+  assert.equal(wearable.availableFeatureKeys.includes("wearable-coverage-index"), true);
   assert.equal(wearable.warnings.some((warning) => warning.message.includes("do not score wearables")), true);
 
   const insufficient = assessMurphAgeInputBundle({ asOf, points: [] });
@@ -1703,6 +1763,11 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("bmi"), true);
   assert.equal(keys.includes("steps"), true);
   assert.equal(keys.includes("hrv-rmssd"), true);
+  assert.equal(keys.includes("sleep-duration-variability-minutes"), true);
+  assert.equal(keys.includes("sleep-efficiency"), true);
+  assert.equal(keys.includes("wearable-coverage-index"), true);
+  assert.equal(keys.includes("wearable-valid-day-count-28d"), true);
+  assert.equal(keys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(keys.includes("crp"), false);
   assert.equal(keys.includes("hs-crp"), false);
 });
@@ -1771,6 +1836,56 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
       unit: "bpm",
       value: 62,
     }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:sleep-efficiency:2026-05-08:dispatcher-wearable:0",
+      metricKey: "sleep-efficiency",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_sleep_efficiency",
+      sourceKind: "wearable-summary",
+      unit: "percent",
+      value: 88,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:sleep-duration-variability:2026-05-08:dispatcher-wearable:0",
+      metricKey: "sleep-duration-variability-minutes",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_sleep_variability",
+      sourceKind: "wearable-summary",
+      unit: "minutes",
+      value: 42,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-valid-days:2026-05-08:dispatcher-wearable:0",
+      metricKey: "wearable-valid-day-count-28d",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_valid_days",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 24,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-valid-nights:2026-05-08:dispatcher-wearable:0",
+      metricKey: "wearable-valid-night-count-28d",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_valid_nights",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 22,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-coverage:2026-05-08:dispatcher-wearable:0",
+      metricKey: "wearable-coverage-index",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_coverage",
+      sourceKind: "wearable-summary",
+      unit: "score",
+      value: 0.82,
+    }),
   ];
   const lab9WithWearableContextPoints = [...lab9Points, ...wearableContextPoints];
   const researchModel = fixtureLab9ResearchModel();
@@ -1830,6 +1945,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(research.authorization.productAuthorized, false);
   assert.equal(research.authorization.wearableScoreBearingAuthorized, false);
   assert.equal(research.authorization.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(research.authorization.contextOnlyMetricKeys.includes("sleep-efficiency"), true);
+  assert.equal(research.authorization.contextOnlyMetricKeys.includes("wearable-coverage-index"), true);
   assert.equal(research.result?.authorization.cardId, research.authorization.cardId);
   assert.equal(research.result?.authorization.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
   assert.equal(research.bundleAssessment.bundleId, "lab9-bp-body");
@@ -1854,6 +1971,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("steps"), false);
   assert.equal(researchSummary.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(researchSummary.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(researchSummary.contextOnlyMetricKeys.includes("sleep-duration-variability-minutes"), true);
+  assert.equal(researchSummary.contextOnlyMetricKeys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(researchSummary.contextOnlyPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), true);
   const productRiskOnlySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
@@ -1978,12 +2097,16 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnly.authorization.evidenceClass, "context-only");
   assert.equal(wearableOnly.authorization.scoreBearing, false);
   assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("sleep-efficiency"), true);
+  assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("wearable-coverage-index"), true);
   assert.equal(wearableOnly.contextAssessments.length, 0);
   const wearableOnlySummary = summarizeMurphAgeCalculatorOutput(wearableOnly);
   assert.equal(wearableOnlySummary.displayStatus, "context-only");
   assert.equal(wearableOnlySummary.displayBlockedReason, "context-only");
   assert.equal(wearableOnlySummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(wearableOnlySummary.contextOnlyMetricKeys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("resting-heart-rate"), true);
+  assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("sleep-duration-variability-minutes"), true);
   assert.equal(wearableOnlySummary.selectedScoreBearingMetricKeys.length, 0);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
