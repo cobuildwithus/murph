@@ -111,7 +111,7 @@ export type RunnerStaleInvocationRecoveryResult =
     attemptId: string | null;
     cleared: true;
     nextRecoveryAt: null;
-    reason: "container_stopped" | "expired" | "worker_version_mismatch";
+    reason: ActiveInvocationRecoveryClearReason;
     record: RunnerStateRecord;
   };
 
@@ -243,8 +243,12 @@ export function resolveActiveInvocationRecoveryDecision(input: {
     : Number.isFinite(startedAtMs)
     ? startedAtMs + input.timeoutMs
     : 0;
+  const startupGraceMs = Math.max(
+    Math.max(0, Math.floor(input.readyTimeoutMs)),
+    heartbeatStaleMs,
+  );
   const startupDeadlineMs = !hasHeartbeat && Number.isFinite(startedAtMs)
-    ? startedAtMs + Math.max(0, Math.floor(input.readyTimeoutMs))
+    ? startedAtMs + startupGraceMs
     : Number.POSITIVE_INFINITY;
   const heartbeatDeadlineMs = hasHeartbeat
     ? lastHeartbeatAtMs + heartbeatStaleMs
@@ -1208,11 +1212,7 @@ export class RunnerStateStore {
       attemptId,
       cleared: true,
       nextRecoveryAt: null,
-      reason: decision.reason === "container_stopped"
-        ? "container_stopped"
-        : decision.reason === "worker_version_mismatch"
-        ? "worker_version_mismatch"
-        : "expired",
+      reason: decision.reason,
       record: this.readStateFromMetaSync(meta),
     };
   }

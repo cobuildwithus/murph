@@ -1796,7 +1796,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual(expect.arrayContaining([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:20.050Z",
+      "2026-04-27T00:00:30.050Z",
     ]));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1847,7 +1847,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await expect(runner.alarm()).resolves.toBeUndefined();
     await flushDetachedRunnerDrive();
 
@@ -2014,7 +2014,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:20.050Z",
+      "2026-04-27T00:00:30.050Z",
     ]);
     expect(
       sql.exec(
@@ -2175,7 +2175,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(alarms).toEqual([
       "2026-04-27T00:00:01.000Z",
-      "2026-04-27T00:00:20.050Z",
+      "2026-04-27T00:00:30.050Z",
     ]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2272,11 +2272,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
     await expect(runner.runUntilIdleOrBudget({ reason: "alarm" })).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:20.050Z",
+      nextWakeAt: "2026-04-27T00:00:30.050Z",
       status: "scheduled",
     });
     expect(invoke).toHaveBeenCalledOnce();
-    expect(alarms).toEqual(["2026-04-27T00:00:20.050Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.050Z"]);
     expect(
       sql.exec(
         "SELECT pending_nudge FROM runner_meta WHERE user_id = ?",
@@ -2324,7 +2324,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.waitFor(() =>
       expect(alarms).toEqual(expect.arrayContaining([
         "2026-04-27T00:00:01.000Z",
-        "2026-04-27T00:00:20.050Z",
+        "2026-04-27T00:00:30.050Z",
         "2026-04-27T00:04:01.100Z",
       ]))
     );
@@ -2739,7 +2739,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
-        message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+        message: "Hosted workspace invocation startup timed out; clearing stale in-flight state.",
         phase: "wake.running",
         userId: "member_123",
       }),
@@ -2856,7 +2856,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual(["2026-04-27T00:00:20.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
     expect(
       sql.exec(
         `SELECT active_invocation_id,
@@ -2869,7 +2869,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toEqual([{
       active_invocation_id: "workspace-invocation-1",
       in_flight: 1,
-      next_wake_at: "2026-04-27T00:00:20.000Z",
+      next_wake_at: "2026-04-27T00:00:30.000Z",
       pending_nudge: 1,
     }]);
   });
@@ -2930,7 +2930,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("retries a consumed persisted nudge after no-heartbeat readiness times out", async () => {
+  it("retries a consumed persisted nudge after the no-heartbeat startup grace expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
@@ -2963,6 +2963,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
     await expect(runner.runUntilIdleOrBudget({
       dueWake: true,
       reason: "alarm",

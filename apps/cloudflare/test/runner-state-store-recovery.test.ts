@@ -37,6 +37,19 @@ describe("resolveActiveInvocationRecoveryDecision", () => {
     {
       expected: {
         kind: "live",
+        nextRecoveryAt: "2026-04-27T00:00:30.000Z",
+        reason: "starting",
+      },
+      input: {
+        heartbeatStaleMs: 30_000,
+        readyTimeoutMs: 5_000,
+        startedAt: "2026-04-27T00:00:00.000Z",
+      },
+      name: "uses the heartbeat stale window as the minimum startup grace",
+    },
+    {
+      expected: {
+        kind: "live",
         nextRecoveryAt: "2026-04-27T00:00:13.000Z",
         reason: "heartbeating",
       },
