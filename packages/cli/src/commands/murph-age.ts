@@ -72,12 +72,19 @@ const murphAgeModelCardBlockerSchema = z.enum([
   'WEARABLE_NOT_SCORE_BEARING',
 ])
 
+const murphAgeOutcomeContextSchema = z.object({
+  ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
+  horizonYears: z.number().nullable(),
+  riskEndpoint: z.enum(['all-cause-mortality', 'none']),
+})
+
 const murphAgeModelCardStatusPolicySchema = z.object({
   acceptedBundleIds: z.array(z.string().min(1)),
   blockers: z.array(murphAgeModelCardBlockerSchema),
   cardId: murphAgeModelCardIdSchema,
   evidenceClass: murphAgeEvidenceClassSchema,
   loaded: z.boolean(),
+  outcomeContext: murphAgeOutcomeContextSchema,
   productAgeReady: z.boolean(),
   productRiskReady: z.boolean(),
   researchUsable: z.boolean(),
@@ -155,12 +162,6 @@ const murphAgePublicAuthorizationSchema = z.object({
 const murphAgePublicRiskEstimateSchema = z.object({
   horizonYears: z.number(),
   probability: z.number(),
-})
-
-const murphAgeOutcomeContextSchema = z.object({
-  ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
-  horizonYears: z.number().nullable(),
-  riskEndpoint: z.enum(['all-cause-mortality', 'none']),
 })
 
 const murphAgePublicFeatureAttributionSchema = z.object({
@@ -469,6 +470,11 @@ function summarizeMurphAgeModelCardPolicy(
     cardId: policy.cardId,
     evidenceClass: policy.evidenceClass,
     loaded,
+    outcomeContext: {
+      ageEstimateBasis: policy.outcome.ageEstimateBasis,
+      horizonYears: policy.outcome.horizonYears,
+      riskEndpoint: policy.outcome.riskEndpoint,
+    },
     productAgeReady,
     productRiskReady,
     researchUsable: policy.scoreBearing && loaded,
