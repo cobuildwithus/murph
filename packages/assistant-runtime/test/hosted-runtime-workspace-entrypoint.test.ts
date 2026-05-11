@@ -1340,6 +1340,69 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("returns scheduled when initial foreground liveness reports fresh input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const freshInputWakeAt = "2026-04-27T00:00:03.000Z";
+    let touchCalls = 0;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        touchCalls += 1;
+        events.push(`heartbeat:${touchCalls}`);
+        return {
+          inputAvailable: true,
+          nextAlarmAt: freshInputWakeAt,
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_initial_foreground_liveness",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Foreground input preemption must not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Foreground input preemption must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(result, {
+        nextWakeAt: freshInputWakeAt,
+        status: "scheduled",
+      });
+      assert.equal(touchCalls, 1);
+      assert.deepEqual(events, ["heartbeat:1"]);
+      assert.equal(checkpointRequests.length, 0);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("passes liveness cancellation into mailbox imports before import side effects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

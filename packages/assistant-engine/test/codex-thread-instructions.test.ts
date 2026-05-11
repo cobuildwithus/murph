@@ -15,6 +15,9 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/providers/registry.ts'
+import {
+  executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
+} from '../src/assistant/providers/codex-cli.ts'
 
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
@@ -81,6 +84,10 @@ describe('Codex thread instructions', () => {
       }),
       env: {},
       developerInstructions: 'Stable Murph instructions.',
+      freshThreadFallback: {
+        developerInstructions: 'Stable Murph instructions.',
+        turnContextPrompt: 'Current Murph runtime context.',
+      },
       refreshThreadInstructions: false,
       resumeProviderSessionId: 'thread-resume',
       systemPrompt: 'Stable Murph instructions.',
@@ -101,6 +108,26 @@ describe('Codex thread instructions', () => {
     )
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
     expect(appServerInput.resumeSessionId).toBe('thread-resume')
+  })
+
+  it('requires a prepared fresh-thread fallback plan for native resume', async () => {
+    await expect(
+      executeCodexAssistantTurnAttemptUnchecked({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        env: {},
+        developerInstructions: 'Stable Murph instructions.',
+        refreshThreadInstructions: false,
+        resumeProviderSessionId: 'thread-resume',
+        userPrompt: 'Continue.',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
+    })
+
+    expect(codexAppServerMocks.executeCodexAppServerTurn).not.toHaveBeenCalled()
   })
 
   it('starts stale-resume fallback with fresh thread instructions', async () => {

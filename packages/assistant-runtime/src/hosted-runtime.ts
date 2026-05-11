@@ -396,6 +396,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "scheduled",
       };
     }
+    if (
+      !isIdleShutdownCheckpoint
+      && hasRuntimeInputAvailable(initialLiveness)
+    ) {
+      return {
+        nextWakeAt: initialLiveness.nextAlarmAt ?? null,
+        status: "scheduled",
+      };
+    }
 
     let workspaceRead = await raceHostedRuntimeLiveness(
       workspacePort.read(),
