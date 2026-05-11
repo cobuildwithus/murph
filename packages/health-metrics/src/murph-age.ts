@@ -2138,7 +2138,7 @@ function summarizeWearableContext(
     readyFeatureKeySet.has(featureKey)
   );
   const hasWearableContext = readyFeatureKeys.length > 0;
-  const hasQualityMetadata = availableQualityFeatureKeys.length > 0;
+  const hasQualityMetadata = readyFeatureKeySet.has("wearable-coverage-index");
   const quality = resolveWearableContextQuality({
     availableFeatureFamilies,
     hasQualityMetadata,

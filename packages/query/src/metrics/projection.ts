@@ -42,11 +42,16 @@ export function buildMetricProjection(vault: VaultReadModel): MetricProjection {
 }
 
 export function buildWearableMetricEvidence(vault: VaultReadModel): MetricRowEvidence[] {
+  const sleepSummaries = summarizeWearableSleep(vault, { limit: METRIC_PROJECTION_LIMIT });
+  const recoverySummaries = summarizeWearableRecovery(vault, { limit: METRIC_PROJECTION_LIMIT });
+  const activitySummaries = summarizeWearableActivity(vault, { limit: METRIC_PROJECTION_LIMIT });
+  const bodyStateSummaries = summarizeWearableBodyState(vault, { limit: METRIC_PROJECTION_LIMIT });
+
   return [
-    ...summarizeWearableSleep(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(sleepMetricEvidence),
-    ...summarizeWearableRecovery(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(recoveryMetricEvidence),
-    ...summarizeWearableActivity(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(activityMetricEvidence),
-    ...summarizeWearableBodyState(vault, { limit: METRIC_PROJECTION_LIMIT }).flatMap(bodyStateMetricEvidence),
+    ...sleepSummaries.flatMap(sleepMetricEvidence),
+    ...recoverySummaries.flatMap(recoveryMetricEvidence),
+    ...activitySummaries.flatMap(activityMetricEvidence),
+    ...bodyStateSummaries.flatMap(bodyStateMetricEvidence),
   ];
 }
 
