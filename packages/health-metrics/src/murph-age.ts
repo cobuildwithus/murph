@@ -14,7 +14,7 @@ export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1"
 export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v5" as const;
 export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
-  "murph.age.public-calculator-report.v1" as const;
+  "murph.age.public-calculator-report.v2" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
@@ -372,6 +372,31 @@ export interface MurphAgePublicWarning {
   metricKey?: string;
 }
 
+export interface MurphAgePublicInputFeatureReadiness {
+  featureKey: string;
+  metricKeys: string[];
+  requiredFor: MurphAgeInputBundleFeatureStatus["requiredFor"];
+  selectedMetricKey: string | null;
+  status: "missing" | "ready";
+}
+
+export interface MurphAgePublicInputBundleReadiness {
+  availableFeatureKeys: string[];
+  bundleId: MurphAgeInputBundleId;
+  featureStatuses: MurphAgePublicInputFeatureReadiness[];
+  missingFeatureKeys: string[];
+  recommendedCardId: MurphAgeInputBundleAssessment["recommendedCardId"];
+  schemaVersion: typeof MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION;
+  selectedMetricKeys: string[];
+  status: MurphAgeInputBundleStatus;
+  warnings: MurphAgePublicWarning[];
+}
+
+export interface MurphAgePublicInputReadinessSummary {
+  bundle: MurphAgePublicInputBundleReadiness;
+  contextBundles: MurphAgePublicInputBundleReadiness[];
+}
+
 export interface MurphAgePublicAuthorization {
   cardId: MurphAgeModelCardId | null;
   contextOnlyMetricKeys: string[];
@@ -400,6 +425,7 @@ export interface MurphAgePublicResult {
 export interface MurphAgePublicCalculatorReport {
   authorization: MurphAgePublicAuthorization;
   displaySummary: MurphAgePublicDisplaySummary;
+  inputReadiness: MurphAgePublicInputReadinessSummary;
   mode: MurphAgeCalculatorMode;
   result: MurphAgePublicResult | null;
   schemaVersion: typeof MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION;
@@ -1198,6 +1224,11 @@ const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
   "sex",
 ]);
 
+const MURPH_AGE_PUBLIC_FALLBACK_FEATURE_KEYS = new Set([
+  "metric-feature",
+  "model-feature",
+]);
+
 const MURPH_AGE_PUBLIC_WEARABLE_BRIDGE_FEATURE_KEYS = new Set(
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map((feature) => feature.featureKey),
 );
@@ -1223,6 +1254,17 @@ export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridge
 
 export function listMurphAgeInputBundleMetricKeys(): string[] {
   return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
+}
+
+export function isMurphAgePublicFeatureKey(value: string): boolean {
+  const simpleKey = toPublicSimpleKey(value);
+  return simpleKey === value
+    && (MURPH_AGE_PUBLIC_FEATURE_KEYS.has(value) || MURPH_AGE_PUBLIC_FALLBACK_FEATURE_KEYS.has(value));
+}
+
+export function isMurphAgePublicMetricKey(value: string): boolean {
+  const simpleKey = toPublicSimpleKey(value);
+  return simpleKey === value && MURPH_AGE_PUBLIC_METRIC_KEYS.has(value);
 }
 
 export function isMurphAgeInputBundleMetricPointAllowed(
@@ -1638,11 +1680,49 @@ export function toPublicMurphAgeCalculatorReport(
   return {
     authorization: toPublicMurphAgeAuthorization(output.authorization),
     displaySummary: summarizeMurphAgeCalculatorPublicOutput(output),
+    inputReadiness: toPublicMurphAgeInputReadiness(output),
     mode: output.mode,
     result: output.result ? toPublicMurphAgeResult(output.result) : null,
     schemaVersion: MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
     status: output.status,
     warnings: toPublicMurphAgeWarnings(output.warnings),
+  };
+}
+
+function toPublicMurphAgeInputReadiness(
+  output: MurphAgeCalculatorOutput,
+): MurphAgePublicInputReadinessSummary {
+  return {
+    bundle: toPublicMurphAgeInputBundleReadiness(output.bundleAssessment),
+    contextBundles: output.contextAssessments.map(toPublicMurphAgeInputBundleReadiness),
+  };
+}
+
+function toPublicMurphAgeInputBundleReadiness(
+  assessment: MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+): MurphAgePublicInputBundleReadiness {
+  return {
+    availableFeatureKeys: toPublicFeatureKeyList(assessment.availableFeatureKeys),
+    bundleId: assessment.bundleId,
+    featureStatuses: assessment.featureStatuses.map(toPublicMurphAgeInputFeatureReadiness),
+    missingFeatureKeys: toPublicFeatureKeyList(assessment.missingFeatureKeys),
+    recommendedCardId: assessment.recommendedCardId,
+    schemaVersion: assessment.schemaVersion,
+    selectedMetricKeys: toPublicMetricKeyList(assessment.selectedMetricKeys),
+    status: assessment.status,
+    warnings: toPublicMurphAgeWarnings(assessment.warnings),
+  };
+}
+
+function toPublicMurphAgeInputFeatureReadiness(
+  feature: MurphAgeContextBundleFeatureStatus | MurphAgeInputBundleFeatureStatus,
+): MurphAgePublicInputFeatureReadiness {
+  return {
+    featureKey: toPublicFeatureKeyFromKey(feature.featureKey) ?? "model-feature",
+    metricKeys: toPublicMetricKeyList(feature.metricKeys),
+    requiredFor: feature.requiredFor,
+    selectedMetricKey: toPublicMetricKey(feature.selectedMetricKey),
+    status: feature.status,
   };
 }
 

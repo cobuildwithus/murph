@@ -28,7 +28,7 @@ import { registerBloodTestCommands } from '../src/commands/health-blood-test-sav
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { registerMurphAgeCommands } from '../src/commands/murph-age.js'
+import { murphAgeReportResultSchema, registerMurphAgeCommands } from '../src/commands/murph-age.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import {
@@ -428,8 +428,87 @@ test('age report returns a product-mode public abstention instead of research-on
     ]))
 
     assert.equal(report.mode, 'product')
+    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v2')
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
+    assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')
+    assert.equal(report.inputReadiness.bundle.selectedMetricKeys.includes('hba1c'), true)
+    assert.equal(report.inputReadiness.contextBundles[0]?.bundleId, 'wearable-context')
+    assert.equal(report.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes('steps'), true)
+    const withPrivateBundleList = (
+      key: 'availableFeatureKeys' | 'missingFeatureKeys' | 'selectedMetricKeys',
+      value: string,
+    ) => ({
+      ...report,
+      inputReadiness: {
+        ...report.inputReadiness,
+        bundle: {
+          ...report.inputReadiness.bundle,
+          [key]: [value],
+        },
+      },
+    })
+    const withPrivateBundleFeatureStatus = (
+      patch: Partial<MurphAgePublicCalculatorReport['inputReadiness']['bundle']['featureStatuses'][number]>,
+    ) => ({
+      ...report,
+      inputReadiness: {
+        ...report.inputReadiness,
+        bundle: {
+          ...report.inputReadiness.bundle,
+          featureStatuses: report.inputReadiness.bundle.featureStatuses.map((feature, index) => index === 0
+            ? {
+              ...feature,
+              ...patch,
+            }
+            : feature),
+        },
+      },
+    })
+    const withPrivateContextFeatureStatus = (
+      patch: Partial<MurphAgePublicCalculatorReport['inputReadiness']['bundle']['featureStatuses'][number]>,
+    ) => ({
+      ...report,
+      inputReadiness: {
+        ...report.inputReadiness,
+        contextBundles: report.inputReadiness.contextBundles.map((bundle, index) => index === 0
+          ? {
+            ...bundle,
+            featureStatuses: bundle.featureStatuses.map((feature, featureIndex) => featureIndex === 0
+              ? {
+                ...feature,
+                ...patch,
+              }
+              : feature),
+          }
+          : bundle),
+      },
+    })
+    const withPrivateReadinessWarning = () => ({
+      ...report,
+      inputReadiness: {
+        ...report.inputReadiness,
+        bundle: {
+          ...report.inputReadiness.bundle,
+          warnings: [{
+            code: 'MODEL_FEATURE_MISSING',
+            featureKey: 'private-model-feature',
+            metricKey: 'private-metric-key',
+          }],
+        },
+      },
+    })
+    for (const invalidPublicReadinessReport of [
+      withPrivateBundleList('availableFeatureKeys', 'private-model-feature'),
+      withPrivateBundleList('missingFeatureKeys', 'private-model-feature'),
+      withPrivateBundleList('selectedMetricKeys', 'private-metric-key'),
+      withPrivateBundleFeatureStatus({ featureKey: 'private-model-feature' }),
+      withPrivateContextFeatureStatus({ metricKeys: ['private-metric-key'] }),
+      withPrivateContextFeatureStatus({ selectedMetricKey: 'private-metric-key' }),
+      withPrivateReadinessWarning(),
+    ]) {
+      assert.equal(murphAgeReportResultSchema.safeParse(invalidPublicReadinessReport).success, false)
+    }
     assert.equal(report.authorization.productAuthorized, false)
     assert.equal(report.displaySummary.schemaVersion, 'murph.age.public-display-summary.v4')
     assert.equal(report.displaySummary.displayBlockedReason, 'product-not-authorized')
@@ -453,6 +532,9 @@ test('age report returns a product-mode public abstention instead of research-on
       'selectedPointIds',
       '"value"',
       '"unit"',
+      '"label"',
+      '"message"',
+      '"path"',
       'fixture-lab9-research-model',
       'modelId',
       'coefficient',
