@@ -1,6 +1,6 @@
 # Murph Age model-card owner boundary
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -35,10 +35,10 @@ Updated: 2026-05-11
 ## Tasks
 
 1. Inspect existing query-owned artifact schema and tests. Done.
-2. Add health-metrics-owned artifact contract parsing and policy validation.
-3. Update query loader to call the health-metrics parser/validator and remove duplicate schemas/Zod use from the Murph Age query module.
-4. Add/adjust focused tests.
-5. Run package typechecks, package coverage, smoke/diff checks, required audits, and finish with a scoped commit if safe.
+2. Add health-metrics-owned artifact contract parsing and policy validation. Done.
+3. Update query loader to call the health-metrics parser/validator and remove duplicate schemas/Zod use from the Murph Age query module. Done.
+4. Add/adjust focused tests. Done.
+5. Run package typechecks, package coverage, smoke/diff checks, required audits, and finish with a scoped commit if safe. Done.
 
 ## Decisions
 
@@ -54,3 +54,16 @@ Updated: 2026-05-11
   - `pnpm --dir packages/query test:coverage`
   - `pnpm test:smoke`
 - Expected outcomes: all focused checks pass; if root typecheck remains red from the known unrelated contracts/scripts drift, report it rather than attributing it to this diff.
+- Results:
+  - `pnpm --dir packages/health-metrics typecheck`: passed.
+  - `pnpm --dir packages/query typecheck`: passed.
+  - `pnpm --dir packages/health-metrics test:coverage`: passed, 34 tests.
+  - `pnpm --dir packages/query test:coverage`: passed, 279 tests.
+  - `pnpm test:smoke`: passed, 181 scenarios, 6 sample inputs, and 24 golden-output directories.
+  - `git diff --check -- <task paths>`: passed.
+  - `pnpm typecheck`: passed after retry.
+  - `security-privacy-review`: no findings.
+  - `coverage-write`: no coverage gaps, no edits.
+  - `simplify`: low findings addressed for warning-helper surface, score-bearing card-id derivation, and top-level parser fail-fast behavior.
+  - `task-finish-review`: no findings.
+Completed: 2026-05-11

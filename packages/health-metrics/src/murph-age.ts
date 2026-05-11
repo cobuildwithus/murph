@@ -2958,21 +2958,18 @@ export function parseMurphAgeRiskModelArtifact(value: unknown): MurphAgeRiskMode
 
 export function parseMurphAgeLocalModelCardArtifact(value: unknown): MurphAgeLocalModelCardArtifactParseResult {
   const artifact = asPlainRecord(value);
-  const cardId = artifact ? parseScoreBearingCardId(artifact.cardId) : null;
-  const model = artifact ? parseMurphAgeRiskModelArtifact(artifact.model) : null;
+  if (!artifact || artifact.schemaVersion !== MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION) {
+    return invalidMurphAgeLocalModelCardArtifactResult();
+  }
 
-  if (
-    !artifact ||
-    artifact.schemaVersion !== MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION ||
-    !cardId ||
-    !model
-  ) {
-    return {
-      value: null,
-      warnings: [createMurphAgeLocalModelCardWarning(
-        "A local Murph Age model-card artifact does not match the expected schema.",
-      )],
-    };
+  const cardId = parseScoreBearingCardId(artifact.cardId);
+  if (!cardId) {
+    return invalidMurphAgeLocalModelCardArtifactResult();
+  }
+
+  const model = parseMurphAgeRiskModelArtifact(artifact.model);
+  if (!model) {
+    return invalidMurphAgeLocalModelCardArtifactResult();
   }
 
   return {
@@ -2982,6 +2979,22 @@ export function parseMurphAgeLocalModelCardArtifact(value: unknown): MurphAgeLoc
       schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
     },
     warnings: [],
+  };
+}
+
+function invalidMurphAgeLocalModelCardArtifactResult(): MurphAgeLocalModelCardArtifactParseResult {
+  return {
+    value: null,
+    warnings: [createMurphAgeLocalModelCardWarning(
+      "A local Murph Age model-card artifact does not match the expected schema.",
+    )],
+  };
+}
+
+function createMurphAgeLocalModelCardWarning(message: string): MurphAgeWarning {
+  return {
+    code: "INVALID_INPUT",
+    message,
   };
 }
 
@@ -3015,13 +3028,6 @@ export function validateMurphAgeLocalModelCardArtifactPolicy(
     }
   }
   return warnings;
-}
-
-export function createMurphAgeLocalModelCardWarning(message: string): MurphAgeWarning {
-  return {
-    code: "INVALID_INPUT",
-    message,
-  };
 }
 
 function validateFeatureTransform(feature: MurphAgeModelFeature): MurphAgeWarning[] {
@@ -3060,9 +3066,9 @@ function validateFeatureTransform(feature: MurphAgeModelFeature): MurphAgeWarnin
 }
 
 function parseScoreBearingCardId(value: unknown): MurphAgeScoreBearingCardId | null {
-  return value === "lab5_bp_bmi_transport_research" || value === "lab9_bp_body_10y_acm_research"
-    ? value
-    : null;
+  if (typeof value !== "string") return null;
+  const policy = MURPH_AGE_MODEL_CARD_POLICIES.find((candidate) => candidate.cardId === value);
+  return policy && policy.scoreBearing && isScoreBearingCardId(policy.cardId) ? policy.cardId : null;
 }
 
 function parseModelFeatures(value: unknown): readonly MurphAgeModelFeature[] | null {
