@@ -1,6 +1,6 @@
 # Murph Age policy invariants
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -41,4 +41,13 @@ Updated: 2026-05-11
 
 ## Verification
 
-- Commands to run: focused health-metrics/query typechecks and coverage, root typecheck when unblocked, smoke, diff check, and required completion audits.
+- `pnpm --dir packages/health-metrics typecheck` passed.
+- `pnpm --dir packages/query typecheck` passed.
+- `pnpm --dir packages/health-metrics test:coverage` passed with 33 tests.
+- `pnpm --dir packages/query test:coverage` passed with 279 tests.
+- `pnpm test:smoke` passed.
+- `git diff --check -- agent-docs/exec-plans/active/2026-05-11-murph-age-policy-invariants.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md packages/health-metrics/test/index.test.ts packages/query/test/murph-age-runtime.test.ts` passed.
+- Required coverage-write and security/privacy audit passes completed with no edits/findings.
+- Final review found one low test-specificity gap; accepted-bundle-specific score-bearing metric coverage was added and the affected health-metrics checks were rerun.
+- `pnpm typecheck` was attempted and failed in unrelated `scripts/verify.ts` / `@murphai/contracts` export drift outside this plan's touched files.
+Completed: 2026-05-11

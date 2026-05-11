@@ -1786,6 +1786,11 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
 
 test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
   const bundleMetricKeys = new Set(listMurphAgeInputBundleMetricKeys());
+  const bundleMetricKeysById = new Map<string, Set<string>>([
+    ["lab9-bp-body", assessedBundleMetricKeys("lab9-bp-body", completeLab9BpBodyPolicyPoints())],
+    ["lab5-bp-bmi", assessedBundleMetricKeys("lab5-bp-bmi", completeLab5BpBmiPolicyPoints())],
+    ["wearable-context", bundleMetricKeys],
+  ]);
   const bridgeSpecs = listMurphAgeWearableBridgeFeatureSpecs();
   const shadowPolicies = listMurphAgeWearableShadowIncrementPolicies();
   const wearableResearchMetricKeys = new Set([
@@ -1797,11 +1802,20 @@ test("keeps Murph Age card metrics reachable while wearable research signals sta
   ]);
 
   for (const policy of listMurphAgeModelCardPolicies()) {
+    const acceptedBundleMetricKeys = new Set(policy.acceptedBundleIds.flatMap((bundleId) => [
+      ...assertDefined(bundleMetricKeysById.get(bundleId), `bundle ${bundleId} must have invariant coverage`),
+    ]));
+
     for (const metricKey of policy.scoreBearingMetricKeys) {
       assert.equal(
         bundleMetricKeys.has(metricKey),
         true,
         `${policy.cardId} score-bearing metric ${metricKey} must be in the input bundle registry`,
+      );
+      assert.equal(
+        acceptedBundleMetricKeys.has(metricKey),
+        true,
+        `${policy.cardId} score-bearing metric ${metricKey} must be reachable through its accepted bundles`,
       );
       assert.equal(
         wearableResearchMetricKeys.has(metricKey),
@@ -3536,6 +3550,70 @@ function labMetricPoint(metricKey: string, unit: string, value: number): MetricP
     unit,
     value,
   });
+}
+
+function assessedBundleMetricKeys(expectedBundleId: string, points: MetricPoint[]): Set<string> {
+  const assessment = assessMurphAgeInputBundle({
+    asOf: "2026-05-10T00:00:00.000Z",
+    points,
+  });
+  assert.equal(assessment.bundleId, expectedBundleId);
+  return new Set(assessment.featureStatuses.flatMap((status) => status.metricKeys));
+}
+
+function completeLab9BpBodyPolicyPoints(): MetricPoint[] {
+  return [
+    labMetricPoint("albumin", "g/dL", 4.4),
+    labMetricPoint("creatinine", "mg/dL", 0.9),
+    labMetricPoint("egfr", "mL/min/1.73m^2", 95),
+    labMetricPoint("hba1c", "percent", 5.2),
+    labMetricPoint("glucose", "mg/dL", 92),
+    labMetricPoint("alkaline-phosphatase", "U/L", 65),
+    labMetricPoint("white-blood-cell-count", "10^3/uL", 5.5),
+    labMetricPoint("lymphocyte-percentage", "percent", 32),
+    labMetricPoint("red-cell-distribution-width", "percent", 12.5),
+    labMetricPoint("hdl-c", "mg/dL", 58),
+    labMetricPoint("triglycerides", "mg/dL", 95),
+    measurementMetricPoint("systolic-blood-pressure", "mmHg", 118),
+    measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
+    measurementMetricPoint("bmi", "kg/m^2", 23.2),
+    measurementMetricPoint("waist-circumference", "cm", 82),
+  ];
+}
+
+function completeLab5BpBmiPolicyPoints(): MetricPoint[] {
+  return [
+    labMetricPoint("hba1c", "percent", 5.2),
+    labMetricPoint("glucose", "mg/dL", 92),
+    labMetricPoint("hdl-c", "mg/dL", 58),
+    labMetricPoint("triglycerides", "mg/dL", 95),
+    labMetricPoint("creatinine", "mg/dL", 0.9),
+    labMetricPoint("egfr", "mL/min/1.73m^2", 95),
+    measurementMetricPoint("systolic-blood-pressure", "mmHg", 118),
+    measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
+    measurementMetricPoint("bmi", "kg/m^2", 23.2),
+    measurementMetricPoint("waist-circumference", "cm", 82),
+  ];
+}
+
+function measurementMetricPoint(metricKey: string, unit: string, value: number): MetricPoint {
+  return metricPoint({
+    effectiveDate: "2026-05-08",
+    id: `metric-point:${metricKey}:2026-05-08:measurement:0`,
+    metricKey,
+    observedAt: "2026-05-08T08:00:00.000Z",
+    recordId: `measurement_${metricKey.replaceAll("-", "_")}`,
+    sourceKind: "measurement",
+    unit,
+    value,
+  });
+}
+
+function assertDefined<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
 }
 
 function metricPoint(input: {
