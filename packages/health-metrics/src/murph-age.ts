@@ -129,6 +129,12 @@ export type MurphAgeValidationEvidenceTier =
   | "partner-aggregate-validation"
   | "same-family-sanity"
   | "true-external-validation";
+export type MurphAgeProductPromotionBlocker =
+  | "PRODUCT_POLICY_NOT_AUTHORIZED"
+  | "PRODUCT_PROMOTION_EVIDENCE_MISSING"
+  | "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING"
+  | "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED"
+  | "VALIDATION_GATE_BLOCKED";
 
 export interface MurphAgeLocalModelCardArtifact {
   cardId: MurphAgeScoreBearingCardId;
@@ -1216,6 +1222,20 @@ export function isMurphAgeModelCardProductAuthorized(policy: MurphAgeModelCardPo
 
 export function isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy: MurphAgeModelCardPolicy): boolean {
   return policy.riskToAgeDisplayAuthorized && isMurphAgeModelCardProductAuthorized(policy);
+}
+
+export function listMurphAgeModelCardProductPromotionBlockers(
+  policy: MurphAgeModelCardPolicy,
+): MurphAgeProductPromotionBlocker[] {
+  const blockers: MurphAgeProductPromotionBlocker[] = [];
+  if (!policy.productAuthorized) blockers.push("PRODUCT_POLICY_NOT_AUTHORIZED");
+  if (policy.validationGate.status !== "passed") blockers.push("VALIDATION_GATE_BLOCKED");
+  if (!policy.validationGate.productPromotionEvidence) blockers.push("PRODUCT_PROMOTION_EVIDENCE_MISSING");
+  if (!hasMurphAgeProductPromotionEvidenceTier(policy.validationGate)) {
+    blockers.push("PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING");
+  }
+  if (!policy.riskToAgeDisplayAuthorized) blockers.push("RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED");
+  return blockers;
 }
 
 export function hasMurphAgeProductPromotionEvidenceTier(summary: MurphAgeValidationGateSummary): boolean {
