@@ -11,8 +11,8 @@ import type {
 
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
-export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v3" as const;
-export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v2" as const;
+export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v4" as const;
+export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
@@ -148,11 +148,31 @@ export interface MurphAgeValidationGateSummary {
   summary: string;
 }
 
+export type MurphAgeRiskEndpoint = "all-cause-mortality" | "none";
+export type MurphAgeAgeEstimateBasis = "none" | "risk-age-equivalent";
+
+const MURPH_AGE_EMPTY_OUTCOME_CONTEXT = {
+  ageEstimateBasis: "none",
+  horizonYears: null,
+  riskEndpoint: "none",
+} satisfies MurphAgeOutcomeContext;
+
+export interface MurphAgeOutcomeContext {
+  ageEstimateBasis: MurphAgeAgeEstimateBasis;
+  horizonYears: number | null;
+  riskEndpoint: MurphAgeRiskEndpoint;
+}
+
+export interface MurphAgeModelCardOutcomePolicy extends MurphAgeOutcomeContext {
+  modelEndpoint: string | null;
+}
+
 export interface MurphAgeModelCardPolicy {
   acceptedBundleIds: readonly MurphAgeInputBundleId[];
   cardId: MurphAgeModelCardId;
   evidenceClass: MurphAgeEvidenceClass;
   evidenceSummary: string;
+  outcome: MurphAgeModelCardOutcomePolicy;
   productAuthorized: boolean;
   riskToAgeDisplayAuthorized: boolean;
   scoreBearing: boolean;
@@ -507,6 +527,7 @@ export interface MurphAgeDisplaySummary {
   displayBlockedReason: MurphAgeDisplayBlockedReason | null;
   displayStatus: MurphAgeDisplayStatus;
   missingFeatureKeys: string[];
+  outcomeContext: MurphAgeOutcomeContext;
   productAgeDisplayReady: boolean;
   productRiskDisplayReady: boolean;
   researchEstimateAvailable: boolean;
@@ -948,6 +969,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     cardId: "lab9_bp_body_10y_acm_research",
     evidenceClass: "research-internal",
     evidenceSummary: "Lab9/BP/body hard-outcome research card; not product-authorized and not validated for score-bearing wearable inputs.",
+    outcome: {
+      ageEstimateBasis: "risk-age-equivalent",
+      horizonYears: 10,
+      modelEndpoint: "10-year all-cause mortality",
+      riskEndpoint: "all-cause-mortality",
+    },
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: true,
@@ -982,6 +1009,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     cardId: "lab5_bp_bmi_transport_research",
     evidenceClass: "research-transport",
     evidenceSummary: "Smaller lab/BP/body transport research card for partial clinical bundles; not product-authorized and not validated for score-bearing wearable inputs.",
+    outcome: {
+      ageEstimateBasis: "risk-age-equivalent",
+      horizonYears: 10,
+      modelEndpoint: "10-year all-cause mortality",
+      riskEndpoint: "all-cause-mortality",
+    },
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: true,
@@ -1011,6 +1044,12 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     cardId: "wearable_context_no_risk",
     evidenceClass: "context-only",
     evidenceSummary: "Wearable inputs may be shown as context, but they are not score-bearing in current Murph Age cards.",
+    outcome: {
+      ageEstimateBasis: "none",
+      horizonYears: null,
+      modelEndpoint: null,
+      riskEndpoint: "none",
+    },
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: false,
@@ -1517,6 +1556,7 @@ export function summarizeMurphAgeCalculatorOutput(
       productRiskDisplayReady,
     }),
     missingFeatureKeys: uniqueStrings(missingAttributions.map((feature) => feature.featureKey)),
+    outcomeContext: resolveMurphAgeOutcomeContext(output.cardPolicy),
     productAgeDisplayReady,
     productRiskDisplayReady,
     researchEstimateAvailable: output.mode === "research" && ageEstimateAvailable,
@@ -1560,6 +1600,7 @@ export function toPublicMurphAgeDisplaySummary(
     displayBlockedReason: summary.displayBlockedReason,
     displayStatus: summary.displayStatus,
     missingFeatureKeys: toPublicFeatureKeyList(summary.missingFeatureKeys),
+    outcomeContext: toPublicMurphAgeOutcomeContext(summary.outcomeContext),
     productAgeDisplayReady: summary.productAgeDisplayReady,
     productRiskDisplayReady: summary.productRiskDisplayReady,
     researchEstimateAvailable: summary.researchEstimateAvailable,
@@ -2332,10 +2373,66 @@ function resolveDisplayStatus(input: {
   return "abstain";
 }
 
+function resolveMurphAgeOutcomeContext(cardPolicy: MurphAgeModelCardPolicy | null): MurphAgeOutcomeContext {
+  if (!cardPolicy) {
+    return {
+      ageEstimateBasis: "none",
+      horizonYears: null,
+      riskEndpoint: "none",
+    };
+  }
+  return cloneMurphAgeOutcomeContext(cardPolicy.outcome);
+}
+
+function cloneMurphAgeOutcomeContext(context: MurphAgeOutcomeContext): MurphAgeOutcomeContext {
+  return {
+    ageEstimateBasis: context.ageEstimateBasis,
+    horizonYears: context.horizonYears,
+    riskEndpoint: context.riskEndpoint,
+  };
+}
+
+function toPublicMurphAgeOutcomeContext(value: unknown): MurphAgeOutcomeContext {
+  const context = asPlainRecord(value);
+  if (!context) return cloneMurphAgeOutcomeContext(MURPH_AGE_EMPTY_OUTCOME_CONTEXT);
+  const ageEstimateBasis = context.ageEstimateBasis === "risk-age-equivalent"
+    ? "risk-age-equivalent"
+    : context.ageEstimateBasis === "none"
+    ? "none"
+    : null;
+  const riskEndpoint = context.riskEndpoint === "all-cause-mortality"
+    ? "all-cause-mortality"
+    : context.riskEndpoint === "none"
+    ? "none"
+    : null;
+  const horizonYears = context.horizonYears === null
+    ? null
+    : typeof context.horizonYears === "number" && Number.isFinite(context.horizonYears) && context.horizonYears > 0
+    ? context.horizonYears
+    : null;
+
+  if (ageEstimateBasis !== "risk-age-equivalent" || riskEndpoint !== "all-cause-mortality" || horizonYears === null) {
+    return cloneMurphAgeOutcomeContext(MURPH_AGE_EMPTY_OUTCOME_CONTEXT);
+  }
+  return {
+    ageEstimateBasis,
+    horizonYears,
+    riskEndpoint,
+  };
+}
+
+function cloneMurphAgeModelCardOutcomePolicy(outcome: MurphAgeModelCardOutcomePolicy): MurphAgeModelCardOutcomePolicy {
+  return {
+    ...cloneMurphAgeOutcomeContext(outcome),
+    modelEndpoint: outcome.modelEndpoint,
+  };
+}
+
 function cloneMurphAgeModelCardPolicy(policy: MurphAgeModelCardPolicy): MurphAgeModelCardPolicy {
   return {
     ...policy,
     acceptedBundleIds: [...policy.acceptedBundleIds],
+    outcome: cloneMurphAgeModelCardOutcomePolicy(policy.outcome),
     scoreBearingMetricKeys: [...policy.scoreBearingMetricKeys],
     scoreBearingSourceKinds: [...policy.scoreBearingSourceKinds],
     validationGate: cloneMurphAgeValidationGateSummary(policy.validationGate),
@@ -2471,6 +2568,9 @@ function findModelCardPolicyViolation(input: {
   model: MurphAgeRiskModel;
   points: readonly MetricPoint[];
 }): MurphAgeWarning | null {
+  const outcomePolicyViolation = findModelCardOutcomePolicyViolation(input.cardPolicy, input.model);
+  if (outcomePolicyViolation) return outcomePolicyViolation;
+
   const allowedMetricKeys = new Set(input.cardPolicy.scoreBearingMetricKeys.map(resolveMetricInputKey));
   for (const feature of input.model.features) {
     if (feature.kind !== "metric") continue;
@@ -2503,6 +2603,26 @@ function findModelCardPolicyViolation(input: {
         metricKey,
       };
     }
+  }
+  return null;
+}
+
+function findModelCardOutcomePolicyViolation(
+  cardPolicy: MurphAgeModelCardPolicy,
+  model: MurphAgeRiskModel,
+): MurphAgeWarning | null {
+  if (!cardPolicy.scoreBearing) return null;
+  if (cardPolicy.outcome.modelEndpoint !== null && model.endpoint !== cardPolicy.outcome.modelEndpoint) {
+    return {
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${cardPolicy.cardId} does not authorize this model endpoint.`,
+    };
+  }
+  if (cardPolicy.outcome.horizonYears !== null && model.horizonYears !== cardPolicy.outcome.horizonYears) {
+    return {
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${cardPolicy.cardId} does not authorize this model horizon.`,
+    };
   }
   return null;
 }
@@ -3075,6 +3195,8 @@ export function validateMurphAgeLocalModelCardArtifactPolicy(
     ));
     return warnings;
   }
+  const outcomePolicyViolation = findModelCardOutcomePolicyViolation(policy, artifact.model);
+  if (outcomePolicyViolation) warnings.push(outcomePolicyViolation);
 
   const allowedMetricKeys = new Set(policy.scoreBearingMetricKeys.map(resolveMetricInputKey));
   for (const feature of artifact.model.features) {

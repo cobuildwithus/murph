@@ -398,6 +398,11 @@ test('age report can run explicit local research mode through the public report 
     assert.equal(report.status, 'ready')
     assert.equal(report.displaySummary.displayStatus, 'research-only')
     assert.equal(report.displaySummary.researchEstimateAvailable, true)
+    assert.deepEqual(report.displaySummary.outcomeContext, {
+      ageEstimateBasis: 'risk-age-equivalent',
+      horizonYears: 10,
+      riskEndpoint: 'all-cause-mortality',
+    })
     assert.equal(report.authorization.productAuthorized, false)
     assert.equal(report.result?.authorization.evidenceClass, 'research-internal')
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'albumin'), true)
@@ -648,6 +653,11 @@ test('age report consumes canonical wearable observations as context-only bridge
     assert.equal(report.status, 'context-only')
     assert.equal(report.result, null)
     assert.equal(report.displaySummary.displayStatus, 'context-only')
+    assert.deepEqual(report.displaySummary.outcomeContext, {
+      ageEstimateBasis: 'none',
+      horizonYears: null,
+      riskEndpoint: 'none',
+    })
     assert.equal(report.displaySummary.wearableContext.scoreBearing, false)
     assert.equal(report.displaySummary.wearableContext.scoreContributionAuthorized, false)
     assert.equal(report.displaySummary.wearableBridge.scoreBearing, false)

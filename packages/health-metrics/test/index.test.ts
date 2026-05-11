@@ -2768,7 +2768,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     publicFromLeakyBridgeSummary.wearableContext.missingQualityFeatureKeys.includes("private-quality-feature"),
     false,
   );
-  const publicFromLeakyDisplaySummary = toPublicMurphAgeDisplaySummary({
+  const leakyDisplaySummary = {
     ...researchSummary,
     blockedFeatureKeys: ["private-model-feature", ...researchSummary.blockedFeatureKeys],
     contextOnlyFeatureKeys: ["private-model-feature", ...researchSummary.contextOnlyFeatureKeys],
@@ -2776,7 +2776,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     missingFeatureKeys: ["private-model-feature", ...researchSummary.missingFeatureKeys],
     selectedScoreBearingFeatureKeys: ["private-model-feature", ...researchSummary.selectedScoreBearingFeatureKeys],
     selectedScoreBearingMetricKeys: ["private-metric-key", ...researchSummary.selectedScoreBearingMetricKeys],
+  };
+  Object.assign(leakyDisplaySummary, {
+    outcomeContext: {
+      ageEstimateBasis: "private endpoint basis",
+      horizonYears: Number.NaN,
+      riskEndpoint: "private endpoint",
+    },
   });
+  const publicFromLeakyDisplaySummary = toPublicMurphAgeDisplaySummary(leakyDisplaySummary);
   assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingFeatureKeys.includes("private-model-feature"), false);
   assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingFeatureKeys.includes("model-feature"), true);
   assert.equal(publicFromLeakyDisplaySummary.blockedFeatureKeys.includes("private-model-feature"), false);
@@ -2785,6 +2793,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingMetricKeys.includes("private-metric-key"), false);
   assert.equal(publicFromLeakyDisplaySummary.contextOnlyMetricKeys.includes("private-metric-key"), false);
   assert.equal(publicFromLeakyDisplaySummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.deepEqual(publicFromLeakyDisplaySummary.outcomeContext, {
+    ageEstimateBasis: "none",
+    horizonYears: null,
+    riskEndpoint: "none",
+  });
   const publicResearchReport = toPublicMurphAgeCalculatorReport(research);
   assert.equal(publicResearchReport.schemaVersion, MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION);
   assert.equal(publicResearchReport.status, "ready");
@@ -2792,6 +2805,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchReport.authorization.productAuthorized, false);
   assert.equal(publicResearchReport.displaySummary.displayStatus, "research-only");
   assert.equal(publicResearchReport.displaySummary.displayBlockedReason, "product-not-authorized");
+  assert.deepEqual(publicResearchReport.displaySummary.outcomeContext, {
+    ageEstimateBasis: "risk-age-equivalent",
+    horizonYears: 10,
+    riskEndpoint: "all-cause-mortality",
+  });
   assert.equal(publicResearchReport.result?.biologicalAgeYears, research.result?.biologicalAgeYears);
   assert.equal(publicResearchReport.result?.risk?.probability, research.result?.risk?.probability);
   assert.equal(publicResearchReport.result?.authorization.productAuthorized, false);
@@ -2911,6 +2929,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefaultReport.result, null);
   assert.equal(productDefaultReport.displaySummary.displayStatus, "abstain");
   assert.equal(productDefaultReport.displaySummary.displayBlockedReason, "product-not-authorized");
+  assert.deepEqual(productDefaultReport.displaySummary.outcomeContext, {
+    ageEstimateBasis: "risk-age-equivalent",
+    horizonYears: 10,
+    riskEndpoint: "all-cause-mortality",
+  });
   assert.equal("contextOnlyPointIds" in publicResearchSummary, false);
   assert.equal("selectedScoreBearingPointIds" in publicResearchSummary, false);
   assert.equal("wearableShadowIncrementAssessments" in publicResearchSummary, false);
@@ -3059,6 +3082,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   const wearableOnlySummary = summarizeMurphAgeCalculatorOutput(wearableOnly);
   assert.equal(wearableOnlySummary.displayStatus, "context-only");
   assert.equal(wearableOnlySummary.displayBlockedReason, "context-only");
+  assert.deepEqual(wearableOnlySummary.outcomeContext, {
+    ageEstimateBasis: "none",
+    horizonYears: null,
+    riskEndpoint: "none",
+  });
   assert.equal(wearableOnlySummary.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(wearableOnlySummary.contextOnlyMetricKeys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("resting-heart-rate"), true);
@@ -3458,6 +3486,36 @@ test("Murph Age model-card artifact parser and policy validator stay with model 
   const warnings = validateMurphAgeLocalModelCardArtifactPolicy(unauthorizedArtifact.value);
   assert.equal(warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
   assert.equal(warnings.some((warning) => warning.message.includes("Steps")), false);
+
+  const wrongEndpointArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "lab9_bp_body_10y_acm_research",
+    model: {
+      ...fixtureLab9ResearchModel(),
+      endpoint: "five-year cardiovascular event",
+      modelId: "fixture-lab9-wrong-endpoint-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(wrongEndpointArtifact.value);
+  const endpointWarnings = validateMurphAgeLocalModelCardArtifactPolicy(wrongEndpointArtifact.value);
+  assert.equal(endpointWarnings.some((warning) =>
+    warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("endpoint")
+  ), true);
+
+  const wrongHorizonArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "lab9_bp_body_10y_acm_research",
+    model: {
+      ...fixtureLab9ResearchModel(),
+      horizonYears: 5,
+      modelId: "fixture-lab9-wrong-horizon-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(wrongHorizonArtifact.value);
+  const horizonWarnings = validateMurphAgeLocalModelCardArtifactPolicy(wrongHorizonArtifact.value);
+  assert.equal(horizonWarnings.some((warning) =>
+    warning.code === "MODEL_CARD_POLICY_VIOLATION" && warning.message.includes("horizon")
+  ), true);
 });
 
 test("Murph Age calculator abstains when required model features are missing or blocked", () => {

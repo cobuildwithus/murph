@@ -157,6 +157,12 @@ const murphAgePublicRiskEstimateSchema = z.object({
   probability: z.number(),
 })
 
+const murphAgeOutcomeContextSchema = z.object({
+  ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
+  horizonYears: z.number().nullable(),
+  riskEndpoint: z.enum(['all-cause-mortality', 'none']),
+})
+
 const murphAgePublicFeatureAttributionSchema = z.object({
   contributionYears: z.number().nullable(),
   featureKey: z.string().min(1),
@@ -265,10 +271,11 @@ const murphAgePublicDisplaySummarySchema = z.object({
     'research-only',
   ]),
   missingFeatureKeys: z.array(z.string().min(1)),
+  outcomeContext: murphAgeOutcomeContextSchema,
   productAgeDisplayReady: z.boolean(),
   productRiskDisplayReady: z.boolean(),
   researchEstimateAvailable: z.boolean(),
-  schemaVersion: z.literal('murph.age.public-display-summary.v2'),
+  schemaVersion: z.literal('murph.age.public-display-summary.v3'),
   selectedScoreBearingFeatureKeys: z.array(z.string().min(1)),
   selectedScoreBearingMetricKeys: z.array(z.string().min(1)),
   wearableBridge: murphAgePublicWearableBridgeSummarySchema,
