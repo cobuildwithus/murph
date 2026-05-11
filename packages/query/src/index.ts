@@ -358,14 +358,19 @@ export async function selectMetric(input: {
 
 export type {
   AssessMurphAgeInputReadinessFromVaultInput,
+  AssessMurphAgeWearableShadowReadinessFromVaultInput,
   CalculateMurphAgeForVaultInput,
   CalculateMurphAgeFromVaultInputBundleInput,
   MurphAgeInputReadinessForVault,
   MurphAgeLocalModelCardArtifact,
   MurphAgeLocalModelCardLoadResult,
+  MurphAgeWearableShadowAnchorReadiness,
+  MurphAgeWearableShadowIncrementReadiness,
+  MurphAgeWearableShadowReadinessForVault,
 } from "./murph-age.ts";
 export {
   assessMurphAgeInputReadinessFromVault,
+  assessMurphAgeWearableShadowReadinessFromVault,
   defaultMurphAgeModelCardArtifactRoot,
   loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,

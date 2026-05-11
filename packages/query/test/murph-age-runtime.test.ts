@@ -22,6 +22,7 @@ import { test } from "vitest";
 import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   assessMurphAgeInputReadinessFromVault,
+  assessMurphAgeWearableShadowReadinessFromVault,
   calculateMurphAgeFromVaultInputBundle,
   calculateMurphAgePublicReportFromVaultInputBundle,
   calculateMurphAgeForVault,
@@ -385,6 +386,130 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
+});
+
+test("assessMurphAgeWearableShadowReadinessFromVault reports sanitized shadow readiness", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-valid-night-count-28d", null, 21, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
+      wearablePoint("total-sleep-minutes", null, 450, "minutes"),
+      wearablePoint("sleep-duration-variability-minutes", null, 38, "minutes"),
+      wearablePoint("sleep-regularity-score", null, 0.72, "score"),
+      wearablePoint("sleep-midpoint-variability-minutes", null, 45, "minutes"),
+    ]);
+
+    const readiness = await assessMurphAgeWearableShadowReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(readiness.schemaVersion, "murph.age.wearable-shadow-readiness.v1");
+    assert.equal(readiness.anchor.anchorCardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(readiness.anchor.bundleId, "lab9-bp-body");
+    assert.deepEqual(readiness.blockedFamilies, []);
+    assert.equal(readiness.readyFamilies.includes("activity"), true);
+    assert.equal(readiness.readyFamilies.includes("sleep"), true);
+    assert.equal(readiness.readyFamilies.includes("resting-heart-rate"), true);
+    assert.equal(readiness.readyFamilies.includes("hrv"), true);
+
+    const activity = readiness.assessments.find((assessment) => assessment.family === "activity");
+    assert.equal(activity?.status, "ready");
+    assert.equal(activity?.scoreBearing, false);
+    assert.equal(activity?.scoreContributionAuthorized, false);
+    assert.equal(activity?.productAuthorized, false);
+    assert.equal(activity?.riskEffect, "not-estimated");
+    assert.equal(activity?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(activity?.selectedMetricKeys.includes("wearable-coverage-index"), true);
+    assert.equal(activity?.outputBoundary.aggregateOnly, true);
+    assert.equal(activity?.outputBoundary.rowValuesExportAllowed, false);
+
+    const encoded = JSON.stringify(readiness);
+    for (const forbidden of [
+      "metric-point:",
+      "selectedPointIds",
+      "\"value\"",
+      "\"unit\"",
+      "\"message\"",
+      "modelId",
+      "\"coefficient\"",
+      "biologicalAgeYears",
+      "featureAttributions",
+      "moduleAttributions",
+      vaultRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("assessMurphAgeWearableShadowReadinessFromVault blocks missing anchors without reading invalid asOf vaults", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...wearableContextMetricPoints(),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
+    ]);
+
+    const readiness = await assessMurphAgeWearableShadowReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(readiness.anchor.anchorCardId, null);
+    assert.equal(readiness.anchor.bundleId, "wearable-context");
+    assert.deepEqual(readiness.readyFamilies, []);
+    assert.deepEqual(readiness.blockedFamilies.sort(), [
+      "activity",
+      "hrv",
+      "resting-heart-rate",
+      "sleep",
+    ]);
+    assert.equal(readiness.assessments.every((assessment) =>
+      assessment.scoreBearing === false
+        && assessment.scoreContributionAuthorized === false
+        && assessment.productAuthorized === false
+    ), true);
+
+    const blockedEncoded = JSON.stringify(readiness);
+    for (const forbidden of [
+      "metric-point:",
+      "selectedPointIds",
+      "\"value\"",
+      "\"unit\"",
+      "\"message\"",
+      "modelId",
+      "\"coefficient\"",
+      "biologicalAgeYears",
+      "featureAttributions",
+      "moduleAttributions",
+      vaultRoot,
+    ]) {
+      assert.equal(blockedEncoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+
+  const invalid = await assessMurphAgeWearableShadowReadinessFromVault({
+    asOf: "not-a-date",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  });
+
+  assert.equal(invalid.schemaVersion, "murph.age.wearable-shadow-readiness.v1");
+  assert.equal(invalid.anchor.anchorCardId, null);
+  assert.equal(invalid.assessments.length, 0);
+  assert.equal(invalid.warnings[0]?.code, "INVALID_INPUT");
+  assert.equal(JSON.stringify(invalid).includes("\"message\""), false);
 });
 
 test("calculateMurphAgeFromVaultInputBundle loads ignored local research model-card artifacts", async () => {
