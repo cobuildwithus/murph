@@ -568,7 +568,9 @@ https://join.example.test/join/code_first_text`);
         }),
         "workflow-enqueued",
         expect.objectContaining({
-          directNudgeDeferred: true,
+          directNudgeAttempted: true,
+          directNudgeConfigured: true,
+          directNudgeErrorCode: null,
         }),
       );
       expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -1147,7 +1149,9 @@ https://join.example.test/join/code_first_text`);
       }),
       "workflow-enqueued",
       expect.objectContaining({
-        directNudgeDeferred: true,
+        directNudgeAttempted: true,
+        directNudgeConfigured: true,
+        directNudgeErrorCode: null,
       }),
     );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(

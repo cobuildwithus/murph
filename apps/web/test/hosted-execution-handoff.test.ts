@@ -132,7 +132,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
+      directRunnerNudgeStatus: "accepted",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -195,14 +195,14 @@ describe("nudgeHostedRunnerBestEffort", () => {
       runId: "workflow-run-123",
     });
     await expect(handoff).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
+      directRunnerNudgeStatus: "accepted",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
     });
   });
 
-  it("does not wait for the success-path direct nudge before returning workflow handoff", async () => {
+  it("waits for the success-path direct nudge before returning workflow handoff", async () => {
     let resolveDirectNudge!: (value: {
       accepted: boolean;
       alarmScheduled: boolean;
@@ -228,7 +228,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
-    await expect(maybeHandoffHostedExecutionWebhookWake({
+    const handoff = maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_direct_nudge_pending",
       mailboxItemId: "mailbox_123",
       response: {
@@ -237,11 +237,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       },
       source: "linq",
       userId: "user-123",
-    })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
-      reason: "workflow-started",
-      started: true,
-      workflowStarted: true,
     });
 
     expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
@@ -249,6 +244,12 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
     });
     await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
+    let settled = false;
+    void handoff.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
 
     resolveDirectNudge({
       accepted: true,
@@ -256,6 +257,12 @@ describe("nudgeHostedRunnerBestEffort", () => {
       alreadyRunning: false,
       inFlight: false,
       leaseGeneration: "1",
+    });
+    await expect(handoff).resolves.toMatchObject({
+      directRunnerNudgeStatus: "accepted",
+      reason: "workflow-started",
+      started: true,
+      workflowStarted: true,
     });
   });
 
@@ -272,7 +279,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
+      directRunnerNudgeStatus: "not-accepted",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -315,7 +322,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
+      directRunnerNudgeStatus: "not-accepted",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,
@@ -489,7 +496,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "telegram",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "deferred",
+      directRunnerNudgeStatus: "not-accepted",
       reason: "workflow-started",
       started: true,
       workflowStarted: true,

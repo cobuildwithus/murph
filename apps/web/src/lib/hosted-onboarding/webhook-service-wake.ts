@@ -1,7 +1,6 @@
 import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
-import { after } from "next/server";
 import {
   nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
@@ -38,7 +37,6 @@ export type HostedWebhookWakeHandoffResult =
 
 type HostedWebhookDirectNudgeStatus =
   | "accepted"
-  | "deferred"
   | "not-accepted"
   | "not-attempted";
 
@@ -120,15 +118,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     };
   }
 
-  scheduleAfterResponseOrFireAndForget(async () => {
-    await directNudgePromise;
-  });
+  const directNudge = await directNudgePromise;
   finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
-    directNudgeDeferred: true,
+    directNudgeAttempted: directNudge.attempted,
+    directNudgeConfigured: directNudge.configured,
+    directNudgeErrorCode: directNudge.errorCode,
     workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
   });
   return {
-    directRunnerNudgeStatus: "deferred",
+    directRunnerNudgeStatus: directNudge.accepted ? "accepted" : "not-accepted",
     reason: "workflow-started",
     runId: workflow.runId,
     started: true,
@@ -174,14 +172,6 @@ function observeHostedWebhookDirectNudge(input: {
       errorCode: errorName,
     };
   });
-}
-
-function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
-  try {
-    after(task);
-  } catch {
-    void task();
-  }
 }
 
 async function tryNudgeHostedWebhookRunnerDirectForMailboxItem(input: {
