@@ -66,6 +66,7 @@ import {
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
+  tryOpenExistingWarmWorkspaceForIdleCheckpoint,
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
@@ -278,7 +279,7 @@ class HostedForegroundInputAvailableError extends Error {
   readonly nextWakeAt: string | null | undefined;
 
   constructor(nextWakeAt: string | null | undefined) {
-    super("Hosted foreground runtime stopped because fresher input became available.");
+    super("Hosted foreground run stopped because fresher input became available.");
     this.name = "HostedForegroundInputAvailableError";
     this.nextWakeAt = nextWakeAt;
   }
@@ -309,12 +310,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const isIdleShutdownCheckpoint = input.request.reason === "idle_shutdown_checkpoint";
   let idleShutdownInputAvailable = false;
   let idleShutdownInputNextWakeAt: string | null | undefined;
-  let foregroundInputNextWakeAt: string | null | undefined;
   let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const assertRuntimeLiveness = () => {
     if (livenessRejectedReason) {
       throw new HostedWorkspaceRuntimeLivenessRejectedError(livenessRejectedReason);
+    }
+    if (livenessAbortController.signal.reason instanceof HostedForegroundInputAvailableError) {
+      throw livenessAbortController.signal.reason;
     }
     if (isIdleShutdownCheckpoint && idleShutdownInputAvailable) {
       throw new HostedIdleShutdownCheckpointInputAvailableError();
@@ -334,9 +337,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return undefined;
       }
 
-      foregroundInputNextWakeAt = result.nextAlarmAt ?? null;
       livenessAbortController.abort(
-        new HostedForegroundInputAvailableError(foregroundInputNextWakeAt),
+        new HostedForegroundInputAvailableError(result.nextAlarmAt ?? null),
       );
       return undefined;
     },
@@ -381,6 +383,94 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assertRuntimeLiveness();
       return snapshot;
     };
+  const runWarmOnlyIdleShutdownCheckpoint =
+    async (): Promise<HostedWorkspaceInvocationResult> => {
+      const workspaceRead = await raceHostedRuntimeLiveness(
+        workspacePort.read!(),
+        livenessAbortController.signal,
+      );
+      assertRuntimeLiveness();
+      if (!workspaceRunVersionMatchesRequest({
+        expectedWorkspaceVersion: input.request.workspaceVersion,
+        workspace: workspaceRead.workspace,
+      })) {
+        return {
+          idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+          status: "idle",
+        };
+      }
+      assertWorkspaceRunUserMatchesRequest({
+        expectedUserId: input.request.userId,
+        workspace: workspaceRead.workspace,
+      });
+
+      const warmWorkspace = await tryOpenExistingWarmWorkspaceForIdleCheckpoint({
+        vaultRoot: options.vaultRoot,
+        workspace: workspaceRead.workspace,
+      });
+      if (!warmWorkspace.ok) {
+        return {
+          idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+          status: "idle",
+        };
+      }
+
+      hotRestoreCacheVaultRoot = warmWorkspace.restored.vaultRoot;
+      const checkpointNextWakeAt = Object.hasOwn(input.request, "checkpointNextWakeAt")
+        ? input.request.checkpointNextWakeAt ?? null
+        : workspaceRead.workspace?.nextWakeAt ?? null;
+      const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+        createSnapshot: createLivenessGuardedCheckpointSnapshot,
+        metadata: {
+          attemptId: input.request.attemptId,
+          expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+          leaseGeneration: input.request.leaseGeneration,
+          nextWakeAt: checkpointNextWakeAt,
+          nextWakeReason: workspaceRead.workspace?.nextWakeAt === checkpointNextWakeAt
+            ? workspaceRead.workspace?.nextWakeReason ?? null
+            : null,
+        },
+      });
+      const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
+        read: () => workspacePort.read!(),
+        checkpoint: (request) => workspacePort.checkpoint(request),
+      };
+      const latestLiveness = await touchRuntimeLivenessOnce({
+        port: runtime.platform.runtimeLivenessPort,
+        requestId,
+        signal: livenessAbortController.signal,
+      });
+      if (!latestLiveness.ok) {
+        throw new HostedWorkspaceRuntimeLivenessRejectedError(latestLiveness.reason);
+      }
+      if (hasRuntimeInputAvailable(latestLiveness)) {
+        return {
+          nextWakeAt: latestLiveness.nextAlarmAt ?? null,
+          status: "scheduled",
+        };
+      }
+
+      return await runHostedWorkspaceIdleShutdownCheckpoint({
+        assertRuntimeLiveness,
+        checkpointRequestBuilder,
+        expectedUserId: input.request.userId,
+        livenessAbortSignal: livenessAbortController.signal,
+        onCheckpointValidated: recordHotRestoreCache,
+        readLivenessScheduledResult: () => idleShutdownInputAvailable
+          ? {
+              ...(idleShutdownInputNextWakeAt === undefined
+                ? {}
+                : { nextWakeAt: idleShutdownInputNextWakeAt }),
+              status: "scheduled",
+            }
+          : null,
+        redactedStatus: await buildHostedIdleShutdownCheckpointRedactedStatus({
+          baseStatus: workspaceRead.workspace?.redactedStatus ?? null,
+          vaultRoot: warmWorkspace.restored.vaultRoot,
+        }),
+        workspacePort: idleShutdownCheckpointWorkspacePort,
+      });
+    };
 
   try {
     const initialLiveness = await heartbeat.initialTouch;
@@ -404,6 +494,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: initialLiveness.nextAlarmAt ?? null,
         status: "scheduled",
       };
+    }
+    if (isIdleShutdownCheckpoint) {
+      return await runWarmOnlyIdleShutdownCheckpoint();
     }
 
     let workspaceRead = await raceHostedRuntimeLiveness(
@@ -456,62 +549,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeLiveness();
-    if (isIdleShutdownCheckpoint) {
-      const checkpointNextWakeAt = Object.hasOwn(input.request, "checkpointNextWakeAt")
-        ? input.request.checkpointNextWakeAt ?? null
-        : workspaceRead.workspace?.nextWakeAt ?? null;
-      const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-        createSnapshot: createLivenessGuardedCheckpointSnapshot,
-        metadata: {
-          attemptId: input.request.attemptId,
-          expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
-          leaseGeneration: input.request.leaseGeneration,
-          nextWakeAt: checkpointNextWakeAt,
-          nextWakeReason: workspaceRead.workspace?.nextWakeAt === checkpointNextWakeAt
-            ? workspaceRead.workspace?.nextWakeReason ?? null
-            : null,
-        },
-      });
-      const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
-        read: () => workspacePort.read!(),
-        checkpoint: (request) => workspacePort.checkpoint(request),
-      };
-      const latestLiveness = await touchRuntimeLivenessOnce({
-        port: runtime.platform.runtimeLivenessPort,
-        requestId,
-        signal: livenessAbortController.signal,
-      });
-      if (!latestLiveness.ok) {
-        throw new HostedWorkspaceRuntimeLivenessRejectedError(latestLiveness.reason);
-      }
-      if (hasRuntimeInputAvailable(latestLiveness)) {
-        return {
-          nextWakeAt: latestLiveness.nextAlarmAt ?? null,
-          status: "scheduled",
-        };
-      }
-
-      return await runHostedWorkspaceIdleShutdownCheckpoint({
-        assertRuntimeLiveness,
-        checkpointRequestBuilder,
-        expectedUserId: input.request.userId,
-        livenessAbortSignal: livenessAbortController.signal,
-        onCheckpointValidated: recordHotRestoreCache,
-        readLivenessScheduledResult: () => idleShutdownInputAvailable
-          ? {
-              ...(idleShutdownInputNextWakeAt === undefined
-                ? {}
-                : { nextWakeAt: idleShutdownInputNextWakeAt }),
-              status: "scheduled",
-            }
-          : null,
-        redactedStatus: await buildHostedIdleShutdownCheckpointRedactedStatus({
-          baseStatus: workspaceRead.workspace?.redactedStatus ?? null,
-          vaultRoot: restored.vaultRoot,
-        }),
-        workspacePort: idleShutdownCheckpointWorkspacePort,
-      });
-    }
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
     if (!runnerMailboxPort) {
@@ -685,9 +722,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     }
     if (error instanceof HostedForegroundInputAvailableError) {
       return {
-        ...(foregroundInputNextWakeAt === undefined
-          ? {}
-          : { nextWakeAt: foregroundInputNextWakeAt }),
+        ...(error.nextWakeAt === undefined ? {} : { nextWakeAt: error.nextWakeAt }),
         status: "scheduled",
       };
     }
@@ -1073,20 +1108,31 @@ function assertWorkspaceRunVersionMatchesRequest(input: {
   expectedWorkspaceVersion: string;
   workspace: HostedWorkspaceState | null;
 }): void {
-  const actualWorkspaceVersion = input.workspace?.version ?? null;
-
-  if (actualWorkspaceVersion === input.expectedWorkspaceVersion) {
-    return;
-  }
-
-  if (actualWorkspaceVersion === null && input.expectedWorkspaceVersion === "0") {
+  if (workspaceRunVersionMatchesRequest(input)) {
     return;
   }
 
   throw new HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError({
-    actualWorkspaceVersion,
+    actualWorkspaceVersion: input.workspace?.version ?? null,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
   });
+}
+
+function workspaceRunVersionMatchesRequest(input: {
+  expectedWorkspaceVersion: string;
+  workspace: HostedWorkspaceState | null;
+}): boolean {
+  const actualWorkspaceVersion = input.workspace?.version ?? null;
+
+  if (actualWorkspaceVersion === input.expectedWorkspaceVersion) {
+    return true;
+  }
+
+  if (actualWorkspaceVersion === null && input.expectedWorkspaceVersion === "0") {
+    return true;
+  }
+
+  return false;
 }
 
 function assertWorkspaceRunUserMatchesRequest(input: {
@@ -1104,7 +1150,7 @@ function assertWorkspaceRunUserMatchesRequest(input: {
 }
 
 function hasRuntimeInputAvailable(result: RuntimeLivenessTouchResult): boolean {
-  return result.ok && (result.inputAvailable === true || result.pendingNudge === true);
+  return result.ok && result.inputAvailable === true;
 }
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {

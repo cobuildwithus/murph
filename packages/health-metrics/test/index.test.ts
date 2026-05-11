@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
@@ -39,6 +40,7 @@ import {
   selectMetricWindowComparison,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
+  toPublicMurphAgeCalculatorReport,
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeRiskModel,
   type GoalMetricTarget,
@@ -2405,6 +2407,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     false,
   );
   for (const forbiddenFeatureKey of [
+    "label",
     "value",
     "unit",
     "prediction",
@@ -2423,21 +2426,60 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   const publicFromLeakyBridgeSummary = toPublicMurphAgeDisplaySummary({
     ...researchSummary,
+    wearableContext: {
+      ...researchSummary.wearableContext,
+      availableQualityFeatureKeys: [
+        "private-quality-feature",
+        ...researchSummary.wearableContext.availableQualityFeatureKeys,
+      ],
+      missingQualityFeatureKeys: [
+        "private-quality-feature",
+        ...researchSummary.wearableContext.missingQualityFeatureKeys,
+      ],
+    },
     wearableBridge: {
       ...researchSummary.wearableBridge,
+      deferredFeatureKeys: ["private-bridge-feature", ...researchSummary.wearableBridge.deferredFeatureKeys],
+      firstPriorityIncompleteFeatureKeys: [
+        "private-bridge-feature",
+        ...researchSummary.wearableBridge.firstPriorityIncompleteFeatureKeys,
+      ],
+      firstPriorityReadyFeatureKeys: [
+        "private-bridge-feature",
+        ...researchSummary.wearableBridge.firstPriorityReadyFeatureKeys,
+      ],
       features: researchSummary.wearableBridge.features.map((feature) => ({
         ...feature,
         coefficient: 1,
         contributionLogit: 1,
         contributionYears: 1,
+        featureKey: "private-bridge-feature",
+        label: "private bridge label",
+        metricKeys: ["private-bridge-metric", ...feature.metricKeys],
+        missingMetricKeys: ["private-bridge-metric", ...feature.missingMetricKeys],
+        missingQualityMetricKeys: ["private-bridge-metric", ...feature.missingQualityMetricKeys],
         prediction: 1,
+        readyMetricKeys: ["private-bridge-metric", ...feature.readyMetricKeys],
+        requiredQualityMetricKeys: ["private-bridge-metric", ...feature.requiredQualityMetricKeys],
         selectedPointIds: ["metric-point:private-row:0"],
         unit: "count",
         value: 1,
       })),
+      missingFeatureKeys: ["private-bridge-feature", ...researchSummary.wearableBridge.missingFeatureKeys],
+      partialFeatureKeys: ["private-bridge-feature", ...researchSummary.wearableBridge.partialFeatureKeys],
+      readyFeatureKeys: ["private-bridge-feature", ...researchSummary.wearableBridge.readyFeatureKeys],
+      secondPriorityIncompleteFeatureKeys: [
+        "private-bridge-feature",
+        ...researchSummary.wearableBridge.secondPriorityIncompleteFeatureKeys,
+      ],
+      secondPriorityReadyFeatureKeys: [
+        "private-bridge-feature",
+        ...researchSummary.wearableBridge.secondPriorityReadyFeatureKeys,
+      ],
     },
   });
   for (const forbiddenFeatureKey of [
+    "label",
     "selectedPointIds",
     "value",
     "unit",
@@ -2451,6 +2493,183 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
       false,
     );
   }
+  assert.equal(publicFromLeakyBridgeSummary.wearableBridge.readyFeatureKeys.includes("private-bridge-feature"), false);
+  assert.equal(publicFromLeakyBridgeSummary.wearableBridge.readyFeatureKeys.includes("wearable-feature"), true);
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableBridge.deferredFeatureKeys.includes("private-bridge-feature"),
+    false,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableBridge.features.some((feature) => feature.featureKey === "private-bridge-feature"),
+    false,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableBridge.features.some((feature) => feature.featureKey === "wearable-feature"),
+    true,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableBridge.features.some((feature) =>
+      feature.metricKeys.includes("private-bridge-metric")
+    ),
+    false,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableBridge.features.some((feature) =>
+      feature.requiredQualityMetricKeys.includes("private-bridge-metric")
+    ),
+    false,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableContext.availableQualityFeatureKeys.includes("private-quality-feature"),
+    false,
+  );
+  assert.equal(
+    publicFromLeakyBridgeSummary.wearableContext.missingQualityFeatureKeys.includes("private-quality-feature"),
+    false,
+  );
+  const publicFromLeakyDisplaySummary = toPublicMurphAgeDisplaySummary({
+    ...researchSummary,
+    blockedFeatureKeys: ["private-model-feature", ...researchSummary.blockedFeatureKeys],
+    contextOnlyFeatureKeys: ["private-model-feature", ...researchSummary.contextOnlyFeatureKeys],
+    contextOnlyMetricKeys: ["private-metric-key", ...researchSummary.contextOnlyMetricKeys],
+    missingFeatureKeys: ["private-model-feature", ...researchSummary.missingFeatureKeys],
+    selectedScoreBearingFeatureKeys: ["private-model-feature", ...researchSummary.selectedScoreBearingFeatureKeys],
+    selectedScoreBearingMetricKeys: ["private-metric-key", ...researchSummary.selectedScoreBearingMetricKeys],
+  });
+  assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingFeatureKeys.includes("private-model-feature"), false);
+  assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingFeatureKeys.includes("model-feature"), true);
+  assert.equal(publicFromLeakyDisplaySummary.blockedFeatureKeys.includes("private-model-feature"), false);
+  assert.equal(publicFromLeakyDisplaySummary.contextOnlyFeatureKeys.includes("private-model-feature"), false);
+  assert.equal(publicFromLeakyDisplaySummary.missingFeatureKeys.includes("private-model-feature"), false);
+  assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingMetricKeys.includes("private-metric-key"), false);
+  assert.equal(publicFromLeakyDisplaySummary.contextOnlyMetricKeys.includes("private-metric-key"), false);
+  assert.equal(publicFromLeakyDisplaySummary.contextOnlyMetricKeys.includes("steps"), true);
+  const publicResearchReport = toPublicMurphAgeCalculatorReport(research);
+  assert.equal(publicResearchReport.schemaVersion, MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION);
+  assert.equal(publicResearchReport.status, "ready");
+  assert.equal(publicResearchReport.mode, "research");
+  assert.equal(publicResearchReport.authorization.productAuthorized, false);
+  assert.equal(publicResearchReport.displaySummary.displayStatus, "research-only");
+  assert.equal(publicResearchReport.displaySummary.displayBlockedReason, "product-not-authorized");
+  assert.equal(publicResearchReport.result?.biologicalAgeYears, research.result?.biologicalAgeYears);
+  assert.equal(publicResearchReport.result?.risk?.probability, research.result?.risk?.probability);
+  assert.equal(publicResearchReport.result?.authorization.productAuthorized, false);
+  assert.equal(publicResearchReport.result ? "modelId" in publicResearchReport.result : true, false);
+  assert.equal(publicResearchReport.result ? "modelVersion" in publicResearchReport.result : true, false);
+  assert.equal(publicResearchReport.result?.risk ? "endpoint" in publicResearchReport.result.risk : true, false);
+  assert.equal(
+    publicResearchReport.result?.risk ? "referencePopulation" in publicResearchReport.result.risk : true,
+    false,
+  );
+  assert.equal("evidenceSummary" in publicResearchReport.authorization, false);
+  assert.equal(publicResearchReport.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
+  assert.equal(publicResearchReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  const publicHba1cAttribution = publicResearchReport.result?.featureAttributions.find((feature) =>
+    feature.metricKey === "hba1c"
+  );
+  assert.ok(publicHba1cAttribution);
+  assert.equal("selectedPointIds" in publicHba1cAttribution, false);
+  assert.equal("value" in publicHba1cAttribution, false);
+  assert.equal("unit" in publicHba1cAttribution, false);
+  assert.equal("label" in publicHba1cAttribution, false);
+  assert.equal("contributionLogit" in publicHba1cAttribution, false);
+  const publicMetabolicModule = publicResearchReport.result?.moduleAttributions.find((module) =>
+    module.moduleId === "metabolic"
+  );
+  assert.ok(publicMetabolicModule);
+  assert.equal("contributionLogit" in publicMetabolicModule, false);
+  const publicReportFromLeakyResult = toPublicMurphAgeCalculatorReport({
+    ...research,
+    warnings: [{
+      code: "MODEL_FEATURE_MISSING",
+      featureKey: "private feature key",
+      message: "private report warning",
+      metricKey: "private metric key",
+    }, {
+      code: "MODEL_FEATURE_MISSING",
+      featureKey: "private-model-feature",
+      message: "private slug report warning",
+      metricKey: "private-metric-key",
+    }],
+    result: research.result ? {
+      ...research.result,
+      featureAttributions: research.result.featureAttributions.map((feature) => ({
+        ...feature,
+        coefficient: 1,
+        contributionLogit: 1,
+        featureKey: "private feature key",
+        label: "private artifact label",
+        metricKey: "private metric key",
+        moduleId: "private artifact module",
+        prediction: 1,
+        selectedPointIds: ["metric-point:private-row:0"],
+        unit: "mg/dL",
+        value: 1,
+        warnings: [{
+          code: "MODEL_FEATURE_MISSING",
+          featureKey: "private feature key",
+          message: "private artifact warning",
+          metricKey: "private metric key",
+        }],
+      })),
+      moduleAttributions: research.result.moduleAttributions.map((module) => ({
+        ...module,
+        coefficient: 1,
+        contributionLogit: 1,
+        moduleId: "private artifact module",
+      })),
+      modelId: "private artifact model id",
+      modelVersion: "private artifact model version",
+      risk: {
+        ...research.result.risk!,
+        endpoint: "private artifact endpoint",
+        referencePopulation: "private artifact reference population",
+      },
+      warnings: [{
+        code: "MODEL_FEATURE_MISSING",
+        featureKey: "private feature key",
+        message: "private artifact warning",
+        metricKey: "private metric key",
+      }],
+    } : null,
+  });
+  for (const forbiddenFeatureKey of [
+    "selectedPointIds",
+    "value",
+    "unit",
+    "prediction",
+    "coefficient",
+    "contributionLogit",
+  ]) {
+    assert.equal(
+      publicReportFromLeakyResult.result?.featureAttributions.some((feature) => forbiddenFeatureKey in feature),
+      false,
+    );
+  }
+  assert.equal(
+    publicReportFromLeakyResult.result?.moduleAttributions.some((module) => "contributionLogit" in module),
+    false,
+  );
+  assert.equal(publicReportFromLeakyResult.result ? "modelId" in publicReportFromLeakyResult.result : true, false);
+  assert.equal(publicReportFromLeakyResult.result?.risk ? "endpoint" in publicReportFromLeakyResult.result.risk : true, false);
+  assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.featureKey, "metric-feature");
+  assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.metricKey, null);
+  assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.warnings[0]?.code, "MODEL_FEATURE_MISSING");
+  assert.equal(
+    publicReportFromLeakyResult.result?.featureAttributions[0]?.warnings.some((warning) => "message" in warning),
+    false,
+  );
+  assert.equal(publicReportFromLeakyResult.warnings[0]?.code, "MODEL_FEATURE_MISSING");
+  assert.equal(publicReportFromLeakyResult.warnings.some((warning) => "message" in warning), false);
+  assert.equal(publicReportFromLeakyResult.warnings.some((warning) => warning.featureKey === "private-model-feature"), false);
+  assert.equal(publicReportFromLeakyResult.warnings.some((warning) => warning.featureKey === "model-feature"), true);
+  assert.equal(publicReportFromLeakyResult.warnings.some((warning) => "metricKey" in warning), false);
+  assert.equal(publicReportFromLeakyResult.result?.moduleAttributions[0]?.moduleId, "unknown");
+  const productDefaultReport = toPublicMurphAgeCalculatorReport(productDefault);
+  assert.equal(productDefaultReport.status, "abstain");
+  assert.equal(productDefaultReport.result, null);
+  assert.equal(productDefaultReport.displaySummary.displayStatus, "abstain");
+  assert.equal(productDefaultReport.displaySummary.displayBlockedReason, "product-not-authorized");
   assert.equal("contextOnlyPointIds" in publicResearchSummary, false);
   assert.equal("selectedScoreBearingPointIds" in publicResearchSummary, false);
   assert.equal("wearableShadowIncrementAssessments" in publicResearchSummary, false);

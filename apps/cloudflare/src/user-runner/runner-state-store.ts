@@ -102,6 +102,64 @@ export type RunnerStaleInvocationRecoveryResult =
     record: RunnerStateRecord;
   };
 
+export type RunnerPendingWorkDecision =
+  | {
+    alreadyRunning: boolean;
+    kind: "start";
+    preemptedPersistedActiveInvocation: boolean;
+    record: RunnerStateRecord;
+    resetRetryFailureCount: boolean;
+    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
+  }
+  | {
+    activeInvocation: {
+      attemptId: string;
+      leaseGeneration: string;
+      userId: string;
+    };
+    alreadyRunning: true;
+    kind: "preempt_local_idle_checkpoint";
+    preemptedPersistedActiveInvocation: false;
+    record: RunnerStateRecord;
+    resetRetryFailureCount: boolean;
+    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
+  }
+  | {
+    alreadyRunning: true;
+    kind: "wait";
+    preemptedPersistedActiveInvocation: false;
+    record: RunnerStateRecord;
+    resetRetryFailureCount: boolean;
+    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
+  };
+
+export type RunnerHeartbeatInstruction =
+  | {
+    kind: "abort";
+    reason:
+      | "no_active_invocation"
+      | "stale_attempt"
+      | "stale_generation"
+      | "wrong_user";
+    record: RunnerStateRecord;
+  }
+  | {
+    kind: "continue";
+    record: RunnerStateRecord;
+  }
+  | {
+    activeInvocation: {
+      attemptId: string;
+      leaseGeneration: string;
+      reason: HostedWorkspaceInvocationReason;
+      userId: string;
+    };
+    kind: "yield";
+    nextWakeAt: string | null;
+    record: RunnerStateRecord;
+    status: "scheduled";
+  };
+
 export type ActiveInvocationRecoveryDecision =
   | {
     kind: "live";
@@ -340,6 +398,123 @@ export class RunnerStateStore {
     };
   }
 
+  async markPendingWorkAndDecide(input: {
+    activeInThisIsolate: boolean;
+    currentWorkerVersionId?: string | null;
+    defaultRetryDelayMs: number;
+    heartbeatStaleMs: number;
+    immediateRetryDelayMs: number;
+    maxEventAttempts: number;
+    maxRetryDelayMs: number;
+    nowMs: number;
+    pendingWorkContinuationDelayMs: number;
+    retryBackoffMultiplier: number;
+    runnerReadyTimeoutMs: number;
+    runnerTimeoutMs: number;
+  }): Promise<RunnerPendingWorkDecision> {
+    let staleRecovery: RunnerStaleInvocationRecoveryResult | null = null;
+    let runningRecord = this.readStateSync();
+    if (!input.activeInThisIsolate && runningRecord.inFlight) {
+      staleRecovery = await this.clearStaleInvocationIfExpired({
+        currentWorkerVersionId: input.currentWorkerVersionId ?? null,
+        heartbeatStaleMs: input.heartbeatStaleMs,
+        nowMs: input.nowMs,
+        readyTimeoutMs: input.runnerReadyTimeoutMs,
+        timeoutMs: input.runnerTimeoutMs,
+      });
+      runningRecord = staleRecovery.record;
+    }
+
+    const alreadyRunning = input.activeInThisIsolate || runningRecord.inFlight;
+    const activeWorkspaceInvocation = runningRecord.workspaceInvocation;
+    const activeIdleShutdownCheckpoint =
+      activeWorkspaceInvocation?.reason === "idle_shutdown_checkpoint"
+        ? activeWorkspaceInvocation
+        : null;
+    const resetRetryFailureCount = runningRecord.retryFailureCount >= input.maxEventAttempts;
+    const retryFailureCount = resetRetryFailureCount
+      ? 0
+      : runningRecord.retryFailureCount;
+    const preferredWakeAt = input.activeInThisIsolate
+      ? new Date(input.nowMs + input.pendingWorkContinuationDelayMs).toISOString()
+      : alreadyRunning
+      ? resolvePendingWorkDrainContinuationWakeAt({
+          activeRecoveryWakeAt: staleRecovery?.nextRecoveryAt ?? null,
+          heartbeatStaleMs: input.heartbeatStaleMs,
+          nowMs: input.nowMs,
+          pendingWorkContinuationDelayMs: input.pendingWorkContinuationDelayMs,
+          record: runningRecord,
+          runnerReadyTimeoutMs: input.runnerReadyTimeoutMs,
+          runnerTimeoutMs: input.runnerTimeoutMs,
+        })
+      : new Date(input.nowMs + resolvePendingWorkRetryDelayMs({
+          defaultRetryDelayMs: input.defaultRetryDelayMs,
+          immediateRetryDelayMs: input.immediateRetryDelayMs,
+          maxRetryDelayMs: input.maxRetryDelayMs,
+          retryBackoffMultiplier: input.retryBackoffMultiplier,
+          retryFailureCount,
+        })).toISOString();
+
+    const meta = this.requireMetaRowSync();
+    this.markPendingWorkMetaSync(meta, {
+      preferredWakeAt,
+      resetRetryFailureCount,
+    });
+
+    if (input.activeInThisIsolate && activeIdleShutdownCheckpoint) {
+      this.writeMetaRowSync(meta);
+      return {
+        activeInvocation: {
+          attemptId: activeIdleShutdownCheckpoint.attemptId,
+          leaseGeneration: runningRecord.leaseGeneration.toString(),
+          userId: runningRecord.userId,
+        },
+        alreadyRunning: true,
+        kind: "preempt_local_idle_checkpoint",
+        preemptedPersistedActiveInvocation: false,
+        record: this.readStateFromMetaSync(meta),
+        resetRetryFailureCount,
+        staleRecovery,
+      };
+    }
+
+    if (!input.activeInThisIsolate && activeIdleShutdownCheckpoint) {
+      this.clearActiveInvocationMetaSync(meta);
+      meta.in_flight = 0;
+      this.writeMetaRowSync(meta);
+      return {
+        alreadyRunning: true,
+        kind: "start",
+        preemptedPersistedActiveInvocation: true,
+        record: this.readStateFromMetaSync(meta),
+        resetRetryFailureCount,
+        staleRecovery,
+      };
+    }
+
+    this.writeMetaRowSync(meta);
+    const record = this.readStateFromMetaSync(meta);
+    if (!alreadyRunning) {
+      return {
+        alreadyRunning: false,
+        kind: "start",
+        preemptedPersistedActiveInvocation: false,
+        record,
+        resetRetryFailureCount,
+        staleRecovery,
+      };
+    }
+
+    return {
+      alreadyRunning: true,
+      kind: "wait",
+      preemptedPersistedActiveInvocation: false,
+      record,
+      resetRetryFailureCount,
+      staleRecovery,
+    };
+  }
+
   async beginInvocation(input: {
     consumePendingNudge?: boolean;
     expiresAt?: string | null;
@@ -559,68 +734,14 @@ export class RunnerStateStore {
     };
   }
 
-  async clearActiveIdleShutdownCheckpointForForegroundNudge(userId: string): Promise<{
-    attemptId: string | null;
-    cleared: boolean;
-    record: RunnerStateRecord;
-  }> {
-    const meta = this.selectMetaRowSync();
-    if (meta && meta.user_id !== userId) {
-      throw new Error(
-        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
-      );
-    }
-
-    if (
-      !meta
-      || meta.in_flight !== 1
-      || meta.active_invocation_reason !== "idle_shutdown_checkpoint"
-      || !meta.active_invocation_id
-    ) {
-      if (!meta) {
-        await this.bindUser(userId);
-      }
-      const record = meta
-        ? this.readStateFromMetaSync(meta)
-        : await this.readState();
-      return {
-        attemptId: null,
-        cleared: false,
-        record,
-      };
-    }
-
-    const attemptId = meta.active_invocation_id;
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
-    this.writeMetaRowSync(meta);
-
-    return {
-      attemptId,
-      cleared: true,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
   async markPendingInvocationNudge(input: {
     preferredWakeAt?: string | null;
     resetRetryFailureCount?: boolean;
   } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    if (input.resetRetryFailureCount === true) {
-      this.clearLastErrorMetaSync(meta);
-      meta.retry_failure_count = 0;
-    }
-    meta.pending_nudge = 1;
-    meta.pending_work = 1;
-    meta.pending_nudge_generation =
-      normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
-    this.setAlarmMetaSync(meta, {
-      dueAt: resolveRunnerNextWakeAt({
-        preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
-      }) ?? new Date().toISOString(),
-      kind: "work",
-      workspaceVersion: null,
+    this.markPendingWorkMetaSync(meta, {
+      preferredWakeAt: input.preferredWakeAt,
+      resetRetryFailureCount: input.resetRetryFailureCount,
     });
     this.writeMetaRowSync(meta);
 
@@ -893,6 +1014,96 @@ export class RunnerStateStore {
     return {
       ok: true,
       record: this.readStateFromMetaSync(meta),
+    };
+  }
+
+  async recordActiveInvocationHeartbeatInstruction(input: {
+    attemptId: string;
+    heartbeatStaleMs: number;
+    leaseGeneration: string;
+    nowMs?: number | null;
+    runnerReadyTimeoutMs: number;
+    runnerTimeoutMs: number;
+    userId: string;
+  }): Promise<RunnerHeartbeatInstruction> {
+    const nowMs = input.nowMs ?? Date.now();
+    const meta = this.requireMetaRowSync();
+    if (this.clearActiveInvocationIfExpiredSync(meta, nowMs)) {
+      return {
+        kind: "abort",
+        reason: "no_active_invocation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    const lease = this.readActiveInvocationLeaseSync(meta);
+    if (!lease) {
+      return {
+        kind: "abort",
+        reason: "no_active_invocation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.attemptId !== input.attemptId) {
+      return {
+        kind: "abort",
+        reason: "stale_attempt",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.leaseGeneration !== input.leaseGeneration) {
+      return {
+        kind: "abort",
+        reason: "stale_generation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.userId !== input.userId) {
+      return {
+        kind: "abort",
+        reason: "wrong_user",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    meta.active_invocation_last_heartbeat_at = new Date(nowMs).toISOString();
+    meta.active_invocation_orphan_observed_at = null;
+    const pendingWorkPresent = meta.pending_work === 1 || meta.pending_nudge === 1;
+    if (!pendingWorkPresent) {
+      this.writeMetaRowSync(meta);
+      return {
+        kind: "continue",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    const activeReason = isHostedWorkspaceInvocationReasonValue(meta.active_invocation_reason)
+      ? meta.active_invocation_reason
+      : lease.reason;
+    const recordBeforeAlarm = this.readStateFromMetaSync(meta);
+    const nextWakeAt = resolvePendingWorkWakeAt({
+      heartbeatStaleMs: input.heartbeatStaleMs,
+      nowMs,
+      record: recordBeforeAlarm,
+      runnerReadyTimeoutMs: input.runnerReadyTimeoutMs,
+      runnerTimeoutMs: input.runnerTimeoutMs,
+    });
+    this.setAlarmMetaSync(meta, {
+      dueAt: nextWakeAt,
+      kind: "work",
+      workspaceVersion: null,
+    });
+    this.writeMetaRowSync(meta);
+    return {
+      activeInvocation: {
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        reason: activeReason,
+        userId: lease.userId,
+      },
+      kind: "yield",
+      nextWakeAt,
+      record: this.readStateFromMetaSync(meta),
+      status: "scheduled",
     };
   }
 
@@ -1172,6 +1383,30 @@ export class RunnerStateStore {
     this.userId = meta.user_id;
   }
 
+  private markPendingWorkMetaSync(
+    meta: RunnerMetaRow,
+    input: {
+      preferredWakeAt?: string | null;
+      resetRetryFailureCount?: boolean;
+    },
+  ): void {
+    if (input.resetRetryFailureCount === true) {
+      this.clearLastErrorMetaSync(meta);
+      meta.retry_failure_count = 0;
+    }
+    meta.pending_nudge = 1;
+    meta.pending_work = 1;
+    meta.pending_nudge_generation =
+      normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
+    this.setAlarmMetaSync(meta, {
+      dueAt: resolveRunnerNextWakeAt({
+        preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
+      }) ?? new Date().toISOString(),
+      kind: "work",
+      workspaceVersion: null,
+    });
+  }
+
   private clearActiveInvocationLeaseSync(
     meta: RunnerMetaRow,
     lease: RunnerInvocationLease,
@@ -1358,6 +1593,112 @@ function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): 
   meta.pending_nudge_generation =
     normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
   meta.pending_work = 1;
+}
+
+function resolvePendingWorkWakeAt(input: {
+  heartbeatStaleMs: number;
+  nowMs: number;
+  record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
+  runnerTimeoutMs: number;
+}): string {
+  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
+  if (decision.kind === "live" && decision.nextRecoveryAt) {
+    return decision.nextRecoveryAt;
+  }
+  return new Date(input.nowMs).toISOString();
+}
+
+function resolvePendingWorkDrainContinuationWakeAt(input: {
+  activeRecoveryWakeAt?: string | null;
+  heartbeatStaleMs: number;
+  nowMs: number;
+  pendingWorkContinuationDelayMs: number;
+  record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
+  runnerTimeoutMs: number;
+}): string {
+  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
+  const recoveryWakeAt = input.activeRecoveryWakeAt
+    ?? (decision.kind === "live" && decision.nextRecoveryAt
+      ? decision.nextRecoveryAt
+      : new Date(input.nowMs).toISOString());
+  const invocation = input.record.workspaceInvocation;
+  const lastHeartbeatAtMs = invocation?.lastHeartbeatAt
+    ? Date.parse(invocation.lastHeartbeatAt)
+    : Number.NaN;
+  if (input.activeRecoveryWakeAt && invocation && !Number.isFinite(lastHeartbeatAtMs)) {
+    return input.activeRecoveryWakeAt;
+  }
+  if (decision.kind === "live" && decision.reason === "starting") {
+    return recoveryWakeAt;
+  }
+
+  const continuationWakeAt = new Date(
+    input.nowMs + input.pendingWorkContinuationDelayMs,
+  ).toISOString();
+  return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
+}
+
+function resolveRunnerRecordActiveInvocationRecoveryDecision(input: {
+  heartbeatStaleMs: number;
+  nowMs: number;
+  record: RunnerStateRecord;
+  runnerReadyTimeoutMs: number;
+  runnerTimeoutMs: number;
+}): ActiveInvocationRecoveryDecision {
+  const invocation = input.record.workspaceInvocation;
+  const activeExpiresAt = input.record.active?.expiresAt ?? null;
+  const activeStartedAt = input.record.active?.startedAt ?? null;
+  return resolveActiveInvocationRecoveryDecision({
+    activeWorkerVersionId: null,
+    containerStopped: false,
+    currentWorkerVersionId: null,
+    expiresAt: activeExpiresAt !== activeStartedAt ? activeExpiresAt : null,
+    heartbeatStaleMs: input.heartbeatStaleMs,
+    lastHeartbeatAt: invocation?.lastHeartbeatAt ?? null,
+    nowMs: input.nowMs,
+    readyTimeoutMs: input.runnerReadyTimeoutMs,
+    startedAt: invocation?.startedAt ?? null,
+    timeoutMs: input.runnerTimeoutMs,
+  });
+}
+
+function resolvePendingWorkRetryDelayMs(input: {
+  defaultRetryDelayMs: number;
+  immediateRetryDelayMs: number;
+  maxRetryDelayMs: number;
+  retryBackoffMultiplier: number;
+  retryFailureCount: number;
+}): number {
+  const retryFailureCount = Math.max(0, Math.floor(input.retryFailureCount));
+  const backoffStep = Math.max(0, retryFailureCount - 1);
+  const exponentialDelay = input.immediateRetryDelayMs
+    * (input.retryBackoffMultiplier ** backoffStep);
+  return Math.min(
+    input.defaultRetryDelayMs,
+    exponentialDelay,
+    input.maxRetryDelayMs,
+  );
+}
+
+function earliestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
+  }
+  if (!Number.isFinite(rightMs)) {
+    return left;
+  }
+  return rightMs < leftMs ? right : left;
 }
 
 function normalizeIsoDateString(value: string): string {

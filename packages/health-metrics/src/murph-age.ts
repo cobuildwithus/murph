@@ -13,6 +13,8 @@ export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
 export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v2" as const;
+export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
+  "murph.age.public-calculator-report.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
@@ -262,6 +264,65 @@ export interface MurphAgeCalculatorOutput {
   wearableShadowIncrementAssessments: MurphAgeWearableShadowIncrementAssessment[];
 }
 
+export interface MurphAgePublicFeatureAttribution {
+  contributionYears: number | null;
+  featureKey: string;
+  metricKey: string | null;
+  status: "blocked" | "missing" | "ready";
+  warnings: MurphAgePublicWarning[];
+}
+
+export interface MurphAgePublicModuleAttribution {
+  contributionYears: number | null;
+  moduleId: string;
+}
+
+export interface MurphAgePublicRiskEstimate {
+  horizonYears: number;
+  probability: number;
+}
+
+export interface MurphAgePublicWarning {
+  code: MurphAgeWarningCode;
+  featureKey?: string;
+  metricKey?: string;
+}
+
+export interface MurphAgePublicAuthorization {
+  cardId: MurphAgeModelCardId | null;
+  contextOnlyMetricKeys: string[];
+  evidenceClass: MurphAgeEvidenceClass;
+  productAuthorized: boolean;
+  riskToAgeDisplayAuthorized: boolean;
+  scoreBearing: boolean;
+  scoreBearingMetricKeys: string[];
+  scoreBearingSourceKinds: string[];
+  wearableScoreBearingAuthorized: boolean;
+}
+
+export interface MurphAgePublicResult {
+  ageDeltaYears: number | null;
+  authorization: MurphAgePublicAuthorization;
+  biologicalAgeYears: number | null;
+  chronologicalAgeYears: number;
+  featureAttributions: MurphAgePublicFeatureAttribution[];
+  intervalYears: { high: number; low: number } | null;
+  moduleAttributions: MurphAgePublicModuleAttribution[];
+  risk: MurphAgePublicRiskEstimate | null;
+  status: MurphAgeStatus;
+  warnings: MurphAgePublicWarning[];
+}
+
+export interface MurphAgePublicCalculatorReport {
+  authorization: MurphAgePublicAuthorization;
+  displaySummary: MurphAgePublicDisplaySummary;
+  mode: MurphAgeCalculatorMode;
+  result: MurphAgePublicResult | null;
+  schemaVersion: typeof MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION;
+  status: MurphAgeInputBundleStatus;
+  warnings: MurphAgePublicWarning[];
+}
+
 export type MurphAgeDisplayStatus =
   | "abstain"
   | "context-only"
@@ -355,6 +416,55 @@ export interface MurphAgeWearableBridgeSummary {
   secondPriorityReadyFeatureKeys: string[];
 }
 
+export interface MurphAgePublicWearableContextSummary extends Omit<
+  MurphAgeWearableContextSummary,
+  "availableQualityFeatureKeys" | "missingQualityFeatureKeys"
+> {
+  availableQualityFeatureKeys: string[];
+  missingQualityFeatureKeys: string[];
+}
+
+export interface MurphAgePublicWearableBridgeFeatureReadiness extends Omit<
+  MurphAgeWearableBridgeFeatureReadiness,
+  | "featureKey"
+  | "label"
+  | "metricKeys"
+  | "missingMetricKeys"
+  | "missingQualityMetricKeys"
+  | "readyMetricKeys"
+  | "requiredQualityMetricKeys"
+> {
+  featureKey: string;
+  metricKeys: string[];
+  missingMetricKeys: string[];
+  missingQualityMetricKeys: string[];
+  readyMetricKeys: string[];
+  requiredQualityMetricKeys: string[];
+}
+
+export interface MurphAgePublicWearableBridgeSummary extends Omit<
+  MurphAgeWearableBridgeSummary,
+  | "deferredFeatureKeys"
+  | "features"
+  | "firstPriorityIncompleteFeatureKeys"
+  | "firstPriorityReadyFeatureKeys"
+  | "missingFeatureKeys"
+  | "partialFeatureKeys"
+  | "readyFeatureKeys"
+  | "secondPriorityIncompleteFeatureKeys"
+  | "secondPriorityReadyFeatureKeys"
+> {
+  deferredFeatureKeys: string[];
+  features: MurphAgePublicWearableBridgeFeatureReadiness[];
+  firstPriorityIncompleteFeatureKeys: string[];
+  firstPriorityReadyFeatureKeys: string[];
+  missingFeatureKeys: string[];
+  partialFeatureKeys: string[];
+  readyFeatureKeys: string[];
+  secondPriorityIncompleteFeatureKeys: string[];
+  secondPriorityReadyFeatureKeys: string[];
+}
+
 export interface MurphAgeDisplaySummary {
   ageEstimateAvailable: boolean;
   blockedFeatureKeys: string[];
@@ -377,9 +487,11 @@ export interface MurphAgeDisplaySummary {
 
 export interface MurphAgePublicDisplaySummary extends Omit<
   MurphAgeDisplaySummary,
-  "contextOnlyPointIds" | "schemaVersion" | "selectedScoreBearingPointIds"
+  "contextOnlyPointIds" | "schemaVersion" | "selectedScoreBearingPointIds" | "wearableBridge" | "wearableContext"
 > {
   schemaVersion: typeof MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION;
+  wearableBridge: MurphAgePublicWearableBridgeSummary;
+  wearableContext: MurphAgePublicWearableContextSummary;
 }
 
 export interface MurphAgeWearableShadowIncrementOutputBoundary {
@@ -937,6 +1049,26 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
 const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES =
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS.map(completeWearableShadowIncrementPolicy);
 
+const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
+  ...MURPH_AGE_LAB9_FEATURES.map((feature) => feature.featureKey),
+  ...MURPH_AGE_BP_BODY_FEATURES.map((feature) => feature.featureKey),
+  ...MURPH_AGE_LAB5_FEATURES.map((feature) => feature.featureKey),
+  ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.map((feature) => feature.featureKey),
+  "chronological-age",
+  "sex",
+]);
+
+const MURPH_AGE_PUBLIC_WEARABLE_BRIDGE_FEATURE_KEYS = new Set(
+  MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map((feature) => feature.featureKey),
+);
+
+const MURPH_AGE_PUBLIC_METRIC_KEYS = new Set([
+  ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
+]);
+
 export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
   return MURPH_AGE_MODEL_CARD_POLICIES.map(cloneMurphAgeModelCardPolicy);
 }
@@ -1318,62 +1450,225 @@ export function summarizeMurphAgeCalculatorPublicOutput(
   return toPublicMurphAgeDisplaySummary(summarizeMurphAgeCalculatorOutput(output));
 }
 
+export function toPublicMurphAgeCalculatorReport(
+  output: MurphAgeCalculatorOutput,
+): MurphAgePublicCalculatorReport {
+  return {
+    authorization: toPublicMurphAgeAuthorization(output.authorization),
+    displaySummary: summarizeMurphAgeCalculatorPublicOutput(output),
+    mode: output.mode,
+    result: output.result ? toPublicMurphAgeResult(output.result) : null,
+    schemaVersion: MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
+    status: output.status,
+    warnings: toPublicMurphAgeWarnings(output.warnings),
+  };
+}
+
 export function toPublicMurphAgeDisplaySummary(
   summary: MurphAgeDisplaySummary,
 ): MurphAgePublicDisplaySummary {
-  const {
-    contextOnlyPointIds: _contextOnlyPointIds,
-    selectedScoreBearingPointIds: _selectedScoreBearingPointIds,
-    schemaVersion: _schemaVersion,
-    wearableBridge,
-    ...publicSummary
-  } = summary;
-  void _contextOnlyPointIds;
-  void _selectedScoreBearingPointIds;
-  void _schemaVersion;
   return {
-    ...publicSummary,
+    ageEstimateAvailable: summary.ageEstimateAvailable,
+    blockedFeatureKeys: toPublicFeatureKeyList(summary.blockedFeatureKeys),
+    contextOnlyFeatureKeys: toPublicFeatureKeyList(summary.contextOnlyFeatureKeys),
+    contextOnlyMetricKeys: toPublicMetricKeyList(summary.contextOnlyMetricKeys),
+    displayBlockedReason: summary.displayBlockedReason,
+    displayStatus: summary.displayStatus,
+    missingFeatureKeys: toPublicFeatureKeyList(summary.missingFeatureKeys),
+    productAgeDisplayReady: summary.productAgeDisplayReady,
+    productRiskDisplayReady: summary.productRiskDisplayReady,
+    researchEstimateAvailable: summary.researchEstimateAvailable,
     schemaVersion: MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
-    wearableBridge: toPublicWearableBridgeSummary(wearableBridge),
+    selectedScoreBearingFeatureKeys: toPublicFeatureKeyList(summary.selectedScoreBearingFeatureKeys),
+    selectedScoreBearingMetricKeys: toPublicMetricKeyList(summary.selectedScoreBearingMetricKeys),
+    wearableBridge: toPublicWearableBridgeSummary(summary.wearableBridge),
+    wearableContext: {
+      availableFeatureFamilies: [...summary.wearableContext.availableFeatureFamilies],
+      availableQualityFeatureKeys: toPublicFeatureKeyList(summary.wearableContext.availableQualityFeatureKeys),
+      missingQualityFeatureKeys: toPublicFeatureKeyList(summary.wearableContext.missingQualityFeatureKeys),
+      quality: summary.wearableContext.quality,
+      readyFeatureCount: summary.wearableContext.readyFeatureCount,
+      readyMetricCount: summary.wearableContext.readyMetricCount,
+      readyPointCount: summary.wearableContext.readyPointCount,
+      riskEffect: "not-estimated",
+      scoreBearing: false,
+      scoreContributionAuthorized: false,
+      uncertaintyAction: summary.wearableContext.uncertaintyAction,
+    },
   };
+}
+
+function toPublicMurphAgeResult(result: MurphAgeResult): MurphAgePublicResult {
+  return {
+    ageDeltaYears: result.ageDeltaYears,
+    authorization: toPublicMurphAgeAuthorization(result.authorization),
+    biologicalAgeYears: result.biologicalAgeYears,
+    chronologicalAgeYears: result.chronologicalAgeYears,
+    featureAttributions: result.featureAttributions.map(toPublicMurphAgeFeatureAttribution),
+    intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
+    moduleAttributions: result.moduleAttributions.map(toPublicMurphAgeModuleAttribution),
+    risk: result.risk ? {
+      horizonYears: result.risk.horizonYears,
+      probability: result.risk.probability,
+    } : null,
+    status: result.status,
+    warnings: toPublicMurphAgeWarnings(result.warnings),
+  };
+}
+
+function toPublicMurphAgeFeatureAttribution(
+  feature: MurphAgeFeatureAttribution,
+): MurphAgePublicFeatureAttribution {
+  return {
+    contributionYears: feature.contributionYears,
+    featureKey: toPublicFeatureKey(feature),
+    metricKey: toPublicMetricKey(feature.metricKey),
+    status: feature.status,
+    warnings: toPublicMurphAgeWarnings(feature.warnings),
+  };
+}
+
+function toPublicMurphAgeModuleAttribution(
+  module: MurphAgeModuleAttribution,
+): MurphAgePublicModuleAttribution {
+  return {
+    contributionYears: module.contributionYears,
+    moduleId: toPublicModuleId(module.moduleId),
+  };
+}
+
+function toPublicMurphAgeAuthorization(
+  authorization: MurphAgeResultAuthorization,
+): MurphAgePublicAuthorization {
+  return {
+    cardId: authorization.cardId,
+    contextOnlyMetricKeys: authorization.contextOnlyMetricKeys.map(toPublicMetricKey).filter(isString),
+    evidenceClass: authorization.evidenceClass,
+    productAuthorized: authorization.productAuthorized,
+    riskToAgeDisplayAuthorized: authorization.riskToAgeDisplayAuthorized,
+    scoreBearing: authorization.scoreBearing,
+    scoreBearingMetricKeys: authorization.scoreBearingMetricKeys.map(toPublicMetricKey).filter(isString),
+    scoreBearingSourceKinds: [...authorization.scoreBearingSourceKinds],
+    wearableScoreBearingAuthorized: authorization.wearableScoreBearingAuthorized,
+  };
+}
+
+function toPublicMurphAgeWarnings(warnings: readonly MurphAgeWarning[]): MurphAgePublicWarning[] {
+  return warnings.map((warning) => {
+    const featureKey = toPublicFeatureKeyFromKey(warning.featureKey);
+    const metricKey = toPublicMetricKey(warning.metricKey);
+    return {
+      code: warning.code,
+      ...(featureKey ? { featureKey } : {}),
+      ...(metricKey ? { metricKey } : {}),
+    };
+  });
+}
+
+function toPublicFeatureKey(feature: MurphAgeFeatureAttribution): string {
+  if (feature.metricKey) return toPublicMetricKey(feature.metricKey) ?? "metric-feature";
+  return toPublicFeatureKeyFromKey(feature.featureKey) ?? "model-feature";
+}
+
+function toPublicFeatureKeyFromKey(featureKey: string | null | undefined): string | null {
+  const simpleKey = toPublicSimpleKey(featureKey);
+  if (!simpleKey) return null;
+  if (simpleKey === "age") return "chronological-age";
+  if (simpleKey === "male" || simpleKey === "female" || simpleKey === "sex") return "sex";
+  if (MURPH_AGE_PUBLIC_FEATURE_KEYS.has(simpleKey)) return simpleKey;
+  return "model-feature";
+}
+
+function toPublicMetricKey(metricKey: string | null | undefined): string | null {
+  const simpleKey = toPublicSimpleKey(metricKey);
+  return simpleKey && MURPH_AGE_PUBLIC_METRIC_KEYS.has(simpleKey) ? simpleKey : null;
+}
+
+function toPublicFeatureKeyList(featureKeys: readonly string[]): string[] {
+  return uniqueStrings(featureKeys.map(toPublicFeatureKeyFromKey).filter(isString));
+}
+
+function toPublicMetricKeyList(metricKeys: readonly string[]): string[] {
+  return uniqueStrings(metricKeys.map(toPublicMetricKey).filter(isString));
+}
+
+function toPublicWearableBridgeFeatureKey(featureKey: string | null | undefined): string | null {
+  const simpleKey = toPublicSimpleKey(featureKey);
+  if (!simpleKey) return null;
+  if (MURPH_AGE_PUBLIC_WEARABLE_BRIDGE_FEATURE_KEYS.has(simpleKey)) return simpleKey;
+  return "wearable-feature";
+}
+
+function toPublicWearableBridgeFeatureKeyList(featureKeys: readonly string[]): string[] {
+  return uniqueStrings(featureKeys.map(toPublicWearableBridgeFeatureKey).filter(isString));
+}
+
+function toPublicModuleId(moduleId: string): string {
+  const simpleKey = toPublicSimpleKey(moduleId);
+  if (!simpleKey) return "unknown";
+  if ([
+    "body",
+    "cardiovascular",
+    "demographics",
+    "hematologic",
+    "immune",
+    "inflammatory",
+    "liver",
+    "metabolic",
+    "renal",
+  ].includes(simpleKey)) {
+    return simpleKey;
+  }
+  return "unknown";
+}
+
+function toPublicSimpleKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9-]{0,79}$/.test(normalized) ? normalized : null;
+}
+
+function isString(value: string | null): value is string {
+  return value !== null;
 }
 
 function toPublicWearableBridgeSummary(
   summary: MurphAgeWearableBridgeSummary,
-): MurphAgeWearableBridgeSummary {
+): MurphAgePublicWearableBridgeSummary {
   return {
     candidateFeatureCount: summary.candidateFeatureCount,
-    deferredFeatureKeys: [...summary.deferredFeatureKeys],
+    deferredFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.deferredFeatureKeys),
     features: summary.features.map(toPublicWearableBridgeFeatureReadiness),
-    firstPriorityIncompleteFeatureKeys: [...summary.firstPriorityIncompleteFeatureKeys],
-    firstPriorityReadyFeatureKeys: [...summary.firstPriorityReadyFeatureKeys],
-    missingFeatureKeys: [...summary.missingFeatureKeys],
-    partialFeatureKeys: [...summary.partialFeatureKeys],
+    firstPriorityIncompleteFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.firstPriorityIncompleteFeatureKeys),
+    firstPriorityReadyFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.firstPriorityReadyFeatureKeys),
+    missingFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.missingFeatureKeys),
+    partialFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.partialFeatureKeys),
     productAuthorized: false,
-    readyFeatureKeys: [...summary.readyFeatureKeys],
+    readyFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.readyFeatureKeys),
     riskEffect: "not-estimated",
     scoreBearing: false,
     scoreContributionAuthorized: false,
-    secondPriorityIncompleteFeatureKeys: [...summary.secondPriorityIncompleteFeatureKeys],
-    secondPriorityReadyFeatureKeys: [...summary.secondPriorityReadyFeatureKeys],
+    secondPriorityIncompleteFeatureKeys: toPublicWearableBridgeFeatureKeyList(
+      summary.secondPriorityIncompleteFeatureKeys,
+    ),
+    secondPriorityReadyFeatureKeys: toPublicWearableBridgeFeatureKeyList(summary.secondPriorityReadyFeatureKeys),
   };
 }
 
 function toPublicWearableBridgeFeatureReadiness(
   feature: MurphAgeWearableBridgeFeatureReadiness,
-): MurphAgeWearableBridgeFeatureReadiness {
+): MurphAgePublicWearableBridgeFeatureReadiness {
   return {
     family: feature.family,
-    featureKey: feature.featureKey,
-    label: feature.label,
+    featureKey: toPublicWearableBridgeFeatureKey(feature.featureKey) ?? "wearable-feature",
     methodQualifier: feature.methodQualifier,
-    metricKeys: [...feature.metricKeys],
-    missingMetricKeys: [...feature.missingMetricKeys],
-    missingQualityMetricKeys: [...feature.missingQualityMetricKeys],
+    metricKeys: toPublicMetricKeyList(feature.metricKeys),
+    missingMetricKeys: toPublicMetricKeyList(feature.missingMetricKeys),
+    missingQualityMetricKeys: toPublicMetricKeyList(feature.missingQualityMetricKeys),
     productAuthorized: false,
     qualityReady: feature.qualityReady,
-    readyMetricKeys: [...feature.readyMetricKeys],
-    requiredQualityMetricKeys: [...feature.requiredQualityMetricKeys],
+    readyMetricKeys: toPublicMetricKeyList(feature.readyMetricKeys),
+    requiredQualityMetricKeys: toPublicMetricKeyList(feature.requiredQualityMetricKeys),
     riskEffect: "not-estimated",
     role: feature.role,
     scoreBearing: false,

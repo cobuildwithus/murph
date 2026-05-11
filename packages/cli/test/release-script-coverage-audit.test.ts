@@ -38,6 +38,11 @@ const cliPackageJson = JSON.parse(
   scripts?: Record<string, string>
   version?: string
 }
+const hostedWebPackageJson = JSON.parse(
+  readFileSync(path.join(repoRoot, 'apps', 'web', 'package.json'), 'utf8'),
+) as {
+  scripts?: Record<string, string>
+}
 
 function runNodeScript(...args: string[]) {
   return spawnSync('node', args, {
@@ -638,6 +643,43 @@ Updated: 2026-04-24
     )
     expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
       releaseCheck.indexOf('corepack pnpm verify:acceptance'),
+    )
+  })
+
+  it('keeps acceptance web verification on prepared setup paths after root typecheck', () => {
+    const workspaceVerify = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+    const webVerify = readFileSync(
+      path.join(repoRoot, 'apps', 'web', 'scripts', 'verify-fast.sh'),
+      'utf8',
+    )
+
+    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).toContain(
+      'apps/web/scripts/dev-local.ts',
+    )
+    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
+      'health-commons:generate',
+    )
+    expect(hostedWebPackageJson.scripts?.['dev:prepared-local-env']).not.toContain(
+      'legal:pdf',
+    )
+    expect(hostedWebPackageJson.scripts?.['test']).toBe(
+      'pnpm health-commons:generate && pnpm test:prepared',
+    )
+    expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
+      'vitest run --config apps/web/vitest.workspace.ts --no-coverage',
+    )
+    expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
+    expect(webVerify).toContain('pnpm test:prepared')
+    expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
+    expect(workspaceVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1')
+    expect(workspaceVerify).toContain(
+      'skip Health Commons generated catalog; root acceptance typecheck already prepared it',
+    )
+    expect(workspaceVerify).toContain(
+      'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"',
     )
   })
 

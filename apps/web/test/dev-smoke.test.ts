@@ -54,6 +54,17 @@ test("hosted web smoke accepts an explicit local-env override", () => {
   );
 });
 
+test("hosted web smoke can reuse a verifier-prepared local env", () => {
+  assert.equal(
+    resolveHostedWebSmokeDevCommand(createEnv({
+      CI: "true",
+      MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV: "1",
+      MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV: "1",
+    })),
+    "dev:prepared-local-env",
+  );
+});
+
 test("hosted web smoke keeps the Turbopack cache locally by default", () => {
   assert.equal(
     shouldPruneHostedWebSmokeCache(createEnv({

@@ -130,11 +130,7 @@ export function startRuntimeLivenessHeartbeat(input: {
         return;
       }
       settleInitialTouch(result);
-      if (
-        (result.inputAvailable === true || result.pendingNudge === true)
-        && !stopped
-        && !input.signal?.aborted
-      ) {
+      if (result.inputAvailable === true && !stopped && !input.signal?.aborted) {
         void Promise.resolve(input.onInputAvailable?.(result))
           .catch((error: unknown) => {
             if (!stopped && !input.signal?.aborted) {

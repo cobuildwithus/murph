@@ -207,7 +207,7 @@ wait_for_background_jobs() {
 }
 
 run_dev_smoke() {
-  MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 pnpm dev:smoke
+  MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV=1 MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke
 }
 
 run_next_build() {
@@ -235,7 +235,17 @@ run_next_build() {
 }
 
 run_timed_step "legal pdf" pnpm legal:pdf
-run_timed_step "prisma generate" pnpm prisma:generate
+
+run_prisma_generate() {
+  if [[ "${MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED:-0}" == "1" ]]; then
+    verify_log "skip prisma generate; root acceptance typecheck already prepared it"
+    return 0
+  fi
+
+  pnpm prisma:generate
+}
+
+run_timed_step "prisma generate" run_prisma_generate
 
 run_health_commons_generate() {
   if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
@@ -247,7 +257,7 @@ run_health_commons_generate() {
 }
 
 run_web_tests() {
-  MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1 pnpm test
+  pnpm test:prepared
 }
 
 run_timed_step "health commons generated catalog" run_health_commons_generate

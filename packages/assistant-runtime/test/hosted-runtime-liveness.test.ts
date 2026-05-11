@@ -74,7 +74,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
     await heartbeat.stop();
   });
 
-  test("reports pending nudges as available input", async () => {
+  test("keeps pending nudges as metadata instead of reporting available input", async () => {
     vi.useFakeTimers();
     const available: string[] = [];
     const port: RuntimeLivenessPort = {
@@ -101,7 +101,8 @@ describe("startRuntimeLivenessHeartbeat", () => {
       ok: true,
       pendingNudge: true,
     });
-    await vi.waitFor(() => assert.deepEqual(available, ["2026-04-27T00:00:45.000Z"]));
+    await vi.advanceTimersByTimeAsync(1_000);
+    assert.deepEqual(available, []);
     await heartbeat.stop();
   });
 

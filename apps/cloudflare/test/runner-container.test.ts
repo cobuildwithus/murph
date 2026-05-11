@@ -23,6 +23,7 @@ import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
+  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   refreshHostedExecutionContainerBrowserVaultReplica,
   resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
@@ -3753,6 +3754,74 @@ describe("RunnerContainer", () => {
       expect(value).not.toHaveProperty("runAttempt");
       expect(value).not.toHaveProperty("runId");
     }
+  });
+
+  it("skips warm-only idle checkpoint without starting a cold container", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.invokeIdleCheckpointIfWarm({
+      job: {
+        ...createWorkspaceRunnerJob("member_idle_checkpoint_cold"),
+        request: {
+          ...createWorkspaceRunnerJob("member_idle_checkpoint_cold").request,
+          reason: "idle_shutdown_checkpoint",
+        },
+      },
+      timeoutMs: 45_000,
+      userId: "member_idle_checkpoint_cold",
+    })).resolves.toEqual({
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    });
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("routes warm-only idle checkpoint helper to the container warm-only method", async () => {
+    const invoke = vi.fn<NonNullable<HostedExecutionContainerStubLike["invokeIdleCheckpointIfWarm"]>>(
+      async () => ({
+        idleShutdownCheckpointSkipped: "container_not_warm",
+        status: "idle",
+      }),
+    );
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      async invoke() {
+        throw new Error("Warm-only helper must not use foreground invoke.");
+      },
+      invokeIdleCheckpointIfWarm: invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    await expect(invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm({
+      job: {
+        ...createWorkspaceRunnerJob("member_idle_checkpoint_helper"),
+        request: {
+          ...createWorkspaceRunnerJob("member_idle_checkpoint_helper").request,
+          reason: "idle_shutdown_checkpoint",
+        },
+      },
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_idle_checkpoint_helper",
+    })).resolves.toEqual({
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    });
+
+    expect(getByName).toHaveBeenCalledWith("member_idle_checkpoint_helper");
+    expect(invoke).toHaveBeenCalledOnce();
   });
 
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {
