@@ -232,12 +232,14 @@ const murphAgePublicFeatureAttributionSchema = z.object({
   contributionYears: z.number().nullable(),
   featureKey: z.string().min(1),
   metricKey: z.string().min(1).nullable(),
+  moduleId: z.string().min(1),
   status: z.enum(['blocked', 'missing', 'ready']),
   warnings: z.array(murphAgePublicWarningSchema),
 })
 
 const murphAgePublicModuleAttributionSchema = z.object({
   contributionYears: z.number().nullable(),
+  featureKeys: z.array(z.string().min(1)),
   moduleId: z.string().min(1),
 })
 

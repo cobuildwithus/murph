@@ -358,12 +358,14 @@ export interface MurphAgePublicFeatureAttribution {
   contributionYears: number | null;
   featureKey: string;
   metricKey: string | null;
+  moduleId: string;
   status: "blocked" | "missing" | "ready";
   warnings: MurphAgePublicWarning[];
 }
 
 export interface MurphAgePublicModuleAttribution {
   contributionYears: number | null;
+  featureKeys: string[];
   moduleId: string;
 }
 
@@ -1884,7 +1886,9 @@ function toPublicMurphAgeResult(result: MurphAgeResult): MurphAgePublicResult {
     chronologicalAgeYears: result.chronologicalAgeYears,
     featureAttributions: result.featureAttributions.map(toPublicMurphAgeFeatureAttribution),
     intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
-    moduleAttributions: result.moduleAttributions.map(toPublicMurphAgeModuleAttribution),
+    moduleAttributions: result.moduleAttributions.map((module) =>
+      toPublicMurphAgeModuleAttribution(module, result.featureAttributions)
+    ),
     risk: result.risk ? {
       horizonYears: result.risk.horizonYears,
       probability: result.risk.probability,
@@ -1901,6 +1905,7 @@ function toPublicMurphAgeFeatureAttribution(
     contributionYears: feature.contributionYears,
     featureKey: toPublicFeatureKey(feature),
     metricKey: toPublicMetricKey(feature.metricKey),
+    moduleId: toPublicModuleId(feature.moduleId),
     status: feature.status,
     warnings: toPublicMurphAgeWarnings(feature.warnings),
   };
@@ -1908,10 +1913,18 @@ function toPublicMurphAgeFeatureAttribution(
 
 function toPublicMurphAgeModuleAttribution(
   module: MurphAgeModuleAttribution,
+  features: readonly MurphAgeFeatureAttribution[],
 ): MurphAgePublicModuleAttribution {
+  const moduleId = toPublicModuleId(module.moduleId);
+  const featureKeys = uniqueStrings(
+    features
+      .filter((feature) => feature.status === "ready" && toPublicModuleId(feature.moduleId) === moduleId)
+      .map(toPublicFeatureKey),
+  );
   return {
     contributionYears: module.contributionYears,
-    moduleId: toPublicModuleId(module.moduleId),
+    featureKeys: featureKeys.length > 0 ? featureKeys : toPublicFeatureKeyList(module.featureKeys),
+    moduleId,
   };
 }
 

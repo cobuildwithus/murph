@@ -2939,6 +2939,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     feature.metricKey === "hba1c"
   );
   assert.ok(publicHba1cAttribution);
+  assert.equal(publicHba1cAttribution.moduleId, "metabolic");
   assert.equal("selectedPointIds" in publicHba1cAttribution, false);
   assert.equal("value" in publicHba1cAttribution, false);
   assert.equal("unit" in publicHba1cAttribution, false);
@@ -2948,6 +2949,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     module.moduleId === "metabolic"
   );
   assert.ok(publicMetabolicModule);
+  assert.equal(publicMetabolicModule.featureKeys.includes("hba1c"), true);
   assert.equal("contributionLogit" in publicMetabolicModule, false);
   const publicReportFromLeakyResult = toPublicMurphAgeCalculatorReport({
     ...research,
@@ -2987,6 +2989,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
         ...module,
         coefficient: 1,
         contributionLogit: 1,
+        featureKeys: ["private feature key", "private-model-feature", ...module.featureKeys],
         moduleId: "private artifact module",
       })),
       modelId: "private artifact model id",
@@ -3025,6 +3028,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicReportFromLeakyResult.result?.risk ? "endpoint" in publicReportFromLeakyResult.result.risk : true, false);
   assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.featureKey, "metric-feature");
   assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.metricKey, null);
+  assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.moduleId, "unknown");
   assert.equal(publicReportFromLeakyResult.result?.featureAttributions[0]?.warnings[0]?.code, "MODEL_FEATURE_MISSING");
   assert.equal(
     publicReportFromLeakyResult.result?.featureAttributions[0]?.warnings.some((warning) => "message" in warning),
@@ -3036,6 +3040,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicReportFromLeakyResult.warnings.some((warning) => warning.featureKey === "model-feature"), true);
   assert.equal(publicReportFromLeakyResult.warnings.some((warning) => "metricKey" in warning), false);
   assert.equal(publicReportFromLeakyResult.result?.moduleAttributions[0]?.moduleId, "unknown");
+  assert.equal(
+    publicReportFromLeakyResult.result?.moduleAttributions.some((module) =>
+      module.featureKeys.includes("private-model-feature")
+    ),
+    false,
+  );
   const productDefaultReport = toPublicMurphAgeCalculatorReport(productDefault);
   assert.equal(productDefaultReport.status, "abstain");
   assert.equal(productDefaultReport.result, null);
