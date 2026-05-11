@@ -442,6 +442,135 @@ test('age report consumes canonical wearable observations as context-only bridge
   }
 })
 
+test('age report derives wearable coverage quality from canonical observations', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-wearable-coverage-')
+  try {
+    const cli = createCanonicalInputCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'UTC',
+    ])
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const wearableObservationPayloads = wearableCoverageWindowDates().flatMap((date) => [
+      wearableObservationPayload({
+        date,
+        facet: 'steps',
+        metric: 'daily-steps',
+        resourceId: `oura-activity-${date}`,
+        resourceType: 'daily-activity',
+        title: 'Oura daily steps',
+        unit: 'count',
+        value: 10_000,
+      }),
+      wearableObservationPayload({
+        date,
+        facet: 'resting-heart-rate',
+        metric: 'resting-heart-rate',
+        resourceId: `oura-readiness-${date}`,
+        resourceType: 'daily-readiness',
+        title: 'Oura resting heart rate',
+        unit: 'bpm',
+        value: 62,
+      }),
+      wearableObservationPayload({
+        date,
+        facet: 'hrv-rmssd',
+        metric: 'hrv-rmssd',
+        resourceId: `oura-readiness-${date}`,
+        resourceType: 'daily-readiness',
+        title: 'Oura HRV',
+        unit: 'ms',
+        value: 48,
+      }),
+      wearableObservationPayload({
+        date,
+        facet: 'total-sleep-minutes',
+        metric: 'total-sleep-minutes',
+        resourceId: `oura-sleep-${date}`,
+        resourceType: 'sleep',
+        title: 'Oura total sleep',
+        unit: 'minutes',
+        value: 450,
+      }),
+    ])
+
+    for (const [index, payload] of wearableObservationPayloads.entries()) {
+      const payloadPath = path.join(parentRoot, `wearable-coverage-observation-${index}.json`)
+      await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+      const result = await runInProcessJsonCli(cli, [
+        'event',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      requireData(result.envelope)
+    }
+
+    await rebuildQueryProjection(vaultRoot)
+
+    const report = requireData(
+      (
+        await runInProcessJsonCli<MurphAgePublicCalculatorReport>(cli, [
+          'age',
+          'report',
+          '--vault',
+          vaultRoot,
+          '--as-of',
+          '2026-05-10T00:00:00.000Z',
+          '--chronological-age-years',
+          '45',
+          '--sex',
+          'female',
+          '--mode',
+          'research',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(report.mode, 'research')
+    assert.equal(report.status, 'context-only')
+    assert.equal(report.result, null)
+    assert.equal(report.displaySummary.displayStatus, 'context-only')
+    assert.equal(report.displaySummary.wearableContext.quality, 'strong-context')
+    assert.equal(report.displaySummary.wearableContext.scoreBearing, false)
+    assert.equal(report.displaySummary.wearableContext.scoreContributionAuthorized, false)
+    assert.equal(report.displaySummary.wearableBridge.scoreBearing, false)
+    assert.equal(report.displaySummary.wearableBridge.scoreContributionAuthorized, false)
+    assert.equal(report.displaySummary.wearableBridge.productAuthorized, false)
+    for (const metricKey of [
+      'wearable-valid-day-count-28d',
+      'wearable-valid-night-count-28d',
+      'wearable-coverage-index',
+    ]) {
+      assert.equal(report.displaySummary.contextOnlyMetricKeys.includes(metricKey), true, metricKey)
+    }
+    for (const featureKey of [
+      'wearable-coverage-quality',
+      'activity-volume',
+      'sleep-duration-regularity',
+      'resting-heart-rate',
+      'hrv-rmssd',
+    ]) {
+      assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.includes(featureKey), true, featureKey)
+    }
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('activity-volume'), false)
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('resting-heart-rate'), false)
+    assert.equal(report.displaySummary.wearableBridge.features.some((feature) => hasOwnKey(feature, 'selectedPointIds')), false)
+    assert.equal(report.displaySummary.wearableBridge.features.every((feature) => feature.productAuthorized === false), true)
+    assert.equal(hasOwnKey(report, 'contextAssessments'), false)
+    assert.equal(hasOwnKey(report.displaySummary, 'contextOnlyPointIds'), false)
+    assert.equal(hasOwnKey(report.displaySummary, 'selectedScoreBearingPointIds'), false)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report rejects uninitialized vault roots before calculating a report', async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-uninitialized-'))
   try {
@@ -471,6 +600,7 @@ test('age report rejects uninitialized vault roots before calculating a report',
 })
 
 function wearableObservationPayload(input: {
+  date?: string
   facet: string
   metric: string
   resourceId: string
@@ -479,6 +609,7 @@ function wearableObservationPayload(input: {
   unit: string
   value: number
 }) {
+  const occurredAt = `${input.date ?? '2026-05-08'}T08:00:00.000Z`
   return {
     externalRef: {
       facet: input.facet,
@@ -488,12 +619,19 @@ function wearableObservationPayload(input: {
     },
     kind: 'observation',
     metric: input.metric,
-    occurredAt: '2026-05-08T08:00:00.000Z',
+    occurredAt,
     source: 'device',
     title: input.title,
     unit: input.unit,
     value: input.value,
   }
+}
+
+function wearableCoverageWindowDates(): string[] {
+  const start = Date.UTC(2026, 3, 11)
+  return Array.from({ length: 28 }, (_, index) =>
+    new Date(start + index * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  )
 }
 
 async function createProjectionVault(): Promise<string> {

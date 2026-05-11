@@ -5,12 +5,14 @@ import {
   MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  METRIC_POINT_SCHEMA_VERSION,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   createMurphAgeAbstainedAuthorization,
   createMurphAgeCustomModelAuthorization,
   isMurphAgeInputBundleMetricPointAllowed,
   listMurphAgeInputBundleMetricKeys,
+  normalizeMetricValue,
   parseMurphAgeLocalModelCardArtifact,
   resolveMetricInputKey,
   summarizeMurphAgeCalculatorPublicOutput,
@@ -55,6 +57,23 @@ export interface MurphAgeLocalModelCardLoadResult {
 }
 
 const MURPH_AGE_MODEL_CARD_RELATIVE_DIR = path.join(".runtime", "operations", "murph-age", "model-cards");
+const WEARABLE_COVERAGE_WINDOW_DAYS = 28;
+const WEARABLE_COVERAGE_MIN_VALID_DAYS = 14;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+// Activity bridge readiness needs activity-day coverage; recovery-only days must not make activity volume ready.
+const MURPH_AGE_WEARABLE_VALID_DAY_METRIC_KEYS = new Set([
+  "activity-minutes",
+  "estimated-vo2-max",
+  "steps",
+]);
+const MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS = new Set([
+  "deep-sleep-minutes",
+  "hrv-rmssd",
+  "rem-sleep-minutes",
+  "sleep-score",
+  "spo2",
+  "total-sleep-minutes",
+]);
 
 export async function calculateMurphAgeForVault(
   input: CalculateMurphAgeForVaultInput,
@@ -293,7 +312,11 @@ async function loadMurphAgeInputBundleMetricPoints(input: {
 }): Promise<MetricPoint[]> {
   const filters = metricPointFiltersForMurphAgeInputBundle(input.asOf);
   const points = await loadMetricPointsForFilters({ asOf: input.asOf, filters, vaultRoot: input.vaultRoot });
-  return points.filter(isMurphAgeInputBundleMetricPointAllowed);
+  const allowedPoints = points.filter(isMurphAgeInputBundleMetricPointAllowed);
+  return appendMurphAgeWearableCoveragePoints({
+    asOf: input.asOf,
+    points: allowedPoints,
+  });
 }
 
 async function loadMetricPointsForFilters(input: {
@@ -310,6 +333,182 @@ async function loadMetricPointsForFilters(input: {
     pointsById.set(point.id, point);
   }
   return [...pointsById.values()];
+}
+
+function appendMurphAgeWearableCoveragePoints(input: {
+  asOf: string;
+  points: readonly MetricPoint[];
+}): MetricPoint[] {
+  const coveragePoints = deriveMurphAgeWearableCoveragePoints(input);
+  if (coveragePoints.length === 0) {
+    return [...input.points];
+  }
+
+  const byId = new Map<string, MetricPoint>();
+  for (const point of input.points) {
+    byId.set(point.id, point);
+  }
+  for (const point of coveragePoints) {
+    byId.set(point.id, point);
+  }
+  return [...byId.values()];
+}
+
+function deriveMurphAgeWearableCoveragePoints(input: {
+  asOf: string;
+  points: readonly MetricPoint[];
+}): MetricPoint[] {
+  const asOfDay = isoDayFromDateTime(input.asOf);
+  if (!asOfDay) {
+    return [];
+  }
+
+  const validDayDates = uniqueStrings(
+    input.points
+      .filter(isMurphAgeWearableValidDayPoint)
+      .map((point) => point.effectiveDate),
+  );
+  const validNightDates = uniqueStrings(
+    input.points
+      .filter(isMurphAgeWearableValidNightPoint)
+      .map((point) => point.effectiveDate),
+  );
+  const validDayCount = countDatesInTrailingWindow(validDayDates, asOfDay, WEARABLE_COVERAGE_WINDOW_DAYS);
+  const validNightCount = countDatesInTrailingWindow(validNightDates, asOfDay, WEARABLE_COVERAGE_WINDOW_DAYS);
+  const dayCoverageReady = validDayCount >= WEARABLE_COVERAGE_MIN_VALID_DAYS;
+  const nightCoverageReady = validNightCount >= WEARABLE_COVERAGE_MIN_VALID_DAYS;
+  const points: MetricPoint[] = [];
+
+  if (dayCoverageReady) {
+    points.push(createWearableCoverageMetricPoint({
+      asOfDay,
+      metricKey: "wearable-valid-day-count-28d",
+      unit: "count",
+      value: validDayCount,
+    }));
+  }
+
+  if (nightCoverageReady) {
+    points.push(createWearableCoverageMetricPoint({
+      asOfDay,
+      metricKey: "wearable-valid-night-count-28d",
+      unit: "count",
+      value: validNightCount,
+    }));
+  }
+
+  if (dayCoverageReady && nightCoverageReady) {
+    points.push(createWearableCoverageMetricPoint({
+      asOfDay,
+      metricKey: "wearable-coverage-index",
+      unit: "score",
+      value: roundCoverageIndex(
+        (Math.min(validDayCount, WEARABLE_COVERAGE_WINDOW_DAYS) +
+          Math.min(validNightCount, WEARABLE_COVERAGE_WINDOW_DAYS)) /
+          (WEARABLE_COVERAGE_WINDOW_DAYS * 2),
+      ),
+    }));
+  }
+
+  return points;
+}
+
+function isMurphAgeWearableValidDayPoint(point: MetricPoint): boolean {
+  return (point.source.kind === "activity-summary" || point.source.kind === "wearable-summary") &&
+    MURPH_AGE_WEARABLE_VALID_DAY_METRIC_KEYS.has(point.metricKey);
+}
+
+function isMurphAgeWearableValidNightPoint(point: MetricPoint): boolean {
+  return point.source.kind === "sleep-summary" &&
+    MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS.has(point.metricKey);
+}
+
+function createWearableCoverageMetricPoint(input: {
+  asOfDay: string;
+  metricKey: string;
+  unit: string;
+  value: number;
+}): MetricPoint {
+  const observedAt = `${input.asOfDay}T00:00:00.000Z`;
+  const normalized = normalizeMetricValue({
+    metricKey: input.metricKey,
+    unit: input.unit,
+    value: input.value,
+  });
+  const id = `metric-point:murph-age-wearable-coverage:${input.metricKey}:${input.asOfDay}`;
+
+  return {
+    biomarkerKey: null,
+    canonicalUnit: normalized.canonicalUnit,
+    canonicalValue: normalized.canonicalValue,
+    comparator: null,
+    confidence: "medium",
+    context: {
+      measurementWindowDays: WEARABLE_COVERAGE_WINDOW_DAYS,
+      syntheticRecordId: id,
+    },
+    effectiveDate: input.asOfDay,
+    grain: "day",
+    id,
+    metricKey: input.metricKey,
+    observedAt,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: "Wearable coverage summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: METRIC_POINT_SCHEMA_VERSION,
+    source: {
+      family: "derived",
+      kind: "wearable-summary",
+      path: "",
+      recordId: id,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: input.unit,
+    value: input.value,
+  };
+}
+
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
+}
+
+function countDatesInTrailingWindow(
+  dates: readonly string[],
+  latestDate: string,
+  windowDays: number,
+): number {
+  const latestTime = dayKeyTime(latestDate);
+  if (latestTime === null) {
+    return 0;
+  }
+
+  return uniqueStrings(dates).filter((date) => {
+    const time = dayKeyTime(date);
+    if (time === null) {
+      return false;
+    }
+
+    const diffDays = Math.floor((latestTime - time) / MS_PER_DAY);
+    return diffDays >= 0 && diffDays < windowDays;
+  }).length;
+}
+
+function dayKeyTime(date: string): number | null {
+  const time = Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
+  return Number.isFinite(time) ? time : null;
+}
+
+function roundCoverageIndex(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 function invalidAsOfResult(input: CalculateMurphAgeForVaultInput): MurphAgeResult {

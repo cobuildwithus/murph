@@ -621,6 +621,129 @@ test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary w
   }
 });
 
+test("calculateMurphAgeFromVaultInputBundle derives wearable coverage against report asOf", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, wearableCoverageWindowDates("2026-04-11", 28).flatMap((date) => [
+      wearablePointOnDate("steps", null, 10_000, "count", date, "activity-summary"),
+      wearablePointOnDate("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm", date),
+      wearablePointOnDate("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms", date),
+      wearablePointOnDate("total-sleep-minutes", null, 450, "minutes", date, "sleep-summary"),
+    ]));
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(wearableFeatureValue(output, "wearable-valid-day-count-28d"), 26);
+    assert.equal(wearableFeatureValue(output, "wearable-valid-night-count-28d"), 26);
+    assert.equal(wearableFeatureValue(output, "wearable-coverage-index"), 0.9286);
+    const summary = summarizeMurphAgeCalculatorOutput(output);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("wearable-coverage-quality"), true);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("resting-heart-rate"), true);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+
+  const thinVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(thinVaultRoot);
+    insertMetricPoints(thinVaultRoot, wearableCoverageWindowDates("2026-04-28", 13).flatMap((date) => [
+      wearablePointOnDate("steps", null, 10_000, "count", date, "activity-summary"),
+      wearablePointOnDate("total-sleep-minutes", null, 450, "minutes", date, "sleep-summary"),
+    ]));
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot: thinVaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(wearableFeatureValue(output, "wearable-valid-day-count-28d"), null);
+    assert.equal(wearableFeatureValue(output, "wearable-valid-night-count-28d"), null);
+    assert.equal(wearableFeatureValue(output, "wearable-coverage-index"), null);
+    const summary = summarizeMurphAgeCalculatorOutput(output);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("wearable-coverage-quality"), false);
+    assert.equal(summary.wearableBridge.partialFeatureKeys.includes("activity-volume"), true);
+  } finally {
+    await rm(thinVaultRoot, { force: true, recursive: true });
+  }
+
+  const disjointVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(disjointVaultRoot);
+    insertMetricPoints(disjointVaultRoot, [
+      ...wearableCoverageWindowDates("2026-04-26", 14).flatMap((date) => [
+        wearablePointOnDate("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm", date),
+        wearablePointOnDate("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms", date),
+      ]),
+      wearablePointOnDate("steps", null, 10_000, "count", "2026-05-09", "activity-summary"),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot: disjointVaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(wearableFeatureValue(output, "wearable-valid-day-count-28d"), null);
+    assert.equal(wearableFeatureValue(output, "wearable-valid-night-count-28d"), null);
+    assert.equal(wearableFeatureValue(output, "wearable-coverage-index"), null);
+    const summary = summarizeMurphAgeCalculatorOutput(output);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("activity-volume"), false);
+    assert.equal(summary.wearableBridge.partialFeatureKeys.includes("activity-volume"), true);
+    assert.equal(summary.wearableBridge.partialFeatureKeys.includes("resting-heart-rate"), true);
+  } finally {
+    await rm(disjointVaultRoot, { force: true, recursive: true });
+  }
+
+  const oneSidedVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(oneSidedVaultRoot);
+    insertMetricPoints(oneSidedVaultRoot, [
+      ...wearableCoverageWindowDates("2026-04-26", 14).flatMap((date) => [
+        wearablePointOnDate("steps", null, 10_000, "count", date, "activity-summary"),
+      ]),
+      wearablePointOnDate("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm", "2026-05-09"),
+      wearablePointOnDate("total-sleep-minutes", null, 450, "minutes", "2026-05-09", "sleep-summary"),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot: oneSidedVaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(wearableFeatureValue(output, "wearable-valid-day-count-28d"), 14);
+    assert.equal(wearableFeatureValue(output, "wearable-valid-night-count-28d"), null);
+    assert.equal(wearableFeatureValue(output, "wearable-coverage-index"), null);
+    const summary = summarizeMurphAgeCalculatorOutput(output);
+    assert.equal(summary.wearableContext.quality, "thin");
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("wearable-coverage-quality"), false);
+    assert.equal(summary.wearableBridge.readyFeatureKeys.includes("activity-volume"), false);
+    assert.equal(summary.wearableBridge.partialFeatureKeys.includes("activity-volume"), true);
+  } finally {
+    await rm(oneSidedVaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("calculateMurphAgeFromVaultInputBundle ignores sample-derived clinical metrics", async () => {
   const vaultRoot = await createProjectionVault();
   try {
@@ -987,6 +1110,41 @@ function wearablePoint(
     unit,
     value,
   });
+}
+
+function wearablePointOnDate(
+  metricKey: string,
+  biomarkerKey: string | null,
+  value: number,
+  unit: string,
+  date: string,
+  sourceKind: MetricPoint["source"]["kind"] = "wearable-summary",
+): MetricPoint {
+  return metricPoint({
+    biomarkerKey,
+    effectiveDate: date,
+    id: `metric-point:${metricKey}:${date}:${sourceKind}:0`,
+    metricKey,
+    observedAt: `${date}T08:00:00.000Z`,
+    recordId: `wearable_${metricKey.replaceAll("-", "_")}_${date}`,
+    sourceKind,
+    unit,
+    value,
+  });
+}
+
+function wearableCoverageWindowDates(startDate: string, count: number): string[] {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  return Array.from({ length: count }, (_, index) =>
+    new Date(start + index * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
+}
+
+function wearableFeatureValue(
+  output: Awaited<ReturnType<typeof calculateMurphAgeFromVaultInputBundle>>,
+  featureKey: string,
+): number | null {
+  return output.bundleAssessment.featureStatuses.find((feature) => feature.featureKey === featureKey)?.value ?? null;
 }
 
 function fixtureMurphAgeModel(): MurphAgeRiskModel {
