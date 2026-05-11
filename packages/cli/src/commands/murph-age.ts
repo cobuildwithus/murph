@@ -14,6 +14,7 @@ import {
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
@@ -80,6 +81,26 @@ const murphAgeProductPromotionBlockerSchema = z.enum([
   'VALIDATION_GATE_BLOCKED',
 ])
 
+const murphAgeValidationGateSummarySchema = z.object({
+  evidenceTiers: z.array(murphAgeValidationEvidenceTierSchema),
+  productPromotionEvidence: z.boolean(),
+  status: murphAgeValidationGateStatusSchema,
+})
+const murphAgePublicValidationGateSummarySchema = murphAgeValidationGateSummarySchema.extend({
+  summary: z.enum([
+    MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
+    MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.passed,
+  ]),
+}).superRefine((summary, ctx) => {
+  if (summary.summary !== MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT[summary.status]) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Validation gate summary must match the public status text.',
+      path: ['summary'],
+    })
+  }
+})
+
 const murphAgeOutcomeContextSchema = z.object({
   ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
   horizonYears: z.number().nullable(),
@@ -100,11 +121,7 @@ const murphAgeModelCardStatusPolicySchema = z.object({
   scoreBearing: z.boolean(),
   scoreBearingMetricKeys: z.array(z.string().min(1)),
   scoreBearingSourceKinds: z.array(z.string().min(1)),
-  validationGate: z.object({
-    evidenceTiers: z.array(murphAgeValidationEvidenceTierSchema),
-    productPromotionEvidence: z.boolean(),
-    status: murphAgeValidationGateStatusSchema,
-  }),
+  validationGate: murphAgeValidationGateSummarySchema,
   wearableScoreBearingAuthorized: z.boolean(),
 })
 
@@ -292,11 +309,13 @@ const murphAgePublicDisplaySummarySchema = z.object({
   missingFeatureKeys: z.array(z.string().min(1)),
   outcomeContext: murphAgeOutcomeContextSchema,
   productAgeDisplayReady: z.boolean(),
+  productPromotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
   productRiskDisplayReady: z.boolean(),
   researchEstimateAvailable: z.boolean(),
-  schemaVersion: z.literal('murph.age.public-display-summary.v3'),
+  schemaVersion: z.literal('murph.age.public-display-summary.v4'),
   selectedScoreBearingFeatureKeys: z.array(z.string().min(1)),
   selectedScoreBearingMetricKeys: z.array(z.string().min(1)),
+  validationGate: murphAgePublicValidationGateSummarySchema.nullable(),
   wearableBridge: murphAgePublicWearableBridgeSummarySchema,
   wearableContext: murphAgePublicWearableContextSummarySchema,
 })

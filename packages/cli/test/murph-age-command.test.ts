@@ -8,6 +8,7 @@ import { CURRENT_VAULT_FORMAT_VERSION } from '@murphai/contracts'
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   normalizeMetricValue,
   type MetricPoint,
   type MurphAgePublicCalculatorReport,
@@ -430,13 +431,37 @@ test('age report returns a product-mode public abstention instead of research-on
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
     assert.equal(report.authorization.productAuthorized, false)
+    assert.equal(report.displaySummary.schemaVersion, 'murph.age.public-display-summary.v4')
     assert.equal(report.displaySummary.displayBlockedReason, 'product-not-authorized')
     assert.equal(report.displaySummary.displayStatus, 'abstain')
+    assert.equal(report.displaySummary.validationGate?.status, 'blocked')
+    assert.equal(
+      report.displaySummary.validationGate?.summary,
+      MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
+    )
+    assert.equal(report.displaySummary.productPromotionBlockers.includes('PRODUCT_POLICY_NOT_AUTHORIZED'), true)
+    assert.equal(report.displaySummary.productPromotionBlockers.includes('PRODUCT_PROMOTION_EVIDENCE_MISSING'), true)
     assert.equal(report.displaySummary.wearableBridge.productAuthorized, false)
     assert.equal(report.warnings.some((warning) => warning.code === 'MODEL_CARD_NOT_AUTHORIZED'), true)
     assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
     assert.equal(hasOwnKey(report, 'contextAssessments'), false)
     assert.equal(hasOwnKey(report, 'wearableShadowIncrementAssessments'), false)
+
+    const encodedReport = JSON.stringify(report)
+    for (const forbidden of [
+      'metric-point:',
+      'selectedPointIds',
+      '"value"',
+      '"unit"',
+      'fixture-lab9-research-model',
+      'modelId',
+      'coefficient',
+      'referenceRiskCurve',
+      'biologicalAgeYears',
+      'ageDeltaYears',
+    ]) {
+      assert.equal(encodedReport.includes(forbidden), false, forbidden)
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }
@@ -477,6 +502,12 @@ test('age report can run explicit local research mode through the public report 
     assert.equal(report.status, 'ready')
     assert.equal(report.displaySummary.displayStatus, 'research-only')
     assert.equal(report.displaySummary.researchEstimateAvailable, true)
+    assert.equal(report.displaySummary.validationGate?.status, 'blocked')
+    assert.equal(
+      report.displaySummary.validationGate?.summary,
+      MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
+    )
+    assert.equal(report.displaySummary.productPromotionBlockers.includes('RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED'), true)
     assert.deepEqual(report.displaySummary.outcomeContext, {
       ageEstimateBasis: 'risk-age-equivalent',
       horizonYears: 10,

@@ -8,6 +8,7 @@ import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
@@ -2604,6 +2605,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.displayBlockedReason, "product-not-authorized");
   assert.equal(researchSummary.ageEstimateAvailable, true);
   assert.equal(researchSummary.productAgeDisplayReady, false);
+  assert.deepEqual(researchSummary.productPromotionBlockers, [
+    "PRODUCT_POLICY_NOT_AUTHORIZED",
+    "VALIDATION_GATE_BLOCKED",
+    "PRODUCT_PROMOTION_EVIDENCE_MISSING",
+    "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
+    "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
+  ]);
+  assert.equal(researchSummary.validationGate?.status, "blocked");
+  assert.equal(researchSummary.validationGate?.productPromotionEvidence, false);
   assert.equal(researchSummary.researchEstimateAvailable, true);
   assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("hba1c"), true);
   assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("steps"), false);
@@ -2650,6 +2660,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.wearableBridge.productAuthorized, false);
   const publicResearchSummary = summarizeMurphAgeCalculatorPublicOutput(research);
   assert.equal(publicResearchSummary.schemaVersion, MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION);
+  assert.equal(publicResearchSummary.validationGate?.status, "blocked");
+  assert.equal(publicResearchSummary.productPromotionBlockers.includes("PRODUCT_POLICY_NOT_AUTHORIZED"), true);
   assert.equal(publicResearchSummary.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(publicResearchSummary.wearableContext.readyPointCount, 7);
   assert.equal(publicResearchSummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
@@ -2794,6 +2806,19 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
       horizonYears: Number.NaN,
       riskEndpoint: "private endpoint",
     },
+    productPromotionBlockers: [
+      "PRIVATE_PRODUCT_BLOCKER",
+      ...researchSummary.productPromotionBlockers,
+    ],
+    validationGate: {
+      evidenceTiers: [
+        "private-evidence-tier",
+        ...(researchSummary.validationGate?.evidenceTiers ?? []),
+      ],
+      productPromotionEvidence: true,
+      status: "private-status",
+      summary: "private validation gate summary",
+    },
   });
   const publicFromLeakyDisplaySummary = toPublicMurphAgeDisplaySummary(leakyDisplaySummary);
   assert.equal(publicFromLeakyDisplaySummary.selectedScoreBearingFeatureKeys.includes("private-model-feature"), false);
@@ -2809,6 +2834,34 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     horizonYears: null,
     riskEndpoint: "none",
   });
+  const publicPromotionBlockers = new Set<string>(publicFromLeakyDisplaySummary.productPromotionBlockers);
+  assert.equal(publicPromotionBlockers.has("PRIVATE_PRODUCT_BLOCKER"), false);
+  assert.equal(publicPromotionBlockers.has("PRODUCT_POLICY_NOT_AUTHORIZED"), true);
+  const publicEvidenceTiers = new Set<string>(publicFromLeakyDisplaySummary.validationGate?.evidenceTiers ?? []);
+  assert.equal(publicEvidenceTiers.has("private-evidence-tier"), false);
+  assert.equal(publicEvidenceTiers.has("internal-anchor"), true);
+  assert.equal(publicFromLeakyDisplaySummary.validationGate?.status, "blocked");
+  assert.notEqual(publicFromLeakyDisplaySummary.validationGate?.summary, "private validation gate summary");
+  assert.equal(
+    publicFromLeakyDisplaySummary.validationGate?.summary,
+    MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
+  );
+  const strippedPassedGateDisplaySummary = { ...researchSummary };
+  Object.assign(strippedPassedGateDisplaySummary, {
+    validationGate: {
+      evidenceTiers: ["private-evidence-tier", "internal-anchor"],
+      productPromotionEvidence: true,
+      status: "passed",
+      summary: "private validation gate summary",
+    },
+  });
+  const publicFromStrippedPassedGateSummary = toPublicMurphAgeDisplaySummary(strippedPassedGateDisplaySummary);
+  assert.equal(publicFromStrippedPassedGateSummary.validationGate?.status, "blocked");
+  assert.equal(publicFromStrippedPassedGateSummary.validationGate?.productPromotionEvidence, false);
+  assert.equal(
+    publicFromStrippedPassedGateSummary.validationGate?.summary,
+    MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
+  );
   const publicResearchReport = toPublicMurphAgeCalculatorReport(research);
   assert.equal(publicResearchReport.schemaVersion, MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION);
   assert.equal(publicResearchReport.status, "ready");
@@ -2940,6 +2993,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefaultReport.result, null);
   assert.equal(productDefaultReport.displaySummary.displayStatus, "abstain");
   assert.equal(productDefaultReport.displaySummary.displayBlockedReason, "product-not-authorized");
+  assert.equal(productDefaultReport.displaySummary.validationGate?.status, "blocked");
+  assert.equal(
+    productDefaultReport.displaySummary.productPromotionBlockers.includes("PRODUCT_PROMOTION_EVIDENCE_MISSING"),
+    true,
+  );
   assert.deepEqual(productDefaultReport.displaySummary.outcomeContext, {
     ageEstimateBasis: "risk-age-equivalent",
     horizonYears: 10,

@@ -11,8 +11,8 @@ import type {
 
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
-export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v4" as const;
-export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v3" as const;
+export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v5" as const;
+export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
@@ -154,6 +154,10 @@ export interface MurphAgeValidationGateSummary {
   summary: string;
 }
 
+export interface MurphAgePublicValidationGateSummary extends Omit<MurphAgeValidationGateSummary, "evidenceTiers"> {
+  evidenceTiers: MurphAgeValidationEvidenceTier[];
+}
+
 export type MurphAgeRiskEndpoint = "all-cause-mortality" | "none";
 export type MurphAgeAgeEstimateBasis = "none" | "risk-age-equivalent";
 
@@ -193,6 +197,27 @@ const MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS = new Set<MurphAgeValidationEvi
   "partner-aggregate-validation",
   "true-external-validation",
 ]);
+
+const MURPH_AGE_VALIDATION_EVIDENCE_TIERS = new Set<string>([
+  "internal-anchor",
+  "murph-native-prospective-validation",
+  "partner-aggregate-validation",
+  "same-family-sanity",
+  "true-external-validation",
+]);
+
+const MURPH_AGE_PRODUCT_PROMOTION_BLOCKERS = new Set<string>([
+  "PRODUCT_POLICY_NOT_AUTHORIZED",
+  "PRODUCT_PROMOTION_EVIDENCE_MISSING",
+  "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
+  "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
+  "VALIDATION_GATE_BLOCKED",
+]);
+
+export const MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT = {
+  blocked: "Product promotion validation gate is blocked.",
+  passed: "Product promotion validation gate passed.",
+} satisfies Record<MurphAgeValidationGateStatus, string>;
 
 export interface MurphAgeCalculatorInput {
   asOf?: string;
@@ -535,21 +560,29 @@ export interface MurphAgeDisplaySummary {
   missingFeatureKeys: string[];
   outcomeContext: MurphAgeOutcomeContext;
   productAgeDisplayReady: boolean;
+  productPromotionBlockers: MurphAgeProductPromotionBlocker[];
   productRiskDisplayReady: boolean;
   researchEstimateAvailable: boolean;
   schemaVersion: typeof MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION;
   selectedScoreBearingFeatureKeys: string[];
   selectedScoreBearingMetricKeys: string[];
   selectedScoreBearingPointIds: string[];
+  validationGate: MurphAgeValidationGateSummary | null;
   wearableBridge: MurphAgeWearableBridgeSummary;
   wearableContext: MurphAgeWearableContextSummary;
 }
 
 export interface MurphAgePublicDisplaySummary extends Omit<
   MurphAgeDisplaySummary,
-  "contextOnlyPointIds" | "schemaVersion" | "selectedScoreBearingPointIds" | "wearableBridge" | "wearableContext"
+  | "contextOnlyPointIds"
+  | "schemaVersion"
+  | "selectedScoreBearingPointIds"
+  | "validationGate"
+  | "wearableBridge"
+  | "wearableContext"
 > {
   schemaVersion: typeof MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION;
+  validationGate: MurphAgePublicValidationGateSummary | null;
   wearableBridge: MurphAgePublicWearableBridgeSummary;
   wearableContext: MurphAgePublicWearableContextSummary;
 }
@@ -1578,12 +1611,16 @@ export function summarizeMurphAgeCalculatorOutput(
     missingFeatureKeys: uniqueStrings(missingAttributions.map((feature) => feature.featureKey)),
     outcomeContext: resolveMurphAgeOutcomeContext(output.cardPolicy),
     productAgeDisplayReady,
+    productPromotionBlockers: output.cardPolicy
+      ? listMurphAgeModelCardProductPromotionBlockers(output.cardPolicy)
+      : [],
     productRiskDisplayReady,
     researchEstimateAvailable: output.mode === "research" && ageEstimateAvailable,
     schemaVersion: MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
     selectedScoreBearingFeatureKeys: uniqueStrings(readyAttributions.map((feature) => feature.featureKey)),
     selectedScoreBearingMetricKeys: uniqueStrings(readyAttributions.map((feature) => feature.metricKey)),
     selectedScoreBearingPointIds: uniqueStrings(readyAttributions.flatMap((feature) => feature.selectedPointIds)),
+    validationGate: output.cardPolicy ? cloneMurphAgeValidationGateSummary(output.cardPolicy.validationGate) : null,
     wearableBridge,
     wearableContext,
   };
@@ -1622,11 +1659,13 @@ export function toPublicMurphAgeDisplaySummary(
     missingFeatureKeys: toPublicFeatureKeyList(summary.missingFeatureKeys),
     outcomeContext: toPublicMurphAgeOutcomeContext(summary.outcomeContext),
     productAgeDisplayReady: summary.productAgeDisplayReady,
+    productPromotionBlockers: toPublicMurphAgeProductPromotionBlockers(summary.productPromotionBlockers),
     productRiskDisplayReady: summary.productRiskDisplayReady,
     researchEstimateAvailable: summary.researchEstimateAvailable,
     schemaVersion: MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
     selectedScoreBearingFeatureKeys: toPublicFeatureKeyList(summary.selectedScoreBearingFeatureKeys),
     selectedScoreBearingMetricKeys: toPublicMetricKeyList(summary.selectedScoreBearingMetricKeys),
+    validationGate: summary.validationGate ? toPublicMurphAgeValidationGateSummary(summary.validationGate) : null,
     wearableBridge: toPublicWearableBridgeSummary(summary.wearableBridge),
     wearableContext: {
       availableFeatureFamilies: [...summary.wearableContext.availableFeatureFamilies],
@@ -1642,6 +1681,51 @@ export function toPublicMurphAgeDisplaySummary(
       uncertaintyAction: summary.wearableContext.uncertaintyAction,
     },
   };
+}
+
+function toPublicMurphAgeValidationGateSummary(
+  summary: MurphAgeValidationGateSummary,
+): MurphAgePublicValidationGateSummary {
+  const evidenceTiers = toPublicMurphAgeValidationEvidenceTiers(summary.evidenceTiers);
+  const productPromotionEvidence = summary.productPromotionEvidence === true
+    && evidenceTiers.some((tier) => MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS.has(tier));
+  const status = summary.status === "passed" && productPromotionEvidence ? "passed" : "blocked";
+  return {
+    evidenceTiers,
+    productPromotionEvidence,
+    status,
+    summary: MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT[status],
+  };
+}
+
+function toPublicMurphAgeProductPromotionBlockers(blockers: unknown): MurphAgeProductPromotionBlocker[] {
+  if (!Array.isArray(blockers)) return [];
+  const publicBlockers: MurphAgeProductPromotionBlocker[] = [];
+  for (const blocker of blockers) {
+    if (isMurphAgeProductPromotionBlocker(blocker) && !publicBlockers.includes(blocker)) {
+      publicBlockers.push(blocker);
+    }
+  }
+  return publicBlockers;
+}
+
+function toPublicMurphAgeValidationEvidenceTiers(evidenceTiers: unknown): MurphAgeValidationEvidenceTier[] {
+  if (!Array.isArray(evidenceTiers)) return [];
+  const publicEvidenceTiers: MurphAgeValidationEvidenceTier[] = [];
+  for (const tier of evidenceTiers) {
+    if (isMurphAgeValidationEvidenceTier(tier) && !publicEvidenceTiers.includes(tier)) {
+      publicEvidenceTiers.push(tier);
+    }
+  }
+  return publicEvidenceTiers;
+}
+
+function isMurphAgeProductPromotionBlocker(value: unknown): value is MurphAgeProductPromotionBlocker {
+  return typeof value === "string" && MURPH_AGE_PRODUCT_PROMOTION_BLOCKERS.has(value);
+}
+
+function isMurphAgeValidationEvidenceTier(value: unknown): value is MurphAgeValidationEvidenceTier {
+  return typeof value === "string" && MURPH_AGE_VALIDATION_EVIDENCE_TIERS.has(value);
 }
 
 function toPublicMurphAgeResult(result: MurphAgeResult): MurphAgePublicResult {
