@@ -5318,7 +5318,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBeNull();
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -5496,7 +5496,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.workspaceVersion).toBe("0");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5737,7 +5737,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:10:00.000Z");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5891,7 +5891,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(idleInvoke).toHaveBeenCalledOnce();
     expect(idleInvoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms).toContain("deleted");
     expect(
       sql.exec(
@@ -5951,7 +5951,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(idleInvoke).toHaveBeenCalledOnce();
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms.at(-1)).toBe("2026-04-27T00:10:00.000Z");
     expect(
       sql.exec(
@@ -6308,11 +6308,11 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("destroys the warm container after quiet idle-checkpoint cleanup", async () => {
+  it("leaves warm container teardown to Cloudflare after quiet idle-checkpoint cleanup", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
-      snapshotRef: createLayeredSnapshotRef("idle-cleanup-destroy-fail"),
+      snapshotRef: createLayeredSnapshotRef("idle-cleanup-no-destroy"),
       version: "4",
     });
     const destroyInstance = vi.fn(async () => {});
@@ -6337,7 +6337,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms.at(-1)).toBe("deleted");
     expect(
       sql.exec(
@@ -6360,10 +6360,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        details: {
-          destroyAttempted: true,
-        },
-        message: "Hosted runner completed idle-shutdown checkpoint cleanup.",
+        message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
       }),
     );
   });
@@ -7622,7 +7619,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(waitUntil).toHaveBeenCalledOnce();
     await Promise.all(waitUntilPromises);
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();

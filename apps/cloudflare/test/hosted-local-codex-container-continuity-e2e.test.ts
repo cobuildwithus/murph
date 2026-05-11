@@ -80,7 +80,7 @@ describe("hosted local Codex container continuity e2e", () => {
     await startScenario();
   }, 300_000);
 
-  it("resumes the same real Codex session after idle-shutdown container cleanup", async () => {
+  it("resumes the same real Codex session after idle-shutdown checkpoint cleanup", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -112,7 +112,7 @@ describe("hosted local Codex container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
+    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownCheckpointCleanupLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -308,7 +308,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countSuccessfulIdleShutdownContainerCleanupLogs() > input.baselineCleanupCount
+      && countSuccessfulIdleShutdownCheckpointCleanupLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -336,15 +336,39 @@ async function waitForIdleShutdownCheckpoint(input: {
   ]));
 }
 
-function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
+function countSuccessfulIdleShutdownCheckpointCleanupLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(1_000_000),
     requireScenario().harness.stderrTail(1_000_000),
   ].join("\n");
 
   return output
-    .split("Hosted execution container destroy confirmed stopped.")
-    .length - 1;
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+        return false;
+      }
+
+      let record: unknown;
+      try {
+        record = JSON.parse(trimmed);
+      } catch {
+        return false;
+      }
+
+      if (!record || typeof record !== "object") {
+        return false;
+      }
+
+      const candidate = record as {
+        message?: unknown;
+        userId?: unknown;
+      };
+      const cleanupMessage =
+        "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.";
+      return candidate.message === cleanupMessage && candidate.userId === userId;
+    }).length;
 }
 
 async function readCodexSessionFromStatus(

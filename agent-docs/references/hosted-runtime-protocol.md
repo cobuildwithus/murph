@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-10
+Last verified: 2026-05-11
 
 ## Decision
 
@@ -37,16 +37,19 @@ The live ownership split is:
   configured idle window minus the default 60 second safety margin. If a
   workspace wake is due before that T-minus checkpoint, the wake preempts the
   checkpoint; if the wake is later, the checkpoint runs first and preserves the
-  later wake. That Durable Object alarm owns checkpoint and shutdown ordering.
+  later wake. That Durable Object alarm owns checkpoint ordering, while normal
+  container teardown remains owned by the Cloudflare/container lifecycle.
   The runner container's own activity expiry uses the same configured idle
-  lifecycle, leaving the checkpoint at the default T-minus-60 near-shutdown
-  point rather than a separate foreground checkpoint. Fresh nudges clear or
+  lifecycle, leaving the checkpoint at the default T-minus-60 lifecycle point
+  rather than a separate foreground checkpoint. Fresh nudges clear or
   abort idle checkpoint work and foreground input always outranks idle
   maintenance. When the idle alarm is still current, Cloudflare starts a
   normal lease-scoped invocation that renews container liveness, runs checkpoint
   reason `idle_shutdown_checkpoint`, validates the same workspace CAS/user
-  fences, writes a full/base checkpoint, and destroys the warm container only if
-  no pending work arrived meanwhile.
+  fences, writes a full/base checkpoint, and clears idle checkpoint scheduling
+  state without forcing warm-container destroy. Idle checkpoint is warm-only
+  best-effort compaction; it does not use container destroy as lifecycle
+  control.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority

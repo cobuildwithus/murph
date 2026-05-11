@@ -54,7 +54,7 @@ describe("hosted local container continuity e2e", () => {
     await startScenario();
   }, 300_000);
 
-  it("preserves conversation context across idle-shutdown container cleanup", async () => {
+  it("preserves conversation context across idle-shutdown checkpoint cleanup", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -74,7 +74,7 @@ describe("hosted local container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownContainerCleanupLogs();
+    const baselineIdleShutdownCleanupCount = countSuccessfulIdleShutdownCheckpointCleanupLogs();
     requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
@@ -113,7 +113,7 @@ describe("hosted local container continuity e2e", () => {
       .toBeNull();
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
-    expect(countSuccessfulIdleShutdownContainerCleanupLogs())
+    expect(countSuccessfulIdleShutdownCheckpointCleanupLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
 
     const secondWebhookResponse = await postSignedLinqWebhook(
@@ -202,7 +202,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countSuccessfulIdleShutdownContainerCleanupLogs() > input.baselineCleanupCount
+      && countSuccessfulIdleShutdownCheckpointCleanupLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -234,7 +234,7 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
+function countSuccessfulIdleShutdownCheckpointCleanupLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(200_000),
     requireScenario().harness.stderrTail(200_000),
@@ -260,15 +260,12 @@ function countSuccessfulIdleShutdownContainerCleanupLogs(): number {
       }
 
       const candidate = record as {
-        details?: {
-          destroyOk?: unknown;
-        };
         message?: unknown;
         userId?: unknown;
       };
-      return candidate.message === "Hosted runner completed idle-shutdown checkpoint container cleanup."
-        && candidate.userId === userId
-        && candidate.details?.destroyOk === true;
+      const cleanupMessage =
+        "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.";
+      return candidate.message === cleanupMessage && candidate.userId === userId;
     }).length;
 }
 
