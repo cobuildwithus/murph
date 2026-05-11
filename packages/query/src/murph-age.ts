@@ -11,6 +11,7 @@ import {
   listMurphAgeInputBundleMetricKeys,
   resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
+  summarizeMurphAgeCalculatorPublicOutput,
   validateMurphAgeRiskModel,
   type MetricPoint,
   type MetricSelectionPolicy,
@@ -18,6 +19,7 @@ import {
   type MurphAgeCalculatorInput,
   type MurphAgeCalculatorMode,
   type MurphAgeCalculatorOutput,
+  type MurphAgePublicDisplaySummary,
   type MurphAgeModelFeature,
   type MurphAgeResult,
   type MurphAgeRiskModel,
@@ -241,6 +243,13 @@ export async function calculateMurphAgeFromVaultInputBundle(
     sex: input.sex,
   });
   return withPrependedWarnings(output, localModelCards.warnings);
+}
+
+export async function summarizeMurphAgeFromVaultInputBundle(
+  input: CalculateMurphAgeFromVaultInputBundleInput,
+): Promise<MurphAgePublicDisplaySummary> {
+  const output = await calculateMurphAgeFromVaultInputBundle(input);
+  return summarizeMurphAgeCalculatorPublicOutput(output);
 }
 
 export function metricPointFiltersForMurphAgeModel(

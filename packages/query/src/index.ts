@@ -384,6 +384,13 @@ export async function calculateMurphAgeFromVaultInputBundle(
   return mod.calculateMurphAgeFromVaultInputBundle(input);
 }
 
+export async function summarizeMurphAgeFromVaultInputBundle(
+  input: import("./murph-age.ts").CalculateMurphAgeFromVaultInputBundleInput,
+): Promise<import("@murphai/health-metrics").MurphAgePublicDisplaySummary> {
+  const mod = await import("./murph-age.ts");
+  return mod.summarizeMurphAgeFromVaultInputBundle(input);
+}
+
 export async function listMetricTargets(
   vaultRoot: string,
 ): Promise<import("./query-projection.ts").QueryMetricTargetRow[]> {
