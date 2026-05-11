@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  MURPH_AGE_RESULT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   buildMetricSeries,
   calculateMurphAge,
@@ -1525,6 +1526,12 @@ test("calculates Murph Age from calibrated demographic, wearable, and lab featur
   });
 
   assert.equal(result.status, "ready");
+  assert.equal(result.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(result.authorization.cardId, null);
+  assert.equal(result.authorization.evidenceClass, "custom-model-unreviewed");
+  assert.equal(result.authorization.productAuthorized, false);
+  assert.equal(result.authorization.riskToAgeDisplayAuthorized, false);
+  assert.equal(result.authorization.scoreBearingMetricKeys.includes("steps"), true);
   assert.equal(result.modelId, "fixture-calibrated-risk-age-model");
   assert.equal(result.biologicalAgeYears, 42.1);
   assert.equal(result.ageDeltaYears, -2.9);
@@ -1771,6 +1778,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(lab9Policy?.productAuthorized, false);
   assert.equal(lab9Policy?.wearableScoreBearingAuthorized, false);
+  assert.equal(lab9Policy?.evidenceClass, "research-internal");
   const resolvedLab9Policy = resolveMurphAgeModelCardPolicy("lab9_bp_body_10y_acm_research");
   if (resolvedLab9Policy) {
     (resolvedLab9Policy as { productAuthorized: boolean }).productAuthorized = true;
@@ -1787,6 +1795,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   assert.equal(productDefault.status, "abstain");
   assert.equal(productDefault.result, null);
+  assert.equal(productDefault.authorization.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(productDefault.authorization.productAuthorized, false);
+  assert.equal(productDefault.authorization.riskToAgeDisplayAuthorized, false);
+  assert.equal(productDefault.authorization.scoreBearing, true);
+  assert.equal(productDefault.authorization.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(productDefault.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
   assert.equal(productDefault.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(productDefault.cardPolicy?.productAuthorized, false);
@@ -1803,6 +1816,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   assert.equal(research.status, "ready");
   assert.equal(research.result?.status, "ready");
+  assert.equal(research.authorization.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(research.authorization.evidenceClass, "research-internal");
+  assert.equal(research.authorization.productAuthorized, false);
+  assert.equal(research.authorization.wearableScoreBearingAuthorized, false);
+  assert.equal(research.authorization.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(research.result?.authorization.cardId, research.authorization.cardId);
+  assert.equal(research.result?.authorization.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
   assert.equal(research.bundleAssessment.bundleId, "lab9-bp-body");
   assert.equal(research.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), false);
   assert.equal(research.contextAssessments.length, 1);
@@ -1846,6 +1866,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(lab5WithoutModel.status, "abstain");
   assert.equal(lab5WithoutModel.bundleAssessment.bundleId, "lab5-bp-bmi");
   assert.equal(lab5WithoutModel.cardPolicy?.cardId, "lab5_bp_bmi_transport_research");
+  assert.equal(lab5WithoutModel.authorization.evidenceClass, "research-transport");
   assert.equal(lab5WithoutModel.warnings.some((warning) => warning.code === "MODEL_FEATURE_MISSING"), true);
 
   const lab5Research = calculateMurphAgeFromInputBundle({
@@ -1888,6 +1909,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnly.status, "context-only");
   assert.equal(wearableOnly.result, null);
   assert.equal(wearableOnly.cardPolicy?.scoreBearing, false);
+  assert.equal(wearableOnly.authorization.evidenceClass, "context-only");
+  assert.equal(wearableOnly.authorization.scoreBearing, false);
+  assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(wearableOnly.contextAssessments.length, 0);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
@@ -1916,6 +1940,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   assert.equal(policyViolation.status, "abstain");
   assert.equal(policyViolation.result?.status, "abstain");
+  assert.equal(policyViolation.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
   assert.equal(policyViolation.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
 
   const wearableSourcedBmiViolation = calculateMurphAgeFromInputBundle({

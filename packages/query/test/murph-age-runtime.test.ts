@@ -7,6 +7,7 @@ import { QUERY_DB_RELATIVE_PATH, openSqliteRuntimeDatabase } from "@murphai/runt
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  MURPH_AGE_RESULT_SCHEMA_VERSION,
   normalizeMetricValue,
   type MetricPoint,
   type MurphAgeRiskModel,
@@ -196,6 +197,10 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.status, "abstain");
     assert.equal(output.mode, "product");
     assert.equal(output.result, null);
+    assert.equal(output.authorization.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.authorization.productAuthorized, false);
+    assert.equal(output.authorization.riskToAgeDisplayAuthorized, false);
+    assert.equal(output.authorization.contextOnlyMetricKeys.includes("steps"), true);
     assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
     assert.equal(output.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
     assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
@@ -230,6 +235,10 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
     assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
     assert.equal(output.result?.status, "ready");
     assert.equal(output.result?.modelId, "fixture-lab9-research-model");
+    assert.equal(output.authorization.evidenceClass, "research-internal");
+    assert.equal(output.authorization.wearableScoreBearingAuthorized, false);
+    assert.equal(output.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.result?.authorization.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
     assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
     assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
     assert.equal(output.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
@@ -274,6 +283,7 @@ test("calculateMurphAgeFromVaultInputBundle loads ignored local research model-c
 
     assert.equal(output.status, "ready");
     assert.equal(output.result?.modelId, "fixture-lab9-research-model");
+    assert.equal(output.result?.authorization.evidenceClass, "research-internal");
     assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
@@ -490,6 +500,9 @@ test("calculateMurphAgeFromVaultInputBundle requires a valid asOf timestamp befo
   });
 
   assert.equal(output.status, "abstain");
+  assert.equal(output.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(output.authorization.evidenceClass, "abstained");
+  assert.equal(output.authorization.scoreBearing, false);
   assert.equal(output.result, null);
   assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
   assert.equal(output.bundleAssessment.bundleId, "insufficient");
@@ -506,6 +519,9 @@ test("calculateMurphAgeFromVaultInputBundle rejects impossible asOf dates before
   });
 
   assert.equal(output.status, "abstain");
+  assert.equal(output.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(output.authorization.evidenceClass, "abstained");
+  assert.equal(output.authorization.scoreBearing, false);
   assert.equal(output.result, null);
   assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
 });
@@ -521,6 +537,9 @@ test("calculateMurphAgeFromVaultInputBundle rejects invalid runtime modes before
   }]);
 
   assert.equal(output.status, "abstain");
+  assert.equal(output.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(output.authorization.evidenceClass, "abstained");
+  assert.equal(output.authorization.scoreBearing, false);
   assert.equal(output.result, null);
   assert.equal(output.mode, "product");
   assert.equal(output.warnings[0]?.code, "INVALID_INPUT");
@@ -553,6 +572,9 @@ test("calculateMurphAgeForVault requires a valid asOf timestamp before reading t
   });
 
   assert.equal(result.status, "abstain");
+  assert.equal(result.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(result.authorization.evidenceClass, "custom-model-unreviewed");
+  assert.equal(result.authorization.scoreBearingMetricKeys.includes("steps"), true);
   assert.equal(result.warnings[0]?.code, "INVALID_INPUT");
   assert.equal(result.warnings[0]?.message, "Murph Age query runtime requires a valid asOf timestamp.");
 });
@@ -567,6 +589,9 @@ test("calculateMurphAgeForVault rejects impossible asOf dates before reading the
   });
 
   assert.equal(result.status, "abstain");
+  assert.equal(result.schemaVersion, MURPH_AGE_RESULT_SCHEMA_VERSION);
+  assert.equal(result.authorization.evidenceClass, "custom-model-unreviewed");
+  assert.equal(result.authorization.scoreBearingMetricKeys.includes("apob"), true);
   assert.equal(result.warnings[0]?.code, "INVALID_INPUT");
 });
 
