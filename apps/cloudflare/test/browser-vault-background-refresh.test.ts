@@ -18,6 +18,9 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  fetchBrowserVaultBackgroundWithRetry,
+} from "../src/browser-vault-refresh/background-child.ts";
+import {
   refreshBrowserVaultReplicaFromWarmVault,
 } from "../src/browser-vault-refresh/refresher.ts";
 import {
@@ -129,7 +132,7 @@ describe("browser-vault background refresh", () => {
     }
   });
 
-  it("keeps stale publish conflicts dirty without entering backoff", async () => {
+  it("backs off stale publish conflicts", async () => {
     const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-conflict-"));
     try {
       await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "---\ntitle: Core\n---\n# Core\n");
@@ -160,12 +163,32 @@ describe("browser-vault background refresh", () => {
       expect(result.status).toBe("publish_conflict");
       await expect(readHostedBrowserVaultRefreshState({ vaultRoot })).resolves.toMatchObject({
         dirty: true,
-        failureCount: 0,
-        nextAttemptAt: null,
+        failureCount: 1,
+        nextAttemptAt: expect.any(String),
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
+  });
+
+  it("retries thrown 401 proxy authority races", async () => {
+    let attempts = 0;
+    const response = await fetchBrowserVaultBackgroundWithRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw Object.assign(new Error("proxy token is not installed yet"), {
+            responseStatus: 401,
+          });
+        }
+        return Response.json({ ok: true });
+      },
+      new URL("http://browser-vault-replicas.worker/replicas"),
+      { method: "POST" },
+    );
+
+    expect(attempts).toBe(3);
+    expect(response.ok).toBe(true);
   });
 
   it("logs sanitized structured errors from the child entrypoint", async () => {
