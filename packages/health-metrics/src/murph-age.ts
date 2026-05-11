@@ -11,7 +11,7 @@ import type {
 
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
-export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v1" as const;
+export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v2" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -271,6 +271,23 @@ export type MurphAgeDisplayBlockedReason =
   | "risk-estimate-unavailable"
   | "risk-to-age-not-authorized";
 
+export type MurphAgeWearableContextFamily = "activity" | "quality" | "recovery" | "sleep";
+export type MurphAgeWearableContextQuality = "none" | "strong-context" | "thin" | "usable-context";
+
+export interface MurphAgeWearableContextSummary {
+  availableFeatureFamilies: MurphAgeWearableContextFamily[];
+  availableQualityFeatureKeys: string[];
+  missingQualityFeatureKeys: string[];
+  quality: MurphAgeWearableContextQuality;
+  readyFeatureCount: number;
+  readyMetricCount: number;
+  readyPointCount: number;
+  riskEffect: "not-estimated";
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  uncertaintyAction: "context-only" | "none";
+}
+
 export interface MurphAgeDisplaySummary {
   ageEstimateAvailable: boolean;
   blockedFeatureKeys: string[];
@@ -287,6 +304,7 @@ export interface MurphAgeDisplaySummary {
   selectedScoreBearingFeatureKeys: string[];
   selectedScoreBearingMetricKeys: string[];
   selectedScoreBearingPointIds: string[];
+  wearableContext: MurphAgeWearableContextSummary;
 }
 
 export interface MurphAgeModelValidationResult {
@@ -444,6 +462,35 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
+
+const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
+  activity: [
+    "activity-minutes",
+    "estimated-vo2-max",
+    "mvpa-minutes",
+    "sedentary-minutes",
+    "steps",
+  ],
+  quality: [
+    "wearable-coverage-index",
+    "wearable-valid-day-count-28d",
+    "wearable-valid-night-count-28d",
+  ],
+  recovery: [
+    "hrv-rmssd",
+    "resting-heart-rate",
+  ],
+  sleep: [
+    "sleep-duration-variability-minutes",
+    "sleep-efficiency",
+    "sleep-midpoint-variability-minutes",
+    "sleep-regularity-score",
+    "total-sleep-minutes",
+  ],
+} satisfies Record<MurphAgeWearableContextFamily, readonly string[]>;
+
+const MURPH_AGE_WEARABLE_QUALITY_FEATURE_KEYS =
+  MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES.quality;
 
 const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
@@ -800,6 +847,7 @@ export function summarizeMurphAgeCalculatorOutput(
     feature.status === "blocked"
   ) ?? [];
   const contextFeatures = listContextOnlyFeatureStatuses(output);
+  const wearableContext = summarizeWearableContext(contextFeatures);
   const ageEstimateAvailable = output.result?.status === "ready" && output.result.biologicalAgeYears !== null;
   const riskEstimateAvailable = output.result?.risk !== null && output.result?.risk !== undefined;
   const productRiskDisplayReady = riskEstimateAvailable && output.authorization.productAuthorized;
@@ -833,6 +881,7 @@ export function summarizeMurphAgeCalculatorOutput(
     selectedScoreBearingFeatureKeys: uniqueStrings(readyAttributions.map((feature) => feature.featureKey)),
     selectedScoreBearingMetricKeys: uniqueStrings(readyAttributions.map((feature) => feature.metricKey)),
     selectedScoreBearingPointIds: uniqueStrings(readyAttributions.flatMap((feature) => feature.selectedPointIds)),
+    wearableContext,
   };
 }
 
@@ -1090,6 +1139,59 @@ function listContextOnlyFeatureStatuses(output: MurphAgeCalculatorOutput): Murph
     : [];
   return [...primaryContext, ...output.contextAssessments.flatMap((assessment) => assessment.featureStatuses)]
     .filter((feature) => feature.status === "ready");
+}
+
+function summarizeWearableContext(
+  features: readonly MurphAgeContextBundleFeatureStatus[],
+): MurphAgeWearableContextSummary {
+  const readyFeatureKeys = uniqueStrings(features.map((feature) => feature.featureKey));
+  const readyFeatureKeySet = new Set(readyFeatureKeys);
+  const availableFeatureFamilies = (Object.keys(MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES) as MurphAgeWearableContextFamily[])
+    .filter((family) =>
+      MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES[family].some((featureKey) =>
+        readyFeatureKeySet.has(featureKey)
+      )
+    );
+  const availableQualityFeatureKeys = MURPH_AGE_WEARABLE_QUALITY_FEATURE_KEYS.filter((featureKey) =>
+    readyFeatureKeySet.has(featureKey)
+  );
+  const hasWearableContext = readyFeatureKeys.length > 0;
+  const hasQualityMetadata = availableQualityFeatureKeys.length > 0;
+  const quality = resolveWearableContextQuality({
+    availableFeatureFamilies,
+    hasQualityMetadata,
+    readyFeatureCount: readyFeatureKeys.length,
+  });
+
+  return {
+    availableFeatureFamilies,
+    availableQualityFeatureKeys,
+    missingQualityFeatureKeys: hasWearableContext
+      ? MURPH_AGE_WEARABLE_QUALITY_FEATURE_KEYS.filter((featureKey) => !readyFeatureKeySet.has(featureKey))
+      : [],
+    quality,
+    readyFeatureCount: readyFeatureKeys.length,
+    readyMetricCount: uniqueStrings(features.map((feature) => feature.selectedMetricKey)).length,
+    readyPointCount: uniqueStrings(features.flatMap((feature) => feature.selectedPointIds)).length,
+    riskEffect: "not-estimated",
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    uncertaintyAction: hasWearableContext ? "context-only" : "none",
+  };
+}
+
+function resolveWearableContextQuality(input: {
+  availableFeatureFamilies: readonly MurphAgeWearableContextFamily[];
+  hasQualityMetadata: boolean;
+  readyFeatureCount: number;
+}): MurphAgeWearableContextQuality {
+  if (input.readyFeatureCount === 0) return "none";
+  if (input.readyFeatureCount < 3 || !input.hasQualityMetadata) return "thin";
+  const familySet = new Set(input.availableFeatureFamilies);
+  if (familySet.has("activity") && familySet.has("recovery") && familySet.has("sleep")) {
+    return "strong-context";
+  }
+  return "usable-context";
 }
 
 function cloneContextBundleAssessment(assessment: MurphAgeContextBundleAssessment): MurphAgeContextBundleAssessment {
