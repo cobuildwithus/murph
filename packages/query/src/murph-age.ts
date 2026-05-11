@@ -105,6 +105,13 @@ const MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS = new Set([
   "spo2",
   "total-sleep-minutes",
 ]);
+const MURPH_AGE_WEARABLE_SUMMARY_VALID_NIGHT_METRIC_KEYS = new Set([
+  "deep-sleep-minutes",
+  "rem-sleep-minutes",
+  "sleep-score",
+  "spo2",
+  "total-sleep-minutes",
+]);
 
 export async function calculateMurphAgeForVault(
   input: CalculateMurphAgeForVaultInput,
@@ -522,8 +529,11 @@ function isMurphAgeWearableValidDayPoint(point: MetricPoint): boolean {
 }
 
 function isMurphAgeWearableValidNightPoint(point: MetricPoint): boolean {
-  return point.source.kind === "sleep-summary" &&
-    MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS.has(point.metricKey);
+  if (point.source.kind === "sleep-summary") {
+    return MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS.has(point.metricKey);
+  }
+  return point.source.kind === "wearable-summary" &&
+    MURPH_AGE_WEARABLE_SUMMARY_VALID_NIGHT_METRIC_KEYS.has(point.metricKey);
 }
 
 function createWearableCoverageMetricPoint(input: {
