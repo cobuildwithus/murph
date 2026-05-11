@@ -2022,7 +2022,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeLivenessPort: {
         async touch(input) {
           livenessTouches.push(input.requestId);
-          return { ok: true };
+          return continueRuntimeLiveness();
         },
       },
     }));
