@@ -3529,6 +3529,57 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
+  it("returns a yield instruction from heartbeat liveness for pending work without the legacy nudge mirror", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = NULL,
+        pending_nudge = 0,
+        pending_work = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.recordActiveInvocationHeartbeat({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    })).resolves.toEqual({
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:03.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(
+      sql.exec(
+        `SELECT pending_nudge,
+                pending_work,
+                next_wake_at
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      next_wake_at: "2026-04-27T00:00:03.000Z",
+      pending_nudge: 0,
+      pending_work: 1,
+    }]);
+  });
+
   it("clears a due idle checkpoint when heartbeat liveness yields to pending work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -6091,6 +6142,85 @@ describe("HostedUserRunner runtime crypto context", () => {
       in_flight: 0,
       next_wake_at: null,
       retry_failure_count: 0,
+    }]);
+  });
+
+  it("does not destroy a foreground container when pending work appears during a cold idle-checkpoint skip", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-skip-cold-foreground-race"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        sql.exec(
+          `UPDATE runner_meta
+           SET active_invocation_id = ?,
+               active_invocation_reason = ?,
+               active_invocation_started_at = ?,
+               active_workspace_version = ?,
+               in_flight = 1,
+               lease_generation = 2,
+               pending_nudge = 1,
+               pending_work = 1,
+               next_wake_at = ?
+           WHERE user_id = ?`,
+          "workspace-invocation-foreground-race",
+          "nudge",
+          FIXED_NOW,
+          "4",
+          FIXED_NOW,
+          "member_123",
+        );
+        return {
+          idleShutdownCheckpointSkipped: "container_not_warm",
+          status: "idle",
+        };
+      }
+      throw new Error("Unexpected extra runner invocation.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+      onWorkspaceRead: () => {
+        throw new Error("Warm-only idle checkpoint must not read workspace through the user runner.");
+      },
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).not.toBe("deleted");
+    expect(
+      sql.exec(
+        `SELECT active_invocation_id,
+                idle_shutdown_checkpoint_due_at,
+                in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: "workspace-invocation-foreground-race",
+      idle_shutdown_checkpoint_due_at: FIXED_NOW,
+      in_flight: 1,
+      pending_nudge: 1,
+      pending_work: 1,
     }]);
   });
 

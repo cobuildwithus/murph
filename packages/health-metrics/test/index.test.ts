@@ -1784,6 +1784,68 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("hs-crp"), false);
 });
 
+test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
+  const bundleMetricKeys = new Set(listMurphAgeInputBundleMetricKeys());
+  const bridgeSpecs = listMurphAgeWearableBridgeFeatureSpecs();
+  const shadowPolicies = listMurphAgeWearableShadowIncrementPolicies();
+  const wearableResearchMetricKeys = new Set([
+    ...bridgeSpecs.flatMap((spec) => spec.metricKeys),
+    ...bridgeSpecs.flatMap((spec) => spec.requiredQualityMetricKeys),
+    ...shadowPolicies.flatMap((policy) => policy.allowedMetricKeys),
+    ...shadowPolicies.flatMap((policy) => policy.signalMetricKeys),
+    ...shadowPolicies.flatMap((policy) => policy.requiredQualityMetricKeys),
+  ]);
+
+  for (const policy of listMurphAgeModelCardPolicies()) {
+    for (const metricKey of policy.scoreBearingMetricKeys) {
+      assert.equal(
+        bundleMetricKeys.has(metricKey),
+        true,
+        `${policy.cardId} score-bearing metric ${metricKey} must be in the input bundle registry`,
+      );
+      assert.equal(
+        wearableResearchMetricKeys.has(metricKey),
+        false,
+        `${policy.cardId} must not score wearable research metric ${metricKey}`,
+      );
+    }
+
+    assert.equal(policy.wearableScoreBearingAuthorized, false);
+    assert.equal(policy.scoreBearingSourceKinds.includes("activity-summary"), false);
+    assert.equal(policy.scoreBearingSourceKinds.includes("sleep-summary"), false);
+    assert.equal(policy.scoreBearingSourceKinds.includes("wearable-summary"), false);
+  }
+
+  for (const spec of bridgeSpecs) {
+    assert.equal(spec.scoreBearing, false);
+    for (const metricKey of [...spec.metricKeys, ...spec.requiredQualityMetricKeys]) {
+      assert.equal(
+        bundleMetricKeys.has(metricKey),
+        true,
+        `wearable bridge metric ${metricKey} must be loadable through the input bundle registry`,
+      );
+    }
+  }
+
+  for (const policy of shadowPolicies) {
+    assert.equal(policy.scoreBearing, false);
+    for (const cardId of policy.compatibleAnchorCardIds) {
+      assert.ok(resolveMurphAgeModelCardPolicy(cardId), `shadow increment anchor ${cardId} must resolve`);
+    }
+    for (const metricKey of [
+      ...policy.allowedMetricKeys,
+      ...policy.signalMetricKeys,
+      ...policy.requiredQualityMetricKeys,
+    ]) {
+      assert.equal(
+        bundleMetricKeys.has(metricKey),
+        true,
+        `wearable shadow metric ${metricKey} must be loadable through the input bundle registry`,
+      );
+    }
+  }
+});
+
 test("exposes non-score-bearing wearable bridge feature specs for research routing", () => {
   const specs = listMurphAgeWearableBridgeFeatureSpecs();
   const featureKeys = specs.map((spec) => spec.featureKey);

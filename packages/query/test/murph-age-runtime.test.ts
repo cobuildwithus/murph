@@ -8,6 +8,9 @@ import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  listMurphAgeInputBundleMetricKeys,
+  listMurphAgeWearableBridgeFeatureSpecs,
+  listMurphAgeWearableShadowIncrementPolicies,
   normalizeMetricValue,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
@@ -189,6 +192,10 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(filters.some((filter) => filter.metricKey === "albumin"), true);
     assert.equal(filters.some((filter) => filter.metricKey === "steps"), true);
     assert.equal(filters.some((filter) => filter.metricKey === "hrv-rmssd"), true);
+    assert.deepEqual(
+      filters.map((filter) => filter.metricKey).sort(),
+      [...listMurphAgeInputBundleMetricKeys()].sort(),
+    );
 
     const output = await calculateMurphAgeFromVaultInputBundle({
       asOf: "2026-05-10T00:00:00.000Z",
@@ -230,6 +237,48 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal("bundleAssessment" in publicReport, false);
     assert.equal("contextAssessments" in publicReport, false);
     assert.equal("wearableShadowIncrementAssessments" in publicReport, false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle keeps wearable registry metrics on the context-only path", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const wearableMetricKeys = [
+      ...new Set([
+        ...listMurphAgeWearableBridgeFeatureSpecs().flatMap((spec) => spec.metricKeys),
+        ...listMurphAgeWearableBridgeFeatureSpecs().flatMap((spec) => spec.requiredQualityMetricKeys),
+        ...listMurphAgeWearableShadowIncrementPolicies().flatMap((policy) => policy.allowedMetricKeys),
+        ...listMurphAgeWearableShadowIncrementPolicies().flatMap((policy) => policy.signalMetricKeys),
+        ...listMurphAgeWearableShadowIncrementPolicies().flatMap((policy) => policy.requiredQualityMetricKeys),
+      ]),
+    ];
+    insertMetricPoints(vaultRoot, wearableMetricKeys.map((metricKey) =>
+      wearablePoint(metricKey, metricKey === "steps" ? null : `biomarker:${metricKey}`, 10, "count")
+    ));
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.bundleAssessment.bundleId, "wearable-context");
+    assert.equal(output.authorization.scoreBearing, false);
+    assert.equal(output.authorization.wearableScoreBearingAuthorized, false);
+    assert.equal(output.result, null);
+    for (const metricKey of wearableMetricKeys) {
+      assert.equal(
+        output.authorization.contextOnlyMetricKeys.includes(metricKey),
+        true,
+        `wearable metric ${metricKey} must remain loadable as context-only`,
+      );
+    }
+    assert.equal(output.authorization.scoreBearingMetricKeys.some((metricKey) => wearableMetricKeys.includes(metricKey)), false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
