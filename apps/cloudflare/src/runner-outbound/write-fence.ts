@@ -152,27 +152,31 @@ export function writeRunnerRuntimeWriteFenceHeaders(
 export { LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER };
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `RunnerRuntimeWriteFenceHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `RunnerRuntimeWriteFenceHeaders`.
  */
 export type RunnerActiveInvocationLeaseHeaders = RunnerRuntimeWriteFenceHeaders & {
   leaseGeneration: string;
 };
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `RunnerRuntimeWriteFenceWriteHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `RunnerRuntimeWriteFenceWriteHeaders`.
  */
 export type RunnerActiveInvocationLeaseWriteHeaders =
   RunnerRuntimeWriteFenceWriteHeaders & { leaseGeneration: string };
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `RunnerRuntimeWriteFenceError`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `RunnerRuntimeWriteFenceError`.
  */
 export const RunnerActiveInvocationLeaseError = RunnerRuntimeWriteFenceError;
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `readRunnerRuntimeWriteFenceHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `readRunnerRuntimeWriteFenceHeaders`.
  */
 export function readRunnerActiveInvocationLeaseHeaders(
   request: Request,
@@ -187,8 +191,9 @@ export function readRunnerActiveInvocationLeaseHeaders(
 }
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `requireRunnerRuntimeWriteFence`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `requireRunnerRuntimeWriteFence`.
  */
 export async function requireRunnerActiveInvocationLease(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -203,8 +208,9 @@ export async function requireRunnerActiveInvocationLease(input: {
 }
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `requireRunnerRuntimeWriteFenceHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `requireRunnerRuntimeWriteFenceHeaders`.
  */
 export function requireRunnerActiveInvocationLeaseHeaders(
   request: Request,
@@ -217,8 +223,9 @@ export function requireRunnerActiveInvocationLeaseHeaders(
 }
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `requireRunnerRuntimeWriteFenceWriteHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `requireRunnerRuntimeWriteFenceWriteHeaders`.
  */
 export function requireRunnerActiveInvocationLeaseWriteHeaders(
   request: Request,
@@ -231,8 +238,9 @@ export function requireRunnerActiveInvocationLeaseWriteHeaders(
 }
 
 /**
- * Legacy deployed-caller compatibility only. Delete after 2026-05-25.
- * Current runtime code should use `writeRunnerRuntimeWriteFenceHeaders`.
+ * Legacy active-invocation compatibility around the write fence.
+ * Delete after 2026-05-25. Current runtime code should use
+ * `writeRunnerRuntimeWriteFenceHeaders`.
  */
 export function writeRunnerActiveInvocationLeaseHeaders(
   headers: Headers,

@@ -315,6 +315,10 @@ export class HostedUserRunner {
     return this.nudgeHostedRunner(input);
   }
 
+  /**
+   * Legacy deploy-skew compatibility only: generic nudge only, not a
+   * browser-vault scheduler. Delete after 2026-05-25.
+   */
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
     await this.stateStore.markWakePending({
@@ -331,7 +335,7 @@ export class HostedUserRunner {
       details: {
         scheduled: true,
       },
-      message: "Hosted runner accepted browser-vault refresh as normal runtime work.",
+      message: "Hosted runner accepted legacy browser-vault refresh as a generic runtime nudge.",
       phase: "scheduled",
       userId: input.userId,
     });
@@ -352,7 +356,7 @@ export class HostedUserRunner {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
    */
   async ownsActiveInvocationLease(input: {
@@ -380,7 +384,7 @@ export class HostedUserRunner {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use
    * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
    */
@@ -399,7 +403,7 @@ export class HostedUserRunner {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; this path is intentionally inert.
    */
   async recordActiveInvocationHeartbeat(_input?: unknown): Promise<{
@@ -413,7 +417,7 @@ export class HostedUserRunner {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; this path is intentionally inert.
    */
   async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false }> {

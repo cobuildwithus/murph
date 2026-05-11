@@ -592,6 +592,8 @@ describe("hosted deploy automation helpers", () => {
       "name: Validate generated Worker deploy bundle",
       "--dry-run",
       "predeploy-${GITHUB_SHA::12}",
+      "Deploy commit SHA: ${checked_out_sha}",
+      "Expected GitHub SHA: ${GITHUB_SHA}",
       "name: Run focused Cloudflare checks and smoke runner container image",
       "pnpm --dir apps/cloudflare verify:parallel &",
       "pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base &",
