@@ -1701,11 +1701,17 @@ export class HostedUserRunner {
   private logStaleInvocationLeaseCleared(
     attemptId: string | null,
     userId: string,
-    reason: "container_stopped" | "expired" | "worker_version_mismatch",
+    reason:
+      | "container_stopped"
+      | "hard_timeout"
+      | "heartbeat_stale"
+      | "startup_timeout"
+      | "worker_version_mismatch",
   ): void {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
+        activeInvocationRecoveryReason: reason,
         workspaceAttemptId: attemptId,
       },
       level: "warn",
@@ -1713,7 +1719,11 @@ export class HostedUserRunner {
         ? "Hosted workspace invocation belonged to a previous worker version; clearing stale in-flight state."
         : reason === "container_stopped"
         ? "Hosted workspace invocation container stopped; clearing stale in-flight state."
-        : "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+        : reason === "startup_timeout"
+        ? "Hosted workspace invocation startup timed out; clearing stale in-flight state."
+        : reason === "heartbeat_stale"
+        ? "Hosted workspace invocation heartbeat timed out; clearing stale in-flight state."
+        : "Hosted workspace invocation hard timeout elapsed; clearing stale in-flight state.",
       phase: "wake.running",
       userId,
     });
