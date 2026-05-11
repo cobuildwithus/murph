@@ -170,6 +170,37 @@ interface MurphAgeInputReadinessReport {
     status: string
   }
   wearableBridge: MurphAgePublicDisplaySummary['wearableBridge']
+  wearableShadow: {
+    anchor: {
+      anchorCardId: string | null
+      bundleId: string
+      recommendedCardId: string
+      status: string
+    }
+    assessments: Array<{
+      family: string
+      missingMetricKeys: string[]
+      outputBoundary: {
+        aggregateOnly: true
+        coefficientsExportAllowed: false
+        participantLevelExportAllowed: false
+        predictionsExportAllowed: false
+        productDisplayExportAllowed: false
+        rowValuesExportAllowed: false
+      }
+      productAuthorized: false
+      riskEffect: 'not-estimated'
+      scoreBearing: false
+      scoreContributionAuthorized: false
+      selectedMetricKeys: string[]
+      status: string
+    }>
+    blockedFamilies: string[]
+    missingFamilies: string[]
+    readyFamilies: string[]
+    schemaVersion: string
+    warnings: Array<{ code: string }>
+  }
 }
 
 test('age model-cards reports local research readiness without model internals', async () => {
@@ -298,6 +329,13 @@ test('age inputs reports feature readiness without metric values or point ids', 
     insertMetricPoints(vaultRoot, [
       ...lab9BpBodyMetricPoints(),
       ...wearableContextMetricPoints(),
+      wearablePoint('wearable-valid-day-count-28d', null, 25, 'count'),
+      wearablePoint('wearable-valid-night-count-28d', null, 21, 'count'),
+      wearablePoint('wearable-coverage-index', null, 0.86, 'ratio'),
+      wearablePoint('total-sleep-minutes', null, 450, 'minutes'),
+      wearablePoint('sleep-duration-variability-minutes', null, 38, 'minutes'),
+      wearablePoint('sleep-regularity-score', null, 0.72, 'score'),
+      wearablePoint('sleep-midpoint-variability-minutes', null, 45, 'minutes'),
     ])
 
     const readiness = requireData(await runSliceCli<MurphAgeInputReadinessReport>([
@@ -309,7 +347,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v4')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v5')
     assert.deepEqual(readiness.runtimeInputs, [
       {
         key: 'chronological-age-years',
@@ -373,16 +411,47 @@ test('age inputs reports feature readiness without metric values or point ids', 
     assert.equal(readiness.wearableBridge.scoreBearing, false)
     assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false)
     assert.equal(readiness.wearableBridge.productAuthorized, false)
-    assert.equal(readiness.wearableBridge.partialFeatureKeys.includes('activity-volume'), true)
+    assert.equal(readiness.wearableBridge.readyFeatureKeys.includes('activity-volume'), true)
     assert.equal(readiness.wearableBridge.features.some((feature) =>
       feature.featureKey === 'activity-volume'
         && feature.readyMetricKeys.includes('steps')
+        && feature.status === 'ready'
         && feature.scoreBearing === false
         && feature.scoreContributionAuthorized === false
         && feature.productAuthorized === false
         && feature.riskEffect === 'not-estimated'
         && feature.uncertaintyAction === 'context-only'
     ), true)
+    assert.equal(readiness.wearableShadow.schemaVersion, 'murph.age.wearable-shadow-readiness.v1')
+    assert.equal(readiness.wearableShadow.anchor.anchorCardId, 'lab9_bp_body_10y_acm_research')
+    assert.equal(readiness.wearableShadow.anchor.bundleId, 'lab9-bp-body')
+    assert.deepEqual(readiness.wearableShadow.blockedFamilies, [])
+    assert.equal(readiness.wearableShadow.readyFamilies.includes('activity'), true)
+    assert.equal(readiness.wearableShadow.readyFamilies.includes('sleep'), true)
+    assert.equal(readiness.wearableShadow.readyFamilies.includes('resting-heart-rate'), true)
+    assert.equal(readiness.wearableShadow.readyFamilies.includes('hrv'), true)
+    assert.equal(readiness.wearableShadow.assessments.every((assessment) =>
+      assessment.scoreBearing === false
+        && assessment.scoreContributionAuthorized === false
+        && assessment.productAuthorized === false
+        && assessment.riskEffect === 'not-estimated'
+        && assessment.outputBoundary.aggregateOnly === true
+        && assessment.outputBoundary.coefficientsExportAllowed === false
+        && assessment.outputBoundary.participantLevelExportAllowed === false
+        && assessment.outputBoundary.predictionsExportAllowed === false
+        && assessment.outputBoundary.productDisplayExportAllowed === false
+        && assessment.outputBoundary.rowValuesExportAllowed === false
+    ), true)
+    const activityShadow = readiness.wearableShadow.assessments.find((assessment) => assessment.family === 'activity')
+    assert.equal(activityShadow?.status, 'ready')
+    assert.equal(activityShadow?.scoreBearing, false)
+    assert.equal(activityShadow?.scoreContributionAuthorized, false)
+    assert.equal(activityShadow?.productAuthorized, false)
+    assert.equal(activityShadow?.riskEffect, 'not-estimated')
+    assert.equal(activityShadow?.selectedMetricKeys.includes('steps'), true)
+    assert.equal(activityShadow?.selectedMetricKeys.includes('wearable-coverage-index'), true)
+    assert.equal(activityShadow?.outputBoundary.aggregateOnly, true)
+    assert.equal(activityShadow?.outputBoundary.rowValuesExportAllowed, false)
 
     const encodedReadiness = JSON.stringify(readiness)
     for (const forbidden of [
@@ -390,6 +459,12 @@ test('age inputs reports feature readiness without metric values or point ids', 
       'metric-point:',
       '"value"',
       '"unit"',
+      '"message"',
+      'modelId',
+      '"coefficient"',
+      'biologicalAgeYears',
+      'featureAttributions',
+      'moduleAttributions',
       vaultRoot,
     ]) {
       assert.equal(encodedReadiness.includes(forbidden), false, forbidden)
@@ -413,7 +488,7 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v4')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v5')
     assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ['chronological-age-years', 'sex'])
     assert.equal(readiness.bundle.bundleId, 'insufficient')
     assert.equal(readiness.bundle.status, 'abstain')
@@ -440,6 +515,20 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
     assert.equal(readiness.wearableBridge.scoreBearing, false)
     assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false)
     assert.equal(readiness.wearableBridge.productAuthorized, false)
+    assert.equal(readiness.wearableShadow.anchor.anchorCardId, null)
+    assert.equal(readiness.wearableShadow.anchor.bundleId, 'insufficient')
+    assert.deepEqual(readiness.wearableShadow.readyFamilies, [])
+    assert.deepEqual(readiness.wearableShadow.blockedFamilies, [
+      'activity',
+      'sleep',
+      'resting-heart-rate',
+      'hrv',
+    ])
+    assert.equal(readiness.wearableShadow.assessments.every((assessment) =>
+      assessment.scoreBearing === false
+        && assessment.scoreContributionAuthorized === false
+        && assessment.productAuthorized === false
+    ), true)
 
     const encodedReadiness = JSON.stringify(readiness)
     for (const forbidden of [
@@ -447,6 +536,12 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
       'metric-point:',
       '"value"',
       '"unit"',
+      '"message"',
+      'modelId',
+      '"coefficient"',
+      'biologicalAgeYears',
+      'featureAttributions',
+      'moduleAttributions',
       vaultRoot,
       'ledger/events',
     ]) {

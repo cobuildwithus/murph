@@ -6,6 +6,7 @@ import {
 import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   assessMurphAgeInputReadinessFromVault,
+  assessMurphAgeWearableShadowReadinessFromVault,
   calculateMurphAgePublicReportFromVaultInputBundle,
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
@@ -17,6 +18,7 @@ import {
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
@@ -350,13 +352,65 @@ const murphAgePublicWearableBridgeSummarySchema = z.object({
   secondPriorityReadyFeatureKeys: z.array(z.string().min(1)),
 })
 
+const murphAgeWearableShadowFamilySchema = z.enum([
+  'activity',
+  'hrv',
+  'resting-heart-rate',
+  'sleep',
+])
+
+const murphAgeWearableShadowOutputBoundarySchema = z.object({
+  aggregateOnly: z.literal(true),
+  coefficientsExportAllowed: z.literal(false),
+  participantLevelExportAllowed: z.literal(false),
+  predictionsExportAllowed: z.literal(false),
+  productDisplayExportAllowed: z.literal(false),
+  rowValuesExportAllowed: z.literal(false),
+})
+
+const murphAgeWearableShadowIncrementReadinessSchema = z.object({
+  anchorCardId: murphAgeModelCardIdSchema.nullable(),
+  anchorCompatible: z.boolean(),
+  availableMetricKeys: z.array(z.string().min(1)),
+  compatibleAnchorCardIds: z.array(murphAgeModelCardIdSchema),
+  family: murphAgeWearableShadowFamilySchema,
+  missingMetricKeys: z.array(z.string().min(1)),
+  missingQualityMetricKeys: z.array(z.string().min(1)),
+  outputBoundary: murphAgeWearableShadowOutputBoundarySchema,
+  productAuthorized: z.literal(false),
+  readySignalMetricKeys: z.array(z.string().min(1)),
+  riskEffect: z.literal('not-estimated'),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  selectedMetricKeys: z.array(z.string().min(1)),
+  status: z.enum(['blocked', 'missing', 'ready']),
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+
+const murphAgeWearableShadowReadinessSchema = z.object({
+  anchor: z.object({
+    anchorCardId: murphAgeModelCardIdSchema.nullable(),
+    bundleId: murphAgeInputBundleIdSchema,
+    recommendedCardId: murphAgeRecommendedModelCardIdSchema,
+    status: murphAgeInputBundleStatusSchema,
+  }),
+  assessments: z.array(murphAgeWearableShadowIncrementReadinessSchema),
+  blockedFamilies: z.array(murphAgeWearableShadowFamilySchema),
+  missingFamilies: z.array(murphAgeWearableShadowFamilySchema),
+  readyFamilies: z.array(murphAgeWearableShadowFamilySchema),
+  schemaVersion: z.literal('murph.age.wearable-shadow-readiness.v1'),
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+
 export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
   runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
-  schemaVersion: z.literal('murph.age.input-readiness.v4'),
+  schemaVersion: z.literal('murph.age.input-readiness.v5'),
   scoreReadiness: murphAgeInputScoreReadinessSchema,
   wearableBridge: murphAgePublicWearableBridgeSummarySchema,
+  wearableShadow: murphAgeWearableShadowReadinessSchema,
 })
 
 const murphAgePublicDisplaySummarySchema = z.object({
@@ -496,11 +550,22 @@ export function registerMurphAgeCommands(
     output: murphAgeInputReadinessResultSchema,
     async run({ options }) {
       await assertInitializedVaultRoot(options.vault)
+      const [inputReadiness, wearableShadow] = await Promise.all([
+        assessMurphAgeInputReadinessFromVault({
+          asOf: options.asOf,
+          vaultRoot: options.vault,
+        }),
+        assessMurphAgeWearableShadowReadinessFromVault({
+          asOf: options.asOf,
+          vaultRoot: options.vault,
+        }),
+      ])
 
-      return assessMurphAgeInputReadinessFromVault({
-        asOf: options.asOf,
-        vaultRoot: options.vault,
-      })
+      return {
+        ...inputReadiness,
+        schemaVersion: 'murph.age.input-readiness.v5' as const,
+        wearableShadow,
+      }
     },
   })
 
