@@ -2346,7 +2346,7 @@ test("validates aggregate wearable shadow result cards as blocked research evide
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
-    sourceRouteId: "nhanes-activity-shadow-v0",
+    sourceRouteId: "nhanes-activity-shadow-lmf",
   } satisfies MurphAgeWearableShadowIncrementResultCard;
 
   const validation = validateMurphAgeWearableShadowIncrementResultCard(resultCard);
@@ -2370,6 +2370,26 @@ test("validates aggregate wearable shadow result cards as blocked research evide
     riskEffect: "not-estimated",
   });
   assert.equal(notEstimatedValidation.status, "valid");
+
+  const unknownRouteValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    sourceRouteId: "unknown-source-route",
+  });
+  assert.equal(unknownRouteValidation.status, "invalid");
+  assert.equal(
+    unknownRouteValidation.warnings.some((warning) => warning.message.includes("registered Murph Age source route")),
+    true,
+  );
+
+  const nonWearableRouteValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    sourceRouteId: "midus-biomarker-mortality",
+  });
+  assert.equal(nonWearableRouteValidation.status, "invalid");
+  assert.equal(
+    nonWearableRouteValidation.warnings.some((warning) => warning.message.includes("wearable shadow increment route")),
+    true,
+  );
 
   const invalidValidation = validateMurphAgeWearableShadowIncrementResultCard({
     ...resultCard,
