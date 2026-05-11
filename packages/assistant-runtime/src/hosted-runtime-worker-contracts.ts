@@ -45,6 +45,7 @@ export type {
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export type {
+  RuntimeLivenessInstruction,
   RuntimeLivenessPort,
   RuntimeLivenessRejectionReason,
   RuntimeLivenessTouchResult,

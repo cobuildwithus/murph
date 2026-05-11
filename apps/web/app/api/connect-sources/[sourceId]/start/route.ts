@@ -1,8 +1,8 @@
 import {
-  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
-} from "@murphai/device-syncd/config";
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/connect-config";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
@@ -45,7 +45,7 @@ export const POST = withJsonError(async (
 
 function resolveHostedConnectSourceTarget(sourceId: string) {
   const target = resolveConfiguredDeviceSyncConnectTargetBySourceId(
-    readConfiguredDeviceSyncProviderConfigs(process.env),
+    readConfiguredDeviceSyncConnectTargetConfigs(process.env),
     sourceId,
   );
 

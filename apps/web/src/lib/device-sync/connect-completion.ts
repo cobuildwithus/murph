@@ -1,6 +1,6 @@
 import "server-only";
 
-import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/config";
+import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/connect-config";
 
 import {
   buildHostedDeviceSyncMessagingReturnMessageBody,

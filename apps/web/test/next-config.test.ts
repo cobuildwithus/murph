@@ -161,12 +161,31 @@ test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
 test("device connect routes use the narrow connect-config entrypoint", () => {
   for (const relativePath of [
     "apps/web/app/(dashboard)/connect/page.tsx",
+    "apps/web/app/api/connect-sources/[sourceId]/start/route.ts",
     "apps/web/app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route.ts",
+    "apps/web/app/device/connect/[claim]/route.ts",
+    "apps/web/src/lib/device-sync/connect-completion.ts",
+    "apps/web/src/lib/device-sync/connect-intents.ts",
+    "apps/web/src/lib/device-sync/hosted-connect-start.ts",
+    "apps/web/src/lib/device-sync/wake-service.ts",
   ]) {
     const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
 
     assert.doesNotMatch(source, /from ["']@murphai\/device-syncd\/config["']/u);
     assert.match(source, /from ["']@murphai\/device-syncd\/connect-config["']/u);
+  }
+});
+
+test("connect-link routes use the lightweight device-sync error entrypoint", () => {
+  for (const relativePath of [
+    "apps/web/app/api/connect-sources/[sourceId]/start/route.ts",
+    "apps/web/app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route.ts",
+    "apps/web/app/device/connect/[claim]/route.ts",
+  ]) {
+    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+    assert.doesNotMatch(source, /from ["']@murphai\/device-syncd\/public-ingress["']/u);
+    assert.match(source, /from ["']@murphai\/device-syncd\/errors["']/u);
   }
 });
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/config";
+import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";

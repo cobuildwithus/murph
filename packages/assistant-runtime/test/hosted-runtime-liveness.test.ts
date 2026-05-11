@@ -45,6 +45,11 @@ describe("startRuntimeLivenessHeartbeat", () => {
       async touch(input) {
         touches.push(input.requestId);
         return {
+          instruction: {
+            kind: "yield",
+            nextWakeAt: "2026-04-27T00:00:45.000Z",
+            status: "scheduled",
+          },
           inputAvailable: true,
           nextAlarmAt: "2026-04-27T00:00:45.000Z",
           ok: true,
@@ -56,13 +61,22 @@ describe("startRuntimeLivenessHeartbeat", () => {
     const heartbeat = startRuntimeLivenessHeartbeat({
       intervalMs: 1_000,
       onInputAvailable(result) {
-        available.push(result.nextAlarmAt ?? "none");
+        available.push(
+          result.instruction?.kind === "yield"
+            ? result.instruction.nextWakeAt ?? "none"
+            : result.nextAlarmAt ?? "none",
+        );
       },
       port,
       requestId: "request_123",
     });
 
     assert.deepEqual(await heartbeat.initialTouch, {
+      instruction: {
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      },
       inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,

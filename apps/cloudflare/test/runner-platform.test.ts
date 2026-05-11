@@ -1680,6 +1680,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.runtimeLivenessPort?.touch({
       requestId: "hosted-workspace-invocation:attempt_1",
     })).resolves.toEqual({
+      instruction: {
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      },
       inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
@@ -1739,6 +1744,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.runtimeLivenessPort?.touch({
       requestId: "hosted-workspace-invocation:attempt_1",
     })).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true,

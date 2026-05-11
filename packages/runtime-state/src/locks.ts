@@ -463,7 +463,7 @@ function getRelativeMetadataPath(lockPath: string, metadataPath: string): string
 
 function buildLockSiblingPath(lockPath: string, suffix: string): string {
   return path.join(
-    path.dirname(lockPath),
+    /* turbopackIgnore: true */ path.dirname(lockPath),
     `.${path.basename(lockPath)}.${suffix}.${randomUUID().replace(/-/g, "")}`,
   );
 }

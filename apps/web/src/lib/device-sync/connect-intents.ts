@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   configuredDeviceSyncProviderKeys,
   type ConfiguredDeviceSyncProviderKey,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";

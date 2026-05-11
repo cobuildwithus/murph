@@ -63,9 +63,12 @@ export {
 } from "./providers/junction-connect-sources.ts";
 
 import type {
+  ConfiguredDeviceSyncProviderKey,
   ConfiguredDeviceSyncProviderPresence,
   DeviceSyncEnvSource,
 } from "./config/provider-types.ts";
+
+export type { ConfiguredDeviceSyncProviderKey };
 
 type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresence & {
   junction?: { providerFilter?: string[] };

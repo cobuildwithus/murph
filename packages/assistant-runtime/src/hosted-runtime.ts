@@ -41,6 +41,8 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
+  readRuntimeLivenessInstruction,
+  readRuntimeLivenessNextWakeAt,
   startRuntimeLivenessHeartbeat,
   type RuntimeLivenessPort,
   type RuntimeLivenessRejectionReason,
@@ -330,15 +332,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       livenessAbortController.abort(new HostedWorkspaceRuntimeLivenessRejectedError(reason));
     },
     onInputAvailable: (result) => {
+      const nextWakeAt = readRuntimeLivenessNextWakeAt(result);
       if (isIdleShutdownCheckpoint) {
         idleShutdownInputAvailable = true;
-        idleShutdownInputNextWakeAt = result.nextAlarmAt ?? null;
+        idleShutdownInputNextWakeAt = nextWakeAt;
         livenessAbortController.abort(new HostedIdleShutdownCheckpointInputAvailableError());
         return undefined;
       }
 
       livenessAbortController.abort(
-        new HostedForegroundInputAvailableError(result.nextAlarmAt ?? null),
+        new HostedForegroundInputAvailableError(nextWakeAt),
       );
       return undefined;
     },
@@ -445,7 +448,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       if (hasRuntimeInputAvailable(latestLiveness)) {
         return {
-          nextWakeAt: latestLiveness.nextAlarmAt ?? null,
+          nextWakeAt: readRuntimeLivenessNextWakeAt(latestLiveness),
           status: "scheduled",
         };
       }
@@ -482,7 +485,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       && hasRuntimeInputAvailable(initialLiveness)
     ) {
       return {
-        nextWakeAt: initialLiveness.nextAlarmAt ?? null,
+        nextWakeAt: readRuntimeLivenessNextWakeAt(initialLiveness),
         status: "scheduled",
       };
     }
@@ -491,7 +494,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       && hasRuntimeInputAvailable(initialLiveness)
     ) {
       return {
-        nextWakeAt: initialLiveness.nextAlarmAt ?? null,
+        nextWakeAt: readRuntimeLivenessNextWakeAt(initialLiveness),
         status: "scheduled",
       };
     }
@@ -1132,7 +1135,7 @@ function assertWorkspaceRunUserMatchesRequest(input: {
 }
 
 function hasRuntimeInputAvailable(result: RuntimeLivenessTouchResult): boolean {
-  return result.ok && result.inputAvailable === true;
+  return result.ok && readRuntimeLivenessInstruction(result).kind === "yield";
 }
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {

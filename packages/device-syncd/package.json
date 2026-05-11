@@ -38,6 +38,10 @@
       "types": "./dist/connect-config.d.ts",
       "default": "./dist/connect-config.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
     "./local-secret-codec": {
       "types": "./dist/local-secret-codec.d.ts",
       "default": "./dist/local-secret-codec.js"

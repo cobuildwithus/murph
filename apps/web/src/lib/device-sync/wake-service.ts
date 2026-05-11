@@ -1,7 +1,7 @@
 import {
   buildJunctionProviderSourceInstanceKey,
   normalizeJunctionProviderSlug,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 import {
   deviceSyncError,
   isDeviceSyncError,

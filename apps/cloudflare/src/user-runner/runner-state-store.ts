@@ -65,26 +65,31 @@ export type RunnerDueAlarm =
     record: RunnerStateRecord;
   };
 
+export type RunnerDueAlarmDecision =
+  | {
+    activeInvocationPresent: boolean;
+    kind: "none";
+    record: RunnerStateRecord;
+  }
+  | {
+    dueWake: true;
+    kind: "work";
+    reason: "alarm" | "nudge";
+    record: RunnerStateRecord;
+  }
+  | {
+    checkpointNextWakeAt: string | null;
+    idleWorkspaceVersion: string;
+    kind: "idle_checkpoint";
+    reason: "idle_shutdown_checkpoint";
+    record: RunnerStateRecord;
+  };
+
 export interface RunnerInvocationCheckpointResult {
   clearedOrphanObservation: boolean;
   recorded: boolean;
   record: RunnerStateRecord;
 }
-
-export type RunnerInvocationHeartbeatResult =
-  | {
-    ok: true;
-    record: RunnerStateRecord;
-  }
-  | {
-    ok: false;
-    reason:
-      | "no_active_invocation"
-      | "stale_attempt"
-      | "stale_generation"
-      | "wrong_user";
-    record: RunnerStateRecord;
-  };
 
 export type RunnerStaleInvocationRecoveryResult =
   | {
@@ -281,9 +286,7 @@ export class RunnerStateStore {
 
     if (meta) {
       if (meta.user_id !== userId) {
-        throw new Error(
-          `Hosted runner Durable Object is already bound to ${meta.user_id}, not ${userId}.`,
-        );
+        throw new Error("Hosted runner Durable Object is already bound to a different user.");
       }
 
       this.userId = userId;
@@ -303,9 +306,7 @@ export class RunnerStateStore {
     const meta = this.selectMetaRowSync();
 
     if (meta && meta.user_id !== userId) {
-      throw new Error(
-        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
-      );
+      throw new Error("Hosted runner Durable Object is bound to a different user.");
     }
 
     if (!meta) {
@@ -322,9 +323,7 @@ export class RunnerStateStore {
     const meta = this.selectMetaRowSync();
 
     if (meta && meta.user_id !== userId) {
-      throw new Error(
-        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
-      );
+      throw new Error("Hosted runner Durable Object is bound to a different user.");
     }
   }
 
@@ -398,6 +397,34 @@ export class RunnerStateStore {
     };
   }
 
+  async consumeDueRunnerAlarmAndDecide(nowMs: number): Promise<RunnerDueAlarmDecision> {
+    const dueAlarm = await this.consumeDueRunnerAlarm(nowMs);
+    if (dueAlarm.kind === "none") {
+      return {
+        activeInvocationPresent: dueAlarm.record.active !== null,
+        kind: "none",
+        record: dueAlarm.record,
+      };
+    }
+
+    if (dueAlarm.kind === "work") {
+      return {
+        dueWake: true,
+        kind: "work",
+        reason: dueAlarm.record.pendingWork ? "nudge" : "alarm",
+        record: dueAlarm.record,
+      };
+    }
+
+    return {
+      checkpointNextWakeAt: dueAlarm.checkpointNextWakeAt,
+      idleWorkspaceVersion: dueAlarm.idleWorkspaceVersion,
+      kind: "idle_checkpoint",
+      reason: "idle_shutdown_checkpoint",
+      record: dueAlarm.record,
+    };
+  }
+
   async markPendingWorkAndDecide(input: {
     activeInThisIsolate: boolean;
     currentWorkerVersionId?: string | null;
@@ -414,7 +441,7 @@ export class RunnerStateStore {
   }): Promise<RunnerPendingWorkDecision> {
     let staleRecovery: RunnerStaleInvocationRecoveryResult | null = null;
     let runningRecord = this.readStateSync();
-    if (!input.activeInThisIsolate && runningRecord.inFlight) {
+    if (!input.activeInThisIsolate && runningRecord.active !== null) {
       staleRecovery = await this.clearStaleInvocationIfExpired({
         currentWorkerVersionId: input.currentWorkerVersionId ?? null,
         heartbeatStaleMs: input.heartbeatStaleMs,
@@ -425,7 +452,7 @@ export class RunnerStateStore {
       runningRecord = staleRecovery.record;
     }
 
-    const alreadyRunning = input.activeInThisIsolate || runningRecord.inFlight;
+    const alreadyRunning = input.activeInThisIsolate || runningRecord.active !== null;
     const activeWorkspaceInvocation = runningRecord.workspaceInvocation;
     const activeIdleShutdownCheckpoint =
       activeWorkspaceInvocation?.reason === "idle_shutdown_checkpoint"
@@ -525,7 +552,7 @@ export class RunnerStateStore {
     await this.bindUser(input.userId);
 
     const meta = this.requireMetaRowSync();
-    if (meta.in_flight === 1) {
+    if (this.readActiveInvocationLeaseSync(meta)) {
       throw new RunnerInvocationAlreadyActiveError(this.readStateFromMetaSync(meta));
     }
 
@@ -653,19 +680,6 @@ export class RunnerStateStore {
     };
   }
 
-  async recordInvocationStartFailure(input: {
-    error: unknown;
-    failedAt?: string | null;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.last_error_at = input.failedAt ?? new Date().toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
-    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
-  }
-
   async recordActiveInvocationContainerStopped(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -709,12 +723,10 @@ export class RunnerStateStore {
   }> {
     const meta = this.selectMetaRowSync();
     if (meta && meta.user_id !== userId) {
-      throw new Error(
-        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
-      );
+      throw new Error("Hosted runner Durable Object is bound to a different user.");
     }
 
-    if (!meta || (meta.in_flight !== 1 && !meta.active_invocation_id)) {
+    if (!meta || !meta.active_invocation_id) {
       return {
         attemptId: null,
         cleared: false,
@@ -820,7 +832,7 @@ export class RunnerStateStore {
   > {
     const meta = this.requireMetaRowSync();
     const currentRecord = this.readStateFromMetaSync(meta);
-    if (currentRecord.pendingNudge || currentRecord.inFlight) {
+    if (currentRecord.pendingWork || currentRecord.active !== null) {
       return {
         record: currentRecord,
         scheduled: false,
@@ -965,58 +977,6 @@ export class RunnerStateStore {
     };
   }
 
-  async recordActiveInvocationHeartbeat(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    nowMs?: number | null;
-    userId: string;
-  }): Promise<RunnerInvocationHeartbeatResult> {
-    const meta = this.requireMetaRowSync();
-    if (this.clearActiveInvocationIfExpiredSync(meta, input.nowMs ?? Date.now())) {
-      return {
-        ok: false,
-        reason: "no_active_invocation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    const lease = this.readActiveInvocationLeaseSync(meta);
-    if (!lease) {
-      return {
-        ok: false,
-        reason: "no_active_invocation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.attemptId !== input.attemptId) {
-      return {
-        ok: false,
-        reason: "stale_attempt",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.leaseGeneration !== input.leaseGeneration) {
-      return {
-        ok: false,
-        reason: "stale_generation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.userId !== input.userId) {
-      return {
-        ok: false,
-        reason: "wrong_user",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    meta.active_invocation_last_heartbeat_at = new Date(input.nowMs ?? Date.now()).toISOString();
-    meta.active_invocation_orphan_observed_at = null;
-    this.writeMetaRowSync(meta);
-    return {
-      ok: true,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
   async recordActiveInvocationHeartbeatInstruction(input: {
     attemptId: string;
     heartbeatStaleMs: number;
@@ -1093,6 +1053,13 @@ export class RunnerStateStore {
       workspaceVersion: null,
     });
     this.writeMetaRowSync(meta);
+    if (activeReason !== "idle_shutdown_checkpoint") {
+      return {
+        kind: "continue",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
     return {
       activeInvocation: {
         attemptId: lease.attemptId,
