@@ -428,7 +428,7 @@ test('age report returns a product-mode public abstention instead of research-on
     ]))
 
     assert.equal(report.mode, 'product')
-    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v2')
+    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v3')
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
     assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')

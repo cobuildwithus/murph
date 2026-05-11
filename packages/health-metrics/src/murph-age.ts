@@ -14,7 +14,7 @@ export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1"
 export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v5" as const;
 export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
-  "murph.age.public-calculator-report.v2" as const;
+  "murph.age.public-calculator-report.v3" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
