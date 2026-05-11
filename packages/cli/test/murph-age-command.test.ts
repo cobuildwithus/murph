@@ -11,6 +11,7 @@ import {
   normalizeMetricValue,
   type MetricPoint,
   type MurphAgePublicCalculatorReport,
+  type MurphAgePublicDisplaySummary,
   type MurphAgeRiskModel,
 } from '@murphai/health-metrics'
 import {
@@ -152,6 +153,7 @@ interface MurphAgeInputReadinessReport {
     status: string
   }>
   schemaVersion: string
+  wearableBridge: MurphAgePublicDisplaySummary['wearableBridge']
 }
 
 test('age model-cards reports local research readiness without model internals', async () => {
@@ -291,7 +293,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v2')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v3')
     assert.deepEqual(readiness.runtimeInputs, [
       {
         key: 'chronological-age-years',
@@ -325,6 +327,19 @@ test('age inputs reports feature readiness without metric values or point ids', 
         && feature.selectedMetricKey === 'steps'
         && feature.status === 'ready'
     ), true)
+    assert.equal(readiness.wearableBridge.scoreBearing, false)
+    assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false)
+    assert.equal(readiness.wearableBridge.productAuthorized, false)
+    assert.equal(readiness.wearableBridge.partialFeatureKeys.includes('activity-volume'), true)
+    assert.equal(readiness.wearableBridge.features.some((feature) =>
+      feature.featureKey === 'activity-volume'
+        && feature.readyMetricKeys.includes('steps')
+        && feature.scoreBearing === false
+        && feature.scoreContributionAuthorized === false
+        && feature.productAuthorized === false
+        && feature.riskEffect === 'not-estimated'
+        && feature.uncertaintyAction === 'context-only'
+    ), true)
 
     const encodedReadiness = JSON.stringify(readiness)
     for (const forbidden of [
@@ -355,7 +370,7 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
       '2026-05-10T00:00:00.000Z',
     ]))
 
-    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v2')
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v3')
     assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ['chronological-age-years', 'sex'])
     assert.equal(readiness.bundle.bundleId, 'insufficient')
     assert.equal(readiness.bundle.status, 'abstain')
@@ -363,6 +378,10 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
     assert.deepEqual(readiness.bundle.availableFeatureKeys, [])
     assert.deepEqual(readiness.bundle.selectedMetricKeys, [])
     assert.equal(readiness.contextBundles.length, 0)
+    assert.deepEqual(readiness.wearableBridge.readyFeatureKeys, [])
+    assert.equal(readiness.wearableBridge.scoreBearing, false)
+    assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false)
+    assert.equal(readiness.wearableBridge.productAuthorized, false)
 
     const encodedReadiness = JSON.stringify(readiness)
     for (const forbidden of [

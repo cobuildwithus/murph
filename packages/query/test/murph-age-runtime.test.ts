@@ -422,7 +422,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v2");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v3");
     assert.deepEqual(readiness.runtimeInputs, [
       {
         key: "chronological-age-years",
@@ -446,6 +446,19 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
     assert.equal(readiness.bundle.selectedMetricKeys.includes("albumin"), true);
     assert.equal(readiness.contextBundles[0]?.bundleId, "wearable-context");
     assert.equal(readiness.contextBundles[0]?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(readiness.wearableBridge.scoreBearing, false);
+    assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false);
+    assert.equal(readiness.wearableBridge.productAuthorized, false);
+    assert.equal(readiness.wearableBridge.partialFeatureKeys.includes("activity-volume"), true);
+    assert.equal(readiness.wearableBridge.features.some((feature) =>
+      feature.featureKey === "activity-volume"
+        && feature.readyMetricKeys.includes("steps")
+        && feature.scoreBearing === false
+        && feature.scoreContributionAuthorized === false
+        && feature.productAuthorized === false
+        && feature.riskEffect === "not-estimated"
+        && feature.uncertaintyAction === "context-only"
+    ), true);
 
     const encoded = JSON.stringify(readiness);
     for (const forbidden of [
@@ -472,7 +485,7 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v2");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v3");
     assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ["chronological-age-years", "sex"]);
     assert.equal(readiness.bundle.bundleId, "insufficient");
     assert.equal(readiness.bundle.status, "abstain");
@@ -480,6 +493,10 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
     assert.deepEqual(readiness.bundle.availableFeatureKeys, []);
     assert.deepEqual(readiness.bundle.selectedMetricKeys, []);
     assert.equal(readiness.contextBundles.length, 0);
+    assert.deepEqual(readiness.wearableBridge.readyFeatureKeys, []);
+    assert.equal(readiness.wearableBridge.scoreBearing, false);
+    assert.equal(readiness.wearableBridge.scoreContributionAuthorized, false);
+    assert.equal(readiness.wearableBridge.productAuthorized, false);
 
     const encoded = JSON.stringify(readiness);
     for (const forbidden of [

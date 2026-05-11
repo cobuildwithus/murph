@@ -84,12 +84,14 @@ export type MurphAgeInputBundleReadiness = Omit<
   featureStatuses: MurphAgeInputFeatureReadiness[];
   warnings: MurphAgeInputReadinessWarning[];
 };
+export type MurphAgeWearableBridgeInputReadiness = MurphAgePublicDisplaySummary["wearableBridge"];
 
 export interface MurphAgeInputReadinessForVault {
   bundle: MurphAgeInputBundleReadiness;
   contextBundles: MurphAgeInputBundleReadiness[];
   runtimeInputs: MurphAgeRuntimeInputReadiness[];
-  schemaVersion: "murph.age.input-readiness.v2";
+  schemaVersion: "murph.age.input-readiness.v3";
+  wearableBridge: MurphAgeWearableBridgeInputReadiness;
 }
 
 export interface MurphAgeLocalModelCardLoadResult {
@@ -246,7 +248,11 @@ export async function assessMurphAgeInputReadinessFromVault(
       },
       contextBundles: [],
       runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-      schemaVersion: "murph.age.input-readiness.v2",
+      schemaVersion: "murph.age.input-readiness.v3",
+      wearableBridge: buildMurphAgeWearableBridgeReadiness({
+        asOf: "1970-01-01T00:00:00.000Z",
+        points: [],
+      }),
     };
   }
 
@@ -268,7 +274,11 @@ export async function assessMurphAgeInputReadinessFromVault(
     bundle: sanitizeMurphAgeInputBundleAssessment(bundleAssessment),
     contextBundles: contextAssessments.map(sanitizeMurphAgeInputBundleAssessment),
     runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-    schemaVersion: "murph.age.input-readiness.v2",
+    schemaVersion: "murph.age.input-readiness.v3",
+    wearableBridge: buildMurphAgeWearableBridgeReadiness({
+      asOf,
+      points,
+    }),
   };
 }
 
@@ -301,6 +311,21 @@ function sanitizeMurphAgeInputBundleAssessment(
       ...(warning.metricKey ? { metricKey: warning.metricKey } : {}),
     })),
   };
+}
+
+function buildMurphAgeWearableBridgeReadiness(input: {
+  asOf: string;
+  points: readonly MetricPoint[];
+}): MurphAgeWearableBridgeInputReadiness {
+  const output = calculateMurphAgeFromInputBundle({
+    asOf: input.asOf,
+    chronologicalAgeYears: 50,
+    mode: "product",
+    models: {},
+    points: input.points,
+    sex: "female",
+  });
+  return summarizeMurphAgeCalculatorPublicOutput(output).wearableBridge;
 }
 
 export function metricPointFiltersForMurphAgeModel(
