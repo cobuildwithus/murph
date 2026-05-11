@@ -115,6 +115,7 @@ import type {
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
   RuntimeLivenessPort,
+  RuntimeLivenessTouchResult,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 
@@ -125,6 +126,27 @@ const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-vercel-key",
 } as const;
+
+function continueRuntimeLiveness(): RuntimeLivenessTouchResult {
+  return {
+    instruction: { kind: "continue" },
+    ok: true,
+  };
+}
+
+function yieldRuntimeLiveness(nextWakeAt: string | null): RuntimeLivenessTouchResult {
+  return {
+    instruction: {
+      kind: "yield",
+      nextWakeAt,
+      status: "scheduled",
+    },
+    inputAvailable: true,
+    nextAlarmAt: nextWakeAt,
+    ok: true,
+    pendingNudge: true,
+  };
+}
 
 function requireMailboxSnapshotInput(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -654,7 +676,7 @@ describe("hosted workspace runtime entrypoint", () => {
         touchCalls += 1;
         events.push(`heartbeat:${touchCalls}`);
         if (touchCalls === 1) {
-          return { ok: true };
+          return continueRuntimeLiveness();
         }
         return {
           inputAvailable: true,
@@ -747,7 +769,7 @@ describe("hosted workspace runtime entrypoint", () => {
         touchCalls += 1;
         events.push(`heartbeat:${touchCalls}`);
         if (touchCalls < 3) {
-          return { ok: true };
+          return continueRuntimeLiveness();
         }
         return {
           inputAvailable: true,
@@ -873,7 +895,7 @@ describe("hosted workspace runtime entrypoint", () => {
           };
         }
         events.push("heartbeat:ok");
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -980,7 +1002,7 @@ describe("hosted workspace runtime entrypoint", () => {
           };
         }
         events.push("heartbeat:ok");
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -1086,7 +1108,7 @@ describe("hosted workspace runtime entrypoint", () => {
           };
         }
         events.push("heartbeat:ok");
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -1183,7 +1205,7 @@ describe("hosted workspace runtime entrypoint", () => {
             pendingNudge: true,
           };
         }
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -1343,7 +1365,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeLivenessPort: RuntimeLivenessPort = {
       async touch() {
         events.push("heartbeat");
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -1511,7 +1533,7 @@ describe("hosted workspace runtime entrypoint", () => {
         touchCalls += 1;
         events.push(`heartbeat:${touchCalls}`);
         if (touchCalls === 1 || !importStarted) {
-          return { ok: true };
+          return continueRuntimeLiveness();
         }
         return {
           ok: false,
@@ -1602,7 +1624,7 @@ describe("hosted workspace runtime entrypoint", () => {
         touchCalls += 1;
         events.push(`heartbeat:${touchCalls}`);
         if (!assistantStarted) {
-          return { ok: true };
+          return continueRuntimeLiveness();
         }
         return {
           nextAlarmAt: freshInputWakeAt,
@@ -1977,7 +1999,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeLivenessPort: RuntimeLivenessPort = {
       async touch() {
         livenessTouches += 1;
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
