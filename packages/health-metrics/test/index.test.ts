@@ -2957,6 +2957,132 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.ok(publicMetabolicModule);
   assert.equal(publicMetabolicModule.featureKeys.includes("hba1c"), true);
   assert.equal("contributionLogit" in publicMetabolicModule, false);
+  const internalReadyAttribution = research.result?.featureAttributions.find((feature) => feature.status === "ready");
+  assert.ok(internalReadyAttribution);
+  const publicReportWithWearableModules = toPublicMurphAgeCalculatorReport({
+    ...research,
+    result: research.result ? {
+      ...research.result,
+      featureAttributions: [
+        ...research.result.featureAttributions,
+        {
+          ...internalReadyAttribution,
+          contributionYears: -1.2,
+          featureKey: "steps",
+          label: "Steps",
+          metricKey: "steps",
+          moduleId: "activity",
+          selectedPointIds: ["metric-point:private-row:activity"],
+          unit: "count",
+          value: 10_000,
+          valueLabel: "10,000 steps",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: -0.8,
+          featureKey: "total-sleep-minutes",
+          label: "Total sleep",
+          metricKey: "total-sleep-minutes",
+          moduleId: "sleep",
+          selectedPointIds: ["metric-point:private-row:sleep"],
+          unit: "minutes",
+          value: 440,
+          valueLabel: "440 minutes",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: 0.4,
+          featureKey: "resting-heart-rate",
+          label: "Resting heart rate",
+          metricKey: "resting-heart-rate",
+          moduleId: "recovery",
+          selectedPointIds: ["metric-point:private-row:recovery"],
+          unit: "bpm",
+          value: 65,
+          valueLabel: "65 bpm",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: 0.2,
+          featureKey: "private-feature",
+          label: "Private feature",
+          metricKey: "private-metric",
+          moduleId: "private-module",
+          selectedPointIds: ["metric-point:private-row:private"],
+          unit: "private unit",
+          value: 1,
+          valueLabel: "private value",
+          warnings: [],
+        },
+      ],
+      moduleAttributions: [
+        ...research.result.moduleAttributions,
+        { contributionLogit: -0.2, contributionYears: -1.2, featureKeys: ["steps"], moduleId: "activity" },
+        {
+          contributionLogit: -0.1,
+          contributionYears: -0.8,
+          featureKeys: ["total-sleep-minutes"],
+          moduleId: "sleep",
+        },
+        {
+          contributionLogit: 0.05,
+          contributionYears: 0.4,
+          featureKeys: ["resting-heart-rate"],
+          moduleId: "recovery",
+        },
+        {
+          contributionLogit: 0.05,
+          contributionYears: 0.2,
+          featureKeys: ["private-feature"],
+          moduleId: "private-module",
+        },
+      ],
+    } : null,
+  });
+  const publicWearableModuleIds = new Set(
+    publicReportWithWearableModules.result?.moduleAttributions.map((module) => module.moduleId),
+  );
+  assert.equal(publicWearableModuleIds.has("activity"), true);
+  assert.equal(publicWearableModuleIds.has("sleep"), true);
+  assert.equal(publicWearableModuleIds.has("recovery"), true);
+  assert.equal(publicWearableModuleIds.has("private-module"), false);
+  assert.equal(publicWearableModuleIds.has("unknown"), true);
+  assert.equal(
+    publicReportWithWearableModules.result?.featureAttributions.find((feature) => feature.metricKey === "steps")
+      ?.moduleId,
+    "activity",
+  );
+  assert.equal(
+    publicReportWithWearableModules.result?.featureAttributions.find((feature) =>
+      feature.metricKey === "total-sleep-minutes"
+    )?.moduleId,
+    "sleep",
+  );
+  assert.equal(
+    publicReportWithWearableModules.result?.featureAttributions.find((feature) =>
+      feature.metricKey === "resting-heart-rate"
+    )?.moduleId,
+    "recovery",
+  );
+  const publicPrivateMetricAttribution = publicReportWithWearableModules.result?.featureAttributions.find((feature) =>
+    feature.featureKey === "metric-feature" && feature.metricKey === null && feature.status === "ready"
+  );
+  assert.ok(publicPrivateMetricAttribution);
+  assert.equal(publicPrivateMetricAttribution.moduleId, "unknown");
+  const publicActivityModule = publicReportWithWearableModules.result?.moduleAttributions.find((module) =>
+    module.moduleId === "activity"
+  );
+  assert.ok(publicActivityModule);
+  assert.equal(publicActivityModule.featureKeys.includes("steps"), true);
+  assert.equal(
+    publicReportWithWearableModules.result?.moduleAttributions.some((module) =>
+      module.featureKeys.includes("private-feature")
+    ),
+    false,
+  );
   const publicReportFromLeakyResult = toPublicMurphAgeCalculatorReport({
     ...research,
     warnings: [{

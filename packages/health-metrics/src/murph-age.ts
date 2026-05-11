@@ -1298,6 +1298,22 @@ const MURPH_AGE_PUBLIC_WEARABLE_BRIDGE_FEATURE_KEYS = new Set(
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map((feature) => feature.featureKey),
 );
 
+const MURPH_AGE_PUBLIC_MODULE_IDS = new Set([
+  "activity",
+  "body",
+  "cardiovascular",
+  "demographics",
+  "function",
+  "hematologic",
+  "immune",
+  "inflammatory",
+  "liver",
+  "metabolic",
+  "renal",
+  "recovery",
+  "sleep",
+]);
+
 const MURPH_AGE_PUBLIC_METRIC_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
@@ -1997,21 +2013,7 @@ function toPublicWearableBridgeFeatureKeyList(featureKeys: readonly string[]): s
 function toPublicModuleId(moduleId: string): string {
   const simpleKey = toPublicSimpleKey(moduleId);
   if (!simpleKey) return "unknown";
-  if ([
-    "body",
-    "cardiovascular",
-    "demographics",
-    "function",
-    "hematologic",
-    "immune",
-    "inflammatory",
-    "liver",
-    "metabolic",
-    "renal",
-  ].includes(simpleKey)) {
-    return simpleKey;
-  }
-  return "unknown";
+  return MURPH_AGE_PUBLIC_MODULE_IDS.has(simpleKey) ? simpleKey : "unknown";
 }
 
 function toPublicSimpleKey(value: string | null | undefined): string | null {
