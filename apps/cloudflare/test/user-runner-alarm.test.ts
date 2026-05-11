@@ -6217,7 +6217,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       active_invocation_id: "workspace-invocation-foreground-race",
-      idle_shutdown_checkpoint_due_at: FIXED_NOW,
+      idle_shutdown_checkpoint_due_at: null,
       in_flight: 1,
       pending_nudge: 1,
       pending_work: 1,
