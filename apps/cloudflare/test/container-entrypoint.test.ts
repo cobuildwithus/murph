@@ -917,6 +917,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(runnerSpy.mock.calls[0]?.[1]).toEqual({
         internalWorkerProxyToken: "proxy-token",
         localInternalProxyBaseUrl: null,
+        runtimeCallbackBaseUrl: null,
         signal: expect.any(AbortSignal),
       });
     } finally {

@@ -407,8 +407,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult> {
-    await this.runner.bindUser(input.userId);
-    return this.runner.runUntilIdleOrBudget({ reason: input.reason });
+    return await this.runner.runUntilIdleForTest(input);
   }
 
   async runAlarmForTest(input: { userId: string }): Promise<{ ok: true }> {

@@ -358,6 +358,83 @@ it("keeps nudging when a runner error still has mailbox lag", async () => {
   }
 });
 
+it("lets fresh mailbox lag settle before recovery nudging", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const laggedStatus = {
+    inFlight: false,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_fresh_lag",
+    workspace: null,
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...laggedStatus,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: {
+        hostedMailboxSystemImportedSeq: "1",
+      },
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      userId: "member_fresh_lag",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [laggedStatus, completedStatus];
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).includes("/nudge")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(statuses.shift() ?? completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_fresh_lag", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      userId: "member_fresh_lag",
+    });
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_fresh_lag/nudge"
+      && init?.method === "POST"
+    )).toBe(false);
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("calls the hosted-local alarm test route with the bound user headers", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ ok: true });

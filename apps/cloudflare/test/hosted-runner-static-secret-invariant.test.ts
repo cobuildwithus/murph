@@ -287,6 +287,7 @@ async function serializeContainerRequestBody(
   let running = false;
   const container = new RunnerContainer({}, {
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://runner-callback.example.test",
   });
 
   Object.assign(container, {

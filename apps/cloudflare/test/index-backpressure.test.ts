@@ -105,7 +105,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
-  it("clears deploy-stale active leases through the production Durable Object constructor", async () => {
+  it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
     const harness = createUserRunnerDurableObject({
       CF_VERSION_METADATA: {
         id: "worker_version_current",
@@ -120,17 +120,18 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
 
     const nudge = await harness.durableObject.nudgeHostedRunnerForUser("member_123");
-    const row = harness.storage.state.storage.sql.exec<{
-      active_invocation_worker_version_id: string | null;
-    }>("SELECT active_invocation_worker_version_id FROM runner_meta WHERE singleton = 1").one();
+    const state = await stateStore.readState();
 
     expect(nudge).toMatchObject({
       accepted: true,
-      alreadyRunning: false,
-      immediateDriveStarted: true,
-      inFlight: false,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
     });
-    expect(row.active_invocation_worker_version_id).not.toBe("worker_version_previous");
+    expect(state.writeFence).toMatchObject({
+      expiresAt: "2999-01-01T00:00:00.000Z",
+      kind: "runtime",
+    });
   });
 });
 

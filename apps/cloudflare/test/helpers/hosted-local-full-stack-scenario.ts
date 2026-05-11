@@ -196,6 +196,8 @@ export async function startHostedLocalFullStackScenario(input: {
       ...hostedAssistantDevEnv,
       ...buildHostedLocalDeviceSyncProviderEnvClearances(),
       ...resolveHostedLocalSmokeWebEnv(baseEnvironment),
+      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "4000",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
