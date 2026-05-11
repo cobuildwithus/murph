@@ -46,7 +46,7 @@ describe("R399 layering readiness runner", () => {
       expect(output.status).toBe("research-local-aggregate-only");
       expect(output.anchor).toMatchObject({
         coefficientCountStored: false,
-        committedCalculatorCardPresent: false,
+        committedCalculatorCardPresent: true,
         featureFamilies: [
           "chronological-age",
           "sex",
@@ -66,6 +66,7 @@ describe("R399 layering readiness runner", () => {
       });
       expect(output.gates.r399AnchorPresent.status).toBe("passed");
       expect(output.gates.calculatorScorePathReady.status).toBe("blocked");
+      expect(output.gates.calculatorScorePathReady.reason).toContain("research model-card policy");
       expect(output.gates.biomarkerTransportConfirmed.status).toBe("blocked");
       expect(output.gates.wearableIncrementValidated.status).toBe("blocked");
       expect(output.productPromotionAuthorized).toBe(false);
@@ -227,7 +228,7 @@ describe("R399 layering readiness runner", () => {
         anchorPresent: true,
         biomarkerTransportConfirmed: false,
         productPromotionAuthorized: false,
-        r399CardPresent: false,
+        r399CardPresent: true,
         schemaVersion: R399_LAYERING_READINESS_SCHEMA_VERSION,
         status: "research-local-aggregate-only",
         wearableIncrementValidated: false,

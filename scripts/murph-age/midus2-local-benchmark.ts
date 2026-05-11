@@ -11,6 +11,7 @@ import type {
   MurphAgeLocalModelCardArtifact,
   MurphAgeModelFeature,
   MurphAgeRiskModel,
+  MurphAgeSex,
 } from "@murphai/health-metrics";
 
 export const MIDUS2_LOCAL_BENCHMARK_SCHEMA_VERSION = "murph-age-midus2-local-benchmark.v1" as const;
@@ -638,11 +639,27 @@ function scoreRuntimeModelFromValues(model: MurphAgeRiskModel, values: Record<st
 }
 
 function runtimeFeatureValue(feature: MurphAgeModelFeature, values: Record<string, number>): number {
-  const rawValue = feature.kind === "chronological-age"
-    ? values.age
-    : feature.kind === "sex"
-      ? values.male
-      : values[feature.metricKey];
+  let rawValue: number | undefined;
+  switch (feature.kind) {
+    case "chronological-age":
+      rawValue = values.age;
+      break;
+    case "chronological-age-squared":
+      rawValue = isFiniteNumber(values.age) ? values.age * values.age : undefined;
+      break;
+    case "age-sex-interaction": {
+      const sexIndicator = sexFeatureValue(feature.sex, values);
+      rawValue = isFiniteNumber(values.age) && isFiniteNumber(sexIndicator) ? values.age * sexIndicator : undefined;
+      break;
+    }
+    case "sex":
+      rawValue = sexFeatureValue(feature.sex, values);
+      break;
+    case "metric":
+    case "metric-missingness":
+      rawValue = values[feature.metricKey];
+      break;
+  }
   if (!isFiniteNumber(rawValue)) {
     throw new Error(`MIDUS 2 local model-card parity fixture is missing ${feature.key}.`);
   }
@@ -651,6 +668,11 @@ function runtimeFeatureValue(feature: MurphAgeModelFeature, values: Record<strin
     throw new Error(`MIDUS 2 local model-card parity does not support ${feature.transform.kind} fixtures.`);
   }
   return rawValue;
+}
+
+function sexFeatureValue(sex: MurphAgeSex, values: Record<string, number>): number | undefined {
+  if (!isFiniteNumber(values.male)) return undefined;
+  return sex === "male" ? values.male : 1 - values.male;
 }
 
 function finalizeRuntimeFeatures(

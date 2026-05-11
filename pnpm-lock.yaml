@@ -26,6 +26,9 @@ importers:
       '@cobuild/review-gpt':
         specifier: ^0.5.88
         version: 0.5.88(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:packages/health-metrics
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0

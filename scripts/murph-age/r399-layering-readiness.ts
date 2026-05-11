@@ -2,6 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  isMurphAgeModelCardProductAuthorized,
+  isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  resolveMurphAgeModelCardPolicy,
+} from "@murphai/health-metrics";
+
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
 
 export const R399_LAYERING_READINESS_SCHEMA_VERSION =
@@ -55,7 +61,7 @@ const FROZEN_R399_FEATURE_FAMILIES = [
   "age-nonlinearity",
 ] as const;
 const PRODUCT_BLOCKER_REASONS = [
-  "R399 is not a committed score-bearing model card in the current calculator.",
+  "R399 remains research-only and requires an ignored local model-card artifact before scoring.",
   "R399 uses NHIS proxy features; user-input mapping for self-rated health, smoking, diagnoses, and activity proxy is not locked.",
   "The MIDUS-to-CRELES biomarker transport diagnostic has not confirmed a stable additive biomarker increment over the target age/sex reference.",
   "Wearable features remain shadow/context-only and have no score-bearing residual-increment estimate.",
@@ -159,7 +165,8 @@ export async function runR399LayeringReadiness(
     readOptionalJson(options.transportOutputPath ?? DEFAULT_TRANSPORT_OUTPUT_PATH),
   ]);
 
-  const committedCalculatorCardPresent = false;
+  const r399Policy = resolveMurphAgeModelCardPolicy(R399_RESEARCH_CARD_ID);
+  const committedCalculatorCardPresent = isResearchOnlyR399PolicyPresent(r399Policy);
   const biomarkerIncrement = [
     summarizeMidus2Increment(midus2),
     summarizeCrelesIncrement(creles),
@@ -185,9 +192,9 @@ export async function runR399LayeringReadiness(
     },
     calculatorScorePathReady: {
       reason: committedCalculatorCardPresent
-        ? "A committed R399 research model-card policy is present."
-        : `No committed ${R399_RESEARCH_CARD_ID} model-card policy is present; current calculator policies cover lab5/lab9 research cards and context-only wearable/function cards.`,
-      status: committedCalculatorCardPresent ? "passed" : "blocked",
+        ? "Committed R399 research model-card policy is present; scoring still requires an ignored local model-card artifact and explicit research mode."
+        : `No committed ${R399_RESEARCH_CARD_ID} research model-card policy is present.`,
+      status: "blocked",
     },
     biomarkerTransportConfirmed: {
       reason: transportConfirmed
@@ -338,6 +345,8 @@ function buildRecommendations(input: {
   ];
   if (input.r399Present && !input.committedCalculatorCardPresent) {
     recommendations.push("Before layering R399 into the calculator, define a research-only R399 model-card/input bundle for NHIS proxy features without committing private coefficients.");
+  } else if (input.r399Present) {
+    recommendations.push("Keep the committed R399 card research-only; load private coefficients only through ignored local model-card artifacts in explicit research mode.");
   }
   if (!input.transportConfirmed) {
     recommendations.push("Do not promote the current MIDUS lab5 biomarker increment over R399; use it as a negative/weak transport result and test a narrower or different biomarker increment on another source.");
@@ -345,6 +354,19 @@ function buildRecommendations(input: {
   recommendations.push("Keep wearable activity/sleep/RHR/HRV as shadow increments until a locked residual-increment benchmark shows stable aggregate lift over the anchor.");
   recommendations.push("Use ReviewGPT for the next high-level model strategy choice, not for another metadata gate: whether to build the R399 research card first or prioritize another external biomarker/wearable increment source.");
   return recommendations;
+}
+
+function isResearchOnlyR399PolicyPresent(
+  policy: ReturnType<typeof resolveMurphAgeModelCardPolicy>,
+): boolean {
+  return policy?.cardId === R399_RESEARCH_CARD_ID
+    && policy.scoreBearing === true
+    && policy.acceptedBundleIds.includes("r399-nhis-proxy-anchor")
+    && policy.outcome.modelEndpoint === "10-year all-cause mortality"
+    && policy.outcome.horizonYears === 10
+    && policy.outcome.riskEndpoint === "all-cause-mortality"
+    && isMurphAgeModelCardProductAuthorized(policy) === false
+    && isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy) === false;
 }
 
 async function readR399ModelMetadata(filePath: string): Promise<R399ModelMetadata> {
