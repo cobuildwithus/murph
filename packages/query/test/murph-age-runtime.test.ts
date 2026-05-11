@@ -702,7 +702,7 @@ test("calculateMurphAgeFromVaultInputBundle derives wearable coverage against re
       wearablePointOnDate("steps", null, 10_000, "count", date, "activity-summary"),
       wearablePointOnDate("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm", date),
       wearablePointOnDate("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms", date),
-      wearablePointOnDate("total-sleep-minutes", null, 450, "minutes", date, "sleep-summary"),
+      wearablePointOnDate("total-sleep-minutes", null, 450, "minutes", date, "wearable-summary"),
     ]));
 
     const output = await calculateMurphAgeFromVaultInputBundle({
@@ -782,6 +782,30 @@ test("calculateMurphAgeFromVaultInputBundle derives wearable coverage against re
     assert.equal(summary.wearableBridge.partialFeatureKeys.includes("resting-heart-rate"), true);
   } finally {
     await rm(disjointVaultRoot, { force: true, recursive: true });
+  }
+
+  const sleepSummaryRecoveryVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(sleepSummaryRecoveryVaultRoot);
+    insertMetricPoints(sleepSummaryRecoveryVaultRoot, wearableCoverageWindowDates("2026-04-26", 14).flatMap((date) => [
+      wearablePointOnDate("steps", null, 10_000, "count", date, "activity-summary"),
+      wearablePointOnDate("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms", date, "sleep-summary"),
+    ]));
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot: sleepSummaryRecoveryVaultRoot,
+    });
+
+    assert.equal(output.status, "context-only");
+    assert.equal(wearableFeatureValue(output, "wearable-valid-day-count-28d"), 14);
+    assert.equal(wearableFeatureValue(output, "wearable-valid-night-count-28d"), 14);
+    assert.equal(wearableFeatureValue(output, "wearable-coverage-index"), 0.5);
+  } finally {
+    await rm(sleepSummaryRecoveryVaultRoot, { force: true, recursive: true });
   }
 
   const oneSidedVaultRoot = await createProjectionVault();
