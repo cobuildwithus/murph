@@ -762,6 +762,77 @@ test('age report can run explicit local research mode through the public report 
   }
 })
 
+test('age report can explicitly select the R399 NHIS proxy anchor card', async () => {
+  const vaultRoot = await createProjectionVault()
+  try {
+    await rebuildQueryProjection(vaultRoot)
+    insertMetricPoints(vaultRoot, [
+      ...r399ProxyMetricPoints(),
+      ...wearableContextMetricPoints(),
+      wearablePoint('wearable-valid-day-count-28d', null, 25, 'count'),
+      wearablePoint('wearable-coverage-index', null, 0.86, 'ratio'),
+    ])
+    await writeLocalModelCardArtifact(vaultRoot, 'r399.json', {
+      cardId: 'r399_nhis_proxy_10y_acm_research',
+      model: fixtureR399ProxyResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+
+    const report = requireData(await runSliceCli<MurphAgePublicCalculatorReport>([
+      'age',
+      'report',
+      '--vault',
+      vaultRoot,
+      '--as-of',
+      '2026-05-10T00:00:00.000Z',
+      '--chronological-age-years',
+      '52',
+      '--sex',
+      'female',
+      '--mode',
+      'research',
+      '--card-id',
+      'r399_nhis_proxy_10y_acm_research',
+    ]))
+
+    assert.equal(report.mode, 'research')
+    assert.equal(report.status, 'ready')
+    assert.equal(report.inputReadiness.bundle.bundleId, 'r399-nhis-proxy-anchor')
+    assert.equal(report.authorization.cardId, 'r399_nhis_proxy_10y_acm_research')
+    assert.equal(report.authorization.productAuthorized, false)
+    assert.equal(report.authorization.riskToAgeDisplayAuthorized, false)
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    assert.equal(report.displaySummary.contextOnlyMetricKeys.includes('steps'), true)
+    assert.equal(report.displaySummary.selectedScoreBearingMetricKeys.includes('bmi'), true)
+    assert.equal(report.displaySummary.selectedScoreBearingMetricKeys.includes('self-rated-health'), true)
+    assert.equal(report.result?.authorization.cardId, 'r399_nhis_proxy_10y_acm_research')
+    assert.equal(report.result?.authorization.evidenceClass, 'research-internal')
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'bmi'), true)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'self-rated-health'), true)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'steps'), false)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.status === 'imputed'), true)
+    assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
+
+    const encodedReport = JSON.stringify(report)
+    for (const forbidden of [
+      'metric-point:',
+      'selectedPointIds',
+      '"value"',
+      '"unit"',
+      '"label"',
+      '"message"',
+      'fixture-r399-proxy-anchor-model',
+      'modelId',
+      'coefficient',
+      'referenceRiskCurve',
+    ]) {
+      assert.equal(encodedReport.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report consumes saved canonical blood tests and measurements through projection', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-canonical-')
   try {
@@ -1652,6 +1723,22 @@ function wearableContextMetricPoints(): MetricPoint[] {
   ]
 }
 
+function r399ProxyMetricPoints(): MetricPoint[] {
+  return [
+    measurementPoint('bmi', null, 24.2, 'kg/m^2'),
+    metricPoint({
+      effectiveDate: '2026-05-08',
+      id: 'metric-point:self-rated-health:2026-05-08:survey:0',
+      metricKey: 'self-rated-health',
+      observedAt: '2026-05-08T08:00:00.000Z',
+      recordId: 'survey_self_rated_health',
+      sourceKind: 'survey-response',
+      unit: 'score',
+      value: 2,
+    }),
+  ]
+}
+
 function labPoint(metricKey: string, biomarkerKey: string, value: number, unit: string): MetricPoint {
   return metricPoint({
     biomarkerKey,
@@ -1756,6 +1843,120 @@ function fixtureLab5ResearchModel(): MurphAgeRiskModel {
       labFeature('bmi', 'BMI', 'bmi', 0.08, 25, 4, 'kg/m^2'),
     ],
     modelId: 'fixture-lab5-research-model',
+  }
+}
+
+function fixtureR399ProxyResearchModel(): MurphAgeRiskModel {
+  return {
+    endpoint: '10-year all-cause mortality',
+    features: [
+      {
+        coefficient: 0.035,
+        key: 'age',
+        kind: 'chronological-age',
+        label: 'Age',
+        moduleId: 'demographics',
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 52, standardDeviation: 14 },
+      },
+      {
+        coefficient: 0.01,
+        key: 'age-squared',
+        kind: 'chronological-age-squared',
+        label: 'Age squared',
+        moduleId: 'demographics',
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 2900, standardDeviation: 1400 },
+      },
+      {
+        coefficient: -0.12,
+        key: 'female',
+        kind: 'sex',
+        label: 'Female',
+        moduleId: 'demographics',
+        sex: 'female',
+      },
+      {
+        coefficient: -0.02,
+        key: 'age-x-female',
+        kind: 'age-sex-interaction',
+        label: 'Age by female',
+        moduleId: 'demographics',
+        sex: 'female',
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 27, standardDeviation: 25 },
+      },
+      {
+        coefficient: 0.05,
+        expectedUnit: 'kg/m^2',
+        key: 'bmi',
+        kind: 'metric',
+        label: 'BMI',
+        metricKey: 'bmi',
+        missingValue: 27,
+        moduleId: 'body',
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 27, standardDeviation: 5 },
+      },
+      {
+        coefficient: 0.02,
+        key: 'bmi-missing',
+        kind: 'metric-missingness',
+        label: 'BMI missing',
+        metricKey: 'bmi',
+        moduleId: 'data-quality',
+      },
+      {
+        coefficient: 0.09,
+        key: 'self-rated-health',
+        kind: 'metric',
+        label: 'Self-rated health',
+        metricKey: 'self-rated-health',
+        missingValue: 3,
+        moduleId: 'function',
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 3, standardDeviation: 1 },
+      },
+      {
+        coefficient: 0.03,
+        key: 'self-rated-health-missing',
+        kind: 'metric-missingness',
+        label: 'Self-rated health missing',
+        metricKey: 'self-rated-health',
+        moduleId: 'data-quality',
+      },
+      {
+        coefficient: 0.06,
+        key: 'smoking-status',
+        kind: 'metric',
+        label: 'Smoking status',
+        metricKey: 'smoking-status-proxy',
+        missingValue: 1,
+        moduleId: 'behavior',
+        required: false,
+        transform: { clamp: { max: 3, min: -3 }, kind: 'z-score', mean: 1, standardDeviation: 0.8 },
+      },
+      {
+        coefficient: 0.02,
+        key: 'smoking-status-missing',
+        kind: 'metric-missingness',
+        label: 'Smoking status missing',
+        metricKey: 'smoking-status-proxy',
+        moduleId: 'data-quality',
+      },
+    ],
+    horizonYears: 10,
+    intercept: -4.4,
+    modelId: 'fixture-r399-proxy-anchor-model',
+    modelVersion: 'test.0',
+    referencePopulation: 'fixture NHIS proxy reference curve',
+    referenceRiskCurve: [
+      { ageYears: 20, riskProbability: 0.01 },
+      { ageYears: 40, riskProbability: 0.03 },
+      { ageYears: 60, riskProbability: 0.1 },
+      { ageYears: 80, riskProbability: 0.3 },
+    ],
+    uncertainty: {
+      baseYears: 2,
+      perMissingOptionalFeatureYears: 0.5,
+    },
   }
 }
 
