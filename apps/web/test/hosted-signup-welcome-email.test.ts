@@ -79,14 +79,14 @@ describe("hosted signup welcome email", () => {
         from: "Murph founder <founder@example.com>",
         html: expect.stringContaining("Hey, welcome to Murph!"),
         subject: "Welcome to Murph",
-        text: expect.stringContaining("I'm Murph founder, the founder of Murph."),
+        text: expect.stringContaining("I'm Murph founder, the founder."),
         to: ["member@example.com"],
       });
       expect(payload.html).not.toContain("<h1");
       expect(payload.html).not.toContain("Welcome to Murph</h1>");
       expect(payload.text).toContain("- Murph founder");
-      expect(payload.text).toContain("Email me if anything's confusing or not working.");
-      expect(payload.html).toContain("Email me if anything&#39;s confusing or not working.");
+      expect(payload.text).toContain("Hit reply if anything's confusing or broken.");
+      expect(payload.html).toContain("Hit reply if anything&#39;s confusing or broken.");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
@@ -112,7 +112,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Best thing to do right now is sync your wearable or health data and text Murph.",
+        "Best next step: sync your data and text Murph.",
       );
       expect(payload.text).toContain(
         "Shoot Murph a text at (+1) 555-010-0099 to start your first experiment.",
