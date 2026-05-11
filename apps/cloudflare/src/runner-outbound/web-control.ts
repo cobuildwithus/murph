@@ -21,7 +21,7 @@ import {
   requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceWriteHeaders,
   RunnerRuntimeWriteFenceError,
-} from "./active-lease.ts";
+} from "./write-fence.ts";
 import {
   handleRunnerMailboxPayloadDecodeRequest,
 } from "./mailbox-payload-decode.ts";

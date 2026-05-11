@@ -18,7 +18,7 @@ import {
   requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceWriteHeaders,
   RunnerRuntimeWriteFenceError,
-} from "./runner-outbound/active-lease.ts";
+} from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {

@@ -397,6 +397,10 @@ export class RunnerStateStore {
     });
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; this path is intentionally inert.
+   */
   async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false; record: RunnerStateRecord }> {
     return {
       recorded: false,
@@ -428,6 +432,10 @@ export class RunnerStateStore {
     return await this.scheduleIdleCheckpoint(input);
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; this path is intentionally inert.
+   */
   async recordActiveInvocationHeartbeatInstruction(_input?: unknown): Promise<{
     ok: false;
     reason: "no_active_invocation";
@@ -567,6 +575,10 @@ export class RunnerStateStore {
     };
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use `validateWriteFenceToken`.
+   */
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -613,6 +625,11 @@ export class RunnerStateStore {
     };
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use
+   * `recordWriteFenceWorkspaceCheckpoint`.
+   */
   async recordActiveInvocationWorkspaceCheckpoint(input: {
     attemptId: string;
     leaseGeneration: string;

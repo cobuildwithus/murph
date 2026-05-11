@@ -4287,6 +4287,48 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("failed runtime invocation increments retry_count once, keeps wakePending, and schedules one retry alarm", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("Hosted runner container timed out.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      retryDelayMs: 5_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_pending = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(
+      sql.exec<{
+        retryAt: string | null;
+        retryCount: number;
+        wakePending: number;
+      }>(
+        `SELECT retry_at AS retryAt,
+                retry_count AS retryCount,
+                wake_pending AS wakePending
+         FROM runner_meta
+         WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      retryAt: "2026-04-27T00:00:05.000Z",
+      retryCount: 1,
+      wakePending: 1,
+    }]);
+    expect(alarms).toEqual([FIXED_NOW]);
+  });
+
   it("lets a fresh nudge restart work after retry attempts are exhausted", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

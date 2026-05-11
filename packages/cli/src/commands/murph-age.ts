@@ -206,8 +206,8 @@ const murphAgePublicInputReadinessSummarySchema = z.object({
 const murphAgeInputScoreReadinessStatusSchema = z.enum([
   'context-only',
   'input-incomplete',
-  'product-age-ready',
-  'product-risk-ready',
+  'product-age-policy-ready',
+  'product-risk-policy-ready',
   'research-ready-product-blocked',
 ])
 const murphAgeInputProductBlockedReasonSchema = z.union([
@@ -221,10 +221,10 @@ const murphAgeInputScoreReadinessSchema = z.object({
   bundleId: murphAgeInputBundleIdSchema,
   contextOnly: z.boolean(),
   inputReady: z.boolean(),
-  productAgeReady: z.boolean(),
+  productAgePolicyReady: z.boolean(),
   productBlockedReasons: z.array(murphAgeInputProductBlockedReasonSchema),
   productPromotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
-  productRiskReady: z.boolean(),
+  productRiskPolicyReady: z.boolean(),
   recommendedCardId: murphAgeRecommendedModelCardIdSchema,
   researchModelCardRequired: z.boolean(),
   researchReadiness: z.enum([

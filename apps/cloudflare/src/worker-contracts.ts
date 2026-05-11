@@ -1,6 +1,8 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
+export const LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER = "2026-05-25";
+
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
@@ -14,12 +16,20 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
+   */
   ownsActiveInvocationLease?(input: {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; this path is intentionally inert.
+   */
   recordActiveInvocationHeartbeat?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -31,6 +41,11 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use
+   * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
+   */
   recordActiveInvocationWorkspaceCheckpoint?(input: {
     attemptId: string;
     leaseGeneration: string;

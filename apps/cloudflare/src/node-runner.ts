@@ -20,7 +20,6 @@ import {
 } from "./runner-native-parser-toolchain.ts";
 import {
   runHostedWorkspaceInvocationIsolatedDetailed,
-  resolveHostedRunnerWarmWorkspaceVaultRoot,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
@@ -47,11 +46,6 @@ import {
 import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.ts";
-import {
-  createLiveBrowserVaultProjectionHash,
-  refreshBrowserVaultReplicaFromLiveWorkspace,
-  type BrowserVaultReplicaRefreshResult,
-} from "./browser-vault-refresh/refresher.ts";
 
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
@@ -85,13 +79,6 @@ export interface HostedWorkspaceInvocationRunner {
     options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 }
-
-export interface HostedBrowserVaultReplicaRefreshInput {
-  runtime?: HostedAssistantRuntimeConfig | null;
-  userId: string;
-}
-
-export type HostedBrowserVaultReplicaRefreshResult = BrowserVaultReplicaRefreshResult;
 
 export function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
@@ -234,59 +221,6 @@ export function createHostedWorkspaceInvocationRunner(
 }
 
 export const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
-
-export async function refreshHostedBrowserVaultReplica(
-  input: HostedBrowserVaultReplicaRefreshInput,
-  options?: HostedWorkspaceInvocationOptions,
-): Promise<HostedBrowserVaultReplicaRefreshResult> {
-  const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
-  const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
-  const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
-  const generatedAt = new Date().toISOString();
-  const projectionHash = createLiveBrowserVaultProjectionHash({
-    generatedAt,
-    userId: input.userId,
-  });
-  const platform = buildHostedExecutionRuntimePlatform({
-    boundUserId: input.userId,
-    commitTimeoutMs: runtime.commitTimeoutMs,
-    internalWorkerProxyToken,
-    localInternalProxyBaseUrl,
-    workspaceCheckpointBridge: null,
-  });
-  const workspaceRead = await readBrowserVaultRefreshWorkspace({
-    platform,
-    userId: input.userId,
-  });
-  return await refreshBrowserVaultReplicaFromLiveWorkspace({
-    generatedAt,
-    platform,
-    projectionHash,
-    signal: options?.signal,
-    userId: input.userId,
-    vaultRoot: resolveHostedRunnerWarmWorkspaceVaultRoot(input.userId),
-    workspace: workspaceRead.workspace,
-  });
-}
-
-async function readBrowserVaultRefreshWorkspace(input: {
-  platform: ReturnType<typeof buildHostedExecutionRuntimePlatform>;
-  userId: string;
-}) {
-  if (!input.platform.workspacePort?.read) {
-    throw new TypeError("Browser-vault refresh requires a workspace read port.");
-  }
-
-  const workspaceRead = await input.platform.workspacePort.read();
-  if (
-    workspaceRead.workspace
-    && workspaceRead.workspace.userId !== input.userId
-  ) {
-    throw new Error("Browser-vault refresh workspace user did not match the requested user.");
-  }
-
-  return workspaceRead;
-}
 
 function resolveHostedWorkspaceInProcessVaultRoot(): string {
   const vaultRoot = process.env.VAULT?.trim();

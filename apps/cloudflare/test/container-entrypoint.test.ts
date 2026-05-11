@@ -368,6 +368,50 @@ describe("startHostedContainerEntrypoint", () => {
     await expect(response.text()).resolves.toBe("Not found");
   });
 
+  it("returns gone for the removed browser-vault refresh side path after auth without loading the runner", async () => {
+    const loadNodeRunner = vi.fn(async () => nodeRunner);
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    await vi.waitFor(() => expect(loadNodeRunner).toHaveBeenCalledTimes(1));
+    loadNodeRunner.mockClear();
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/browser-vault-refresh`, {
+      body: "{]",
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toEqual({
+      code: "browser_vault_refresh_removed",
+      error: "Browser-vault refresh side path removed.",
+    });
+    expect(loadNodeRunner).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        level: "info",
+        message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
+        phase: "failed",
+      }),
+    );
+  });
+
   it("fails closed when the initial runner control token header is missing", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: null,

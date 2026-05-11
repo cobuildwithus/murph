@@ -340,6 +340,10 @@ export class HostedUserRunner {
     return (await this.stateStore.validateWriteFenceToken(input)).owns;
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
+   */
   async ownsActiveInvocationLease(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -364,6 +368,11 @@ export class HostedUserRunner {
     return { recorded: result.recorded };
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; live code must use
+   * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
+   */
   async recordActiveInvocationWorkspaceCheckpoint(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -378,6 +387,10 @@ export class HostedUserRunner {
     });
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; this path is intentionally inert.
+   */
   async recordActiveInvocationHeartbeat(_input?: unknown): Promise<{
     ok: false;
     reason: "no_active_invocation";
@@ -388,6 +401,10 @@ export class HostedUserRunner {
     };
   }
 
+  /**
+   * Legacy deployed-caller compatibility only.
+   * Delete after 2026-05-25; this path is intentionally inert.
+   */
   async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false }> {
     return { recorded: false };
   }
@@ -485,6 +502,9 @@ export class HostedUserRunner {
           aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
           reason: due.reason === "retry" ? "retry" : input.reason,
         });
+        if (lastResult.status === "scheduled") {
+          return lastResult;
+        }
         continue;
       }
 
@@ -562,13 +582,13 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
-      await this.stateStore.clearWriteFenceAfterFailure({
+      const failed = await this.stateStore.clearWriteFenceAfterFailure({
         error,
         finishedAt: new Date().toISOString(),
         token,
         retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
       });
-      await this.syncAlarm(await this.stateStore.readState());
+      await this.syncAlarm(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -583,7 +603,10 @@ export class HostedUserRunner {
         phase: "failed",
         userId: initialRecord.userId,
       });
-      throw error;
+      return {
+        nextWakeAt: readRunnerStateAlarmAt(failed.record),
+        status: "scheduled",
+      };
     }
   }
 
