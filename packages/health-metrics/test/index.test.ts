@@ -7,6 +7,7 @@ import {
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   assessMurphAgeWearableShadowIncrements,
@@ -18,6 +19,7 @@ import {
   formatTargetValue,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
+  listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
   listMetricDefinitions,
@@ -28,6 +30,7 @@ import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   resolveMurphAgeModelCardPolicy,
+  resolveMurphAgeWearableBridgeFeatureSpec,
   resolveMurphAgeWearableShadowIncrementPolicy,
   selectMetricGoalProgress,
   selectMetricSeries,
@@ -1776,6 +1779,75 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(keys.includes("crp"), false);
   assert.equal(keys.includes("hs-crp"), false);
+});
+
+test("exposes non-score-bearing wearable bridge feature specs for research routing", () => {
+  const specs = listMurphAgeWearableBridgeFeatureSpecs();
+  const featureKeys = specs.map((spec) => spec.featureKey);
+
+  assert.equal(new Set(featureKeys).size, featureKeys.length);
+  assert.deepEqual(featureKeys, [
+    "wearable-coverage-quality",
+    "activity-volume",
+    "sedentary-time",
+    "sleep-duration-regularity",
+    "resting-heart-rate",
+    "hrv-rmssd",
+    "estimated-vo2-max",
+  ]);
+
+  for (const spec of specs) {
+    assert.equal(spec.schemaVersion, MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION);
+    assert.equal(spec.productAuthorized, false);
+    assert.equal(spec.riskEffect, "not-estimated");
+    assert.equal(spec.scoreBearing, false);
+    assert.equal(spec.scoreContributionAuthorized, false);
+    assert.equal(spec.outputBoundary.aggregateOnly, true);
+    assert.equal(spec.outputBoundary.rowValuesExportAllowed, false);
+    assert.equal(spec.outputBoundary.participantLevelExportAllowed, false);
+    assert.equal(spec.outputBoundary.predictionsExportAllowed, false);
+    assert.equal(spec.outputBoundary.coefficientsExportAllowed, false);
+    assert.equal(spec.outputBoundary.productDisplayExportAllowed, false);
+    assert.ok(spec.metricKeys.length >= 1);
+    assert.ok(spec.measurementWindowDays.every((days) => Number.isInteger(days) && days > 0));
+  }
+
+  const firstWave = specs.filter((spec) => spec.unlockPriority === "first").map((spec) => spec.featureKey);
+  assert.deepEqual(firstWave, [
+    "wearable-coverage-quality",
+    "activity-volume",
+    "sedentary-time",
+  ]);
+
+  const activityVolume = resolveMurphAgeWearableBridgeFeatureSpec("activity-volume");
+  assert.equal(activityVolume?.role, "shadow-increment-signal");
+  assert.equal(activityVolume?.family, "activity");
+  assert.equal(activityVolume?.metricKeys.includes("steps"), true);
+  assert.equal(activityVolume?.metricKeys.includes("mvpa-minutes"), true);
+  assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-valid-day-count-28d"), true);
+  assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-coverage-index"), true);
+
+  const sleep = resolveMurphAgeWearableBridgeFeatureSpec("sleep-duration-regularity");
+  assert.equal(sleep?.unlockPriority, "second");
+  assert.equal(sleep?.methodQualifier, "required");
+  assert.equal(sleep?.sourceKinds.includes("sleep-summary"), true);
+  assert.equal(sleep?.requiredQualityMetricKeys.includes("wearable-valid-night-count-28d"), true);
+
+  const hrv = resolveMurphAgeWearableBridgeFeatureSpec("hrv-rmssd");
+  assert.equal(hrv?.role, "deferred-context");
+  assert.equal(hrv?.unlockPriority, "defer");
+  assert.equal(hrv?.methodQualifier, "required");
+
+  if (activityVolume) {
+    (activityVolume.metricKeys as string[]).push("hba1c");
+    (activityVolume.outputBoundary as { rowValuesExportAllowed: boolean }).rowValuesExportAllowed = true;
+    (activityVolume.requiredQualityMetricKeys as string[]).push("glucose");
+  }
+
+  const freshActivityVolume = resolveMurphAgeWearableBridgeFeatureSpec("activity-volume");
+  assert.equal(freshActivityVolume?.metricKeys.includes("hba1c"), false);
+  assert.equal(freshActivityVolume?.outputBoundary.rowValuesExportAllowed, false);
+  assert.equal(freshActivityVolume?.requiredQualityMetricKeys.includes("glucose"), false);
 });
 
 test("exposes wearable shadow increment policies without score authorization", () => {
