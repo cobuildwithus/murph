@@ -1049,6 +1049,17 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
 const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES =
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS.map(completeWearableShadowIncrementPolicy);
 
+const MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS = new Set(
+  MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
+);
+
+const MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS = new Set([
+  ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS,
+]);
+
 const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_BP_BODY_FEATURES.map((feature) => feature.featureKey),
@@ -1082,12 +1093,20 @@ export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridge
 }
 
 export function listMurphAgeInputBundleMetricKeys(): string[] {
-  return uniqueStrings([
-    ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
-    ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
-    ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
-    ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
-  ]);
+  return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
+}
+
+export function isMurphAgeInputBundleMetricPointAllowed(
+  point: Pick<MetricPoint, "metricKey" | "source">,
+): boolean {
+  const metricKey = resolveMetricInputKey(point.metricKey);
+  if (!MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS.has(metricKey)) return false;
+  if (MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS.has(metricKey)) {
+    return point.source.kind === "activity-summary"
+      || point.source.kind === "sleep-summary"
+      || point.source.kind === "wearable-summary";
+  }
+  return point.source.kind === "measurement" || point.source.kind === "test-result";
 }
 
 export function resolveMurphAgeModelCardPolicy(

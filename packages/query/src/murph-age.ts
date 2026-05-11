@@ -8,6 +8,7 @@ import {
   calculateMurphAgeFromInputBundle,
   createMurphAgeAbstainedAuthorization,
   createMurphAgeCustomModelAuthorization,
+  isMurphAgeInputBundleMetricPointAllowed,
   listMurphAgeInputBundleMetricKeys,
   resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
@@ -441,7 +442,7 @@ async function loadMurphAgeInputBundleMetricPoints(input: {
 }): Promise<MetricPoint[]> {
   const filters = metricPointFiltersForMurphAgeInputBundle(input.asOf);
   const points = await loadMetricPointsForFilters({ asOf: input.asOf, filters, vaultRoot: input.vaultRoot });
-  return points.filter(isAllowedMurphAgeInputBundlePoint);
+  return points.filter(isMurphAgeInputBundleMetricPointAllowed);
 }
 
 async function loadMetricPointsForFilters(input: {
@@ -641,31 +642,3 @@ function normalizeCalculatorMode(value: unknown): MurphAgeCalculatorMode | null 
   if (value === undefined) return "product";
   return value === "product" || value === "research" ? value : null;
 }
-
-function isAllowedMurphAgeInputBundlePoint(point: MetricPoint): boolean {
-  const metricKey = resolveMetricInputKey(point.metricKey);
-  if (WEARABLE_CONTEXT_METRIC_KEYS.has(metricKey)) {
-    return point.source.kind === "activity-summary"
-      || point.source.kind === "sleep-summary"
-      || point.source.kind === "wearable-summary";
-  }
-  return point.source.kind === "measurement" || point.source.kind === "test-result";
-}
-
-const WEARABLE_CONTEXT_METRIC_KEYS = new Set([
-  "steps",
-  "activity-minutes",
-  "mvpa-minutes",
-  "sedentary-minutes",
-  "estimated-vo2-max",
-  "total-sleep-minutes",
-  "sleep-duration-variability-minutes",
-  "sleep-efficiency",
-  "sleep-regularity-score",
-  "sleep-midpoint-variability-minutes",
-  "resting-heart-rate",
-  "hrv-rmssd",
-  "wearable-valid-day-count-28d",
-  "wearable-valid-night-count-28d",
-  "wearable-coverage-index",
-]);

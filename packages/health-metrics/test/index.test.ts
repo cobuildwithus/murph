@@ -18,6 +18,7 @@ import {
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
+  isMurphAgeInputBundleMetricPointAllowed,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeWearableBridgeFeatureSpecs,
@@ -1782,6 +1783,34 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("wearable-valid-night-count-28d"), true);
   assert.equal(keys.includes("crp"), false);
   assert.equal(keys.includes("hs-crp"), false);
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("steps", "wearable-summary")),
+    true,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("steps", "test-result")),
+    false,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("hba1c", "test-result")),
+    true,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("hba1c", "wearable-summary")),
+    false,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("bmi", "measurement")),
+    true,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("bmi", "sample-summary")),
+    false,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("apob", "test-result")),
+    false,
+  );
 });
 
 test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
@@ -3606,6 +3635,19 @@ function measurementMetricPoint(metricKey: string, unit: string, value: number):
     sourceKind: "measurement",
     unit,
     value,
+  });
+}
+
+function wearableMetricPoint(metricKey: string, sourceKind: MetricPoint["source"]["kind"]): MetricPoint {
+  return metricPoint({
+    effectiveDate: "2026-05-08",
+    id: `metric-point:${metricKey}:2026-05-08:${sourceKind}:0`,
+    metricKey,
+    observedAt: "2026-05-08T08:00:00.000Z",
+    recordId: `${sourceKind}_${metricKey.replaceAll("-", "_")}`,
+    sourceKind,
+    unit: "count",
+    value: 1,
   });
 }
 
