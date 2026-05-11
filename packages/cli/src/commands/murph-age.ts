@@ -149,11 +149,19 @@ const murphAgeInputBundleReadinessSchema = z.object({
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
 })
+const murphAgeRuntimeInputReadinessSchema = z.object({
+  key: z.enum(['chronological-age-years', 'sex']),
+  label: z.string().min(1),
+  required: z.literal(true),
+  source: z.literal('runtime-option'),
+  status: z.literal('required'),
+})
 
 export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
-  schemaVersion: z.literal('murph.age.input-readiness.v1'),
+  runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
+  schemaVersion: z.literal('murph.age.input-readiness.v2'),
 })
 
 const murphAgePublicAuthorizationSchema = z.object({
