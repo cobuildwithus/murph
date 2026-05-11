@@ -4329,6 +4329,157 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual([FIXED_NOW]);
   });
 
+  it("does not increment retry twice when alarm sync fails after recording runtime failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let setAlarmCalls = 0;
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("Hosted runner container timed out.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      onSetAlarm() {
+        setAlarmCalls += 1;
+        if (setAlarmCalls === 1) {
+          throw new Error("alarm scheduling unavailable after runtime failure");
+        }
+      },
+      retryDelayMs: 5_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_pending = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(setAlarmCalls).toBe(2);
+    expect(
+      sql.exec<{
+        retryAt: string | null;
+        retryCount: number;
+        wakePending: number;
+      }>(
+        `SELECT retry_at AS retryAt,
+                retry_count AS retryCount,
+                wake_pending AS wakePending
+         FROM runner_meta
+         WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      retryAt: "2026-04-27T00:00:05.000Z",
+      retryCount: 1,
+      wakePending: 1,
+    }]);
+    expect(alarms).toEqual([FIXED_NOW]);
+  });
+
+  it("logs runtime failure before retry alarm sync fallback", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let setAlarmCalls = 0;
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      throw new Error("Hosted runner container timed out.");
+    });
+    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      onSetAlarm() {
+        setAlarmCalls += 1;
+        if (setAlarmCalls === 1) {
+          throw new Error("alarm scheduling unavailable after runtime failure");
+        }
+      },
+      retryDelayMs: 5_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_pending = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    const runtimeFailureLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted runner runtime wake failed.");
+    expect(runtimeFailureLog).toEqual(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          workspaceAttemptId: expect.any(String),
+          workspaceReason: "alarm",
+          workspaceWriteFenceGeneration: "1",
+        }),
+        level: "warn",
+        message: "Hosted runner runtime wake failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+    expect(runtimeFailureLog).not.toHaveProperty("error");
+  });
+
+  it("rethrows post-completion scheduling failures for generic retry scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let setAlarmCalls = 0;
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: "2026-04-27T00:04:00.000Z",
+      status: "idle" as const,
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
+      invoke,
+      onSetAlarm() {
+        setAlarmCalls += 1;
+        if (setAlarmCalls === 1) {
+          throw new Error("alarm scheduling unavailable after runtime completion");
+        }
+      },
+      retryDelayMs: 5_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_pending = 1
+       WHERE user_id = ?`,
+      "member_123",
+    );
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(setAlarmCalls).toBe(2);
+    expect(
+      sql.exec<{
+        nextWakeAt: string | null;
+        retryAt: string | null;
+        retryCount: number;
+        wakePending: number;
+      }>(
+        `SELECT next_wake_at AS nextWakeAt,
+                retry_at AS retryAt,
+                retry_count AS retryCount,
+                wake_pending AS wakePending
+         FROM runner_meta
+         WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      nextWakeAt: "2026-04-27T00:04:00.000Z",
+      retryAt: "2026-04-27T00:00:05.000Z",
+      retryCount: 1,
+      wakePending: 1,
+    }]);
+    expect(alarms).toEqual([FIXED_NOW]);
+  });
+
   it("lets a fresh nudge restart work after retry attempts are exhausted", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

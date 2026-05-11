@@ -1,6 +1,6 @@
 # Runtime Wake Single Retry
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -45,6 +45,8 @@ Updated: 2026-05-11
 
 - Keep the behavior local to `runRuntimeWake`: after `clearWriteFenceAfterFailure` succeeds, sync the alarm from that returned record and return `status: "scheduled"` instead of rethrowing.
 - Leave pre-write-fence failures throwing so the generic `scheduleRetryAfterFailure` path still covers failures that cannot be represented by an active invocation token.
+- If `clearWriteFenceAfterFailure` reports `failed: false`, rethrow so post-completion scheduling failures still use the generic retry scheduler instead of being swallowed as write-fence-owned failures.
+- If retry state is recorded but alarm sync throws, rethrow an internal already-recorded error so outer retry handling retries alarm sync without incrementing retry counters again.
 
 ## Verification
 
@@ -56,3 +58,13 @@ Updated: 2026-05-11
 ## Current evidence
 
 - Initial inspection found `runRuntimeWake` already calls `clearWriteFenceAfterFailure`, but then rethrows into detached/alarm catchers that call `scheduleRetryAfterFailure`.
+- Security/privacy audit found the first patch swallowed post-completion scheduling failures where the write fence had already been cleared; the patch now gates the scheduled return on `failed.failed === true`.
+- Second security/privacy audit found alarm-sync failure after recording a runtime failure could still double-count through outer retry handling; the patch now retries alarm sync without another `scheduleRetry` mutation.
+- Final completion review found the alarm-sync-failure fallback skipped the original runtime failure log; the patch now emits the metadata-only runtime failure log before alarm sync.
+- Focused regression passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts -t "failed runtime invocation increments retry_count once|does not increment retry twice when alarm sync fails|logs runtime failure before retry alarm sync fallback|rethrows post-completion scheduling failures" --no-coverage`.
+- `pnpm --dir apps/cloudflare typecheck` passed before unrelated browser-vault container-side dirty edits appeared; a later rerun failed on unrelated `apps/cloudflare/test/runner-container.test.ts` references to `refreshHostedExecutionContainerBrowserVaultReplica`.
+- `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-11-runtime-wake-single-retry.md` passed.
+- Root `pnpm typecheck` was attempted but did not run because another active `apps/cloudflare verify` process held the workspace artifact lock for 12+ minutes; the queued typecheck process was stopped.
+- Final security/privacy review found no issues.
+- Final coverage-write pass made no edits and judged coverage adequate.
+Completed: 2026-05-11
