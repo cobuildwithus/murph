@@ -365,7 +365,7 @@ export const murphAgeReportResultSchema = z.object({
   inputReadiness: murphAgePublicInputReadinessSummarySchema,
   mode: murphAgeModeSchema,
   result: murphAgePublicResultSchema.nullable(),
-  schemaVersion: z.literal('murph.age.public-calculator-report.v2'),
+  schemaVersion: z.literal('murph.age.public-calculator-report.v3'),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
 })
