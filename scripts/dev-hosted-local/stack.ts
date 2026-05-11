@@ -675,6 +675,7 @@ export async function startHostedLocalDevStack(input: {
             );
           }),
         ]);
+        ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (linqWebhookSetup?.shouldRegister) {
           await waitForHostedLocalLinqWebhookTarget({
             setup: linqWebhookSetup,
@@ -685,7 +686,6 @@ export async function startHostedLocalDevStack(input: {
             stderrTarget: input.stderrTarget,
           });
         }
-        ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (workerRuntimeEnv !== null) {
           await maybeRunRunnerContainerSmoke({
             config,
