@@ -4148,6 +4148,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   });
   assert.equal(explicitR399WithLab9BundleDoesNotScore.status, "abstain");
   assert.equal(explicitR399WithLab9BundleDoesNotScore.result, null);
+  assert.equal(explicitR399WithLab9BundleDoesNotScore.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(explicitR399WithLab9BundleDoesNotScore.cardPolicy?.cardId, "r399_nhis_proxy_10y_acm_research");
   assert.equal(
     explicitR399WithLab9BundleDoesNotScore.warnings.some((warning) =>
       warning.code === "MODEL_FEATURE_MISSING" && warning.message.includes("at least one observed proxy input")
