@@ -42,6 +42,9 @@ import {
   runHostedDeviceSyncWakeLane,
 } from "./maintenance.ts";
 import {
+  readRuntimeLivenessInstruction,
+} from "./liveness.ts";
+import {
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes,
   drainHostedProviderCleanupAfterCommit,
   readHostedProviderCleanupCheckpoint,
@@ -177,6 +180,16 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
   "codexResumeFailureOutputStringLengths",
   "codexResumeFailureRetryable",
 ] as const;
+
+export class HostedWorkspaceAssistantPhaseInputAvailableError extends Error {
+  readonly nextWakeAt: string | null;
+
+  constructor(nextWakeAt: string | null) {
+    super("Hosted workspace assistant phase yielded to foreground input.");
+    this.name = "HostedWorkspaceAssistantPhaseInputAvailableError";
+    this.nextWakeAt = nextWakeAt;
+  }
+}
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS = [
@@ -1337,6 +1350,10 @@ async function assertHostedAssistantPhaseRuntimeLiveness(
   });
   if (!result.ok) {
     throw new Error(`Hosted workspace runtime liveness proof was rejected: ${result.reason}.`);
+  }
+  const instruction = readRuntimeLivenessInstruction(result);
+  if (instruction.kind === "yield") {
+    throw new HostedWorkspaceAssistantPhaseInputAvailableError(instruction.nextWakeAt);
   }
   assertHostedAssistantPhaseLiveness(input.signal);
 }

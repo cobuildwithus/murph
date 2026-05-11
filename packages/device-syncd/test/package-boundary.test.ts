@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 import { test } from "vitest";
 
-test("@murphai/device-syncd package manifest exposes local-secret-codec and omits the removed crypto subpath", async () => {
+test("@murphai/device-syncd package manifest exposes narrow public subpaths", async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -11,6 +11,14 @@ test("@murphai/device-syncd package manifest exposes local-secret-codec and omit
   };
 
   assert.equal(packageManifest.exports?.["./crypto"], undefined);
+  assert.deepEqual(packageManifest.exports?.["./connect-config"], {
+    default: "./dist/connect-config.js",
+    types: "./dist/connect-config.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./errors"], {
+    default: "./dist/errors.js",
+    types: "./dist/errors.d.ts",
+  });
   assert.deepEqual(packageManifest.exports?.["./local-secret-codec"], {
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",

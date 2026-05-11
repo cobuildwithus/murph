@@ -17,7 +17,7 @@ export type RuntimeLivenessInstruction =
   };
 
 export type RuntimeLivenessAcceptedResult = {
-  instruction?: RuntimeLivenessInstruction;
+  instruction: RuntimeLivenessInstruction;
   inputAvailable?: boolean;
   nextAlarmAt?: string | null;
   ok: true;
@@ -46,19 +46,7 @@ export interface RuntimeLivenessHeartbeat {
 export function readRuntimeLivenessInstruction(
   result: RuntimeLivenessAcceptedResult,
 ): RuntimeLivenessInstruction {
-  if (result.instruction) {
-    return result.instruction;
-  }
-
-  if (result.inputAvailable === true) {
-    return {
-      kind: "yield",
-      nextWakeAt: result.nextAlarmAt ?? null,
-      status: "scheduled",
-    };
-  }
-
-  return { kind: "continue" };
+  return result.instruction;
 }
 
 export function readRuntimeLivenessNextWakeAt(

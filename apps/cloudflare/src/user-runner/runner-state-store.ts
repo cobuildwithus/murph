@@ -1053,12 +1053,6 @@ export class RunnerStateStore {
       workspaceVersion: null,
     });
     this.writeMetaRowSync(meta);
-    if (activeReason !== "idle_shutdown_checkpoint") {
-      return {
-        kind: "continue",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
 
     return {
       activeInvocation: {

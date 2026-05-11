@@ -5,7 +5,26 @@ import { afterEach, describe, test, vi } from "vitest";
 import {
   startRuntimeLivenessHeartbeat,
   type RuntimeLivenessPort,
+  type RuntimeLivenessTouchResult,
 } from "../src/hosted-runtime/liveness.ts";
+
+function continueRuntimeLiveness(): RuntimeLivenessTouchResult {
+  return {
+    instruction: { kind: "continue" },
+    ok: true,
+  };
+}
+
+function yieldRuntimeLiveness(nextWakeAt: string | null): RuntimeLivenessTouchResult {
+  return {
+    instruction: {
+      kind: "yield",
+      nextWakeAt,
+      status: "scheduled",
+    },
+    ok: true,
+  };
+}
 
 describe("startRuntimeLivenessHeartbeat", () => {
   afterEach(() => {
@@ -18,7 +37,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
     const port: RuntimeLivenessPort = {
       async touch(input) {
         touches.push(input.requestId);
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
 
@@ -28,7 +47,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
       requestId: "request_123",
     });
 
-    assert.deepEqual(await heartbeat.initialTouch, { ok: true });
+    assert.deepEqual(await heartbeat.initialTouch, continueRuntimeLiveness());
     await vi.waitFor(() => assert.equal(touches.length, 1));
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => assert.equal(touches.length, 2));
@@ -45,14 +64,9 @@ describe("startRuntimeLivenessHeartbeat", () => {
       async touch(input) {
         touches.push(input.requestId);
         return {
-          instruction: {
-            kind: "yield",
-            nextWakeAt: "2026-04-27T00:00:45.000Z",
-            status: "scheduled",
-          },
+          ...yieldRuntimeLiveness("2026-04-27T00:00:45.000Z"),
           inputAvailable: true,
           nextAlarmAt: "2026-04-27T00:00:45.000Z",
-          ok: true,
           pendingNudge: true,
         };
       },
@@ -94,6 +108,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
     const port: RuntimeLivenessPort = {
       async touch() {
         return {
+          instruction: { kind: "continue" },
           nextAlarmAt: "2026-04-27T00:00:45.000Z",
           ok: true,
           pendingNudge: true,
@@ -111,6 +126,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
     });
 
     assert.deepEqual(await heartbeat.initialTouch, {
+      instruction: { kind: "continue" },
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
       pendingNudge: true,
@@ -132,12 +148,9 @@ describe("startRuntimeLivenessHeartbeat", () => {
           await new Promise<void>((resolve) => {
             releaseFirstTouch = resolve;
           });
-          return { ok: true };
+          return continueRuntimeLiveness();
         }
-        return {
-          ok: false,
-          reason: "stale_attempt",
-        };
+        return { ok: false, reason: "stale_attempt" };
       },
     };
 
@@ -173,7 +186,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
             reject(signal.reason);
           }, { once: true });
         });
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
     const errors: unknown[] = [];
@@ -206,7 +219,7 @@ describe("startRuntimeLivenessHeartbeat", () => {
           observedAbortStates.push(input.signal?.aborted === true);
         }, { once: true });
         await new Promise(() => undefined);
-        return { ok: true };
+        return continueRuntimeLiveness();
       },
     };
     const errors: unknown[] = [];

@@ -131,6 +131,7 @@ interface HostedExecutionContainerRunnerInput {
 
 export interface HostedExecutionContainerStubLike {
   abortBrowserVaultRefresh?(input: { attemptId: string; userId: string }): Promise<void>;
+  abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   invokeIdleCheckpointIfWarm?(
@@ -275,6 +276,20 @@ export class RunnerContainer extends Container {
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     this.browserVaultRefreshAbortController?.abort(new Error("browser-vault refresh runner destroyed"));
     await this.stopWarmContainer();
+  }
+
+  async abortWorkspaceInvocation(input: { attemptId: string; userId: string }): Promise<void> {
+    const active = this.workspaceInvocationActiveOperation;
+    const abortController = this.workspaceInvocationAbortController;
+    if (!active || !abortController) {
+      return;
+    }
+    if (active.attemptId !== input.attemptId || active.userId !== input.userId) {
+      return;
+    }
+    if (!abortController.signal.aborted) {
+      abortController.abort(new Error("workspace invocation preempted"));
+    }
   }
 
   async refreshBrowserVaultReplica(
@@ -1620,12 +1635,18 @@ export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
   });
   return input.signal
     ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
-        void container.destroyInstance().catch((error: unknown) => {
+        if (!container.abortWorkspaceInvocation) {
+          return;
+        }
+        void container.abortWorkspaceInvocation({
+          attemptId: input.job.request.attemptId,
+          userId: jobUserId,
+        }).catch((error: unknown) => {
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
             level: "warn",
-            message: "Hosted runner could not destroy a preempted warm-only invocation container.",
+            message: "Hosted runner could not abort a preempted warm-only invocation.",
             phase: "failed",
             userId: jobUserId,
           });

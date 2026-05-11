@@ -31,11 +31,11 @@ interface RunnerOutboundUserRunnerStubLike extends WorkerUserRunnerStubLike {
     userId: string;
   }): Promise<
     | {
-      instruction?: RuntimeLivenessInstruction;
-      inputAvailable: boolean;
-      nextAlarmAt: string | null;
+      instruction: RuntimeLivenessInstruction;
+      inputAvailable?: boolean;
+      nextAlarmAt?: string | null;
       ok: true;
-      pendingNudge: boolean;
+      pendingNudge?: boolean;
     }
     | {
       ok: false;
