@@ -1741,6 +1741,29 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
       value: 23.2,
     }),
   ];
+  const wearableContextPoints = [
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:steps:2026-05-08:dispatcher-wearable:0",
+      metricKey: "steps",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_steps",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 10_000,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:resting-heart-rate:2026-05-08:dispatcher-wearable:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "dispatcher_wearable_rhr",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 62,
+    }),
+  ];
+  const lab9WithWearableContextPoints = [...lab9Points, ...wearableContextPoints];
   const researchModel = fixtureLab9ResearchModel();
 
   const lab9Policy = listMurphAgeModelCardPolicies().find((policy) =>
@@ -1758,13 +1781,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     asOf,
     chronologicalAgeYears: 45,
     models: { lab9_bp_body_10y_acm_research: researchModel },
-    points: lab9Points,
+    points: lab9WithWearableContextPoints,
     sex: "female",
   });
 
   assert.equal(productDefault.status, "abstain");
   assert.equal(productDefault.result, null);
   assert.equal(productDefault.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(productDefault.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(productDefault.cardPolicy?.productAuthorized, false);
   assert.equal(productDefault.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
 
@@ -1773,14 +1797,24 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     chronologicalAgeYears: 45,
     mode: "research",
     models: { lab9_bp_body_10y_acm_research: researchModel },
-    points: lab9Points,
+    points: lab9WithWearableContextPoints,
     sex: "female",
   });
 
   assert.equal(research.status, "ready");
   assert.equal(research.result?.status, "ready");
   assert.equal(research.bundleAssessment.bundleId, "lab9-bp-body");
+  assert.equal(research.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), false);
+  assert.equal(research.contextAssessments.length, 1);
+  assert.equal(research.contextAssessments[0]?.bundleId, "wearable-context");
+  assert.equal(research.contextAssessments[0]?.status, "context-only");
+  assert.equal(research.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), true);
+  const contextStepStatus = research.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
+  assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
+  assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);
   assert.equal(research.result?.featureAttributions.find((feature) => feature.featureKey === "hba1c")?.status, "ready");
+  assert.equal(research.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  assert.equal(research.warnings.some((warning) => warning.code === "CONTEXT_NOT_SCORE_BEARING"), true);
   if (research.cardPolicy) {
     (research.cardPolicy.scoreBearingSourceKinds as string[]).push("wearable-summary");
   }
@@ -1828,28 +1862,33 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(lab5Research.result?.modelId, "fixture-lab5-research-card-model");
   assert.equal(lab5Research.result?.featureAttributions.find((feature) => feature.featureKey === "egfr")?.status, "ready");
 
+  const lab5ResearchWithWearables = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    points: [...lab5Points, ...wearableContextPoints],
+    sex: "female",
+  });
+
+  assert.equal(lab5ResearchWithWearables.status, "ready");
+  assert.equal(lab5ResearchWithWearables.bundleAssessment.bundleId, "lab5-bp-bmi");
+  assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.bundleId, "wearable-context");
+  assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(lab5ResearchWithWearables.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+
   const wearableOnly = calculateMurphAgeFromInputBundle({
     asOf,
     chronologicalAgeYears: 45,
     mode: "research",
-    points: [
-      metricPoint({
-        effectiveDate: "2026-05-08",
-        id: "metric-point:steps:2026-05-08:dispatcher-wearable:0",
-        metricKey: "steps",
-        observedAt: "2026-05-08T08:00:00.000Z",
-        recordId: "dispatcher_wearable_steps",
-        sourceKind: "wearable-summary",
-        unit: "count",
-        value: 10_000,
-      }),
-    ],
+    points: wearableContextPoints,
     sex: "female",
   });
 
   assert.equal(wearableOnly.status, "context-only");
   assert.equal(wearableOnly.result, null);
   assert.equal(wearableOnly.cardPolicy?.scoreBearing, false);
+  assert.equal(wearableOnly.contextAssessments.length, 0);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,

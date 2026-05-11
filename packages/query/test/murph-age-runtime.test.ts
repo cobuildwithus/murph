@@ -201,6 +201,8 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:albumin:2026-05-01:lab:0"), true);
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), false);
+    assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
+    assert.equal(output.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -229,6 +231,12 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
     assert.equal(output.result?.status, "ready");
     assert.equal(output.result?.modelId, "fixture-lab9-research-model");
     assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
+    assert.equal(output.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(output.contextAssessments[0]?.selectedMetricKeys.includes("resting-heart-rate"), true);
+    const contextStepStatus = output.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
+    assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
+    assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);
     assert.equal(
       output.result?.featureAttributions.find((feature) => feature.featureKey === "albumin")?.selectedPointIds[0],
       "metric-point:albumin:2026-05-01:lab:0",
@@ -399,6 +407,7 @@ test("calculateMurphAgeFromVaultInputBundle treats wearable-only inputs as conte
     assert.equal(output.cardPolicy?.cardId, "wearable_context_no_risk");
     assert.equal(output.result, null);
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
+    assert.equal(output.contextAssessments.length, 0);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

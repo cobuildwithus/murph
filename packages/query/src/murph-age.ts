@@ -483,6 +483,7 @@ function invalidCalculatorOutput(input: {
       warnings: [warning],
     },
     cardPolicy: null,
+    contextAssessments: [],
     mode: input.mode,
     result: null,
     schemaVersion: MURPH_AGE_RESULT_SCHEMA_VERSION,
