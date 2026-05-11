@@ -232,6 +232,11 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(publicReport.mode, "product");
     assert.equal(publicReport.result, null);
     assert.equal(publicReport.displaySummary.displayBlockedReason, "product-not-authorized");
+    assert.equal(publicReport.displaySummary.validationGate?.status, "blocked");
+    assert.equal(
+      publicReport.displaySummary.productPromotionBlockers.includes("PRODUCT_POLICY_NOT_AUTHORIZED"),
+      true,
+    );
     assert.equal(publicReport.displaySummary.wearableBridge.productAuthorized, false);
     assert.equal(publicReport.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
     assert.equal(publicReport.warnings.some((warning) => "message" in warning), false);
