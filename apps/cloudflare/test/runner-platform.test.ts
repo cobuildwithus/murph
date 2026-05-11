@@ -33,9 +33,6 @@ import {
 import {
   RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import {
-  RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
-} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -354,44 +351,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         message: "Hosted runtime control-plane response returned non-OK.",
       }),
     );
-  });
-
-  it("builds a live browser-vault refresh publish port without a workspace lease", async () => {
-    const sourceBundleHash = "c".repeat(64);
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      published: false,
-      workspace: null,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 409,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      browserVaultRefreshAuthority: true,
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-    });
-
-    expect(platform.browserVaultReplicaPort?.publishRef).toBeDefined();
-    const result = await platform.browserVaultReplicaPort!.publishRef!({
-      replicaRef,
-    });
-
-    expect(result).toEqual({
-      published: false,
-      workspace: null,
-    });
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault publish fetch");
-    expect(request.method).toBe("POST");
-    expect(request.url).toBe(
-      "http://web-control.worker/api/internal/hosted-workspace/browser-vault-replica",
-    );
-    await expect(request.json()).resolves.toEqual({
-      replicaRef,
-    });
   });
 
   it("logs non-OK internal upstream responses with response metadata", async () => {
@@ -1527,96 +1486,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(request.json()).resolves.toEqual({ replica });
   });
 
-  it("writes detached browser-vault refresh replicas with refresh authority headers", async () => {
-    const sourceBundleHash = "c".repeat(64);
-    const replica = {
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      schema: "murph.browser-vault-replica",
-      source: {
-        dataVersion: "runner-platform-refresh-test",
-        sourceBundleHash,
-      },
-    };
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      browserVaultRefreshSourceStateHash: sourceBundleHash,
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: null,
-    });
-
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
-
-    expect(result).toEqual(replicaRef);
-    expect(platform.runtimeLivenessPort).toBeUndefined();
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
-    expect(request.url).toBe("http://browser-vault.worker/replicas");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.headers.get(RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER)).toBe(
-      sourceBundleHash,
-    );
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBeNull();
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBeNull();
-    await expect(request.json()).resolves.toEqual({ replica });
-  });
-
-  it("writes explicit browser-vault refresh replicas without lease or source headers", async () => {
-    const sourceBundleHash = "d".repeat(64);
-    const replica = {
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      schema: "murph.browser-vault-replica",
-      source: {
-        dataVersion: "runner-platform-live-refresh-test",
-        sourceBundleHash,
-      },
-    };
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      browserVaultRefreshAuthority: true,
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: null,
-    });
-
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
-
-    expect(result).toEqual(replicaRef);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
-    expect(request.url).toBe("http://browser-vault.worker/replicas");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.headers.get(RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER)).toBeNull();
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBeNull();
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBeNull();
-    await expect(request.json()).resolves.toEqual({ replica });
-  });
-
-  it("rejects browser-vault replica write headers without lease, source hash, or refresh authority", async () => {
+  it("rejects browser-vault replica write headers without an active runtime write fence", async () => {
     await expect(
       createHostedBrowserVaultReplicaWriteHeaders({
-        browserVaultRefreshAuthority: false,
-        browserVaultRefreshSourceStateHash: null,
         workspaceCheckpointBridge: null,
       }),
     ).rejects.toThrow(
-      "Hosted browser-vault replica write requires active lease or browser-vault refresh authority.",
+      "Hosted browser-vault replica write requires a runtime write fence.",
     );
   });
 
@@ -1643,7 +1519,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(
       platform.browserVaultReplicaPort!.write({ replica }),
     ).rejects.toThrow(
-      "Browser-vault replica write requires an active hosted runtime invocation lease.",
+      "Browser-vault replica write requires an active hosted runtime write fence.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

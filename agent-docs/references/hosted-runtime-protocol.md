@@ -238,10 +238,10 @@ consumer preserves ordering by comparing due times: a due workspace wake at or
 before the idle checkpoint cancels/deprioritizes idle maintenance, while a later
 wake is retained as `checkpointNextWakeAt` and runs after the checkpoint. If the
 idle checkpoint collides with an already-active workspace invocation, Cloudflare
-keeps the checkpoint retry state rather than clearing it. Optional auxiliary
-work, including browser-vault refresh, stays detached from runner alarms. It may
-run best-effort from live warm state, but failure or staleness cannot mutate
-runner checkpoint, reply, or wake state.
+keeps the checkpoint retry state rather than clearing it. Browser-vault refresh
+now enters through normal runtime work with the active write fence rather than a
+separate container refresh route, and failure or staleness cannot mutate runner
+checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
@@ -315,10 +315,10 @@ restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. Foreground work does not generate or publish browser-vault replicas
-inline. Idle/full checkpoints write only the workspace snapshot ref; they do not
-publish browser-vault replicas. The detached browser-vault refresh publishes the
-latest replica ref separately, without changing the workspace checkpoint
+state. Foreground work may schedule refresh as ordinary runtime work, but idle/full
+checkpoints write only the workspace snapshot ref; they do not publish browser-vault
+replicas. Browser-vault replica writes require the active runtime write fence and
+publish the latest replica ref separately, without changing the workspace checkpoint
 version.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
