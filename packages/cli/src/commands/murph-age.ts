@@ -203,6 +203,39 @@ const murphAgePublicInputReadinessSummarySchema = z.object({
   bundle: murphAgePublicInputBundleReadinessSchema,
   contextBundles: z.array(murphAgePublicInputBundleReadinessSchema),
 })
+const murphAgeInputScoreReadinessStatusSchema = z.enum([
+  'context-only',
+  'input-incomplete',
+  'product-age-ready',
+  'product-risk-ready',
+  'research-ready-product-blocked',
+])
+const murphAgeInputProductBlockedReasonSchema = z.union([
+  z.enum([
+    'CONTEXT_ONLY_NOT_SCORE_BEARING',
+    'INPUT_BUNDLE_INCOMPLETE',
+  ]),
+  murphAgeProductPromotionBlockerSchema,
+])
+const murphAgeInputScoreReadinessSchema = z.object({
+  bundleId: murphAgeInputBundleIdSchema,
+  contextOnly: z.boolean(),
+  inputReady: z.boolean(),
+  productAgeReady: z.boolean(),
+  productBlockedReasons: z.array(murphAgeInputProductBlockedReasonSchema),
+  productPromotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
+  productRiskReady: z.boolean(),
+  recommendedCardId: murphAgeRecommendedModelCardIdSchema,
+  researchModelCardRequired: z.boolean(),
+  researchReadiness: z.enum([
+    'context-only',
+    'input-incomplete',
+    'ready-if-local-model-card-loaded',
+  ]),
+  researchUsableIfModelLoaded: z.boolean(),
+  scoreBearingInput: z.boolean(),
+  status: murphAgeInputScoreReadinessStatusSchema,
+})
 const murphAgeRuntimeInputReadinessSchema = z.object({
   key: z.enum(['chronological-age-years', 'sex']),
   label: z.string().min(1),
@@ -321,7 +354,8 @@ export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
   runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
-  schemaVersion: z.literal('murph.age.input-readiness.v3'),
+  schemaVersion: z.literal('murph.age.input-readiness.v4'),
+  scoreReadiness: murphAgeInputScoreReadinessSchema,
   wearableBridge: murphAgePublicWearableBridgeSummarySchema,
 })
 

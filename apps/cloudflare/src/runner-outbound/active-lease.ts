@@ -61,10 +61,22 @@ export async function requireRunnerRuntimeWriteFence(input: {
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const validateRuntimeWriteFence = requireRunnerOutboundUserStubMethod(
-    stub,
-    "validateRuntimeWriteFence",
-  );
+  const validateRuntimeWriteFence = stub.validateRuntimeWriteFence
+    ?? ((legacyInput: {
+      attemptId: string;
+      generation: string;
+      userId: string;
+    }) => {
+      const legacy = requireRunnerOutboundUserStubMethod(
+        stub,
+        "ownsActiveInvocationLease",
+      );
+      return legacy({
+        attemptId: legacyInput.attemptId,
+        leaseGeneration: legacyInput.generation,
+        userId: legacyInput.userId,
+      });
+    });
   // Workspace version is enforced by the checkpoint route, not by invocation-local side effects.
   const ownsWriteFence = await validateRuntimeWriteFence({
     attemptId: headers.attemptId,
