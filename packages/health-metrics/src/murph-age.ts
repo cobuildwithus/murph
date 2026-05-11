@@ -11,6 +11,7 @@ import type {
 
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
+export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -253,6 +254,39 @@ export interface MurphAgeCalculatorOutput {
   schemaVersion: typeof MURPH_AGE_RESULT_SCHEMA_VERSION;
   status: MurphAgeInputBundleStatus;
   warnings: MurphAgeWarning[];
+}
+
+export type MurphAgeDisplayStatus =
+  | "abstain"
+  | "context-only"
+  | "product-age-ready"
+  | "product-risk-only"
+  | "research-only";
+
+export type MurphAgeDisplayBlockedReason =
+  | "age-estimate-unavailable"
+  | "context-only"
+  | "policy-violation"
+  | "product-not-authorized"
+  | "risk-estimate-unavailable"
+  | "risk-to-age-not-authorized";
+
+export interface MurphAgeDisplaySummary {
+  ageEstimateAvailable: boolean;
+  blockedFeatureKeys: string[];
+  contextOnlyFeatureKeys: string[];
+  contextOnlyMetricKeys: string[];
+  contextOnlyPointIds: string[];
+  displayBlockedReason: MurphAgeDisplayBlockedReason | null;
+  displayStatus: MurphAgeDisplayStatus;
+  missingFeatureKeys: string[];
+  productAgeDisplayReady: boolean;
+  productRiskDisplayReady: boolean;
+  researchEstimateAvailable: boolean;
+  schemaVersion: typeof MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION;
+  selectedScoreBearingFeatureKeys: string[];
+  selectedScoreBearingMetricKeys: string[];
+  selectedScoreBearingPointIds: string[];
 }
 
 export interface MurphAgeModelValidationResult {
@@ -723,6 +757,55 @@ export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResu
   };
 }
 
+export function summarizeMurphAgeCalculatorOutput(
+  output: MurphAgeCalculatorOutput,
+): MurphAgeDisplaySummary {
+  const readyAttributions = output.result?.featureAttributions.filter((feature) =>
+    feature.status === "ready" && feature.metricKey !== null
+  ) ?? [];
+  const missingAttributions = output.result?.featureAttributions.filter((feature) =>
+    feature.status === "missing"
+  ) ?? [];
+  const blockedAttributions = output.result?.featureAttributions.filter((feature) =>
+    feature.status === "blocked"
+  ) ?? [];
+  const contextFeatures = listContextOnlyFeatureStatuses(output);
+  const ageEstimateAvailable = output.result?.status === "ready" && output.result.biologicalAgeYears !== null;
+  const riskEstimateAvailable = output.result?.risk !== null && output.result?.risk !== undefined;
+  const productRiskDisplayReady = riskEstimateAvailable && output.authorization.productAuthorized;
+  const productAgeDisplayReady = ageEstimateAvailable
+    && productRiskDisplayReady
+    && output.authorization.riskToAgeDisplayAuthorized;
+
+  return {
+    ageEstimateAvailable,
+    blockedFeatureKeys: uniqueStrings(blockedAttributions.map((feature) => feature.featureKey)),
+    contextOnlyFeatureKeys: uniqueStrings(contextFeatures.map((feature) => feature.featureKey)),
+    contextOnlyMetricKeys: uniqueStrings(contextFeatures.map((feature) => feature.selectedMetricKey)),
+    contextOnlyPointIds: uniqueStrings(contextFeatures.flatMap((feature) => feature.selectedPointIds)),
+    displayBlockedReason: resolveDisplayBlockedReason({
+      ageEstimateAvailable,
+      output,
+      productRiskDisplayReady,
+      riskEstimateAvailable,
+    }),
+    displayStatus: resolveDisplayStatus({
+      ageEstimateAvailable,
+      output,
+      productAgeDisplayReady,
+      productRiskDisplayReady,
+    }),
+    missingFeatureKeys: uniqueStrings(missingAttributions.map((feature) => feature.featureKey)),
+    productAgeDisplayReady,
+    productRiskDisplayReady,
+    researchEstimateAvailable: output.mode === "research" && ageEstimateAvailable,
+    schemaVersion: MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+    selectedScoreBearingFeatureKeys: uniqueStrings(readyAttributions.map((feature) => feature.featureKey)),
+    selectedScoreBearingMetricKeys: uniqueStrings(readyAttributions.map((feature) => feature.metricKey)),
+    selectedScoreBearingPointIds: uniqueStrings(readyAttributions.flatMap((feature) => feature.selectedPointIds)),
+  };
+}
+
 export function assessMurphAgeInputBundle(
   input: MurphAgeInputBundleAssessmentInput,
 ): MurphAgeInputBundleAssessment {
@@ -971,6 +1054,14 @@ function toContextBundleAssessment(assessment: MurphAgeInputBundleAssessment): M
   };
 }
 
+function listContextOnlyFeatureStatuses(output: MurphAgeCalculatorOutput): MurphAgeContextBundleFeatureStatus[] {
+  const primaryContext = output.bundleAssessment.bundleId === "wearable-context"
+    ? toContextBundleAssessment(output.bundleAssessment).featureStatuses
+    : [];
+  return [...primaryContext, ...output.contextAssessments.flatMap((assessment) => assessment.featureStatuses)]
+    .filter((feature) => feature.status === "ready");
+}
+
 function cloneContextBundleAssessment(assessment: MurphAgeContextBundleAssessment): MurphAgeContextBundleAssessment {
   return {
     ...assessment,
@@ -985,6 +1076,41 @@ function cloneContextBundleAssessment(assessment: MurphAgeContextBundleAssessmen
     selectedPointIds: [...assessment.selectedPointIds],
     warnings: assessment.warnings.map((warning) => ({ ...warning })),
   };
+}
+
+function resolveDisplayBlockedReason(input: {
+  ageEstimateAvailable: boolean;
+  output: MurphAgeCalculatorOutput;
+  productRiskDisplayReady: boolean;
+  riskEstimateAvailable: boolean;
+}): MurphAgeDisplayBlockedReason | null {
+  if (input.output.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION")) {
+    return "policy-violation";
+  }
+  if (input.ageEstimateAvailable && input.productRiskDisplayReady && input.output.authorization.riskToAgeDisplayAuthorized) {
+    return null;
+  }
+  if (input.output.status === "context-only") return "context-only";
+  if (!input.ageEstimateAvailable) {
+    return input.output.authorization.productAuthorized ? "age-estimate-unavailable" : "product-not-authorized";
+  }
+  if (!input.riskEstimateAvailable) return "risk-estimate-unavailable";
+  if (!input.output.authorization.productAuthorized) return "product-not-authorized";
+  if (!input.output.authorization.riskToAgeDisplayAuthorized) return "risk-to-age-not-authorized";
+  return null;
+}
+
+function resolveDisplayStatus(input: {
+  ageEstimateAvailable: boolean;
+  output: MurphAgeCalculatorOutput;
+  productAgeDisplayReady: boolean;
+  productRiskDisplayReady: boolean;
+}): MurphAgeDisplayStatus {
+  if (input.productAgeDisplayReady) return "product-age-ready";
+  if (input.productRiskDisplayReady) return "product-risk-only";
+  if (input.ageEstimateAvailable) return "research-only";
+  if (input.output.status === "context-only") return "context-only";
+  return "abstain";
 }
 
 function cloneMurphAgeModelCardPolicy(policy: MurphAgeModelCardPolicy): MurphAgeModelCardPolicy {

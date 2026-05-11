@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   buildMetricSeries,
@@ -28,6 +29,7 @@ import {
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
+  summarizeMurphAgeCalculatorOutput,
   validateMurphAgeRiskModel,
   type GoalMetricTarget,
   type MetricPoint,
@@ -1804,6 +1806,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefault.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(productDefault.cardPolicy?.productAuthorized, false);
   assert.equal(productDefault.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+  const productDefaultSummary = summarizeMurphAgeCalculatorOutput(productDefault);
+  assert.equal(productDefaultSummary.displayStatus, "abstain");
+  assert.equal(productDefaultSummary.displayBlockedReason, "product-not-authorized");
+  assert.equal(productDefaultSummary.productAgeDisplayReady, false);
+  assert.equal(productDefaultSummary.ageEstimateAvailable, false);
+  assert.equal(productDefaultSummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(productDefaultSummary.selectedScoreBearingMetricKeys.length, 0);
 
   const research = calculateMurphAgeFromInputBundle({
     asOf,
@@ -1835,6 +1844,63 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(research.result?.featureAttributions.find((feature) => feature.featureKey === "hba1c")?.status, "ready");
   assert.equal(research.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
   assert.equal(research.warnings.some((warning) => warning.code === "CONTEXT_NOT_SCORE_BEARING"), true);
+  const researchSummary = summarizeMurphAgeCalculatorOutput(research);
+  assert.equal(researchSummary.displayStatus, "research-only");
+  assert.equal(researchSummary.displayBlockedReason, "product-not-authorized");
+  assert.equal(researchSummary.ageEstimateAvailable, true);
+  assert.equal(researchSummary.productAgeDisplayReady, false);
+  assert.equal(researchSummary.researchEstimateAvailable, true);
+  assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("hba1c"), true);
+  assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("steps"), false);
+  assert.equal(researchSummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(researchSummary.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(researchSummary.contextOnlyPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), true);
+  const productRiskOnlySummary = summarizeMurphAgeCalculatorOutput({
+    ...research,
+    authorization: {
+      ...research.authorization,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: false,
+    },
+    mode: "product",
+    result: research.result ? {
+      ...research.result,
+      authorization: {
+        ...research.result.authorization,
+        productAuthorized: true,
+        riskToAgeDisplayAuthorized: false,
+      },
+    } : null,
+  });
+  assert.equal(productRiskOnlySummary.displayStatus, "product-risk-only");
+  assert.equal(productRiskOnlySummary.displayBlockedReason, "risk-to-age-not-authorized");
+  assert.equal(productRiskOnlySummary.productRiskDisplayReady, true);
+  assert.equal(productRiskOnlySummary.productAgeDisplayReady, false);
+
+  const productAgeReadySummary = summarizeMurphAgeCalculatorOutput({
+    ...research,
+    authorization: {
+      ...research.authorization,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: true,
+    },
+    mode: "product",
+    result: research.result ? {
+      ...research.result,
+      authorization: {
+        ...research.result.authorization,
+        productAuthorized: true,
+        riskToAgeDisplayAuthorized: true,
+      },
+    } : null,
+  });
+  assert.equal(productAgeReadySummary.schemaVersion, MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION);
+  assert.equal(productAgeReadySummary.displayStatus, "product-age-ready");
+  assert.equal(productAgeReadySummary.displayBlockedReason, null);
+  assert.equal(productAgeReadySummary.productRiskDisplayReady, true);
+  assert.equal(productAgeReadySummary.productAgeDisplayReady, true);
+  assert.equal(productAgeReadySummary.researchEstimateAvailable, false);
+  assert.equal(productAgeReadySummary.selectedScoreBearingPointIds.includes("metric-point:hba1c:2026-05-01:lab:0"), true);
   if (research.cardPolicy) {
     (research.cardPolicy.scoreBearingSourceKinds as string[]).push("wearable-summary");
   }
@@ -1913,6 +1979,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnly.authorization.scoreBearing, false);
   assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(wearableOnly.contextAssessments.length, 0);
+  const wearableOnlySummary = summarizeMurphAgeCalculatorOutput(wearableOnly);
+  assert.equal(wearableOnlySummary.displayStatus, "context-only");
+  assert.equal(wearableOnlySummary.displayBlockedReason, "context-only");
+  assert.equal(wearableOnlySummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("resting-heart-rate"), true);
+  assert.equal(wearableOnlySummary.selectedScoreBearingMetricKeys.length, 0);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,
@@ -1942,6 +2014,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(policyViolation.result?.status, "abstain");
   assert.equal(policyViolation.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
   assert.equal(policyViolation.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+  const policyViolationSummary = summarizeMurphAgeCalculatorOutput(policyViolation);
+  assert.equal(policyViolationSummary.displayStatus, "abstain");
+  assert.equal(policyViolationSummary.displayBlockedReason, "policy-violation");
+  assert.equal(policyViolationSummary.selectedScoreBearingMetricKeys.length, 0);
 
   const wearableSourcedBmiViolation = calculateMurphAgeFromInputBundle({
     asOf,
