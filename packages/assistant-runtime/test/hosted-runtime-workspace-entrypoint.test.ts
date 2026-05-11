@@ -33,6 +33,7 @@ import {
   type HostedRuntimeLogRequest,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceInvocationResult,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
@@ -1424,6 +1425,94 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(events.indexOf("import.start") < events.indexOf("heartbeat:2"));
       assert.ok(events.indexOf("heartbeat:2") < events.indexOf("import.abort"));
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("returns scheduled when foreground liveness reports fresh input during active assistant work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const freshInputWakeAt = "2026-04-27T00:00:03.000Z";
+    let assistantStarted = false;
+    let touchCalls = 0;
+    const releaseAssistant = createDeferred<void>();
+    let resultPromise: Promise<HostedWorkspaceInvocationResult> | null = null;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        touchCalls += 1;
+        events.push(`heartbeat:${touchCalls}`);
+        if (!assistantStarted) {
+          return { ok: true };
+        }
+        return {
+          inputAvailable: true,
+          nextAlarmAt: freshInputWakeAt,
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Foreground input preemption must not checkpoint stale active work.");
+        },
+        async importItem(item) {
+          events.push(`import:${item.item.id}`);
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            events,
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_entrypoint_fresh_input_preempts_active_work",
+                laneSeq: "1",
+              }),
+            ],
+          }),
+          runtimeLivenessIntervalMs: 1,
+          runtimeLivenessPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          assistantStarted = true;
+          events.push("assistant.start");
+          await releaseAssistant.promise;
+          events.push("assistant.finish");
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+
+      await waitUntil(
+        () => assert.ok(assistantStarted, events.join(",")),
+        5_000,
+      );
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<HostedWorkspaceInvocationResult>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Timed out waiting for foreground fresh-input preemption."));
+          }, 1_000);
+        }),
+      ]);
+
+      assert.deepEqual(result, {
+        nextWakeAt: freshInputWakeAt,
+        status: "scheduled",
+      });
+      assert.equal(events.includes("assistant.finish"), false);
+      assert.ok(touchCalls >= 2);
+    } finally {
+      releaseAssistant.resolve();
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });

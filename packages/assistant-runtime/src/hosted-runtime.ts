@@ -8,9 +8,6 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  notifyAssistantActiveTurnInputsAvailableForVault,
-} from "@murphai/assistant-engine";
-import {
   normalizeHostedAssistantRuntimeConfig,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
@@ -277,6 +274,16 @@ class HostedIdleShutdownCheckpointInputAvailableError extends Error {
   }
 }
 
+class HostedForegroundInputAvailableError extends Error {
+  readonly nextWakeAt: string | null | undefined;
+
+  constructor(nextWakeAt: string | null | undefined) {
+    super("Hosted foreground runtime stopped because fresher input became available.");
+    this.name = "HostedForegroundInputAvailableError";
+    this.nextWakeAt = nextWakeAt;
+  }
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -302,8 +309,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const isIdleShutdownCheckpoint = input.request.reason === "idle_shutdown_checkpoint";
   let idleShutdownInputAvailable = false;
   let idleShutdownInputNextWakeAt: string | null | undefined;
+  let foregroundInputNextWakeAt: string | null | undefined;
   let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
-  let activeVaultRoot = options.vaultRoot;
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const assertRuntimeLiveness = () => {
     if (livenessRejectedReason) {
@@ -327,10 +334,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return undefined;
       }
 
-      return notifyAssistantActiveTurnInputsAvailableForVault({
-        signal: livenessAbortController.signal,
-        vault: activeVaultRoot,
-      }).then(() => undefined);
+      foregroundInputNextWakeAt = result.nextAlarmAt ?? null;
+      livenessAbortController.abort(
+        new HostedForegroundInputAvailableError(foregroundInputNextWakeAt),
+      );
+      return undefined;
     },
     port: runtime.platform.runtimeLivenessPort,
     requestId,
@@ -437,7 +445,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       livenessAbortController.signal,
     );
-    activeVaultRoot = restored.vaultRoot;
     hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeLiveness();
     if (isIdleShutdownCheckpoint) {
@@ -664,6 +671,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ...(idleShutdownInputNextWakeAt === undefined
           ? {}
           : { nextWakeAt: idleShutdownInputNextWakeAt }),
+        status: "scheduled",
+      };
+    }
+    if (error instanceof HostedForegroundInputAvailableError) {
+      return {
+        ...(foregroundInputNextWakeAt === undefined
+          ? {}
+          : { nextWakeAt: foregroundInputNextWakeAt }),
         status: "scheduled",
       };
     }
