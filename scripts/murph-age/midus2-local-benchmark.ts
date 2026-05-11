@@ -35,19 +35,50 @@ const FEATURE_DEFINITIONS = [
   { column: "B4BLDL", key: "ldl-c", transform: (value: number) => value },
 ] as const;
 
-const MODEL_FEATURE_SETS = {
-  age_sex_reference: ["age", "male"],
-  clinical_core_labs_no_albumin_no_crp: [
-    "age",
-    "male",
-    "bmi",
-    "hba1c",
-    "total-cholesterol",
-    "log-triglycerides",
-    "hdl-c",
-    "ldl-c",
-  ],
+const MODEL_CANDIDATE_DEFINITIONS = {
+  age_sex_reference: {
+    candidateRole: "reference",
+    featureKeys: ["age", "male"],
+    hypothesis: "Age and sex reference model for same-denominator comparison.",
+    hypothesisSource: "literature or mechanistic rationale",
+  },
+  glycemia_body_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: ["age", "male", "bmi", "hba1c"],
+    hypothesis: "BMI plus glycemia may add a small mortality-risk increment over demographics.",
+    hypothesisSource: "literature or mechanistic rationale",
+  },
+  lab5_lipid_body_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: ["age", "male", "bmi", "hba1c", "log-triglycerides", "hdl-c"],
+    hypothesis: "A compact lab5-compatible lipid/glycemia/body candidate may transport better than broader lipid panels.",
+    hypothesisSource: "robustness stress test",
+  },
+  extended_lipids_body_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: ["age", "male", "bmi", "total-cholesterol", "log-triglycerides", "hdl-c", "ldl-c"],
+    hypothesis: "Extended lipid detail may improve discrimination but should be checked against simpler lab5-compatible features.",
+    hypothesisSource: "robustness stress test",
+  },
+  clinical_core_labs_no_albumin_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: [
+      "age",
+      "male",
+      "bmi",
+      "hba1c",
+      "total-cholesterol",
+      "log-triglycerides",
+      "hdl-c",
+      "ldl-c",
+    ],
+    hypothesis: "No-albumin/no-CRP clinical-core candidate combines glycemia, body, and lipid features.",
+    hypothesisSource: "train/calibration diagnostic",
+  },
 } as const;
+
+type ModelCandidateDefinition = typeof MODEL_CANDIDATE_DEFINITIONS[keyof typeof MODEL_CANDIDATE_DEFINITIONS];
+type ModelCandidateHypothesisSource = ModelCandidateDefinition["hypothesisSource"];
 
 const LAMBDAS = [0, 0.0001, 0.001, 0.01, 0.1, 1] as const;
 
@@ -56,10 +87,12 @@ const REQUIRED_FALSE_BOUNDARY_FLAGS = new Set([
   "coefficientsStored",
   "participantIdentifiersStored",
   "participantIdentifiersWritten",
+  "promotionAuthorized",
   "predictionsStored",
   "rowValuesStored",
   "sourceBodiesStored",
   "splitMembershipStored",
+  "testSelectionAuthorized",
 ]);
 
 const FORBIDDEN_AGGREGATE_EGRESS_KEYS = new Set([
@@ -100,6 +133,14 @@ export interface Midus2AggregateMetricSummary {
 
 export interface Midus2LocalBenchmarkOutput {
   benchmarkId: "midus2-biomarker-10y-complete-window-local-0";
+  candidateBatch: {
+    batchId: "midus2-first-no-crp-candidate-batch";
+    candidateCount: number;
+    exposureLabel: "diagnostic-only";
+    hypothesisSources: ModelCandidateHypothesisSource[];
+    promotionAuthorized: false;
+    testSelectionAuthorized: false;
+  };
   codebookTextStored: false;
   createdAt: string;
   dataShape: {
@@ -110,9 +151,12 @@ export interface Midus2LocalBenchmarkOutput {
   endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years";
   modelScoringPerformed: true;
   models: Record<string, {
+    candidateRole: "proposal" | "reference";
     coefficientsStored: false;
     featureKeys: string[];
     featureObservedCounts: Record<string, number>;
+    hypothesis: string;
+    hypothesisSource: ModelCandidateHypothesisSource;
     predictionsStored: false;
     selectedLambda: number;
     splitMetrics: Record<"calibration" | "test" | "train", Midus2AggregateMetricSummary>;
@@ -151,14 +195,24 @@ export async function runMidus2LocalBenchmark(
   const rows = await buildBenchmarkRows(downloadsDir);
 
   const models = Object.fromEntries(
-    Object.entries(MODEL_FEATURE_SETS).map(([modelId, featureKeys]) => {
-      const trained = selectModel(rows, [...featureKeys]);
-      return [modelId, summarizeModel(rows, trained)];
+    Object.entries(MODEL_CANDIDATE_DEFINITIONS).map(([modelId, candidate]) => {
+      const trained = selectModel(rows, [...candidate.featureKeys]);
+      return [modelId, summarizeModel(rows, trained, candidate)];
     }),
   );
 
   const output: Midus2LocalBenchmarkOutput = {
     benchmarkId: "midus2-biomarker-10y-complete-window-local-0",
+    candidateBatch: {
+      batchId: "midus2-first-no-crp-candidate-batch",
+      candidateCount: Object.keys(MODEL_CANDIDATE_DEFINITIONS).length,
+      exposureLabel: "diagnostic-only",
+      hypothesisSources: Array.from(new Set(
+        Object.values(MODEL_CANDIDATE_DEFINITIONS).map((candidate) => candidate.hypothesisSource),
+      )),
+      promotionAuthorized: false,
+      testSelectionAuthorized: false,
+    },
     codebookTextStored: false,
     coefficientsStored: false,
     createdAt: options.createdAt ?? new Date().toISOString(),
@@ -355,13 +409,20 @@ function prepareFeatureMatrix(rows: readonly ParsedRow[], featureKeys: readonly 
   };
 }
 
-function summarizeModel(rows: readonly ParsedRow[], model: TrainedModel): Midus2LocalBenchmarkOutput["models"][string] {
+function summarizeModel(
+  rows: readonly ParsedRow[],
+  model: TrainedModel,
+  candidate: ModelCandidateDefinition,
+): Midus2LocalBenchmarkOutput["models"][string] {
   return {
+    candidateRole: candidate.candidateRole,
     coefficientsStored: false,
     featureKeys: model.featureKeys,
     featureObservedCounts: Object.fromEntries(
       model.featureKeys.map((key) => [key, model.stats[key]?.observedCount ?? 0]),
     ),
+    hypothesis: candidate.hypothesis,
+    hypothesisSource: candidate.hypothesisSource,
     predictionsStored: false,
     selectedLambda: model.lambda,
     splitMetrics: {
@@ -485,13 +546,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     outputDir: process.env.MURPH_AGE_RESEARCH_OUTPUT_DIR,
   });
   const aggregateSummary = {
+    candidateBatch: result.output.candidateBatch,
     dataShape: result.output.dataShape,
     models: Object.fromEntries(
       Object.entries(result.output.models).map(([modelId, model]) => [modelId, {
+        candidateRole: model.candidateRole,
+        hypothesisSource: model.hypothesisSource,
         selectedLambda: model.selectedLambda,
         test: model.splitMetrics.test,
       }]),
     ),
+    status: result.output.status,
     artifact: path.basename(result.outputPath),
   };
   console.log(JSON.stringify(aggregateSummary, null, 2));
