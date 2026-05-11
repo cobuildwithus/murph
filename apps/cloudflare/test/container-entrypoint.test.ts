@@ -369,7 +369,12 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("returns gone for the removed browser-vault refresh side path after auth without loading the runner", async () => {
-    const loadNodeRunner = vi.fn(async () => nodeRunner);
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const nodeRunnerModule = {
+      ...nodeRunner,
+      runHostedWorkspaceInvocation,
+    };
+    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
       port: 0,
@@ -402,12 +407,68 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Browser-vault refresh side path removed.",
     });
     expect(loadNodeRunner).not.toHaveBeenCalled();
+    expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
         level: "info",
         message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
         phase: "failed",
+      }),
+    );
+  });
+
+  it("rejects unauthorized removed browser-vault refresh requests without route details", async () => {
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const nodeRunnerModule = {
+      ...nodeRunner,
+      runHostedWorkspaceInvocation,
+    };
+    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    await vi.waitFor(() => expect(loadNodeRunner).toHaveBeenCalledTimes(1));
+    loadNodeRunner.mockClear();
+    mocks.emitHostedExecutionStructuredLog.mockClear();
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/browser-vault-refresh`, {
+      body: "{]",
+      headers: {
+        authorization: "Bearer stale-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+    expect(loadNodeRunner).not.toHaveBeenCalled();
+    expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        level: "warn",
+        message: "Hosted container entrypoint rejected an unauthorized request.",
+        phase: "failed",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
       }),
     );
   });

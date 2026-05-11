@@ -12,17 +12,25 @@ Key decisions:
 - Removed side path returns a clear non-2xx JSON response instead of invoking node-runner refresh logic.
 
 State:
-- Active.
+- Implemented; final verification in progress.
 
 Done:
 - Read workflow/security/reliability/verification docs.
 - Located container-entrypoint and node-runner side-path code.
+- Removed container execution/parsing for `/internal/browser-vault-refresh`; authenticated callers now get `410`.
+- Removed `refreshHostedBrowserVaultReplica` from `apps/cloudflare/src/node-runner.ts`.
+- Deleted stale node-runner browser-vault refresh tests and replaced stale runner-container refresh lifecycle tests with deploy-skew throw coverage.
+- Updated durable docs to describe browser-vault refresh as normal runtime work under the active write fence.
+- Security/privacy review found no scoped issues.
+- Coverage pass added unauthorized removed-route coverage.
+- Focused checks passed: Cloudflare typecheck, container-entrypoint test, browser-vault runner-platform tests, runner-container deploy-skew throw test, and `git diff --check`.
+- Full `pnpm verify:acceptance` remains blocked by unrelated assistant-runtime liveness test type errors in current branch state.
 
 Now:
-- Remove stale parsing/body-limit/node-runner refresh logic and update tests.
+- Close plan/ledger and create the scoped commit if safe.
 
 Next:
-- Run focused Cloudflare checks, required audits, and final commit workflow if safe.
+- Handoff with verification notes and unrelated acceptance failure details.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -34,3 +42,6 @@ Working set (files/ids/commands):
 - `apps/cloudflare/test/runner-container.test.ts`
 - `apps/cloudflare/test/user-runner-alarm.test.ts`
 - `pnpm --dir apps/cloudflare test -- ...` or `pnpm test:diff ...`
+Status: completed
+Updated: 2026-05-11
+Completed: 2026-05-11

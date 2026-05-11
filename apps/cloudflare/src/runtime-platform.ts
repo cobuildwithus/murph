@@ -177,8 +177,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
   requireRuntimeLivenessPort?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
-  browserVaultRefreshAuthority?: boolean | null;
-  browserVaultRefreshSourceStateHash?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
@@ -612,8 +610,6 @@ function createCloudflareBrowserVaultReplicaPort(input: {
 }
 
 export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
-  browserVaultRefreshAuthority?: boolean | null;
-  browserVaultRefreshSourceStateHash?: string | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): Promise<Headers> {
   if (!input.workspaceCheckpointBridge) {
