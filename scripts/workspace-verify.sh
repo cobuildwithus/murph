@@ -408,6 +408,9 @@ run_app_verify_command_with_retry() {
   if [[ "$health_commons_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1)
   fi
+  if [[ "$app_dir" == "apps/web" && "$skip_cloudflare_typecheck" == "1" ]]; then
+    env_args+=(MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1)
+  fi
 
   run_command_with_retry \
     "Package command for ${app_dir} (verify)" \
@@ -512,8 +515,14 @@ run_test_apps() {
 }
 
 prepare_repo_vitest_runtime_artifacts() {
+  local health_commons_generated_prepared="${1:-0}"
+
   run_test_runtime_artifact_build_with_retry
-  run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
+  if [[ "$health_commons_generated_prepared" == "1" ]]; then
+    verify_log "skip Health Commons generated catalog; root acceptance typecheck already prepared it"
+  else
+    run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
+  fi
   run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
@@ -820,13 +829,14 @@ run_test_packages() {
 run_test_packages_coverage() {
   local artifacts_prepared="${1:-0}"
   local contracts_artifacts_prepared="${2:-0}"
+  local health_commons_generated_prepared="${3:-0}"
 
   run_timed_step \
     "Coverage cleanup" \
     node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
   run_timed_step "Tracked artifact hygiene" pnpm no-js
   if [[ "$artifacts_prepared" != "1" ]]; then
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
+    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$health_commons_generated_prepared"
   else
     verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
   fi
@@ -851,7 +861,7 @@ run_test_coverage() {
     # Keep package coverage and fixture smoke parallel, but wait to start app
     # verify until the package-coverage suite has released shared app-test
     # resources such as Prisma/client generation.
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
+    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"
     run_timed_step "Package coverage suite" run_test_packages_coverage 1 "$acceptance_typechecked" &
     coverage_pid="$!"
     register_background_pid "$coverage_pid"
@@ -871,7 +881,7 @@ run_test_coverage() {
       run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
     fi
   else
-    run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked"
+    run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked" "$acceptance_typechecked"
     run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
     run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage
   fi

@@ -2986,7 +2986,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("preempts persisted deferred idle checkpoints when a foreground nudge arrives", async () => {
+  it("preempts persisted deferred idle checkpoints without destroying the foreground container", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const destroyInstance = vi.fn(async () => {});
@@ -3026,7 +3026,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
 
-    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms).toEqual(["2026-04-27T00:00:01.000Z"]);
     await flushDetachedRunnerDrive();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -3489,7 +3489,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("records heartbeat liveness without keeping pending work on the short drain continuation", async () => {
+  it("returns a yield instruction from heartbeat liveness when foreground work is pending", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -3529,7 +3529,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
-  it("clears a due idle checkpoint when heartbeat liveness preserves pending nudge recovery", async () => {
+  it("clears a due idle checkpoint when heartbeat liveness yields to pending work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -6030,6 +6030,70 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
+  it("clears skipped cold idle-shutdown checkpoints without retry, browser-vault refresh, or container cleanup", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-skip-cold"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    }));
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+      onWorkspaceRead: () => {
+        throw new Error("Warm-only idle checkpoint must not read workspace through the user runner.");
+      },
+      refreshBrowserVaultReplica,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?,
+           retry_failure_count = 0
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await expect(runner.alarm()).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[0]?.[0].job.request.workspaceVersion).toBe("4");
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                next_wake_at,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      in_flight: 0,
+      next_wake_at: null,
+      retry_failure_count: 0,
+    }]);
+  });
+
   it("does not schedule a normal drain when post-checkpoint container destroy fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -6397,6 +6461,59 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("starts foreground work when pending work and an idle checkpoint alarm are due together", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-simultaneous-pending-work"),
+      version: "4",
+    });
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?,
+           pending_nudge = 1,
+           pending_work = 1
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.000Z",
+      idle_shutdown_checkpoint_workspace_version: "4",
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+  });
+
   it("skips an idle-shutdown checkpoint when a nudge arrives after preflight", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -6406,18 +6523,24 @@ describe("HostedUserRunner runtime crypto context", () => {
     });
     let runnerForReentrantNudge: HostedUserRunner | null = null;
     let reentrantNudge: HostedRunnerNudgeResult | null = null;
-    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace, {
-      onWorkspaceRead: async ({ readCount }) => {
-        if (readCount !== 1) {
-          return;
-        }
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(workspace);
+    runnerForReentrantNudge = runner;
+    const stateStore = getRunnerStateStoreForTest(runner);
+    const readState = stateStore.readState.bind(stateStore);
+    let readStateCount = 0;
+    let injectedReentrantNudge = false;
+    vi.spyOn(stateStore, "readState").mockImplementation(async () => {
+      const record = await readState();
+      readStateCount += 1;
+      if (readStateCount === 2 && !injectedReentrantNudge) {
+        injectedReentrantNudge = true;
         if (!runnerForReentrantNudge) {
           throw new Error("Runner is not available for reentrant nudge.");
         }
         reentrantNudge = await runnerForReentrantNudge.nudgeHostedRunner();
-      },
+      }
+      return record;
     });
-    runnerForReentrantNudge = runner;
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -7208,14 +7331,25 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("skips stale idle-shutdown checkpoint alarms when the workspace version changed", async () => {
+  it("lets the warm-only runtime skip stale idle-shutdown checkpoint workspace versions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
       snapshotRef: createLayeredSnapshotRef("idle-stale"),
       version: "5",
     });
-    const { invoke, runner, sql } = createRunnerCryptoContextHarness(workspace);
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+      status: "idle",
+    }));
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+      onWorkspaceRead: () => {
+        throw new Error("Warm-only idle checkpoint must not preflight read workspace.");
+      },
+    });
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -7229,7 +7363,24 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await runner.alarm();
 
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[0]?.[0].job.request.workspaceVersion).toBe("4");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(
+      sql.exec(
+        `SELECT idle_shutdown_checkpoint_due_at,
+                idle_shutdown_checkpoint_workspace_version,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      retry_failure_count: 0,
+    }]);
   });
 });
 
@@ -7555,6 +7706,9 @@ function createRunnerCryptoContextHarness(
             await destroyInstance();
           },
           invoke,
+          async invokeIdleCheckpointIfWarm(input) {
+            return await invoke(input);
+          },
           async ownsInternalWorkerProxyToken() {
             return true;
           },

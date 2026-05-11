@@ -939,6 +939,12 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         record.idleShutdownCheckpointed,
         "Hosted workspace invocation result idleShutdownCheckpointed",
       );
+  const idleShutdownCheckpointSkipped = record.idleShutdownCheckpointSkipped === undefined
+    ? undefined
+    : parseHostedIdleShutdownCheckpointSkipped(
+        record.idleShutdownCheckpointSkipped,
+        "Hosted workspace invocation result idleShutdownCheckpointSkipped",
+      );
   const nextWakeAt = record.nextWakeAt === undefined
     ? undefined
     : readNullableString(
@@ -952,9 +958,20 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
       "Hosted workspace invocation result idleShutdownCheckpointed requires status idle.",
     );
   }
+  if (idleShutdownCheckpointSkipped !== undefined && status !== "idle") {
+    throw new TypeError(
+      "Hosted workspace invocation result idleShutdownCheckpointSkipped requires status idle.",
+    );
+  }
+  if (idleShutdownCheckpointed === true && idleShutdownCheckpointSkipped !== undefined) {
+    throw new TypeError(
+      "Hosted workspace invocation result cannot both checkpoint and skip idle shutdown checkpoint.",
+    );
+  }
   return {
     ...(deferredCheckpointRequired === undefined ? {} : { deferredCheckpointRequired }),
     ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
+    ...(idleShutdownCheckpointSkipped === undefined ? {} : { idleShutdownCheckpointSkipped }),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(record.redactedStatus === undefined
       ? {}
@@ -966,6 +983,17 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         }),
     status,
   };
+}
+
+function parseHostedIdleShutdownCheckpointSkipped(
+  value: unknown,
+  field: string,
+): "container_not_warm" | "warm_workspace_unavailable" {
+  if (value === "container_not_warm" || value === "warm_workspace_unavailable") {
+    return value;
+  }
+
+  throw new TypeError(`${field} must be container_not_warm or warm_workspace_unavailable.`);
 }
 
 export function parseHostedMailboxLane(value: unknown): HostedMailboxLane {

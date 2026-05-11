@@ -297,6 +297,13 @@ describe("hosted runtime control contracts", () => {
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       status: "idle",
     });
+    expect(parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    })).toEqual({
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    });
     expect(() => parseHostedWorkspaceInvocationResult({
       deferredCheckpointRequired: "true",
       status: "idle",
@@ -305,6 +312,15 @@ describe("hosted runtime control contracts", () => {
       idleShutdownCheckpointed: true,
       status: "scheduled",
     })).toThrow("Hosted workspace invocation result idleShutdownCheckpointed requires status idle.");
+    expect(() => parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+      status: "scheduled",
+    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointSkipped requires status idle.");
+    expect(() => parseHostedWorkspaceInvocationResult({
+      idleShutdownCheckpointed: true,
+      idleShutdownCheckpointSkipped: "container_not_warm",
+      status: "idle",
+    })).toThrow("Hosted workspace invocation result cannot both checkpoint and skip idle shutdown checkpoint.");
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {

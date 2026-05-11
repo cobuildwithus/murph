@@ -101,6 +101,9 @@ import {
   ensureHostedInboxSidecarReady,
 } from "../src/hosted-runtime/context.ts";
 import {
+  markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
+} from "../src/hosted-runtime/workspace-restore.ts";
+import {
   createEmptyHostedMailboxImportState,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
@@ -386,27 +389,16 @@ describe("hosted workspace runtime entrypoint", () => {
 
   test("publishes restored mailbox watermarks during idle-shutdown checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
-    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-source-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const restoredState = createEmptyHostedMailboxImportState();
     restoredState.watermarks.conversation = "546";
     restoredState.watermarks.system = "7";
-    await writeMailboxImportStateFile(sourceVaultRoot, restoredState);
-    const sourceBundle = await snapshotHostedBundleRoots({
-      kind: "vault",
-      roots: [
-        {
-          root: sourceVaultRoot,
-          rootKey: "vault",
-        },
-      ],
+    const workspaceSnapshotRef = createBundleRef({
+      hash: "e".repeat(64),
+      key: "users/bundles/member-synthetic/idle-shutdown-source.bundle.json",
+      size: 640,
     });
-    assert.ok(sourceBundle);
-    const bundleHash = sha256HostedBundleHex(sourceBundle);
-    const artifactBytesByHash = new Map([
-      [bundleHash, sourceBundle],
-    ]);
     const redactedStatus = {
       hostedMailboxConversationImportedSeq: "444",
       hostedMailboxFetchedCount: 50,
@@ -418,16 +410,18 @@ describe("hosted workspace runtime entrypoint", () => {
       events,
       workspace: createWorkspaceState({
         redactedStatus,
-        snapshotRef: createBundleRef({
-          hash: bundleHash,
-          key: "users/bundles/member-synthetic/idle-shutdown-source.bundle.json",
-          size: sourceBundle.byteLength,
-        }),
+        snapshotRef: workspaceSnapshotRef,
         version: "4",
       }),
     });
 
     try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeMailboxImportStateFile(vaultRoot, restoredState);
+      await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
+        snapshotRef: workspaceSnapshotRef,
+        vaultRoot,
+      });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -459,7 +453,6 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
           },
           platform: createPlatform({
-            artifactBytesByHash,
             mailboxPort: null,
             workspacePort,
           }),
@@ -483,7 +476,111 @@ describe("hosted workspace runtime entrypoint", () => {
       });
     } finally {
       await removeTempRoot(vaultRoot);
-      await removeTempRoot(sourceVaultRoot);
+    }
+  });
+
+  test("skips idle-shutdown checkpoint when the live warm snapshot marker is missing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      events,
+      workspace: createWorkspaceState({
+        snapshotRef: createBundleRef({
+          hash: "f".repeat(64),
+          key: "users/bundles/member-synthetic/idle-shutdown-missing-warm.bundle.json",
+          size: 640,
+        }),
+        version: "4",
+      }),
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_missing_warm_workspace",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Idle-shutdown checkpoint must not snapshot without warm workspace.");
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort,
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events, ["workspace.read"]);
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(result, {
+        idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+        status: "idle",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("skips stale idle-shutdown checkpoint workspace versions without throwing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      events,
+      workspace: createWorkspaceState({
+        version: "5",
+      }),
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_idle_shutdown_stale_workspace",
+            leaseGeneration: "9",
+            reason: "idle_shutdown_checkpoint",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Idle-shutdown checkpoint must not snapshot stale workspace versions.");
+          },
+          async importItem() {
+            throw new Error("Idle-shutdown checkpoint must not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: null,
+            workspacePort,
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events, ["workspace.read"]);
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(result, {
+        idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
+        status: "idle",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -1369,10 +1466,10 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot() {
-            throw new Error("Foreground input preemption must not checkpoint.");
+            throw new Error("Foreground work must not checkpoint.");
           },
           async importItem() {
-            throw new Error("Foreground input preemption must not import mailbox items.");
+            throw new Error("No mailbox items should be imported.");
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -1492,7 +1589,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("returns scheduled when foreground liveness reports fresh input during active assistant work", async () => {
+  test("keeps foreground assistant work running when liveness reports only a pending nudge", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const freshInputWakeAt = "2026-04-27T00:00:03.000Z";
@@ -1508,7 +1605,6 @@ describe("hosted workspace runtime entrypoint", () => {
           return { ok: true };
         }
         return {
-          inputAvailable: true,
           nextAlarmAt: freshInputWakeAt,
           ok: true,
           pendingNudge: true,
@@ -1518,9 +1614,9 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+      const activeRun = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot() {
-          throw new Error("Foreground input preemption must not checkpoint stale active work.");
+          throw new Error("Foreground assistant work must not checkpoint.");
         },
         async importItem(item) {
           events.push(`import:${item.item.id}`);
@@ -1553,25 +1649,28 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         vaultRoot,
       });
+      resultPromise = activeRun;
+      let activeRunSettled = false;
+      void activeRun.then(() => {
+        activeRunSettled = true;
+      }, () => {
+        activeRunSettled = true;
+      });
 
       await waitUntil(
         () => assert.ok(assistantStarted, events.join(",")),
         5_000,
       );
-      const result = await Promise.race([
-        resultPromise,
-        new Promise<HostedWorkspaceInvocationResult>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error("Timed out waiting for foreground fresh-input preemption."));
-          }, 1_000);
-        }),
-      ]);
+      await waitUntil(
+        () => assert.ok(touchCalls >= 2, events.join(",")),
+        5_000,
+      );
+      assert.equal(activeRunSettled, false);
 
-      assert.deepEqual(result, {
-        nextWakeAt: freshInputWakeAt,
-        status: "scheduled",
-      });
-      assert.equal(events.includes("assistant.finish"), false);
+      releaseAssistant.resolve();
+      const result = await activeRun;
+      assert.equal(result.status, "idle");
+      assert.equal(events.includes("assistant.finish"), true);
       assert.ok(touchCalls >= 2);
     } finally {
       releaseAssistant.resolve();

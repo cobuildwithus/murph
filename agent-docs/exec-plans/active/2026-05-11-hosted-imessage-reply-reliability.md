@@ -42,7 +42,7 @@ Updated: 2026-05-11
 - Product/process constraints:
   - Prefer clean, simple, composable architecture over new orchestration.
   - Preserve unrelated dirty worktree edits and overlapping active plan rows.
-  - Use Cloudflare docs MCP for current Cloudflare behavior; DB Hub MCP is unavailable in this session unless it appears later.
+  - Use Cloudflare and DB Hub MCP evidence for production/runtime state, keeping all identifiers and payloads redacted.
   - Use `review:gpt` as a simplification/review aid where the available tooling permits.
 
 ## Risks and mitigations
@@ -69,11 +69,12 @@ Updated: 2026-05-11
 ## Decisions
 
 - Use the Cloudflare Durable Object alarm as the single scheduler for retry/wake/idle-maintenance ordering, consistent with Cloudflare's one-alarm-per-object model.
-- Treat DB Hub MCP as unavailable until a callable MCP server/tool appears in this session.
+- DB Hub MCP failed to register in this already-running session after a launcher `PATH` issue, so production DB checks in this pass used the same hosted DB URL through a redacted read-only Prisma probe. The wrapper has been fixed for future MCP launches, but this session still has no callable DB Hub tool namespace.
 - Keep the fix in the Cloudflare runner scheduling layer: foreground nudges now abort idle-shutdown checkpoint work instead of waiting behind it, while normal hosted reply handling still flows through the existing mailbox/runtime/outbox path.
 - Align the native container `sleepAfter` with `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` so the existing `runnerIdleTtlMs - safetyMarginMs` checkpoint schedule is the actual default T-minus-60 lifecycle point.
 - Keep hosted-local E2E Docker auth isolated from the operator's normal Docker credential config, while symlinking only Docker CLI plugins into the temporary config so Wrangler retains `buildx`.
-- Runtime liveness is the foreground priority boundary: when it reports fresh user input during normal foreground work, the active job yields as `scheduled` so the queued nudge drives from latest mailbox state instead of waiting behind unrelated active work.
+- Runtime liveness is a maintenance preemption boundary, not a foreground reply cancellation boundary: pending nudges abort idle-shutdown checkpoints, while foreground assistant reply work keeps running and leaves the queued nudge for runner follow-up/active-turn refresh.
+- Treat the webhook direct runner nudge as the immediate wake contract for active conversation input. The pointer workflow remains a retry/watchdog, but webhook handoff must await the direct nudge result and log the actual accepted/not-accepted status before returning.
 
 ## Verification
 
@@ -111,3 +112,11 @@ Updated: 2026-05-11
 - `pnpm test:diff` passed the affected `packages/assistant-runtime` and `apps/cloudflare` verification lanes, including the hosted-local E2E stub-all scenario: 71 test files and 1018 tests.
 - `git diff --check` passed.
 - `review:gpt simplify` was launched with the current diff and invariants; response capture timed out with only a partial/no-finding response before completion.
+- Follow-up production DB evidence after the user still saw no reply showed conversation mailbox items appending successfully, while the target member workspace remained checkpointed at an older conversation import sequence and had no runner import logs after the latest append. That rules out Linq/provider ingress as the primary failure and pins this pass to wake handoff/admission.
+- The web wake handoff success path was still returning `workflow-started` with a deferred direct nudge result. If the after-response work or pointer workflow failed to run promptly, webhook ingress looked healthy while no direct runner wake was durably observed. The fix now awaits the direct nudge on the success path and records the real direct nudge outcome before read receipt/final webhook completion.
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-execution-handoff.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts --no-coverage` passed 55 tests after the web handoff fix.
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-onboarding-telegram-dispatch.test.ts apps/web/test/hosted-onboarding-whatsapp-service.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts apps/web/test/hosted-email-mailbox-ingress-route.test.ts apps/web/test/device-sync-hosted-wake.test.ts --no-coverage` passed 72 tests after the web handoff fix.
+- `pnpm --dir apps/web typecheck:prepared` passed after the web handoff fix.
+- DB Hub and Cloudflare observability now show the latest iMessage mailbox item imported into assistant input and the assistant scanner starting, followed by repeated runner/container lifecycle failures before any pass-finished/outbox evidence. That moves the active failure past Linq/provider ingress and into foreground invocation control/liveness.
+- Cloudflare observability also shows heartbeat RPCs and repeated pending-nudge/alarm activity interleaved with active foreground runs. Treating any pending nudge as a foreground liveness abort can starve the reply pass; the current fix preserves idle checkpoint preemption but stops aborting normal foreground assistant work on runner pending-nudge liveness.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-workspace-entrypoint.test.ts --no-coverage` passed 50 tests after changing foreground liveness behavior.

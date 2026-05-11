@@ -53,6 +53,7 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
+  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   refreshHostedExecutionContainerBrowserVaultReplica,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
@@ -634,101 +635,57 @@ export class HostedUserRunner {
 
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const activeInThisIsolate = this.invocationLock !== null;
-    let activeRecoveryWakeAt: string | null = null;
-    let runningRecord = await this.stateStore.readState();
-    if (!activeInThisIsolate && runningRecord.inFlight) {
-      const recovery = await this.stateStore.clearStaleInvocationIfExpired({
-        currentWorkerVersionId: this.currentWorkerVersionId,
-        heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
-        nowMs: Date.now(),
-        readyTimeoutMs: this.env.runnerReadyTimeoutMs,
-        timeoutMs: this.env.runnerTimeoutMs,
-      });
-      runningRecord = recovery.record;
-      if (recovery.cleared) {
-        this.logStaleInvocationLeaseCleared(
-          recovery.attemptId,
-          runningRecord.userId,
-          recovery.reason,
-        );
-      } else {
-        activeRecoveryWakeAt = recovery.nextRecoveryAt;
-      }
-    }
-    const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
-    const activeWorkspaceInvocation = runningRecord.workspaceInvocation;
-    const activeIdleShutdownCheckpoint =
-      activeWorkspaceInvocation?.reason === "idle_shutdown_checkpoint"
-        ? activeWorkspaceInvocation
-        : null;
-    const nowMs = Date.now();
-    const resetRetryFailureCount = runningRecord.retryFailureCount >= this.env.maxEventAttempts;
-    const retryFailureCount = resetRetryFailureCount
-      ? 0
-      : runningRecord.retryFailureCount;
-    const preferredWakeAt = activeInThisIsolate
-      ? new Date(nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS).toISOString()
-      : alreadyRunning
-      ? resolvePendingNudgeDrainContinuationWakeAt({
-          activeRecoveryWakeAt,
-          nowMs,
-          record: runningRecord,
-          runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
-          runnerTimeoutMs: this.env.runnerTimeoutMs,
-        })
-      : new Date(nowMs + resolveHostedRunnerFailureRetryDelayMs({
-          defaultRetryDelayMs: this.env.retryDelayMs,
-          reason: "nudge",
-          retryFailureCount,
-        })).toISOString();
-    let record = await this.markPendingNudgeAndApplyAlarm({
-      preferredWakeAt,
-      resetRetryFailureCount,
+    const decision = await this.stateStore.markPendingWorkAndDecide({
+      activeInThisIsolate,
+      currentWorkerVersionId: this.currentWorkerVersionId,
+      defaultRetryDelayMs: this.env.retryDelayMs,
+      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+      immediateRetryDelayMs: IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS,
+      maxEventAttempts: this.env.maxEventAttempts,
+      maxRetryDelayMs: NUDGE_FAILURE_RETRY_MAX_DELAY_MS,
+      nowMs: Date.now(),
+      pendingWorkContinuationDelayMs: PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
+      retryBackoffMultiplier: NUDGE_FAILURE_RETRY_BACKOFF_MULTIPLIER,
+      runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
+      runnerTimeoutMs: this.env.runnerTimeoutMs,
     });
-    let preemptedActiveInvocation = false;
-    let preemptedPersistedActiveInvocation = false;
-    let preemptedPersistedActiveInvocationContainerDestroyScheduled = false;
-    let immediateDriveStarted = false;
-    if (activeInThisIsolate) {
-      if (activeIdleShutdownCheckpoint) {
-        const preemption = await this.preemptActiveIdleShutdownCheckpointForPendingNudge({
-          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-          logMessage: "Hosted runner aborted idle-shutdown checkpoint after foreground nudge.",
-          record,
-          userId: record.userId,
-        });
-        if (preemption.preempted) {
-          preemptedActiveInvocation = preemption.activeWorkspaceInvocationAborted;
-          record = preemption.record;
-        } else {
-          immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
-            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-            reason: "nudge",
-            userId: record.userId,
-          });
-        }
-      } else {
-        immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
-          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-          reason: "nudge",
-          userId: record.userId,
-        });
-      }
-    } else if (activeIdleShutdownCheckpoint) {
-      const preemption = await this.stateStore.clearActiveIdleShutdownCheckpointForForegroundNudge(
-        runningRecord.userId,
+    if (decision.record.nextWakeAt) {
+      await this.state.storage.setAlarm(new Date(decision.record.nextWakeAt));
+    }
+    if (decision.staleRecovery?.cleared) {
+      this.logStaleInvocationLeaseCleared(
+        decision.staleRecovery.attemptId,
+        decision.record.userId,
+        decision.staleRecovery.reason,
       );
-      preemptedPersistedActiveInvocation = preemption.cleared;
-      if (preemption.cleared) {
-        immediateDriveStarted = this.startDetachedRunnerDrive({
-          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-          reason: "nudge",
-          userId: record.userId,
-        });
-        preemptedPersistedActiveInvocationContainerDestroyScheduled =
-          this.destroyPreemptedActiveInvocationContainerInBackground(runningRecord.userId);
-      }
-    } else if (!alreadyRunning) {
+    }
+
+    let record = decision.record;
+    let preemptedActiveInvocation = false;
+    let immediateDriveStarted = false;
+    if (decision.kind === "preempt_local_idle_checkpoint") {
+      preemptedActiveInvocation = this.abortActiveWorkspaceInvocation(
+        decision.activeInvocation,
+        new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
+      );
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          activeWorkspaceInvocationAborted: preemptedActiveInvocation,
+          pendingNudge: record.pendingNudge,
+          workspaceAttemptId: decision.activeInvocation.attemptId,
+        },
+        message: "Hosted runner aborted idle-shutdown checkpoint after foreground nudge.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
+    } else if (decision.kind === "wait" && activeInThisIsolate) {
+      immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+        reason: "nudge",
+        userId: record.userId,
+      });
+    } else if (decision.kind === "start") {
       immediateDriveStarted = this.startDetachedRunnerDrive({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: "nudge",
@@ -739,25 +696,24 @@ export class HostedUserRunner {
       component: "hosted.runner",
       details: {
         alarmScheduled: record.nextWakeAt !== null,
-        alreadyRunning,
+        alreadyRunning: decision.alreadyRunning,
         immediateDriveStarted,
         pendingNudge: record.pendingNudge,
-        preemptedPersistedActiveInvocation,
-        preemptedPersistedActiveInvocationContainerDestroyScheduled,
+        preemptedPersistedActiveInvocation: decision.preemptedPersistedActiveInvocation,
         preemptedActiveInvocation,
-        retryFailureCountReset: resetRetryFailureCount,
+        retryFailureCountReset: decision.resetRetryFailureCount,
       },
       message: "Hosted runner nudge accepted.",
       phase: "scheduled",
-      userId: runningRecord.userId,
+      userId: record.userId,
     });
 
     return {
       accepted: true,
       alarmScheduled: record.nextWakeAt !== null,
-      alreadyRunning,
+      alreadyRunning: decision.alreadyRunning,
       immediateDriveStarted,
-      inFlight: alreadyRunning,
+      inFlight: decision.alreadyRunning,
       nextAlarmAt: record.nextWakeAt,
     };
   }
@@ -825,150 +781,52 @@ export class HostedUserRunner {
         | "wrong_user";
     }
   > {
-    const result = await this.stateStore.recordActiveInvocationHeartbeat(input);
-    if (!result.ok) {
+    const instruction = await this.stateStore.recordActiveInvocationHeartbeatInstruction({
+      ...input,
+      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+      runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
+      runnerTimeoutMs: this.env.runnerTimeoutMs,
+    });
+    if (instruction.kind === "abort") {
       return {
         ok: false,
-        reason: result.reason,
+        reason: instruction.reason,
       };
     }
 
-    const preemption = await this.preemptActiveIdleShutdownCheckpointForPendingNudge({
-      logMessage: "Hosted runner aborted idle-shutdown checkpoint after foreground input became available.",
-      record: result.record,
-      userId: input.userId,
-    });
-    if (preemption.preempted) {
-      return {
-        inputAvailable: true,
-        nextAlarmAt: preemption.record.nextWakeAt,
-        ok: true,
-        pendingNudge: preemption.record.pendingNudge,
-      };
-    }
-
-    const record = await this.reschedulePendingNudgeAfterInvocationLiveness(result.record)
-      ?? result.record;
-    return {
-      inputAvailable: record.pendingNudge,
-      nextAlarmAt: record.nextWakeAt,
-      ok: true,
-      pendingNudge: record.pendingNudge,
-    };
-  }
-
-  private async preemptActiveIdleShutdownCheckpointForPendingNudge(input: {
-    aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-    logMessage: string;
-    record: RunnerStateRecord;
-    userId: string;
-  }): Promise<
-    | {
-      preempted: false;
-      record: RunnerStateRecord;
-    }
-    | {
-      activeWorkspaceInvocationAborted: boolean;
-      preempted: true;
-      record: RunnerStateRecord;
-    }
-  > {
-    const activeInvocation = input.record.workspaceInvocation;
-    if (
-      !input.record.pendingNudge
-      || activeInvocation?.reason !== "idle_shutdown_checkpoint"
-    ) {
-      return {
-        preempted: false,
-        record: input.record,
-      };
-    }
-
-    const aborted = this.abortActiveWorkspaceInvocation(
-      {
-        attemptId: activeInvocation.attemptId,
-        leaseGeneration: input.record.leaseGeneration.toString(),
-        userId: input.record.userId,
-      },
-      new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
-    );
-    const record = await this.queuePendingNudgeContinuationAfterInvocation({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      record: input.record,
-      userId: input.userId,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        activeWorkspaceInvocationAborted: aborted,
-        pendingNudge: record.pendingNudge,
-        workspaceAttemptId: activeInvocation.attemptId,
-      },
-      message: input.logMessage,
-      phase: "scheduled",
-      userId: input.userId,
-    });
-
-    return {
-      activeWorkspaceInvocationAborted: aborted,
-      preempted: true,
-      record,
-    };
-  }
-
-  private destroyPreemptedActiveInvocationContainerInBackground(userId: string): boolean {
-    if (!this.runnerContainerNamespace) {
-      return false;
-    }
-
-    const cleanup = destroyHostedExecutionContainer({
-      runnerContainerName: resolveHostedExecutionRunnerContainerName({
-        source: this.runnerRuntimeEnvSource,
-        userId,
-      }),
-      runnerContainerNamespace: this.runnerContainerNamespace,
-      userId,
-    })
-      .then((result) => {
-        if (!result.ok) {
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              destroyAttempted: result.attempted,
-              destroyErrorCode: result.errorCode,
-            },
-            level: "warn",
-            message: "Hosted runner preempted idle-checkpoint container cleanup failed after foreground drive started.",
-            phase: "failed",
-            userId,
-          });
-        }
-      })
-      .catch((error: unknown) => {
+    if (instruction.kind === "yield") {
+      if (instruction.activeInvocation.reason === "idle_shutdown_checkpoint") {
+        const aborted = this.abortActiveWorkspaceInvocation(
+          instruction.activeInvocation,
+          new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
+        );
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
-          error,
-          level: "warn",
-          message: "Hosted runner preempted idle-checkpoint container cleanup threw after foreground drive started.",
-          phase: "failed",
-          userId,
+          details: {
+            activeWorkspaceInvocationAborted: aborted,
+            pendingNudge: instruction.record.pendingNudge,
+            workspaceAttemptId: instruction.activeInvocation.attemptId,
+          },
+          message: "Hosted runner aborted idle-shutdown checkpoint after foreground input became available.",
+          phase: "scheduled",
+          userId: input.userId,
         });
-      });
-
-    try {
-      this.state.waitUntil?.(cleanup);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted runner preempted idle-checkpoint cleanup could not be registered with Durable Object waitUntil.",
-        phase: "scheduled",
-        userId,
-      });
+      }
+      await this.runtimeAlarmScheduler.syncStoredAlarm();
+      return {
+        inputAvailable: true,
+        nextAlarmAt: instruction.nextWakeAt,
+        ok: true,
+        pendingNudge: instruction.record.pendingNudge,
+      };
     }
-    void cleanup;
-    return true;
+
+    return {
+      inputAvailable: false,
+      nextAlarmAt: instruction.record.nextWakeAt,
+      ok: true,
+      pendingNudge: false,
+    };
   }
 
   async recordActiveInvocationContainerStopped(input: {
@@ -1145,19 +1003,24 @@ export class HostedUserRunner {
       };
     }
 
-    let preflightWorkspaceRead: HostedWorkspaceReadResponse | null = null;
     if (invocationReason === "idle_shutdown_checkpoint") {
       const idlePreflight = await this.preflightIdleShutdownCheckpoint({
         expectedWorkspaceVersion: input.idleCheckpointWorkspaceVersion ?? null,
         record: initialRecord,
       });
       if (!idlePreflight.run) {
+        if (idlePreflight.runForeground) {
+          return await this.runUntilIdleOrBudgetInternal({
+            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+            dueWake: true,
+            reason: "nudge",
+          });
+        }
         return {
           nextWakeAt: idlePreflight.nextWakeAt,
           status: "idle",
         };
       }
-      preflightWorkspaceRead = idlePreflight.workspaceRead;
     }
 
     let lease: RunnerInvocationLease;
@@ -1211,10 +1074,11 @@ export class HostedUserRunner {
             finishedAt: new Date().toISOString(),
             lease,
           });
-          const record = await this.queuePendingNudgeContinuationAfterInvocation({
+          await this.queuePendingNudgeContinuationAfterInvocation({
             record: completion.record,
             userId: initialRecord.userId,
           });
+          this.pendingRunnerDriveAfterInvocation = null;
           emitHostedExecutionStructuredLog({
             component: "hosted.runner",
             details: {
@@ -1225,17 +1089,21 @@ export class HostedUserRunner {
             phase: "scheduled",
             userId: initialRecord.userId,
           });
-          return {
-            nextWakeAt: record.nextWakeAt,
-            status: "scheduled",
-          };
+          return await this.runUntilIdleOrBudgetInternal({
+            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+            dueWake: true,
+            reason: "nudge",
+          });
         }
       }
 
-      const workspaceRead = preflightWorkspaceRead
-        ?? await this.readHostedWorkspaceFromWeb(initialRecord.userId);
-      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
-      workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      if (invocationReason === "idle_shutdown_checkpoint") {
+        workspaceVersion = input.idleCheckpointWorkspaceVersion ?? "0";
+      } else {
+        const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
+        this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
+        workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      }
       lease = await this.stateStore.bindInvocationWorkspaceVersion({
         lease,
         workspaceVersion,
@@ -1947,7 +1815,10 @@ export class HostedUserRunner {
     });
 
     try {
-      return await invokeHostedExecutionContainerRunner({
+      const invokeRunner = input.reason === "idle_shutdown_checkpoint"
+        ? invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm
+        : invokeHostedExecutionContainerRunner;
+      return await invokeRunner({
         job,
         runnerContainerName,
         runnerContainerNamespace: this.runnerContainerNamespace,
@@ -2307,21 +2178,18 @@ export class HostedUserRunner {
     | {
       nextWakeAt: string | null;
       run: false;
+      runForeground?: boolean;
     }
     | {
       run: true;
-      workspaceRead: HostedWorkspaceReadResponse;
     }
   > {
     if (input.record.pendingNudge) {
       await this.stateStore.clearIdleShutdownCheckpoint();
-      const record = await this.queuePendingNudgeContinuationAfterInvocation({
-        record: input.record,
-        userId: input.record.userId,
-      });
       return {
-        nextWakeAt: record.nextWakeAt,
+        nextWakeAt: null,
         run: false,
+        runForeground: true,
       };
     }
 
@@ -2336,10 +2204,16 @@ export class HostedUserRunner {
       };
     }
 
-    const workspaceRead = await this.readHostedWorkspaceFromWeb(input.record.userId);
-    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.record.userId);
     const latestRecord = await this.stateStore.readState();
-    if (latestRecord.pendingNudge || latestRecord.inFlight) {
+    if (latestRecord.pendingNudge && !latestRecord.inFlight) {
+      await this.stateStore.clearIdleShutdownCheckpoint();
+      return {
+        nextWakeAt: null,
+        run: false,
+        runForeground: true,
+      };
+    }
+    if (latestRecord.inFlight) {
       const record = await this.syncRunnerFollowUpAfterInvocation({
         record: latestRecord,
         userId: latestRecord.userId,
@@ -2349,20 +2223,13 @@ export class HostedUserRunner {
         run: false,
       };
     }
-    const workspace = workspaceRead.workspace;
     const idleCheckpointDueAt = input.record.idleShutdownCheckpointDueAt;
-    const workspaceVersionMatches = workspace
-      ? workspace.version === input.expectedWorkspaceVersion
-      : input.expectedWorkspaceVersion === "0";
     const recordWakeWouldPreemptIdleCheckpoint =
       latestRecord.nextWakeAt && idleCheckpointDueAt
         ? Date.parse(latestRecord.nextWakeAt) <= Date.parse(idleCheckpointDueAt)
         : Boolean(latestRecord.nextWakeAt);
     const recordWakePreemptsIdleCheckpoint = recordWakeWouldPreemptIdleCheckpoint;
-    if (
-      !workspaceVersionMatches
-      || recordWakePreemptsIdleCheckpoint
-    ) {
+    if (recordWakePreemptsIdleCheckpoint) {
       await this.stateStore.clearIdleShutdownCheckpoint();
       await this.stateStore.clearDeferredCheckpointRequired();
       const record = await this.runtimeAlarmScheduler.syncNextWake({
@@ -2374,8 +2241,6 @@ export class HostedUserRunner {
           expectedWorkspaceVersion: input.expectedWorkspaceVersion,
           hasNextWake: Boolean(latestRecord.nextWakeAt),
           nextWakePreemptsIdleCheckpoint: Boolean(recordWakePreemptsIdleCheckpoint),
-          hasWorkspace: Boolean(workspace),
-          workspaceVersionMatches,
         },
         message: "Hosted runner skipped stale idle-shutdown checkpoint alarm.",
         phase: "scheduled",
@@ -2389,7 +2254,6 @@ export class HostedUserRunner {
 
     return {
       run: true,
-      workspaceRead,
     };
   }
 
@@ -2527,6 +2391,32 @@ export class HostedUserRunner {
     result: HostedWorkspaceInvocationResult;
     userId: string;
   }): Promise<void> {
+    if (input.result.idleShutdownCheckpointSkipped) {
+      await this.stateStore.clearDeferredCheckpointRequired();
+      if (input.result.idleShutdownCheckpointSkipped === "container_not_warm") {
+        await this.finishSkippedIdleShutdownCheckpointWithoutContainerCleanupBestEffort({
+          preferredWakeAt: input.result.nextWakeAt ?? null,
+          userId: input.userId,
+        });
+      } else {
+        await this.finishIdleShutdownCheckpointBestEffort({
+          cleanupFailureMessage: "Hosted skipped idle-shutdown checkpoint cleanup failed.",
+          preferredWakeAt: input.result.nextWakeAt ?? null,
+          userId: input.userId,
+        });
+      }
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          idleShutdownCheckpointSkipped: input.result.idleShutdownCheckpointSkipped,
+        },
+        message: "Hosted runner skipped idle-shutdown checkpoint without retry.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+      return;
+    }
+
     if (isCommittedIdleShutdownCheckpointResult(input.result)) {
       await this.stateStore.clearDeferredCheckpointRequired();
       await this.finishIdleShutdownCheckpointBestEffort({
@@ -2579,6 +2469,72 @@ export class HostedUserRunner {
       cleanupFailureMessage: "Hosted idle-shutdown checkpoint cleanup failed.",
       preferredWakeAt: input.result.nextWakeAt ?? null,
       userId: input.userId,
+    });
+  }
+
+  private async finishSkippedIdleShutdownCheckpointWithoutContainerCleanupBestEffort(input: {
+    preferredWakeAt: string | null;
+    userId: string;
+  }): Promise<void> {
+    try {
+      await this.finishSkippedIdleShutdownCheckpointWithoutContainerCleanup(input);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          cleanupErrorCode: safeCleanupErrorCode(error),
+        },
+        error,
+        level: "warn",
+        message: "Hosted skipped idle-shutdown checkpoint cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+
+      try {
+        await this.runtimeAlarmScheduler.syncStoredAlarm();
+      } catch (syncError) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            cleanupErrorCode: safeCleanupErrorCode(syncError),
+          },
+          error: syncError,
+          level: "warn",
+          message: "Hosted idle-shutdown checkpoint cleanup alarm resync failed.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      }
+    }
+  }
+
+  private async finishSkippedIdleShutdownCheckpointWithoutContainerCleanup(input: {
+    preferredWakeAt: string | null;
+    userId: string;
+  }): Promise<void> {
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge || record.inFlight) {
+      const scheduledRecord = await this.syncRunnerFollowUpAfterInvocation({
+        record,
+        userId: input.userId,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          inFlight: record.inFlight,
+          pendingNudge: record.pendingNudge,
+        },
+        message: "Hosted runner preserved wake after skipped idle checkpoint because work is pending.",
+        phase: "scheduled",
+        userId: scheduledRecord.userId,
+      });
+      return;
+    }
+
+    await this.stateStore.clearIdleShutdownCheckpoint();
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: input.preferredWakeAt,
     });
   }
 
@@ -3114,6 +3070,11 @@ export class HostedUserRunner {
       );
     } finally {
       this.drainQueuedRunnerDriveAfterInvocation();
+      if (this.pendingRunnerDriveAfterInvocation) {
+        queueMicrotask(() => {
+          this.drainQueuedRunnerDriveAfterInvocation();
+        });
+      }
     }
   }
 
@@ -3277,35 +3238,6 @@ function resolvePendingNudgeWakeAt(input: {
     return decision.nextRecoveryAt;
   }
   return new Date(input.nowMs).toISOString();
-}
-
-function resolvePendingNudgeDrainContinuationWakeAt(input: {
-  activeRecoveryWakeAt?: string | null;
-  nowMs: number;
-  record: RunnerStateRecord;
-  runnerReadyTimeoutMs: number;
-  runnerTimeoutMs: number;
-}): string {
-  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
-  const recoveryWakeAt = input.activeRecoveryWakeAt
-    ?? (decision.kind === "live" && decision.nextRecoveryAt
-      ? decision.nextRecoveryAt
-      : new Date(input.nowMs).toISOString());
-  const invocation = input.record.workspaceInvocation;
-  const lastHeartbeatAtMs = invocation?.lastHeartbeatAt
-    ? Date.parse(invocation.lastHeartbeatAt)
-    : Number.NaN;
-  if (input.activeRecoveryWakeAt && invocation && !Number.isFinite(lastHeartbeatAtMs)) {
-    return input.activeRecoveryWakeAt;
-  }
-  if (decision.kind === "live" && decision.reason === "starting") {
-    return recoveryWakeAt;
-  }
-
-  const continuationWakeAt = new Date(
-    input.nowMs + PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS,
-  ).toISOString();
-  return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
 }
 
 function resolveRunnerRecordActiveInvocationRecoveryDecision(input: {

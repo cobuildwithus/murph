@@ -20,11 +20,12 @@ const staleLockWaitTimeoutMs = 15_000;
 const staleLockWaitPollIntervalMs = 250;
 const artifactFreshnessToleranceMs = 2_000;
 const hostedWebSmokeLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV";
+const hostedWebSmokePreparedLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV";
 const hostedWebSmokePruneCacheEnvVarName = "MURPH_HOSTED_WEB_SMOKE_PRUNE_CACHE";
 export const HOSTED_WEB_SMOKE_HEALTH_PATH = "/api/internal/health";
 
 type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
-type HostedWebSmokeDevCommand = "dev" | "dev:local-env";
+type HostedWebSmokeDevCommand = "dev" | "dev:local-env" | "dev:prepared-local-env";
 
 interface HostedWebSmokeLockCleanupOptions {
   isProcessRunning?: (pid: number) => boolean;
@@ -36,6 +37,10 @@ interface HostedWebSmokeLockCleanupOptions {
 export function resolveHostedWebSmokeDevCommand(
   environment: NodeJS.ProcessEnv = process.env,
 ): HostedWebSmokeDevCommand {
+  if (environment[hostedWebSmokePreparedLocalEnvEnvVarName] === "1") {
+    return "dev:prepared-local-env";
+  }
+
   if (environment[hostedWebSmokeLocalEnvEnvVarName] === "1") {
     return "dev:local-env";
   }

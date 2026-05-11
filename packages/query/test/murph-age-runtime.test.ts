@@ -19,6 +19,7 @@ import { test } from "vitest";
 import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   calculateMurphAgeFromVaultInputBundle,
+  calculateMurphAgePublicReportFromVaultInputBundle,
   calculateMurphAgeForVault,
   defaultMurphAgeModelCardArtifactRoot,
   loadMurphAgeLocalModelCardArtifacts,
@@ -211,6 +212,24 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), false);
     assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
     assert.equal(output.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
+
+    const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+    assert.equal(publicReport.status, "abstain");
+    assert.equal(publicReport.mode, "product");
+    assert.equal(publicReport.result, null);
+    assert.equal(publicReport.displaySummary.displayBlockedReason, "product-not-authorized");
+    assert.equal(publicReport.displaySummary.wearableBridge.productAuthorized, false);
+    assert.equal(publicReport.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
+    assert.equal(publicReport.warnings.some((warning) => "message" in warning), false);
+    assert.equal("bundleAssessment" in publicReport, false);
+    assert.equal("contextAssessments" in publicReport, false);
+    assert.equal("wearableShadowIncrementAssessments" in publicReport, false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -271,6 +290,27 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
     assert.equal(sleepShadow?.missingMetricKeys.includes("total-sleep-minutes"), true);
     const publicSummary = summarizeMurphAgeCalculatorPublicOutput(output);
     assert.equal("wearableShadowIncrementAssessments" in publicSummary, false);
+    const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.mode, "research");
+    assert.equal(publicReport.displaySummary.displayStatus, "research-only");
+    assert.equal(publicReport.result?.biologicalAgeYears, output.result?.biologicalAgeYears);
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "albumin"), true);
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(
+      publicReport.result?.featureAttributions.some((feature) => "selectedPointIds" in feature),
+      false,
+    );
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => "value" in feature), false);
+    assert.equal(publicReport.result?.moduleAttributions.some((module) => "contributionLogit" in module), false);
+    assert.equal(publicReport.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
     const contextStepStatus = output.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
     assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
     assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);

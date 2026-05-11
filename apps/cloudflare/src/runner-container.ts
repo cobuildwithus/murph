@@ -133,6 +133,9 @@ export interface HostedExecutionContainerStubLike {
   abortBrowserVaultRefresh?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
+  invokeIdleCheckpointIfWarm?(
+    input: HostedExecutionContainerInvokeRequest,
+  ): Promise<HostedExecutionRunnerJobResult>;
   ownsInternalWorkerProxyToken(input: {
     attemptId?: string;
     leaseGeneration?: string;
@@ -256,6 +259,15 @@ export class RunnerContainer extends Container {
     await this.preemptBrowserVaultRefreshForForegroundInvocation(input.userId);
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
+    );
+  }
+
+  async invokeIdleCheckpointIfWarm(
+    payload: HostedExecutionContainerInvokeRequest,
+  ): Promise<HostedExecutionRunnerJobResult> {
+    const input = parseHostedExecutionContainerInvokeInput(payload);
+    return this.withLifecycleLock(async () =>
+      this.invokeHostedExecution(input, { warmOnly: true })
     );
   }
 
@@ -600,6 +612,7 @@ export class RunnerContainer extends Container {
 
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
+    options: { warmOnly?: boolean } = {},
   ): Promise<HostedExecutionRunnerJobResult> {
     const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
       this.environment,
@@ -649,8 +662,16 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
+      const runnerControlToken = options.warmOnly === true
+        ? await this.openWarmContainerIfReady(input)
+        : await this.ensureContainerReady(input);
+      if (!runnerControlToken) {
+        return {
+          idleShutdownCheckpointSkipped: "container_not_warm",
+          status: "idle",
+        };
+      }
       cleanupWarmContainerOnFailure = true;
-      const runnerControlToken = await this.ensureContainerReady(input);
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       this.runnerOutboundProxyState = outboundProxyState;
@@ -1064,6 +1085,69 @@ export class RunnerContainer extends Container {
     });
 
     return runnerControlToken;
+  }
+
+  private async openWarmContainerIfReady(
+    input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
+  ): Promise<string | null> {
+    const readinessStartedAt = Date.now();
+    const status = readContainerStatus(await this.getState());
+    const readyTimeoutMs = Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment));
+    const warmRunnerControlToken = isRunnerContainerStopped(status)
+      ? null
+      : this.runnerControlToken ?? await this.readRunnerControlToken();
+
+    if (isRunnerContainerStopped(status) || !warmRunnerControlToken) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          readinessLatencyMs: Date.now() - readinessStartedAt,
+          startMode: "warm-only",
+          statusBeforeStart: status,
+          warmControlTokenPresent: Boolean(warmRunnerControlToken),
+        },
+        message: "Hosted execution container skipped warm-only idle checkpoint because no warm shell is available.",
+        phase: "container.ready",
+        userId: input.userId,
+      });
+      return null;
+    }
+
+    try {
+      this.runnerControlToken = warmRunnerControlToken;
+      await assertRunnerHealthy(this, readyTimeoutMs);
+      await assertRunnerControlAuthorized(this, warmRunnerControlToken, readyTimeoutMs);
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          readinessLatencyMs: Date.now() - readinessStartedAt,
+          readinessTimeoutMs: readyTimeoutMs,
+          startMode: "warm-only",
+          statusBeforeStart: status,
+        },
+        message: "Hosted execution container is ready for warm-only idle checkpoint.",
+        phase: "container.ready",
+        userId: input.userId,
+      });
+      return warmRunnerControlToken;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          readinessLatencyMs: Date.now() - readinessStartedAt,
+          readinessTimeoutMs: readyTimeoutMs,
+          startMode: "warm-only",
+          statusBeforeStart: status,
+        },
+        error,
+        level: "warn",
+        message: "Hosted execution container skipped warm-only idle checkpoint because warm health failed.",
+        phase: "container.ready",
+        userId: input.userId,
+      });
+      await this.stopWarmContainer({ failClosed: false });
+      return null;
+    }
   }
 
   private async ensureSmokeContainerReady(timeoutMs: number): Promise<void> {
@@ -1503,6 +1587,45 @@ export async function invokeHostedExecutionContainerRunner(
             error,
             level: "warn",
             message: "Hosted runner could not destroy a preempted invocation container.",
+            phase: "failed",
+            userId: jobUserId,
+          });
+        });
+      })
+    : await invocation;
+}
+
+export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
+  input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
+): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
+export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
+  input: HostedExecutionContainerRunnerInput,
+): Promise<HostedExecutionRunnerJobResult>;
+export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
+  input: HostedExecutionContainerRunnerInput,
+): Promise<HostedExecutionRunnerJobResult> {
+  const jobUserId = readHostedExecutionRunnerJobUserId(input.job);
+  if (input.userId !== jobUserId) {
+    throw new TypeError("Hosted runner container route userId must match workspace job userId.");
+  }
+
+  const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
+  if (!container.invokeIdleCheckpointIfWarm) {
+    throw new Error("Hosted runner container does not support warm-only idle checkpoints.");
+  }
+  const invocation = container.invokeIdleCheckpointIfWarm({
+    job: input.job,
+    timeoutMs: input.timeoutMs,
+    userId: jobUserId,
+  });
+  return input.signal
+    ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
+        void container.destroyInstance().catch((error: unknown) => {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted runner could not destroy a preempted warm-only invocation container.",
             phase: "failed",
             userId: jobUserId,
           });

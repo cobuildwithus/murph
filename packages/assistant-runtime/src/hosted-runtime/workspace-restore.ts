@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -76,6 +76,16 @@ export interface HostedWorkspaceRuntimeRestoreResult
   mode: HostedWorkspaceRuntimeRestoreMode;
   restoreWasCold: boolean;
 }
+
+export type HostedWorkspaceWarmIdleCheckpointOpenResult =
+  | {
+      ok: true;
+      restored: HostedRestoredExecutionContext;
+    }
+  | {
+      ok: false;
+      reason: "warm_workspace_missing" | "workspace_version_mismatch";
+    };
 
 export class HostedWorkspaceRuntimeSnapshotRestoreError extends Error {
   readonly snapshotHash: string;
@@ -425,6 +435,54 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     materializedArtifactPaths,
     mode: "snapshot",
     restoreWasCold,
+  };
+}
+
+export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {
+  vaultRoot: string;
+  workspace: HostedWorkspaceState | null;
+}): Promise<HostedWorkspaceWarmIdleCheckpointOpenResult> {
+  const restored = readHostedWorkspaceRuntimeLocalRoots(input.vaultRoot);
+
+  try {
+    await access(restored.vaultRoot);
+  } catch {
+    return {
+      ok: false,
+      reason: "warm_workspace_missing",
+    };
+  }
+
+  const snapshotRef = input.workspace?.snapshotRef ?? null;
+  if (!snapshotRef) {
+    return {
+      ok: true,
+      restored,
+    };
+  }
+
+  const liveState = await readHostedWorkspaceLiveRuntimeState(restored.vaultRoot);
+  if (!liveState) {
+    return {
+      ok: false,
+      reason: "warm_workspace_missing",
+    };
+  }
+
+  if (!isHostedWorkspaceLiveRuntimeStateHit({
+    cache: liveState,
+    snapshotRef,
+    vaultRoot: restored.vaultRoot,
+  })) {
+    return {
+      ok: false,
+      reason: "workspace_version_mismatch",
+    };
+  }
+
+  return {
+    ok: true,
+    restored,
   };
 }
 
@@ -1278,18 +1336,26 @@ function hasHostedRuntimeEagerArtifactPrefix(
 async function createHostedWorkspaceRuntimeLocalRoots(
   vaultRoot: string,
 ): Promise<HostedRestoredExecutionContext> {
+  const restored = readHostedWorkspaceRuntimeLocalRoots(vaultRoot);
+
+  await Promise.all([
+    createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
+    createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
+  ]);
+
+  return restored;
+}
+
+function readHostedWorkspaceRuntimeLocalRoots(
+  vaultRoot: string,
+): HostedRestoredExecutionContext {
   const resolvedVaultRoot = path.resolve(vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(resolvedVaultRoot).assistantStateRoot;
   const operatorHomeRoot = path.join(
     path.dirname(resolvedVaultRoot),
     `${path.basename(resolvedVaultRoot)}-operator-home`,
   );
-
-  await Promise.all([
-    createHostedWorkspaceRuntimePrivateDirectory(resolvedVaultRoot),
-    createHostedWorkspaceRuntimePrivateDirectory(assistantStateRoot),
-    createHostedWorkspaceRuntimePrivateDirectory(operatorHomeRoot),
-  ]);
 
   return {
     assistantStateRoot,
