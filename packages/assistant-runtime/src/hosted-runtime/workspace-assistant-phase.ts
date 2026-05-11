@@ -1213,7 +1213,9 @@ async function drainHostedPostCheckpointDelivery(input: {
     ? await drainHostedPreparedAssistantDeliveries({
         allowPreparedSending: true,
         assistantDeliveryEffects: input.assistantDeliveryEffects,
-        assertLiveness: () => assertHostedAssistantPhaseRuntimeLiveness(input.input),
+        assertLiveness: async () => {
+          assertHostedAssistantPhaseLiveness(input.input.signal);
+        },
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         platformEnv: input.input.runtime.platformEnv,
@@ -1227,7 +1229,9 @@ async function drainHostedPostCheckpointDelivery(input: {
   if (input.providerCleanup.mode === "drain") {
     const providerCleanup = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: outcomes,
-      assertLiveness: () => assertHostedAssistantPhaseRuntimeLiveness(input.input),
+      assertLiveness: async () => {
+        assertHostedAssistantPhaseLiveness(input.input.signal);
+      },
       checkpoint: input.providerCleanup.checkpoint ?? {
         nextWakeAt: null,
       },
@@ -1320,25 +1324,6 @@ function assertHostedAssistantPhaseLiveness(signal: AbortSignal | null | undefin
     throw reason;
   }
   throw new Error("Hosted workspace assistant phase was aborted.");
-}
-
-async function assertHostedAssistantPhaseRuntimeLiveness(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): Promise<void> {
-  assertHostedAssistantPhaseLiveness(input.signal);
-  const port = input.runtime.platform.runtimeLivenessPort ?? null;
-  if (!port) {
-    return;
-  }
-
-  const result = await port.touch({
-    requestId: `hosted-workspace-invocation:${input.request.attemptId}:post-checkpoint`,
-    signal: input.signal ?? undefined,
-  });
-  if (!result.ok) {
-    throw new Error(`Hosted workspace runtime liveness proof was rejected: ${result.reason}.`);
-  }
-  assertHostedAssistantPhaseLiveness(input.signal);
 }
 
 function isHostedProviderCleanupCheckpointDue(

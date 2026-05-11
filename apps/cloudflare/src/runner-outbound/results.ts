@@ -16,8 +16,8 @@ import {
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  RunnerActiveInvocationLeaseError,
+  requireRunnerRuntimeWriteFence,
+  RunnerRuntimeWriteFenceError,
 } from "./active-lease.ts";
 import {
   decodeRouteParam,
@@ -121,12 +121,12 @@ async function handleRunnerEmailSendRequest(input: {
   userId: string;
 }): Promise<Response> {
   try {
-    const ownsActiveLease = await requestOwnsActiveInvocationLease({
+    const ownsWriteFence = await requestOwnsRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
-    if (!ownsActiveLease) {
+    if (!ownsWriteFence) {
       return unauthorized();
     }
 
@@ -160,20 +160,20 @@ async function handleRunnerEmailSendRequest(input: {
   }
 }
 
-async function requestOwnsActiveInvocationLease(input: {
+async function requestOwnsRuntimeWriteFence(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerActiveInvocationLease({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
     return true;
   } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
       return false;
     }
 

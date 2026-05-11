@@ -44,12 +44,6 @@ export type {
   HostedRuntimeWhatsAppSendResponse,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
-export type {
-  RuntimeLivenessInstruction,
-  RuntimeLivenessPort,
-  RuntimeLivenessRejectionReason,
-  RuntimeLivenessTouchResult,
-} from "./hosted-runtime/liveness.ts";
 export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,

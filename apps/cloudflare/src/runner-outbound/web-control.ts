@@ -18,9 +18,9 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  requireRunnerActiveInvocationLeaseWriteHeaders,
-  RunnerActiveInvocationLeaseError,
+  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceWriteHeaders,
+  RunnerRuntimeWriteFenceError,
 } from "./active-lease.ts";
 import {
   handleRunnerMailboxPayloadDecodeRequest,
@@ -63,18 +63,18 @@ export async function handleRunnerWebControlRequest(input: {
 
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
-  let checkpointHeaders: ReturnType<typeof requireRunnerActiveInvocationLeaseWriteHeaders> | null =
+  let checkpointHeaders: ReturnType<typeof requireRunnerRuntimeWriteFenceWriteHeaders> | null =
     null;
   if (isCheckpointRequest) {
     try {
-      checkpointHeaders = requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
-      await requireRunnerActiveInvocationLease({
+      checkpointHeaders = requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
+      await requireRunnerRuntimeWriteFence({
         env: input.env,
         request: input.request,
         userId: input.userId,
       });
     } catch (error) {
-      if (error instanceof RunnerActiveInvocationLeaseError) {
+      if (error instanceof RunnerRuntimeWriteFenceError) {
         return unauthorized();
       }
       throw error;
@@ -100,7 +100,7 @@ export async function handleRunnerWebControlRequest(input: {
     && checkpointRequest
     && (
       checkpointHeaders.attemptId !== checkpointRequest.attemptId
-      || checkpointHeaders.leaseGeneration !== checkpointRequest.leaseGeneration
+      || checkpointHeaders.generation !== checkpointRequest.leaseGeneration
       || checkpointHeaders.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
     )
   ) {

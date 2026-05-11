@@ -2,9 +2,6 @@ import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
-  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-  type RuntimeLivenessInstruction,
-  type RuntimeLivenessTouchResult,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimeEffectsPort,
   type HostedRuntimePlatform,
@@ -58,14 +55,8 @@ import {
   parseHostedRunnerWhatsAppSendResponse,
 } from "./runner-effects-contract.ts";
 import {
-  HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
-} from "./runner-outbound/heartbeat.ts";
-import {
-  writeRunnerActiveInvocationLeaseHeaders,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/active-lease.ts";
-import {
-  writeRunnerBrowserVaultRefreshHeaders,
-} from "./runner-outbound/browser-vault-refresh-authority.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
@@ -102,11 +93,6 @@ import {
 } from "./runtime-bridge-checkpoint.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
-import {
-  ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
-  CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
-} from "./runner-liveness.ts";
-
 type HostedWebControlTransport =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
@@ -223,16 +209,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
       sha256: string;
     },
     options: {
-      requireActiveLease?: boolean;
+      requireWriteFence?: boolean;
     } = {},
   ): Promise<void> => {
     const headers = input.workspaceCheckpointBridge
-      ? options.requireActiveLease
-        ? await requireHostedRuntimeActiveLeaseHeaders(
+      ? options.requireWriteFence
+        ? await requireHostedRuntimeWriteFenceHeaders(
             input.workspaceCheckpointBridge,
             `Hosted artifact upload ${artifact.sha256}`,
           )
-        : await createHostedRuntimeActiveLeaseHeaders(input.workspaceCheckpointBridge)
+        : await createHostedRuntimeWriteFenceHeaders(input.workspaceCheckpointBridge)
       : new Headers();
     const response = await fetchHostedResponse({
       description: `Hosted artifact upload ${artifact.sha256}`,
@@ -254,7 +240,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       sha256: string;
     },
     options: {
-      requireActiveLease?: boolean;
+      requireWriteFence?: boolean;
     } = {},
   ): Promise<void> => {
     if (uploadedArtifactShas.has(artifact.sha256)) {
@@ -284,38 +270,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         workspaceCheckpointBridge: input.workspaceCheckpointBridge,
       })
     : {};
-  const runtimeLivenessPort = input.internalWorkerProxyToken && input.workspaceCheckpointBridge
-    ? createCloudflareRuntimeLivenessPort({
-        fetchImpl,
-        timeoutMs,
-        workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-      })
-    : null;
-  const runtimeLivenessRequired = input.requireRuntimeLivenessPort === true;
-  emitHostedExecutionStructuredLog({
-    component: "runner",
-    details: {
-      heartbeatIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
-      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
-      heartbeatTouchTimeoutMs: RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-      internalWorkerProxyTokenPresent: Boolean(input.internalWorkerProxyToken),
-      runtimeLivenessPortPresent: Boolean(runtimeLivenessPort),
-      runtimeLivenessRequired,
-      workspaceCheckpointBridgePresent: Boolean(input.workspaceCheckpointBridge),
-    },
-    message: "Hosted runner resolved runtime liveness configuration.",
-    phase: "container.ready",
-    userId: input.boundUserId,
-  });
-  if (runtimeLivenessRequired && !runtimeLivenessPort) {
-    throw new Error(
-      "Hosted runner requires runtime liveness for workspace invocation but could not build the liveness port.",
-    );
-  }
   return {
-    runtimeLivenessIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
-    runtimeLivenessRequired,
-    ...(runtimeLivenessPort ? { runtimeLivenessPort } : {}),
     artifactStore: {
       async get(sha256) {
         const response = await fetchHostedResponse({
@@ -360,20 +315,14 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(input.internalWorkerProxyToken && (
-      input.workspaceCheckpointBridge
-      || input.browserVaultRefreshSourceStateHash
-      || input.browserVaultRefreshAuthority
-    )
+    ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
-            browserVaultRefreshAuthority: input.browserVaultRefreshAuthority === true,
-            browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash ?? null,
             fetchImpl,
             timeoutMs,
             transport: hostedWebControlTransport,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),
         }
       : {}),
@@ -492,7 +441,7 @@ function createCloudflareRunnerProviderEffectsPort(input: {
     body: requestInput.body,
     description: requestInput.description,
     fetchImpl: input.fetchImpl,
-    headers: await requireHostedRuntimeActiveLeaseHeaders(
+    headers: await requireHostedRuntimeWriteFenceHeaders(
       input.workspaceCheckpointBridge,
       requestInput.description,
     ),
@@ -575,38 +524,36 @@ function createCloudflareRunnerProviderEffectsPort(input: {
   };
 }
 
-async function createHostedRuntimeActiveLeaseHeaders(
+async function createHostedRuntimeWriteFenceHeaders(
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority,
 ): Promise<Headers> {
   const headers = new Headers();
   const lease = await workspaceCheckpointBridge.readCurrentLease();
   if (lease) {
-    writeRunnerActiveInvocationLeaseHeaders(headers, lease);
+    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
   }
   return headers;
 }
 
-async function requireHostedRuntimeActiveLeaseHeaders(
+async function requireHostedRuntimeWriteFenceHeaders(
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority,
   description: string,
 ): Promise<Headers> {
   const headers = new Headers();
   const lease = await workspaceCheckpointBridge.readCurrentLease();
   if (!lease) {
-    throw new Error(`${description} requires an active hosted runtime invocation lease.`);
+    throw new Error(`${description} requires an active hosted runtime write fence.`);
   }
-  writeRunnerActiveInvocationLeaseHeaders(headers, lease);
+  writeRunnerRuntimeWriteFenceHeaders(headers, lease);
   return headers;
 }
 
 function createCloudflareBrowserVaultReplicaPort(input: {
   boundUserId: string;
-  browserVaultRefreshAuthority: boolean;
-  browserVaultRefreshSourceStateHash: string | null;
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport | null;
-  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }) {
   return {
     ...(input.transport
@@ -639,8 +586,6 @@ function createCloudflareBrowserVaultReplicaPort(input: {
         description: "Hosted browser-vault replica write",
         fetchImpl: input.fetchImpl,
         headers: await createHostedBrowserVaultReplicaWriteHeaders({
-          browserVaultRefreshAuthority: input.browserVaultRefreshAuthority,
-          browserVaultRefreshSourceStateHash: input.browserVaultRefreshSourceStateHash,
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
         }),
         method: "POST",
@@ -667,105 +612,17 @@ function createCloudflareBrowserVaultReplicaPort(input: {
 }
 
 export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
-  browserVaultRefreshAuthority: boolean;
-  browserVaultRefreshSourceStateHash: string | null;
+  browserVaultRefreshAuthority?: boolean | null;
+  browserVaultRefreshSourceStateHash?: string | null;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): Promise<Headers> {
-  if (input.workspaceCheckpointBridge) {
-    return await requireHostedRuntimeActiveLeaseHeaders(
-      input.workspaceCheckpointBridge,
-      "Browser-vault replica write",
-    );
+  if (!input.workspaceCheckpointBridge) {
+    throw new Error("Hosted browser-vault replica write requires a runtime write fence.");
   }
-
-  if (input.browserVaultRefreshSourceStateHash) {
-    const headers = new Headers();
-    writeRunnerBrowserVaultRefreshHeaders(headers, {
-      sourceStateHash: input.browserVaultRefreshSourceStateHash,
-    });
-    return headers;
-  }
-
-  if (input.browserVaultRefreshAuthority) {
-    return new Headers();
-  }
-
-  throw new Error(
-    "Hosted browser-vault replica write requires active lease or browser-vault refresh authority.",
+  return await requireHostedRuntimeWriteFenceHeaders(
+    input.workspaceCheckpointBridge,
+    "Browser-vault replica write",
   );
-}
-
-function createCloudflareRuntimeLivenessPort(input: {
-  fetchImpl: typeof fetch;
-  timeoutMs: number;
-  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}) {
-  return {
-    async touch(touchInput: {
-      requestId: string;
-      signal?: AbortSignal | null;
-    }): Promise<RuntimeLivenessTouchResult> {
-      const lease = await input.workspaceCheckpointBridge.readCurrentLease();
-      if (!lease) {
-        return {
-          ok: false,
-          reason: "no_active_invocation",
-        };
-      }
-      const headers = new Headers({
-        "content-type": "application/json; charset=utf-8",
-      });
-      writeRunnerActiveInvocationLeaseHeaders(headers, lease);
-
-      let response: Response;
-      try {
-        response = await fetchHostedResponse({
-          description: "Hosted runtime active invocation heartbeat",
-          fetchImpl: input.fetchImpl,
-          init: {
-            body: JSON.stringify({
-              attemptId: lease.attemptId,
-              leaseGeneration: lease.leaseGeneration,
-              requestId: touchInput.requestId,
-            }),
-            headers,
-            method: "POST",
-          },
-          logFailures: false,
-          timeoutMs: input.timeoutMs,
-          url: new URL(
-            HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}/`,
-          ),
-          ...(touchInput.signal ? { signal: touchInput.signal } : {}),
-        });
-      } catch (error) {
-        if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
-          return {
-            ok: false,
-            reason: "unauthorized",
-          };
-        }
-        throw error;
-      }
-
-      if (isInternalAuthorityRejectedStatus(response.status)) {
-        return {
-          ok: false,
-          reason: "unauthorized",
-        };
-      }
-      if (response.status >= 400 && response.status < 500) {
-        return {
-          ok: false,
-          reason: "malformed_request",
-        };
-      }
-      assertHostedOk(response, "Hosted runtime active invocation heartbeat");
-      const payload = await response.json();
-      return parseRuntimeLivenessTouchResult(payload);
-    },
-  };
 }
 
 function resolveHostedWebControlTransport(input: {
@@ -820,10 +677,7 @@ export function createCloudflareHostedRuntimeFetch(
       )
       : url;
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
-    const shouldLogInternalRequest = !(
-      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl
-      && url.pathname === HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH
-    );
+    const shouldLogInternalRequest = true;
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
       host: url.hostname,
@@ -1148,7 +1002,7 @@ function createHostedWebWorkspacePort(input: {
           fetchImpl: input.fetchImpl,
           ...(input.workspaceCheckpointBridge
             ? {
-                headers: await requireHostedRuntimeActiveLeaseHeaders(
+                headers: await requireHostedRuntimeWriteFenceHeaders(
                   input.workspaceCheckpointBridge,
                   "Hosted workspace checkpoint",
                 ),
@@ -1784,122 +1638,6 @@ function readRequiredField(value: unknown, field: string): unknown {
   }
 
   return entry;
-}
-
-function readOptionalBooleanField(value: unknown, field: string): boolean | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime response must be an object.");
-  }
-
-  const entry = (value as Record<string, unknown>)[field];
-  if (entry === undefined || entry === null) {
-    return null;
-  }
-
-  if (typeof entry !== "boolean") {
-    throw new TypeError(`Hosted runtime response.${field} must be a boolean.`);
-  }
-
-  return entry;
-}
-
-function parseRuntimeLivenessTouchResult(value: unknown): RuntimeLivenessTouchResult {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Runtime liveness response must be an object.");
-  }
-
-  const record = value as Record<string, unknown>;
-  const ok = record.ok;
-  if (ok === true) {
-    const response: {
-      instruction: RuntimeLivenessInstruction;
-      inputAvailable?: boolean;
-      nextAlarmAt?: string | null;
-      ok: true;
-      pendingNudge?: boolean;
-    } = {
-      instruction: parseRuntimeLivenessInstruction(record.instruction, record),
-      ok: true,
-    };
-
-    const inputAvailable = readOptionalBooleanField(value, "inputAvailable");
-    if (inputAvailable !== null) {
-      response.inputAvailable = inputAvailable;
-    }
-    const pendingNudge = readOptionalBooleanField(value, "pendingNudge");
-    if (pendingNudge !== null) {
-      response.pendingNudge = pendingNudge;
-    }
-    if ("nextAlarmAt" in record) {
-      response.nextAlarmAt = readOptionalStringField(value, "nextAlarmAt");
-    }
-
-    return response;
-  }
-  if (ok !== false) {
-    throw new TypeError("Runtime liveness response.ok must be a boolean.");
-  }
-
-  const reason = (value as { reason?: unknown }).reason;
-  if (
-    reason === "no_active_invocation"
-    || reason === "malformed_request"
-    || reason === "stale_attempt"
-    || reason === "stale_generation"
-    || reason === "unauthorized"
-    || reason === "wrong_user"
-  ) {
-    return {
-      ok: false,
-      reason,
-    };
-  }
-
-  throw new TypeError("Runtime liveness response.reason is unsupported.");
-}
-
-function parseRuntimeLivenessInstruction(
-  value: unknown,
-  record: Record<string, unknown>,
-): RuntimeLivenessInstruction {
-  if (value === undefined || value === null) {
-    if (record.inputAvailable === true) {
-      return {
-        kind: "yield",
-        nextWakeAt: "nextAlarmAt" in record
-          ? readOptionalStringField(record, "nextAlarmAt")
-          : null,
-        status: "scheduled",
-      };
-    }
-
-    return { kind: "continue" };
-  }
-
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Runtime liveness response.instruction must be an object.");
-  }
-
-  const instruction = value as Record<string, unknown>;
-  if (instruction.kind === "continue") {
-    return { kind: "continue" };
-  }
-
-  if (instruction.kind === "yield") {
-    const nextWakeAt = "nextWakeAt" in instruction
-      ? readOptionalStringField(instruction, "nextWakeAt")
-      : null;
-    if (instruction.status !== "scheduled") {
-      throw new TypeError("Runtime liveness response.instruction.status must be scheduled.");
-    }
-    return {
-      kind: "yield",
-      nextWakeAt,
-      status: "scheduled",
-    };
-  }
-
-  throw new TypeError("Runtime liveness response.instruction.kind is unsupported.");
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

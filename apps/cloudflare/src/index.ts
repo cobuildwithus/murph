@@ -88,11 +88,6 @@ import {
 } from "./user-runner.ts";
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
 import {
-  buildRunnerBrowserVaultRefreshAttemptId,
-  readRunnerBrowserVaultRefreshSourceStateHash,
-  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-} from "./runner-outbound/browser-vault-refresh-authority.ts";
-import {
   asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
 import {
@@ -370,39 +365,22 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
-  async ownsActiveInvocationLease(input: {
+  async validateRuntimeWriteFence(input: {
     attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean> {
-    return this.runner.ownsActiveInvocationLease(input);
+    return this.runner.validateRuntimeWriteFence(input);
   }
 
-  async recordActiveInvocationHeartbeat(input: {
+  async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
     attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-  }): ReturnType<HostedUserRunner["recordActiveInvocationHeartbeat"]> {
-    return this.runner.recordActiveInvocationHeartbeat(input);
-  }
-
-  async recordActiveInvocationContainerStopped(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    stoppedAt?: string | null;
-    userId: string;
-  }): ReturnType<HostedUserRunner["recordActiveInvocationContainerStopped"]> {
-    return this.runner.recordActiveInvocationContainerStopped(input);
-  }
-
-  async recordActiveInvocationWorkspaceCheckpoint(input: {
-    attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }> {
-    return this.runner.recordActiveInvocationWorkspaceCheckpoint(input);
+    return this.runner.recordRuntimeWriteFenceWorkspaceCheckpoint(input);
   }
 
   async runUntilIdleOrBudget(input: {
@@ -1363,59 +1341,11 @@ async function maybeHandleLocalInternalProxyRoute(
       return unauthorized();
     }
   }
-  const refreshSourceStateHash =
-    targetHost === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
-      && internalUrl.pathname === "/replicas"
-      && request.method === "POST"
-      ? readRunnerBrowserVaultRefreshSourceStateHash(request)
-      : null;
-  const tokenOwnsRefreshLease = refreshSourceStateHash
-    ? false
-    : await ownsLocalInternalProxyTokenForUser({
-        env,
-        leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-        token: runnerProxyToken,
-        userId: boundUserId,
-      });
-  const refreshProxyContext = refreshSourceStateHash
-    ? {
-        proxyAttemptId: buildRunnerBrowserVaultRefreshAttemptId(refreshSourceStateHash),
-        proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-      }
-    : tokenOwnsRefreshLease
-      ? {
-          proxyLeaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-        }
-    : null;
-  if (refreshSourceStateHash && refreshProxyContext) {
-    const validRefreshLease = await ownsLocalInternalProxyTokenForUser({
-      attemptId: refreshProxyContext.proxyAttemptId,
-      env,
-      leaseGeneration: refreshProxyContext.proxyLeaseGeneration,
-      token: runnerProxyToken,
-      userId: boundUserId,
-    });
-    if (!validRefreshLease) {
-      emitHostedExecutionStructuredLog({
-        component: "worker",
-        details: buildWorkerRouteLogDetails({
-          reason: "runner-proxy-token-refresh-verification-failed",
-          routeName: "local-internal-proxy",
-        }, request, boundUserId),
-        level: "warn",
-        message: "Hosted worker rejected a local browser-vault refresh after proxy-token verification failed.",
-        phase: "failed",
-        userId: boundUserId,
-      });
-      return unauthorized();
-    }
-  }
   return await handleRunnerOutboundRequest(
     createLocalInternalProxyRequest(request, internalUrl),
     env,
     boundUserId,
     runnerProxyToken,
-    refreshProxyContext ?? undefined,
   );
 }
 

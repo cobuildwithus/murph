@@ -33,12 +33,15 @@ Updated: 2026-05-11
 - The focused stale active-marker test now settles the mocked runner request after the cleanup assertion and passes in about 1.6s wall-clock for the targeted command, without adding parallelism or skipping the behavior under test.
 - Standalone Cloudflare node verification dropped from about 77s wall-clock to about 41s wall-clock, but the run is currently blocked by unrelated dirty `apps/cloudflare/test/user-runner-alarm.test.ts` failures.
 - A fresh full `pnpm verify:acceptance` run is currently blocked before app verification by unrelated dirty Murph Age CLI work: `packages/cli` shape verification reports `config.schema.json` is stale.
+- Full `pnpm verify:acceptance` now passes after aligning the unrelated dirty Cloudflare idle-checkpoint tests with the active no-destroy behavior. The verifier reported app verification complete at 191s since command start on the first passing run and 189s since command start on the second passing run.
+- Both passing shell measurements included pre-verifier workspace-lock waits from other active processes, so the shell `time` totals were not clean no-lock proof. The verifier's own timer is the comparable acceptance-runtime signal for this task.
 
 ## Decisions
 
 - Do not add new parallel scheduling to solve this.
 - Treat full acceptance pass and wall-clock measurement as required proof, not optional follow-up.
 - Fix blockers at their source rather than documenting them away.
+- Count external workspace-lock wait separately from acceptance-runtime performance; the lock wait is coordination noise from other active work, not verification work added by this task.
 
 ## Verification plan
 

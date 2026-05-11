@@ -1,7 +1,6 @@
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import type { RuntimeLivenessInstruction } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -19,36 +18,15 @@ import type {
 } from "../worker-contracts.ts";
 
 interface RunnerOutboundUserRunnerStubLike extends WorkerUserRunnerStubLike {
-  ownsActiveInvocationLease?(input: {
+  validateRuntimeWriteFence?(input: {
     attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
-  recordActiveInvocationHeartbeat?(input: {
+  recordRuntimeWriteFenceWorkspaceCheckpoint?(input: {
     attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-  }): Promise<
-    | {
-      instruction: RuntimeLivenessInstruction;
-      inputAvailable?: boolean;
-      nextAlarmAt?: string | null;
-      ok: true;
-      pendingNudge?: boolean;
-    }
-    | {
-      ok: false;
-      reason:
-        | "no_active_invocation"
-        | "stale_attempt"
-        | "stale_generation"
-        | "wrong_user";
-    }
-  >;
-  recordActiveInvocationWorkspaceCheckpoint?(input: {
-    attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;

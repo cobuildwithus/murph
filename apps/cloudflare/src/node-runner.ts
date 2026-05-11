@@ -249,11 +249,9 @@ export async function refreshHostedBrowserVaultReplica(
   });
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId: input.userId,
-    browserVaultRefreshAuthority: true,
     commitTimeoutMs: runtime.commitTimeoutMs,
     internalWorkerProxyToken,
     localInternalProxyBaseUrl,
-    browserVaultRefreshSourceStateHash: null,
     workspaceCheckpointBridge: null,
   });
   const workspaceRead = await readBrowserVaultRefreshWorkspace({

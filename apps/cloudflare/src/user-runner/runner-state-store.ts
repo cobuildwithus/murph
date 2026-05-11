@@ -5,26 +5,30 @@ import type {
   HostedWorkspaceInvocationReason,
   HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
+
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
+  normalizeIsoDate,
+  normalizeIsoDateOrNull,
+  normalizeNonNegativeInteger,
+  normalizePreferredWakeAt,
   projectRunnerStateRecord,
-  normalizeRetryFailureCount,
-  resolveRunnerNextWakeAt,
   stringifyRunnerDeferredCheckpointMailboxStatus,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
 import {
   type DurableObjectStateLike,
-  type RunnerAlarmKind,
+  type RunnerWriteFenceKind,
   type RunnerStateRecord,
 } from "./types.js";
 
 type RunnerMetaBundleRow = RunnerMetaRow;
 
-export interface RunnerInvocationLease {
+export interface RunnerWriteFenceToken {
   attemptId: string;
   expiresAt: string;
+  generation: string;
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
   startedAt: string;
@@ -33,258 +37,52 @@ export interface RunnerInvocationLease {
   workspaceVersion: string | null;
 }
 
-export class RunnerInvocationAlreadyActiveError extends Error {
+export type RunnerInvocationLease = RunnerWriteFenceToken;
+
+export class RunnerWriteFenceAlreadyActiveError extends Error {
   readonly record: RunnerStateRecord;
 
   constructor(record: RunnerStateRecord) {
-    super("Hosted runner invocation is already active.");
-    this.name = "RunnerInvocationAlreadyActiveError";
+    super("Hosted runner write fence is already active.");
+    this.name = "RunnerWriteFenceAlreadyActiveError";
     this.record = record;
   }
 }
 
-export interface RunnerInvocationLeaseOwnershipResult {
-  clearedOrphanObservation: boolean;
+export interface RunnerWriteFenceValidationResult {
   owns: boolean;
   record: RunnerStateRecord;
 }
 
-export type RunnerDueAlarm =
+export type RunnerDueWork =
   | {
-    kind: "none";
-    record: RunnerStateRecord;
-  }
+      kind: "idle";
+      record: RunnerStateRecord;
+    }
   | {
-    kind: "work";
-    record: RunnerStateRecord;
-  }
+      kind: "runtime";
+      reason: "next_wake" | "retry" | "wake_pending";
+      record: RunnerStateRecord;
+    }
   | {
-    checkpointNextWakeAt: string | null;
-    idleWorkspaceVersion: string;
-    kind: "idle_checkpoint";
-    record: RunnerStateRecord;
-  };
-
-export type RunnerDueAlarmDecision =
-  | {
-    activeInvocationPresent: boolean;
-    kind: "none";
-    record: RunnerStateRecord;
-  }
-  | {
-    dueWake: true;
-    kind: "work";
-    reason: "alarm" | "nudge";
-    record: RunnerStateRecord;
-  }
-  | {
-    checkpointNextWakeAt: string | null;
-    idleWorkspaceVersion: string;
-    kind: "idle_checkpoint";
-    reason: "idle_shutdown_checkpoint";
-    record: RunnerStateRecord;
-  };
-
-export interface RunnerDueAlarmDecisionInput {
-  currentWorkerVersionId?: string | null;
-  heartbeatStaleMs: number;
-  nowMs: number;
-  runnerReadyTimeoutMs: number;
-  runnerTimeoutMs: number;
-}
-
-export interface RunnerInvocationCheckpointResult {
-  clearedOrphanObservation: boolean;
-  recorded: boolean;
-  record: RunnerStateRecord;
-}
-
-export type RunnerStaleInvocationRecoveryResult =
-  | {
-    attemptId: string | null;
-    cleared: false;
-    nextRecoveryAt: string | null;
-    reason: "none";
-    record: RunnerStateRecord;
-  }
-  | {
-    attemptId: string | null;
-    cleared: true;
-    nextRecoveryAt: null;
-    reason: ActiveInvocationRecoveryClearReason;
-    record: RunnerStateRecord;
-  };
-
-export type RunnerPendingWorkDecision =
-  | {
-    alreadyRunning: boolean;
-    kind: "start";
-    preemptedPersistedActiveInvocation: boolean;
-    record: RunnerStateRecord;
-    resetRetryFailureCount: boolean;
-    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
-  }
-  | {
-    activeInvocation: {
-      attemptId: string;
-      leaseGeneration: string;
-      userId: string;
+      checkpointNextWakeAt: string | null;
+      kind: "idle_checkpoint";
+      record: RunnerStateRecord;
+      workspaceVersion: string;
     };
-    alreadyRunning: true;
-    kind: "preempt_local_idle_checkpoint";
-    preemptedPersistedActiveInvocation: false;
-    record: RunnerStateRecord;
-    resetRetryFailureCount: boolean;
-    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
-  }
+
+export type RunnerExpiredActiveRunResult =
   | {
-    alreadyRunning: true;
-    kind: "wait";
-    preemptedPersistedActiveInvocation: false;
-    record: RunnerStateRecord;
-    resetRetryFailureCount: boolean;
-    staleRecovery: RunnerStaleInvocationRecoveryResult | null;
-  };
-
-export type RunnerHeartbeatInstruction =
+      cleared: false;
+      record: RunnerStateRecord;
+    }
   | {
-    kind: "abort";
-    reason:
-      | "no_active_invocation"
-      | "stale_attempt"
-      | "stale_generation"
-      | "wrong_user";
-    record: RunnerStateRecord;
-  }
-  | {
-    kind: "continue";
-    record: RunnerStateRecord;
-  }
-  | {
-    activeInvocation: {
-      attemptId: string;
-      leaseGeneration: string;
-      reason: HostedWorkspaceInvocationReason;
-      userId: string;
+      cleared: true;
+      record: RunnerStateRecord;
     };
-    kind: "yield";
-    nextWakeAt: string | null;
-    record: RunnerStateRecord;
-    status: "scheduled";
-  };
 
-export type ActiveInvocationRecoveryDecision =
-  | {
-    kind: "live";
-    nextRecoveryAt: string | null;
-    reason: "heartbeating" | "starting";
-  }
-  | {
-    kind: "recover";
-    reason:
-      | "container_stopped"
-      | "hard_timeout"
-      | "heartbeat_stale"
-      | "startup_timeout"
-      | "worker_version_mismatch";
-  };
-
-type ActiveInvocationRecoveryClearReason =
-  Extract<ActiveInvocationRecoveryDecision, { kind: "recover" }>["reason"];
-
-export function resolveActiveInvocationRecoveryDecision(input: {
-  activeWorkerVersionId?: string | null;
-  containerStopped?: boolean | null;
-  currentWorkerVersionId?: string | null;
-  expiresAt?: string | null;
-  heartbeatStaleMs: number;
-  lastHeartbeatAt?: string | null;
-  nowMs: number;
-  readyTimeoutMs: number;
-  startedAt?: string | null;
-  timeoutMs: number;
-}): ActiveInvocationRecoveryDecision {
-  const startedAtMs = input.startedAt ? Date.parse(input.startedAt) : Number.NaN;
-  const expiresAtMs = input.expiresAt ? Date.parse(input.expiresAt) : Number.NaN;
-  const lastHeartbeatAtMs = input.lastHeartbeatAt
-    ? Date.parse(input.lastHeartbeatAt)
-    : Number.NaN;
-  const hasHeartbeat = Number.isFinite(lastHeartbeatAtMs);
-  const heartbeatStaleMs = Math.max(0, Math.floor(input.heartbeatStaleMs));
-  const hasRecentHeartbeat = hasHeartbeat
-    && input.nowMs - lastHeartbeatAtMs < heartbeatStaleMs;
-
-  if (input.containerStopped === true) {
-    return {
-      kind: "recover",
-      reason: "container_stopped",
-    };
-  }
-
-  const currentWorkerVersionId = normalizeOptionalString(
-    input.currentWorkerVersionId ?? null,
-  );
-  const activeWorkerVersionId = normalizeOptionalString(
-    input.activeWorkerVersionId ?? null,
-  );
-  if (
-    currentWorkerVersionId !== null
-    && activeWorkerVersionId !== currentWorkerVersionId
-    && !hasRecentHeartbeat
-  ) {
-    return {
-      kind: "recover",
-      reason: "worker_version_mismatch",
-    };
-  }
-
-  const hardDeadlineMs = Number.isFinite(expiresAtMs)
-    ? expiresAtMs
-    : Number.isFinite(startedAtMs)
-    ? startedAtMs + input.timeoutMs
-    : 0;
-  const startupGraceMs = Math.max(
-    Math.max(0, Math.floor(input.readyTimeoutMs)),
-    heartbeatStaleMs,
-  );
-  const startupDeadlineMs = !hasHeartbeat && Number.isFinite(startedAtMs)
-    ? startedAtMs + startupGraceMs
-    : Number.POSITIVE_INFINITY;
-  const heartbeatDeadlineMs = hasHeartbeat
-    ? lastHeartbeatAtMs + heartbeatStaleMs
-    : Number.POSITIVE_INFINITY;
-  const nextDeadlineMs = Math.min(
-    startupDeadlineMs,
-    heartbeatDeadlineMs,
-    hardDeadlineMs,
-  );
-
-  if (input.nowMs < nextDeadlineMs) {
-    return {
-      kind: "live",
-      nextRecoveryAt: Number.isFinite(nextDeadlineMs)
-        ? new Date(nextDeadlineMs).toISOString()
-        : null,
-      reason: hasHeartbeat ? "heartbeating" : "starting",
-    };
-  }
-
-  if (!hasHeartbeat && input.nowMs >= startupDeadlineMs) {
-    return {
-      kind: "recover",
-      reason: "startup_timeout",
-    };
-  }
-  if (hasHeartbeat && input.nowMs >= heartbeatDeadlineMs) {
-    return {
-      kind: "recover",
-      reason: "heartbeat_stale",
-    };
-  }
-  return {
-    kind: "recover",
-    reason: "hard_timeout",
-  };
+export function resolveActiveInvocationRecoveryDecision(_input?: unknown): { action: "none" } {
+  return { action: "none" };
 }
 
 export class RunnerStateStore {
@@ -342,401 +140,193 @@ export class RunnerStateStore {
     }
   }
 
-  async consumeDueRunnerAlarm(nowMs: number): Promise<RunnerDueAlarm> {
+  async markWakePending(input: {
+    clearIdleCheckpoint?: boolean;
+    preferredWakeAt?: string | null;
+    resetRetry?: boolean;
+  } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    const hadStoredAlarm = meta.alarm_kind !== null;
-    this.syncLegacyAlarmIntoV2MetaSync(meta);
-    const hasPendingWork = meta.pending_work === 1 || meta.pending_nudge === 1;
-    const alarm = this.readStateFromMetaSync(meta).alarm;
-    const dueAtMs = alarm ? Date.parse(alarm.dueAt) : Number.NaN;
-    if (!alarm) {
-      if (hasPendingWork) {
-        return {
-          kind: "work",
-          record: this.readStateFromMetaSync(meta),
-        };
-      }
-      return {
-        kind: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
+    meta.wake_pending = 1;
+    if (input.resetRetry === true) {
+      meta.retry_at = null;
+      meta.retry_count = 0;
+      meta.retry_last_error_code = null;
+      meta.last_error_at = null;
+      meta.last_error_code = null;
     }
+    if (input.clearIdleCheckpoint !== false) {
+      this.clearIdleCheckpointMetaSync(meta);
+    }
+    const nextWakeAt = normalizePreferredWakeAt(input.preferredWakeAt ?? new Date().toISOString())
+      ?? new Date().toISOString();
+    meta.next_wake_at = nextWakeAt;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
 
-    if (alarm.kind === "work") {
-      if (
-        (!Number.isFinite(dueAtMs) || dueAtMs > nowMs)
-        && (!hasPendingWork || hadStoredAlarm)
-      ) {
-        return {
-          kind: "none",
-          record: this.readStateFromMetaSync(meta),
-        };
-      }
-      this.clearAlarmMetaSync(meta);
+  async clearWakePending(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.wake_pending = 0;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async readDueWork(nowMs: number): Promise<RunnerDueWork> {
+    let meta = this.requireMetaRowSync();
+    const expired = this.clearExpiredActiveRunSync(meta, nowMs);
+    if (expired) {
       this.writeMetaRowSync(meta);
-      return {
-        kind: "work",
-        record: this.readStateFromMetaSync(meta),
-      };
+      meta = this.requireMetaRowSync();
     }
 
-    if (hasPendingWork) {
-      this.clearAlarmMetaSync(meta);
+    const record = this.readStateFromMetaSync(meta);
+    if (record.writeFence) {
+      return { kind: "idle", record };
+    }
+    if (record.wakePending) {
+      return { kind: "runtime", reason: "wake_pending", record };
+    }
+    if (record.retry.at && Date.parse(record.retry.at) <= nowMs) {
+      return { kind: "runtime", reason: "retry", record };
+    }
+    if (record.nextWakeAt && Date.parse(record.nextWakeAt) <= nowMs) {
+      return { kind: "runtime", reason: "next_wake", record };
+    }
+    if (record.idleCheckpoint && Date.parse(record.idleCheckpoint.dueAt) <= nowMs) {
+      return {
+        checkpointNextWakeAt: record.idleCheckpoint.checkpointNextWakeAt,
+        kind: "idle_checkpoint",
+        record,
+        workspaceVersion: record.idleCheckpoint.workspaceVersion,
+      };
+    }
+    return { kind: "idle", record };
+  }
+
+  async clearExpiredWriteFence(nowMs: number): Promise<RunnerExpiredActiveRunResult> {
+    const meta = this.requireMetaRowSync();
+    const cleared = this.clearExpiredActiveRunSync(meta, nowMs);
+    if (cleared) {
       this.writeMetaRowSync(meta);
-      return {
-        kind: "work",
-        record: this.readStateFromMetaSync(meta),
-      };
     }
-
-    if (!Number.isFinite(dueAtMs) || dueAtMs > nowMs) {
-      return {
-        kind: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    if (!alarm.workspaceVersion) {
-      this.clearAlarmMetaSync(meta);
-      this.writeMetaRowSync(meta);
-      return {
-        kind: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
     return {
-      checkpointNextWakeAt: alarm.checkpointNextWakeAt,
-      idleWorkspaceVersion: alarm.workspaceVersion,
-      kind: "idle_checkpoint",
+      cleared,
       record: this.readStateFromMetaSync(meta),
     };
   }
 
-  async consumeDueRunnerAlarmAndDecide(
-    input: number | RunnerDueAlarmDecisionInput,
-  ): Promise<RunnerDueAlarmDecision> {
-    const decisionInput = typeof input === "number"
-      ? null
-      : input;
-    const nowMs = typeof input === "number" ? input : input.nowMs;
-    const dueAlarm = await this.consumeDueRunnerAlarm(nowMs);
-    if (dueAlarm.kind === "none") {
-      return {
-        activeInvocationPresent: dueAlarm.record.active !== null,
-        kind: "none",
-        record: dueAlarm.record,
-      };
-    }
-
-    if (dueAlarm.kind === "work") {
-      return {
-        dueWake: true,
-        kind: "work",
-        reason: hasPendingForegroundWork(dueAlarm.record) ? "nudge" : "alarm",
-        record: dueAlarm.record,
-      };
-    }
-
-    if (dueAlarm.record.active !== null) {
-      if (!decisionInput) {
-        return {
-          activeInvocationPresent: true,
-          kind: "none",
-          record: dueAlarm.record,
-        };
-      }
-
-      const recovery = await this.clearStaleInvocationIfExpired({
-        currentWorkerVersionId: decisionInput.currentWorkerVersionId ?? null,
-        heartbeatStaleMs: decisionInput.heartbeatStaleMs,
-        nowMs,
-        readyTimeoutMs: decisionInput.runnerReadyTimeoutMs,
-        timeoutMs: decisionInput.runnerTimeoutMs,
-      });
-      if (!recovery.cleared) {
-        const meta = this.requireMetaRowSync();
-        const activeRecord = this.readStateFromMetaSync(meta);
-        if (
-          activeRecord.active !== null
-          && recovery.nextRecoveryAt
-          && this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint"
-        ) {
-          this.setAlarmMetaSync(meta, {
-            dueAt: recovery.nextRecoveryAt,
-            kind: "work",
-            workspaceVersion: null,
-          });
-          this.writeMetaRowSync(meta);
-        }
-        return {
-          activeInvocationPresent: activeRecord.active !== null,
-          kind: "none",
-          record: this.readStateFromMetaSync(meta),
-        };
-      }
-
-      if (hasPendingForegroundWork(recovery.record)) {
-        const meta = this.requireMetaRowSync();
-        this.setAlarmMetaSync(meta, {
-          dueAt: new Date(nowMs).toISOString(),
-          kind: "work",
-          workspaceVersion: null,
-        });
-        this.writeMetaRowSync(meta);
-        return {
-          dueWake: true,
-          kind: "work",
-          reason: "nudge",
-          record: this.readStateFromMetaSync(meta),
-        };
-      }
-
-      const meta = this.requireMetaRowSync();
-      if (this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint") {
-        this.clearAlarmMetaSync(meta);
-        this.writeMetaRowSync(meta);
-      }
-      return {
-        activeInvocationPresent: false,
-        kind: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    return {
-      checkpointNextWakeAt: dueAlarm.checkpointNextWakeAt,
-      idleWorkspaceVersion: dueAlarm.idleWorkspaceVersion,
-      kind: "idle_checkpoint",
-      reason: "idle_shutdown_checkpoint",
-      record: dueAlarm.record,
-    };
-  }
-
-  async markPendingWorkAndDecide(input: {
-    activeInThisIsolate: boolean;
-    currentWorkerVersionId?: string | null;
-    defaultRetryDelayMs: number;
-    heartbeatStaleMs: number;
-    immediateRetryDelayMs: number;
-    maxEventAttempts: number;
-    maxRetryDelayMs: number;
-    nowMs: number;
-    pendingWorkContinuationDelayMs: number;
-    retryBackoffMultiplier: number;
-    runnerReadyTimeoutMs: number;
-    runnerTimeoutMs: number;
-  }): Promise<RunnerPendingWorkDecision> {
-    let staleRecovery: RunnerStaleInvocationRecoveryResult | null = null;
-    let runningRecord = this.readStateSync();
-    if (!input.activeInThisIsolate && runningRecord.active !== null) {
-      staleRecovery = await this.clearStaleInvocationIfExpired({
-        currentWorkerVersionId: input.currentWorkerVersionId ?? null,
-        heartbeatStaleMs: input.heartbeatStaleMs,
-        nowMs: input.nowMs,
-        readyTimeoutMs: input.runnerReadyTimeoutMs,
-        timeoutMs: input.runnerTimeoutMs,
-      });
-      runningRecord = staleRecovery.record;
-    }
-
-    const alreadyRunning = input.activeInThisIsolate || runningRecord.active !== null;
-    const activeWorkspaceInvocation = runningRecord.workspaceInvocation;
-    const activeIdleShutdownCheckpoint =
-      activeWorkspaceInvocation?.reason === "idle_shutdown_checkpoint"
-        ? activeWorkspaceInvocation
-        : null;
-    const resetRetryFailureCount = runningRecord.retryFailureCount >= input.maxEventAttempts;
-    const retryFailureCount = resetRetryFailureCount
-      ? 0
-      : runningRecord.retryFailureCount;
-    const preferredWakeAt = input.activeInThisIsolate
-      ? new Date(input.nowMs + input.pendingWorkContinuationDelayMs).toISOString()
-      : alreadyRunning
-      ? resolvePendingWorkDrainContinuationWakeAt({
-          activeRecoveryWakeAt: staleRecovery?.nextRecoveryAt ?? null,
-          heartbeatStaleMs: input.heartbeatStaleMs,
-          nowMs: input.nowMs,
-          pendingWorkContinuationDelayMs: input.pendingWorkContinuationDelayMs,
-          record: runningRecord,
-          runnerReadyTimeoutMs: input.runnerReadyTimeoutMs,
-          runnerTimeoutMs: input.runnerTimeoutMs,
-        })
-      : new Date(input.nowMs + resolvePendingWorkRetryDelayMs({
-          defaultRetryDelayMs: input.defaultRetryDelayMs,
-          immediateRetryDelayMs: input.immediateRetryDelayMs,
-          maxRetryDelayMs: input.maxRetryDelayMs,
-          retryBackoffMultiplier: input.retryBackoffMultiplier,
-          retryFailureCount,
-        })).toISOString();
-
-    const meta = this.requireMetaRowSync();
-    this.markPendingWorkMetaSync(meta, {
-      preferredWakeAt,
-      resetRetryFailureCount,
-    });
-
-    if (input.activeInThisIsolate && activeIdleShutdownCheckpoint) {
-      this.writeMetaRowSync(meta);
-      return {
-        activeInvocation: {
-          attemptId: activeIdleShutdownCheckpoint.attemptId,
-          leaseGeneration: runningRecord.leaseGeneration.toString(),
-          userId: runningRecord.userId,
-        },
-        alreadyRunning: true,
-        kind: "preempt_local_idle_checkpoint",
-        preemptedPersistedActiveInvocation: false,
-        record: this.readStateFromMetaSync(meta),
-        resetRetryFailureCount,
-        staleRecovery,
-      };
-    }
-
-    if (!input.activeInThisIsolate && activeIdleShutdownCheckpoint) {
-      this.clearActiveInvocationMetaSync(meta);
-      meta.in_flight = 0;
-      this.writeMetaRowSync(meta);
-      return {
-        alreadyRunning: true,
-        kind: "start",
-        preemptedPersistedActiveInvocation: true,
-        record: this.readStateFromMetaSync(meta),
-        resetRetryFailureCount,
-        staleRecovery,
-      };
-    }
-
-    this.writeMetaRowSync(meta);
-    const record = this.readStateFromMetaSync(meta);
-    if (!alreadyRunning) {
-      return {
-        alreadyRunning: false,
-        kind: "start",
-        preemptedPersistedActiveInvocation: false,
-        record,
-        resetRetryFailureCount,
-        staleRecovery,
-      };
-    }
-
-    return {
-      alreadyRunning: true,
-      kind: "wait",
-      preemptedPersistedActiveInvocation: false,
-      record,
-      resetRetryFailureCount,
-      staleRecovery,
-    };
-  }
-
-  async beginInvocation(input: {
+  async beginWriteFence(input: {
     consumePendingNudge?: boolean;
-    expiresAt?: string | null;
+    kind?: RunnerWriteFenceKind;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
+    expiresAt?: string | null;
     workerVersionId?: string | null;
-  }): Promise<RunnerInvocationLease> {
+  }): Promise<RunnerWriteFenceToken> {
     await this.bindUser(input.userId);
 
     const meta = this.requireMetaRowSync();
-    if (this.readActiveInvocationLeaseSync(meta)) {
-      throw new RunnerInvocationAlreadyActiveError(this.readStateFromMetaSync(meta));
+    if (this.readWriteFenceTokenSync(meta)) {
+      throw new RunnerWriteFenceAlreadyActiveError(this.readStateFromMetaSync(meta));
     }
 
-    const nextLeaseGeneration = normalizeLeaseGeneration(meta.lease_generation) + 1;
+    const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
-    const expiresAt = normalizeOptionalIsoDateString(input.expiresAt ?? null)
+    const expiresAt = normalizeIsoDateOrNull(input.expiresAt ?? null)
       ?? new Date(Date.parse(startedAt) + 30 * 60_000).toISOString();
-    const attemptId = `workspace-invocation-${nextLeaseGeneration}`;
+    const attemptId = createRuntimeWriteAttemptId();
 
-    meta.in_flight = 1;
-    meta.lease_generation = nextLeaseGeneration;
-    meta.active_invocation_id = attemptId;
-    meta.active_invocation_expires_at = expiresAt;
-    meta.active_invocation_container_stopped_at = null;
-    meta.active_invocation_consumed_pending_work = input.consumePendingNudge !== false
-      && (meta.pending_nudge === 1 || meta.pending_work === 1)
-      ? 1
-      : 0;
-    meta.active_invocation_last_heartbeat_at = null;
-    meta.active_invocation_orphan_observed_at = null;
-    meta.active_invocation_reason = input.reason;
-    meta.active_invocation_started_at = startedAt;
-    meta.active_invocation_worker_version_id = normalizeOptionalString(
-      input.workerVersionId ?? null,
+    meta.active_attempt_id = attemptId;
+    meta.active_expires_at = expiresAt;
+    meta.active_generation = nextGeneration;
+    meta.active_kind = input.kind ?? (
+      input.reason === "idle_shutdown_checkpoint" ? "idle_checkpoint" : "runtime"
     );
+    meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
-    if (input.consumePendingNudge !== false) {
-      meta.pending_nudge = 0;
-      meta.pending_work = 0;
+    if (meta.active_kind === "runtime") {
+      meta.wake_pending = 0;
+      meta.retry_at = null;
+      meta.next_wake_at = null;
     }
-    this.clearAlarmMetaSync(meta);
-    this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
       expiresAt,
-      leaseGeneration: nextLeaseGeneration.toString(),
+      generation: nextGeneration.toString(),
+      leaseGeneration: nextGeneration.toString(),
       reason: input.reason,
       startedAt,
       userId: input.userId,
-      workerVersionId: meta.active_invocation_worker_version_id,
+      workerVersionId: null,
       workspaceVersion: null,
     };
   }
 
-  async bindInvocationWorkspaceVersion(input: {
-    lease: RunnerInvocationLease;
+  async bindWriteFenceWorkspaceVersion(input: {
+    token: RunnerWriteFenceToken;
     workspaceVersion: string;
-  }): Promise<RunnerInvocationLease> {
+  }): Promise<RunnerWriteFenceToken> {
     const meta = this.requireMetaRowSync();
-    if (!this.hasActiveInvocationLeaseSync(meta, input.lease)) {
-      throw new Error("Hosted runner invocation lease is stale.");
+    if (!this.hasWriteFenceTokenSync(meta, input.token)) {
+      throw new Error("Hosted runner write fence is stale.");
     }
 
     meta.active_workspace_version = input.workspaceVersion;
-    meta.active_invocation_last_heartbeat_at = null;
-    meta.active_invocation_orphan_observed_at = null;
     this.writeMetaRowSync(meta);
     return {
-      ...input.lease,
+      ...input.token,
       workspaceVersion: input.workspaceVersion,
     };
+  }
+
+  async beginInvocation(input: Parameters<RunnerStateStore["beginWriteFence"]>[0]): Promise<RunnerWriteFenceToken> {
+    return await this.beginWriteFence(input);
+  }
+
+  async bindInvocationWorkspaceVersion(input: {
+    lease: RunnerWriteFenceToken;
+    workspaceVersion: string;
+  }): Promise<RunnerWriteFenceToken> {
+    return await this.bindWriteFenceWorkspaceVersion({
+      token: input.lease,
+      workspaceVersion: input.workspaceVersion,
+    });
   }
 
   async ageActiveInvocationForTest(input: {
     startedAt: string;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    if (!meta.active_invocation_id) {
-      throw new Error("Hosted runner has no active invocation to age for test.");
+    if (!meta.active_attempt_id) {
+      throw new Error("Hosted runner has no write fence to age for test.");
     }
-    meta.active_invocation_started_at = normalizeIsoDateString(input.startedAt);
-    meta.active_invocation_expires_at = normalizeIsoDateString(input.startedAt);
-    meta.active_invocation_last_heartbeat_at = null;
-    meta.active_invocation_orphan_observed_at = null;
+    meta.active_started_at = normalizeIsoDate(input.startedAt);
+    meta.active_expires_at = normalizeIsoDate(input.startedAt);
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
 
-  async completeInvocation(input: {
+  async clearWriteFenceAfterCompletion(input: {
     finishedAt?: string | null;
-    lease: RunnerInvocationLease;
+    token: RunnerWriteFenceToken;
   }): Promise<{
     completed: boolean;
     record: RunnerStateRecord;
   }> {
     const meta = this.requireMetaRowSync();
-    if (!this.clearActiveInvocationLeaseSync(meta, input.lease)) {
+    if (!this.clearWriteFenceTokenSync(meta, input.token)) {
       return {
         completed: false,
         record: this.readStateFromMetaSync(meta),
       };
     }
-    this.clearLastErrorMetaSync(meta);
-    meta.retry_failure_count = 0;
+    meta.retry_count = 0;
+    meta.retry_at = null;
+    meta.retry_last_error_code = null;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
 
@@ -746,24 +336,42 @@ export class RunnerStateStore {
     };
   }
 
-  async failInvocation(input: {
+  async completeInvocation(input: {
+    finishedAt?: string | null;
+    lease: RunnerWriteFenceToken;
+  }): Promise<{
+    completed: boolean;
+    record: RunnerStateRecord;
+  }> {
+    return await this.clearWriteFenceAfterCompletion({
+      finishedAt: input.finishedAt,
+      token: input.lease,
+    });
+  }
+
+  async clearWriteFenceAfterFailure(input: {
     error: unknown;
     finishedAt?: string | null;
-    lease: RunnerInvocationLease;
+    token: RunnerWriteFenceToken;
+    retryAt?: string | null;
   }): Promise<{
     failed: boolean;
     record: RunnerStateRecord;
   }> {
     const meta = this.requireMetaRowSync();
-    if (!this.clearActiveInvocationLeaseSync(meta, input.lease)) {
+    if (!this.clearWriteFenceTokenSync(meta, input.token)) {
       return {
         failed: false,
         record: this.readStateFromMetaSync(meta),
       };
     }
+    const errorCode = deriveHostedExecutionErrorCode(input.error);
     meta.last_error_at = input.finishedAt ?? new Date().toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
-    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
+    meta.last_error_code = errorCode;
+    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
+    meta.retry_at = normalizeIsoDate(input.retryAt ?? new Date(Date.now() + 1_000).toISOString());
+    meta.retry_last_error_code = errorCode;
+    meta.wake_pending = 1;
     this.writeMetaRowSync(meta);
 
     return {
@@ -772,44 +380,65 @@ export class RunnerStateStore {
     };
   }
 
-  async recordActiveInvocationContainerStopped(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    stoppedAt?: string | null;
-    userId: string;
+  async failInvocation(input: {
+    error: unknown;
+    finishedAt?: string | null;
+    lease: RunnerWriteFenceToken;
+    retryAt?: string | null;
   }): Promise<{
-    recorded: boolean;
-    record: RunnerStateRecord | null;
+    failed: boolean;
+    record: RunnerStateRecord;
   }> {
-    const meta = this.selectMetaRowSync();
-    if (!meta || meta.user_id !== input.userId) {
-      return {
-        recorded: false,
-        record: meta ? this.readStateFromMetaSync(meta) : null,
-      };
-    }
-    if (
-      meta.active_invocation_id !== input.attemptId
-      || normalizeLeaseGeneration(meta.lease_generation).toString() !== input.leaseGeneration
-    ) {
-      return {
-        recorded: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
+    return await this.clearWriteFenceAfterFailure({
+      error: input.error,
+      finishedAt: input.finishedAt,
+      retryAt: input.retryAt,
+      token: input.lease,
+    });
+  }
 
-    preserveConsumedPendingWorkAfterActiveInvocationClears(meta);
-    meta.active_invocation_container_stopped_at = normalizeOptionalIsoDateString(
-      input.stoppedAt ?? null,
-    ) ?? new Date().toISOString();
-    this.writeMetaRowSync(meta);
+  async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false; record: RunnerStateRecord }> {
     return {
-      recorded: true,
-      record: this.readStateFromMetaSync(meta),
+      recorded: false,
+      record: this.readStateFromMetaSync(this.requireMetaRowSync()),
     };
   }
 
-  async clearActiveInvocationForUserDeletion(userId: string): Promise<{
+  async clearStaleInvocationIfExpired(_input?: unknown): Promise<RunnerExpiredActiveRunResult> {
+    return await this.clearExpiredWriteFence(Date.now());
+  }
+
+  async markPendingInvocationNudge(_input?: unknown): Promise<RunnerStateRecord> {
+    return await this.markWakePending();
+  }
+
+  async clearPendingInvocationNudge(_input?: unknown): Promise<RunnerStateRecord> {
+    return await this.clearWakePending();
+  }
+
+  async consumeDueRunnerAlarmAndDecide(_input?: unknown): Promise<RunnerDueWork> {
+    return await this.readDueWork(Date.now());
+  }
+
+  async scheduleIdleShutdownCheckpointIfStillQuiet(input: {
+    checkpointNextWakeAt?: string | null;
+    dueAt: string;
+    workspaceVersion: string;
+  }): Promise<RunnerStateRecord> {
+    return await this.scheduleIdleCheckpoint(input);
+  }
+
+  async recordActiveInvocationHeartbeatInstruction(_input?: unknown): Promise<{
+    ok: false;
+    reason: "no_active_invocation";
+  }> {
+    return {
+      ok: false,
+      reason: "no_active_invocation",
+    };
+  }
+
+  async clearWriteFenceForUserDeletion(userId: string): Promise<{
     attemptId: string | null;
     cleared: boolean;
   }> {
@@ -818,18 +447,16 @@ export class RunnerStateStore {
       throw new Error("Hosted runner Durable Object is bound to a different user.");
     }
 
-    if (!meta || !meta.active_invocation_id) {
+    if (!meta || !meta.active_attempt_id) {
       return {
         attemptId: null,
         cleared: false,
       };
     }
 
-    const attemptId = meta.active_invocation_id;
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
-    meta.pending_nudge = 0;
-    meta.pending_work = 0;
+    const attemptId = meta.active_attempt_id;
+    this.clearActiveRunMetaSync(meta);
+    meta.wake_pending = 0;
     this.writeMetaRowSync(meta);
 
     return {
@@ -838,121 +465,48 @@ export class RunnerStateStore {
     };
   }
 
-  async markPendingInvocationNudge(input: {
-    preferredWakeAt?: string | null;
-    resetRetryFailureCount?: boolean;
-  } = {}): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    this.markPendingWorkMetaSync(meta, {
-      preferredWakeAt: input.preferredWakeAt,
-      resetRetryFailureCount: input.resetRetryFailureCount,
-    });
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearPendingInvocationNudge(input: {
-    expectedPendingNudgeGeneration: number;
+  async scheduleNextWake(input: {
+    nextWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    if (
-      meta.pending_nudge !== 1
-      || normalizeRetryFailureCount(meta.pending_nudge_generation)
-        !== input.expectedPendingNudgeGeneration
-    ) {
-      return this.readStateFromMetaSync(meta);
-    }
-
-    meta.pending_nudge = 0;
-    meta.pending_work = 0;
-    if (this.readRunnerAlarmKindFromMetaSync(meta) === "work") {
-      this.clearAlarmMetaSync(meta);
-    }
+    meta.next_wake_at = normalizePreferredWakeAt(input.nextWakeAt ?? null);
     this.writeMetaRowSync(meta);
-
     return this.readStateFromMetaSync(meta);
   }
 
-  async scheduleAlarm(input: {
-    checkpointNextWakeAt?: string | null;
-    dueAt: string;
-    kind: RunnerAlarmKind;
-    workspaceVersion?: string | null;
+  async scheduleRetry(input: {
+    error?: unknown;
+    retryAt: string;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    this.setAlarmMetaSync(meta, {
-      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
-      dueAt: input.dueAt,
-      kind: input.kind,
-      workspaceVersion: input.workspaceVersion ?? null,
-    });
+    const errorCode = deriveHostedExecutionErrorCode(input.error);
+    meta.retry_at = normalizeIsoDate(input.retryAt);
+    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
+    meta.retry_last_error_code = errorCode;
+    meta.last_error_at = new Date().toISOString();
+    meta.last_error_code = errorCode;
+    meta.wake_pending = 1;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
 
-  async scheduleIdleShutdownCheckpoint(input: {
+  async scheduleIdleCheckpoint(input: {
     checkpointNextWakeAt?: string | null;
     dueAt: string;
     workspaceVersion: string;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    this.setAlarmMetaSync(meta, {
-      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
-      dueAt: input.dueAt,
-      kind: "idle_checkpoint",
-      workspaceVersion: input.workspaceVersion,
-    });
+    meta.idle_checkpoint_due_at = normalizeIsoDate(input.dueAt);
+    meta.idle_checkpoint_workspace_version = input.workspaceVersion;
+    meta.idle_checkpoint_next_wake_at = normalizeIsoDateOrNull(input.checkpointNextWakeAt ?? null);
     this.writeMetaRowSync(meta);
-
     return this.readStateFromMetaSync(meta);
   }
 
-  async scheduleIdleShutdownCheckpointIfStillQuiet(input: {
-    checkpointNextWakeAt?: string | null;
-    dueAt: string;
-    workspaceVersion: string;
-  }): Promise<
-    | {
-      record: RunnerStateRecord;
-      scheduled: false;
-    }
-    | {
-      record: RunnerStateRecord;
-      scheduled: true;
-    }
-  > {
+  async clearIdleCheckpoint(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    const currentRecord = this.readStateFromMetaSync(meta);
-    if (hasPendingForegroundWork(currentRecord) || currentRecord.active !== null) {
-      return {
-        record: currentRecord,
-        scheduled: false,
-      };
-    }
-
-    this.setAlarmMetaSync(meta, {
-      checkpointNextWakeAt: input.checkpointNextWakeAt ?? null,
-      dueAt: input.dueAt,
-      kind: "idle_checkpoint",
-      workspaceVersion: input.workspaceVersion,
-    });
+    this.clearIdleCheckpointMetaSync(meta);
     this.writeMetaRowSync(meta);
-
-    return {
-      record: this.readStateFromMetaSync(meta),
-      scheduled: true,
-    };
-  }
-
-  async clearIdleShutdownCheckpoint(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    this.syncLegacyAlarmIntoV2MetaSync(meta);
-    if (this.readRunnerAlarmKindFromMetaSync(meta) === "idle_checkpoint") {
-      this.clearAlarmMetaSync(meta);
-    }
-    this.writeMetaRowSync(meta);
-
     return this.readStateFromMetaSync(meta);
   }
 
@@ -977,8 +531,40 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async readActiveInvocationLease(): Promise<RunnerInvocationLease | null> {
-    return this.readActiveInvocationLeaseSync(this.requireMetaRowSync());
+  async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {
+    return this.readWriteFenceTokenSync(this.requireMetaRowSync());
+  }
+
+  async validateWriteFenceToken(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<RunnerWriteFenceValidationResult> {
+    const meta = this.requireMetaRowSync();
+    const token = this.readWriteFenceTokenSync(meta);
+    if (
+      !token
+      || token.attemptId !== input.attemptId
+      || token.generation !== input.generation
+      || token.userId !== input.userId
+    ) {
+      return {
+        owns: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    const ownsWriteFence = (
+      input.workspaceVersion === undefined
+      || input.workspaceVersion === null
+      || token.workspaceVersion === input.workspaceVersion
+    );
+
+    return {
+      owns: ownsWriteFence,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async ownsActiveInvocationLease(input: {
@@ -986,45 +572,43 @@ export class RunnerStateStore {
     leaseGeneration: string;
     userId: string;
     workspaceVersion?: string | null;
-  }): Promise<RunnerInvocationLeaseOwnershipResult> {
+  }): Promise<RunnerWriteFenceValidationResult & { clearedOrphanObservation: false }> {
+    const result = await this.validateWriteFenceToken({
+      attemptId: input.attemptId,
+      generation: input.leaseGeneration,
+      userId: input.userId,
+      workspaceVersion: input.workspaceVersion,
+    });
+    return {
+      ...result,
+      clearedOrphanObservation: false,
+    };
+  }
+
+  async recordWriteFenceWorkspaceCheckpoint(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean; record: RunnerStateRecord }> {
     const meta = this.requireMetaRowSync();
-    if (this.clearActiveInvocationIfExpiredSync(meta, Date.now())) {
-      return {
-        clearedOrphanObservation: false,
-        owns: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    const lease = this.readActiveInvocationLeaseSync(meta);
+    const token = this.readWriteFenceTokenSync(meta);
     if (
-      !lease
-      || lease.attemptId !== input.attemptId
-      || lease.leaseGeneration !== input.leaseGeneration
-      || lease.userId !== input.userId
+      !token
+      || token.attemptId !== input.attemptId
+      || token.generation !== input.generation
+      || token.userId !== input.userId
     ) {
       return {
-        clearedOrphanObservation: false,
-        owns: false,
+        recorded: false,
         record: this.readStateFromMetaSync(meta),
       };
     }
 
-    const ownsLease = (
-      input.workspaceVersion === undefined
-      || input.workspaceVersion === null
-      || lease.workspaceVersion === input.workspaceVersion
-    );
-    const clearedOrphanObservation = ownsLease
-      && meta.active_invocation_orphan_observed_at !== null;
-    if (ownsLease) {
-      meta.active_invocation_last_heartbeat_at = new Date().toISOString();
-      meta.active_invocation_orphan_observed_at = null;
-      this.writeMetaRowSync(meta);
-    }
-
+    meta.active_workspace_version = input.workspaceVersion;
+    this.writeMetaRowSync(meta);
     return {
-      clearedOrphanObservation,
-      owns: ownsLease,
+      recorded: true,
       record: this.readStateFromMetaSync(meta),
     };
   }
@@ -1034,208 +618,36 @@ export class RunnerStateStore {
     leaseGeneration: string;
     userId: string;
     workspaceVersion: string;
-  }): Promise<RunnerInvocationCheckpointResult> {
-    const meta = this.requireMetaRowSync();
-    if (this.clearActiveInvocationIfExpiredSync(meta, Date.now())) {
-      return {
-        clearedOrphanObservation: false,
-        recorded: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    const lease = this.readActiveInvocationLeaseSync(meta);
-    if (
-      !lease
-      || lease.attemptId !== input.attemptId
-      || lease.leaseGeneration !== input.leaseGeneration
-      || lease.userId !== input.userId
-    ) {
-      return {
-        clearedOrphanObservation: false,
-        recorded: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    const clearedOrphanObservation = meta.active_invocation_orphan_observed_at !== null;
-    meta.active_workspace_version = input.workspaceVersion;
-    meta.active_invocation_last_heartbeat_at = new Date().toISOString();
-    meta.active_invocation_orphan_observed_at = null;
-    this.writeMetaRowSync(meta);
-    return {
-      clearedOrphanObservation,
-      recorded: true,
-      record: this.readStateFromMetaSync(meta),
-    };
+  }): Promise<{ recorded: boolean; record: RunnerStateRecord }> {
+    return await this.recordWriteFenceWorkspaceCheckpoint({
+      attemptId: input.attemptId,
+      generation: input.leaseGeneration,
+      userId: input.userId,
+      workspaceVersion: input.workspaceVersion,
+    });
   }
 
-  async recordActiveInvocationHeartbeatInstruction(input: {
-    attemptId: string;
-    heartbeatStaleMs: number;
-    leaseGeneration: string;
-    nowMs?: number | null;
-    runnerReadyTimeoutMs: number;
-    runnerTimeoutMs: number;
-    userId: string;
-  }): Promise<RunnerHeartbeatInstruction> {
-    const nowMs = input.nowMs ?? Date.now();
-    const meta = this.requireMetaRowSync();
-    if (this.clearActiveInvocationIfExpiredSync(meta, nowMs)) {
-      return {
-        kind: "abort",
-        reason: "no_active_invocation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    const lease = this.readActiveInvocationLeaseSync(meta);
-    if (!lease) {
-      return {
-        kind: "abort",
-        reason: "no_active_invocation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.attemptId !== input.attemptId) {
-      return {
-        kind: "abort",
-        reason: "stale_attempt",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.leaseGeneration !== input.leaseGeneration) {
-      return {
-        kind: "abort",
-        reason: "stale_generation",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-    if (lease.userId !== input.userId) {
-      return {
-        kind: "abort",
-        reason: "wrong_user",
-        record: this.readStateFromMetaSync(meta),
-      };
+  private clearExpiredActiveRunSync(meta: RunnerMetaBundleRow, nowMs: number): boolean {
+    const writeFence = this.readWriteFenceTokenSync(meta);
+    if (!writeFence) {
+      return false;
     }
 
-    meta.active_invocation_last_heartbeat_at = new Date(nowMs).toISOString();
-    meta.active_invocation_orphan_observed_at = null;
-    const pendingWorkPresent = meta.pending_work === 1 || meta.pending_nudge === 1;
-    if (!pendingWorkPresent) {
-      this.writeMetaRowSync(meta);
-      return {
-        kind: "continue",
-        record: this.readStateFromMetaSync(meta),
-      };
+    const expiresAtMs = Date.parse(writeFence.expiresAt);
+    if (Number.isFinite(expiresAtMs) && nowMs < expiresAtMs) {
+      return false;
     }
 
-    const activeReason = isHostedWorkspaceInvocationReasonValue(meta.active_invocation_reason)
-      ? meta.active_invocation_reason
-      : lease.reason;
-    const recordBeforeAlarm = this.readStateFromMetaSync(meta);
-    const nextWakeAt = resolvePendingWorkWakeAt({
-      heartbeatStaleMs: input.heartbeatStaleMs,
-      nowMs,
-      record: recordBeforeAlarm,
-      runnerReadyTimeoutMs: input.runnerReadyTimeoutMs,
-      runnerTimeoutMs: input.runnerTimeoutMs,
-    });
-    this.setAlarmMetaSync(meta, {
-      dueAt: nextWakeAt,
-      kind: "work",
-      workspaceVersion: null,
-    });
-    this.writeMetaRowSync(meta);
-
-    return {
-      activeInvocation: {
-        attemptId: lease.attemptId,
-        leaseGeneration: lease.leaseGeneration,
-        reason: activeReason,
-        userId: lease.userId,
-      },
-      kind: "yield",
-      nextWakeAt,
-      record: this.readStateFromMetaSync(meta),
-      status: "scheduled",
-    };
-  }
-
-  async clearStaleInvocationIfExpired(input: {
-    currentWorkerVersionId?: string | null;
-    heartbeatStaleMs: number;
-    nowMs: number;
-    readyTimeoutMs: number;
-    timeoutMs: number;
-  }): Promise<RunnerStaleInvocationRecoveryResult> {
-    const meta = this.requireMetaRowSync();
-    const attemptId = meta.active_invocation_id;
-    const startedAt = meta.active_invocation_started_at;
-    if (!attemptId || !startedAt) {
-      return {
-        attemptId,
-        cleared: false,
-        nextRecoveryAt: null,
-        reason: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    const decision = resolveActiveInvocationRecoveryDecision({
-      activeWorkerVersionId: meta.active_invocation_worker_version_id,
-      containerStopped: meta.active_invocation_container_stopped_at !== null,
-      currentWorkerVersionId: input.currentWorkerVersionId ?? null,
-      expiresAt: meta.active_invocation_expires_at,
-      heartbeatStaleMs: input.heartbeatStaleMs,
-      lastHeartbeatAt: meta.active_invocation_last_heartbeat_at,
-      nowMs: input.nowMs,
-      readyTimeoutMs: input.readyTimeoutMs,
-      startedAt,
-      timeoutMs: input.timeoutMs,
-    });
-    if (decision.kind === "live") {
-      return {
-        attemptId,
-        cleared: false,
-        nextRecoveryAt: decision.nextRecoveryAt,
-        reason: "none",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    this.clearActiveInvocationForRecoverySync(meta, {
-      nowMs: input.nowMs,
-      reason: decision.reason,
-    });
-    this.writeMetaRowSync(meta);
-
-    return {
-      attemptId,
-      cleared: true,
-      nextRecoveryAt: null,
-      reason: decision.reason,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
-  async syncNextWake(input: {
-    preferredWakeAt?: string | null;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    const nextWakeAt = resolveRunnerNextWakeAt({
-      preferredWakeAt: input.preferredWakeAt ?? null,
-    });
-    if (nextWakeAt) {
-      this.setAlarmMetaSync(meta, {
-        dueAt: nextWakeAt,
-        kind: "work",
-        workspaceVersion: null,
-      });
-    } else if (this.readRunnerAlarmKindFromMetaSync(meta) === "work") {
-      this.clearAlarmMetaSync(meta);
-    }
-    this.writeMetaRowSync(meta);
-
-    return this.readStateFromMetaSync(meta);
+    const error = new Error("Hosted runtime write fence timed out.");
+    const errorCode = deriveHostedExecutionErrorCode(error);
+    this.clearActiveRunMetaSync(meta);
+    meta.wake_pending = 1;
+    meta.retry_at = new Date(nowMs).toISOString();
+    meta.retry_count = normalizeNonNegativeInteger(meta.retry_count) + 1;
+    meta.retry_last_error_code = errorCode;
+    meta.last_error_at = new Date(nowMs).toISOString();
+    meta.last_error_code = errorCode;
+    return true;
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -1243,11 +655,10 @@ export class RunnerStateStore {
   }
 
   private readStateFromMetaSync(meta: RunnerMetaBundleRow): RunnerStateRecord {
-    this.syncLegacyAlarmIntoV2MetaSync(meta);
     return projectRunnerStateRecord({
       bundleRef: null,
       meta,
-    }).record;
+    });
   }
 
   private requireMetaRowSync(): RunnerMetaBundleRow {
@@ -1284,34 +695,25 @@ export class RunnerStateStore {
     const row = this.sql.exec<RunnerMetaBundleRow>(
       `SELECT
         user_id,
-        active_invocation_id,
-        active_invocation_expires_at,
-        active_invocation_container_stopped_at,
-        active_invocation_consumed_pending_work,
-        active_invocation_last_heartbeat_at,
-        active_invocation_orphan_observed_at,
-        active_invocation_reason,
-        active_invocation_started_at,
-        active_invocation_worker_version_id,
+        wake_pending,
+        next_wake_at,
+        active_attempt_id,
+        active_generation,
+        active_kind,
+        active_started_at,
+        active_expires_at,
         active_workspace_version,
-        alarm_kind,
-        alarm_due_at,
-        alarm_workspace_version,
-        alarm_checkpoint_next_wake_at,
-        lease_generation,
-        in_flight,
+        idle_checkpoint_due_at,
+        idle_checkpoint_workspace_version,
+        idle_checkpoint_next_wake_at,
+        retry_at,
+        retry_count,
+        retry_last_error_code,
         last_error_at,
         last_error_code,
         last_invocation_at,
         deferred_checkpoint_required,
-        deferred_checkpoint_mailbox_status_json,
-        idle_shutdown_checkpoint_due_at,
-        idle_shutdown_checkpoint_workspace_version,
-        next_wake_at,
-        pending_nudge,
-        pending_nudge_generation,
-        pending_work,
-        retry_failure_count
+        deferred_checkpoint_mailbox_status_json
       FROM runner_meta
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
@@ -1328,65 +730,47 @@ export class RunnerStateStore {
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
-        active_invocation_id,
-        active_invocation_expires_at,
-        active_invocation_container_stopped_at,
-        active_invocation_consumed_pending_work,
-        active_invocation_last_heartbeat_at,
-        active_invocation_orphan_observed_at,
-        active_invocation_reason,
-        active_invocation_started_at,
-        active_invocation_worker_version_id,
+        wake_pending,
+        next_wake_at,
+        active_attempt_id,
+        active_generation,
+        active_kind,
+        active_started_at,
+        active_expires_at,
         active_workspace_version,
-        alarm_kind,
-        alarm_due_at,
-        alarm_workspace_version,
-        alarm_checkpoint_next_wake_at,
-        lease_generation,
-        in_flight,
+        idle_checkpoint_due_at,
+        idle_checkpoint_workspace_version,
+        idle_checkpoint_next_wake_at,
+        retry_at,
+        retry_count,
+        retry_last_error_code,
         last_error_at,
         last_error_code,
         last_invocation_at,
         deferred_checkpoint_required,
-        deferred_checkpoint_mailbox_status_json,
-        idle_shutdown_checkpoint_due_at,
-        idle_shutdown_checkpoint_workspace_version,
-        next_wake_at,
-        pending_nudge,
-        pending_nudge_generation,
-        pending_work,
-        retry_failure_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        deferred_checkpoint_mailbox_status_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
-      meta.active_invocation_id,
-      meta.active_invocation_expires_at,
-      meta.active_invocation_container_stopped_at,
-      meta.active_invocation_consumed_pending_work === 1 ? 1 : 0,
-      meta.active_invocation_last_heartbeat_at,
-      meta.active_invocation_orphan_observed_at,
-      meta.active_invocation_reason,
-      meta.active_invocation_started_at,
-      meta.active_invocation_worker_version_id,
+      meta.wake_pending === 1 ? 1 : 0,
+      meta.next_wake_at,
+      meta.active_attempt_id,
+      normalizeNonNegativeInteger(meta.active_generation),
+      meta.active_kind,
+      meta.active_started_at,
+      meta.active_expires_at,
       meta.active_workspace_version,
-      meta.alarm_kind,
-      meta.alarm_due_at,
-      meta.alarm_workspace_version,
-      meta.alarm_checkpoint_next_wake_at,
-      meta.lease_generation,
-      meta.in_flight,
+      meta.idle_checkpoint_due_at,
+      meta.idle_checkpoint_workspace_version,
+      meta.idle_checkpoint_next_wake_at,
+      meta.retry_at,
+      normalizeNonNegativeInteger(meta.retry_count),
+      meta.retry_last_error_code,
       meta.last_error_at,
       meta.last_error_code,
       meta.last_invocation_at,
-      meta.deferred_checkpoint_required,
+      meta.deferred_checkpoint_required === 1 ? 1 : 0,
       meta.deferred_checkpoint_mailbox_status_json,
-      meta.idle_shutdown_checkpoint_due_at,
-      meta.idle_shutdown_checkpoint_workspace_version,
-      meta.next_wake_at,
-      meta.pending_nudge,
-      normalizeRetryFailureCount(meta.pending_nudge_generation),
-      meta.pending_work,
-      normalizeRetryFailureCount(meta.retry_failure_count),
     );
   }
 
@@ -1395,193 +779,63 @@ export class RunnerStateStore {
     this.userId = meta.user_id;
   }
 
-  private markPendingWorkMetaSync(
+  private clearWriteFenceTokenSync(
     meta: RunnerMetaRow,
-    input: {
-      preferredWakeAt?: string | null;
-      resetRetryFailureCount?: boolean;
-    },
-  ): void {
-    if (input.resetRetryFailureCount === true) {
-      this.clearLastErrorMetaSync(meta);
-      meta.retry_failure_count = 0;
-    }
-    meta.pending_nudge = 1;
-    meta.pending_work = 1;
-    meta.pending_nudge_generation =
-      normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
-    this.setAlarmMetaSync(meta, {
-      dueAt: resolveRunnerNextWakeAt({
-        preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
-      }) ?? new Date().toISOString(),
-      kind: "work",
-      workspaceVersion: null,
-    });
-  }
-
-  private clearActiveInvocationLeaseSync(
-    meta: RunnerMetaRow,
-    lease: RunnerInvocationLease,
+    token: RunnerWriteFenceToken,
   ): boolean {
-    if (!this.hasActiveInvocationLeaseSync(meta, lease)) {
+    if (!this.hasWriteFenceTokenSync(meta, token)) {
       return false;
     }
 
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
+    this.clearActiveRunMetaSync(meta);
     return true;
   }
 
-  private clearActiveInvocationIfExpiredSync(meta: RunnerMetaRow, nowMs: number): boolean {
-    const lease = this.readActiveInvocationLeaseSync(meta);
-    if (!lease) {
-      return false;
-    }
-
-    const expiresAtMs = Date.parse(lease.expiresAt);
-    if (Number.isFinite(expiresAtMs) && nowMs < expiresAtMs) {
-      return false;
-    }
-
-    this.clearActiveInvocationForRecoverySync(meta, {
-      nowMs,
-      reason: "hard_timeout",
-    });
-    this.writeMetaRowSync(meta);
-    return true;
-  }
-
-  private clearActiveInvocationForRecoverySync(
-    meta: RunnerMetaRow,
-    input: {
-      nowMs: number;
-      reason: ActiveInvocationRecoveryClearReason;
-    },
-  ): void {
-    preserveConsumedPendingWorkAfterActiveInvocationClears(meta);
-    this.clearActiveInvocationMetaSync(meta);
-    meta.in_flight = 0;
-    meta.last_error_at = new Date(input.nowMs).toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(
-      new Error(activeInvocationRecoveryClearMessage(input.reason)),
-    );
-    meta.retry_failure_count = normalizeRetryFailureCount(meta.retry_failure_count) + 1;
-  }
-
-  private clearActiveInvocationMetaSync(meta: RunnerMetaRow): void {
-    meta.active_invocation_id = null;
-    meta.active_invocation_expires_at = null;
-    meta.active_invocation_container_stopped_at = null;
-    meta.active_invocation_consumed_pending_work = 0;
-    meta.active_invocation_last_heartbeat_at = null;
-    meta.active_invocation_orphan_observed_at = null;
-    meta.active_invocation_reason = null;
-    meta.active_invocation_started_at = null;
-    meta.active_invocation_worker_version_id = null;
+  private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
+    meta.active_attempt_id = null;
+    meta.active_expires_at = null;
+    meta.active_kind = null;
+    meta.active_started_at = null;
     meta.active_workspace_version = null;
   }
 
-  private hasActiveInvocationLeaseSync(
+  private clearIdleCheckpointMetaSync(meta: RunnerMetaRow): void {
+    meta.idle_checkpoint_due_at = null;
+    meta.idle_checkpoint_workspace_version = null;
+    meta.idle_checkpoint_next_wake_at = null;
+  }
+
+  private hasWriteFenceTokenSync(
     meta: RunnerMetaRow,
-    lease: RunnerInvocationLease,
+    token: RunnerWriteFenceToken,
   ): boolean {
-    return meta.active_invocation_id === lease.attemptId
-      && normalizeLeaseGeneration(meta.lease_generation).toString() === lease.leaseGeneration
-      && meta.user_id === lease.userId;
+    return meta.active_attempt_id === token.attemptId
+      && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
+      && meta.user_id === token.userId;
   }
 
-  private clearLastErrorMetaSync(meta: RunnerMetaRow): void {
-    meta.last_error_at = null;
-    meta.last_error_code = null;
-  }
-
-  private clearAlarmMetaSync(meta: RunnerMetaRow): void {
-    meta.alarm_kind = null;
-    meta.alarm_due_at = null;
-    meta.alarm_workspace_version = null;
-    meta.alarm_checkpoint_next_wake_at = null;
-    meta.next_wake_at = null;
-    meta.idle_shutdown_checkpoint_due_at = null;
-    meta.idle_shutdown_checkpoint_workspace_version = null;
-  }
-
-  private setAlarmMetaSync(
-    meta: RunnerMetaRow,
-    input: {
-      checkpointNextWakeAt?: string | null;
-      dueAt: string;
-      kind: RunnerAlarmKind;
-      workspaceVersion: string | null;
-    },
-  ): void {
-    const dueAt = normalizeIsoDateString(input.dueAt);
-    const checkpointNextWakeAt = normalizeOptionalIsoDateString(
-      input.checkpointNextWakeAt ?? null,
-    );
-    meta.alarm_kind = input.kind;
-    meta.alarm_due_at = dueAt;
-    meta.alarm_workspace_version = input.workspaceVersion;
-    meta.alarm_checkpoint_next_wake_at = checkpointNextWakeAt;
-    if (input.kind === "work") {
-      meta.next_wake_at = dueAt;
-      meta.idle_shutdown_checkpoint_due_at = null;
-      meta.idle_shutdown_checkpoint_workspace_version = null;
-      return;
-    }
-
-    meta.next_wake_at = checkpointNextWakeAt;
-    meta.idle_shutdown_checkpoint_due_at = dueAt;
-    meta.idle_shutdown_checkpoint_workspace_version = input.workspaceVersion;
-  }
-
-  private syncLegacyAlarmIntoV2MetaSync(meta: RunnerMetaRow): void {
-    if (this.readRunnerAlarmKindFromMetaSync(meta) !== null) {
-      return;
-    }
-
-    if (meta.idle_shutdown_checkpoint_due_at) {
-      this.setAlarmMetaSync(meta, {
-        checkpointNextWakeAt: meta.next_wake_at,
-        dueAt: meta.idle_shutdown_checkpoint_due_at,
-        kind: "idle_checkpoint",
-        workspaceVersion: meta.idle_shutdown_checkpoint_workspace_version,
-      });
-      return;
-    }
-
-    if (meta.next_wake_at) {
-      this.setAlarmMetaSync(meta, {
-        dueAt: meta.next_wake_at,
-        kind: "work",
-        workspaceVersion: null,
-      });
-    }
-  }
-
-  private readRunnerAlarmKindFromMetaSync(meta: RunnerMetaRow): RunnerAlarmKind | null {
-    return meta.alarm_kind === "work" || meta.alarm_kind === "idle_checkpoint"
-      ? meta.alarm_kind
-      : null;
-  }
-
-  private readActiveInvocationLeaseSync(meta: RunnerMetaRow): RunnerInvocationLease | null {
+  private readWriteFenceTokenSync(meta: RunnerMetaRow): RunnerWriteFenceToken | null {
     if (
-      !meta.active_invocation_id
-      || !meta.active_invocation_started_at
-      || !isHostedWorkspaceInvocationReasonValue(meta.active_invocation_reason)
+      !meta.active_attempt_id
+      || !meta.active_started_at
+      || (meta.active_kind !== "runtime" && meta.active_kind !== "idle_checkpoint")
     ) {
       return null;
     }
 
+    const reason: HostedWorkspaceInvocationReason =
+      meta.active_kind === "idle_checkpoint" ? "idle_shutdown_checkpoint" : "nudge";
+
     return {
-      attemptId: meta.active_invocation_id,
-      expiresAt: meta.active_invocation_expires_at
-        ?? new Date(Date.parse(meta.active_invocation_started_at) + 30 * 60_000).toISOString(),
-      leaseGeneration: normalizeLeaseGeneration(meta.lease_generation).toString(),
-      reason: meta.active_invocation_reason,
-      startedAt: meta.active_invocation_started_at,
+      attemptId: meta.active_attempt_id,
+      expiresAt: meta.active_expires_at
+        ?? new Date(Date.parse(meta.active_started_at) + 30 * 60_000).toISOString(),
+      generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
+      reason,
+      startedAt: meta.active_started_at,
       userId: meta.user_id,
-      workerVersionId: normalizeOptionalString(meta.active_invocation_worker_version_id),
+      workerVersionId: null,
       workspaceVersion: meta.active_workspace_version,
     };
   }
@@ -1596,177 +850,11 @@ export class RunnerStateStore {
   }
 }
 
-function normalizeLeaseGeneration(value: number | null): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
-function isHostedWorkspaceInvocationReasonValue(
-  value: unknown,
-): value is HostedWorkspaceInvocationReason {
-  return value === "nudge"
-    || value === "alarm"
-    || value === "retry"
-    || value === "manual"
-    || value === "idle_shutdown_checkpoint";
-}
-
-function hasPendingForegroundWork(record: RunnerStateRecord): boolean {
-  return record.pendingWork || record.pendingNudge;
-}
-
-function activeInvocationRecoveryClearMessage(
-  reason: ActiveInvocationRecoveryClearReason,
-): string {
-  switch (reason) {
-    case "container_stopped":
-      return "Hosted workspace invocation container stopped during active work.";
-    case "worker_version_mismatch":
-      return "Hosted workspace invocation belonged to a previous worker version.";
-    case "startup_timeout":
-      return "Hosted workspace invocation startup timed out.";
-    case "heartbeat_stale":
-      return "Hosted workspace invocation heartbeat timed out.";
-    case "hard_timeout":
-      return "Hosted workspace invocation timed out.";
-  }
-}
-
-function preserveConsumedPendingWorkAfterActiveInvocationClears(meta: RunnerMetaRow): void {
-  if (meta.active_invocation_consumed_pending_work !== 1) {
-    return;
+function createRuntimeWriteAttemptId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `runtime-write-${crypto.randomUUID()}`;
   }
 
-  meta.pending_nudge = 1;
-  meta.pending_nudge_generation =
-    normalizeRetryFailureCount(meta.pending_nudge_generation) + 1;
-  meta.pending_work = 1;
-  meta.active_invocation_consumed_pending_work = 0;
-}
-
-function resolvePendingWorkWakeAt(input: {
-  heartbeatStaleMs: number;
-  nowMs: number;
-  record: RunnerStateRecord;
-  runnerReadyTimeoutMs: number;
-  runnerTimeoutMs: number;
-}): string {
-  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
-  if (decision.kind === "live" && decision.nextRecoveryAt) {
-    return decision.nextRecoveryAt;
-  }
-  return new Date(input.nowMs).toISOString();
-}
-
-function resolvePendingWorkDrainContinuationWakeAt(input: {
-  activeRecoveryWakeAt?: string | null;
-  heartbeatStaleMs: number;
-  nowMs: number;
-  pendingWorkContinuationDelayMs: number;
-  record: RunnerStateRecord;
-  runnerReadyTimeoutMs: number;
-  runnerTimeoutMs: number;
-}): string {
-  const decision = resolveRunnerRecordActiveInvocationRecoveryDecision(input);
-  const recoveryWakeAt = input.activeRecoveryWakeAt
-    ?? (decision.kind === "live" && decision.nextRecoveryAt
-      ? decision.nextRecoveryAt
-      : new Date(input.nowMs).toISOString());
-  const invocation = input.record.workspaceInvocation;
-  const lastHeartbeatAtMs = invocation?.lastHeartbeatAt
-    ? Date.parse(invocation.lastHeartbeatAt)
-    : Number.NaN;
-  if (input.activeRecoveryWakeAt && invocation && !Number.isFinite(lastHeartbeatAtMs)) {
-    return input.activeRecoveryWakeAt;
-  }
-  if (decision.kind === "live" && decision.reason === "starting") {
-    return recoveryWakeAt;
-  }
-
-  const continuationWakeAt = new Date(
-    input.nowMs + input.pendingWorkContinuationDelayMs,
-  ).toISOString();
-  return earliestIsoDate(recoveryWakeAt, continuationWakeAt) ?? continuationWakeAt;
-}
-
-function resolveRunnerRecordActiveInvocationRecoveryDecision(input: {
-  heartbeatStaleMs: number;
-  nowMs: number;
-  record: RunnerStateRecord;
-  runnerReadyTimeoutMs: number;
-  runnerTimeoutMs: number;
-}): ActiveInvocationRecoveryDecision {
-  const invocation = input.record.workspaceInvocation;
-  const activeExpiresAt = input.record.active?.expiresAt ?? null;
-  const activeStartedAt = input.record.active?.startedAt ?? null;
-  return resolveActiveInvocationRecoveryDecision({
-    activeWorkerVersionId: null,
-    containerStopped: false,
-    currentWorkerVersionId: null,
-    expiresAt: activeExpiresAt !== activeStartedAt ? activeExpiresAt : null,
-    heartbeatStaleMs: input.heartbeatStaleMs,
-    lastHeartbeatAt: invocation?.lastHeartbeatAt ?? null,
-    nowMs: input.nowMs,
-    readyTimeoutMs: input.runnerReadyTimeoutMs,
-    startedAt: invocation?.startedAt ?? null,
-    timeoutMs: input.runnerTimeoutMs,
-  });
-}
-
-function resolvePendingWorkRetryDelayMs(input: {
-  defaultRetryDelayMs: number;
-  immediateRetryDelayMs: number;
-  maxRetryDelayMs: number;
-  retryBackoffMultiplier: number;
-  retryFailureCount: number;
-}): number {
-  const retryFailureCount = Math.max(0, Math.floor(input.retryFailureCount));
-  const backoffStep = Math.max(0, retryFailureCount - 1);
-  const exponentialDelay = input.immediateRetryDelayMs
-    * (input.retryBackoffMultiplier ** backoffStep);
-  return Math.min(
-    input.defaultRetryDelayMs,
-    exponentialDelay,
-    input.maxRetryDelayMs,
-  );
-}
-
-function earliestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs < leftMs ? right : left;
-}
-
-function normalizeIsoDateString(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError("Hosted runner idle checkpoint due time must be an ISO date string.");
-  }
-
-  return parsed.toISOString();
-}
-
-function normalizeOptionalIsoDateString(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  return normalizeIsoDateString(value);
-}
-
-function normalizeOptionalString(value: string | null): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+  const random = Math.random().toString(36).slice(2);
+  return `runtime-write-${Date.now().toString(36)}-${random}`;
 }
