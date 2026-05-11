@@ -10,6 +10,7 @@ import {
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
@@ -28,6 +29,9 @@ import {
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  listMurphAgePrioritySourceRoutes,
+  listMurphAgeSourceRoutes,
+  listMurphAgeSourceRoutesByLayer,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
@@ -41,6 +45,7 @@ import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   resolveMurphAgeModelCardPolicy,
+  resolveMurphAgeSourceRoute,
   resolveMurphAgeWearableBridgeFeatureSpec,
   resolveMurphAgeWearableShadowIncrementPolicy,
   selectMetricGoalProgress,
@@ -54,12 +59,14 @@ import {
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeLocalModelCardArtifactPolicy,
   validateMurphAgeRiskModel,
+  validateMurphAgeSourceRouteRegistry,
   validateMurphAgeWearableShadowIncrementResultCard,
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
   type MurphAgeModelCardPolicy,
   type MurphAgeRiskModel,
+  type MurphAgeSourceRoute,
   type MurphAgeValidationEvidenceTier,
   type MurphAgeWearableShadowIncrementResultCard,
 } from "../src/index.ts";
@@ -297,6 +304,105 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     unit: "%",
     value: 13.1,
   }).canonicalValue, 13.1);
+});
+
+test("lists Murph Age source routes as metadata-only model strategy", () => {
+  const routes = listMurphAgeSourceRoutes();
+  assert.equal(validateMurphAgeSourceRouteRegistry().status, "valid");
+  assert.deepEqual(validateMurphAgeSourceRouteRegistry().issues, []);
+  assert.ok(routes.length >= 10);
+  assert.equal(routes[0]?.routeId, "nhis-r399-outcome-anchor");
+  assert.equal(routes[0]?.modelUseStatus, "frozen-research-anchor");
+  assert.equal(routes[0]?.productAuthorized, false);
+
+  const routeIds = new Set(routes.map((route) => route.routeId));
+  assert.equal(routeIds.size, routes.length);
+  for (const route of routes) {
+    assert.equal(route.schemaVersion, MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION);
+    assert.equal(route.productAuthorized, false);
+    assert.equal(route.artifactBoundary.aggregateOutputsOnly, true);
+    assert.equal(route.artifactBoundary.localPathStorageAllowed, false);
+    assert.equal(route.artifactBoundary.modelParameterExportAllowed, false);
+    assert.equal(route.artifactBoundary.participantLevelExportAllowed, false);
+    assert.equal(route.artifactBoundary.predictionExportAllowed, false);
+    assert.equal(route.artifactBoundary.productClaimAllowed, false);
+    assert.equal(route.artifactBoundary.rowMaterializationAuthorized, false);
+    assert.equal(route.artifactBoundary.rowValueExportAllowed, false);
+    assert.equal(route.artifactBoundary.sourceTextStorageAllowed, false);
+    assert.ok(route.allowedResearchUses.length >= 1);
+    assert.ok(route.blockedCurrentUses.length >= 1);
+  }
+
+  const midus = resolveMurphAgeSourceRoute("midus-biomarker-mortality");
+  assert.equal(midus?.activationStatus, "terms-activation-required");
+  assert.equal(midus?.layers.includes("biomarker-increment"), true);
+  assert.equal(midus?.featureFamilies.includes("labs"), true);
+  assert.equal(resolveMurphAgeSourceRoute("unknown-route"), null);
+
+  const wearableRoutes = listMurphAgeSourceRoutesByLayer("wearable-shadow-increment");
+  assert.equal(wearableRoutes.some((route) => route.routeId === "nhanes-activity-shadow-lmf"), true);
+  assert.equal(wearableRoutes.some((route) => route.routeId === "all-of-us-fitbit-labs-ehr"), true);
+  assert.equal(
+    wearableRoutes.every((route) =>
+      route.blockedCurrentUses.some((blockedUse) =>
+        blockedUse.includes("score") || blockedUse.includes("product") || blockedUse.includes("background")
+      )
+    ),
+    true,
+  );
+
+  const priorityRoutes = listMurphAgePrioritySourceRoutes();
+  assert.equal(priorityRoutes.some((route) => route.activationStatus === "historical-reference"), false);
+  assert.equal(priorityRoutes[0]?.routeId, "nhis-r399-outcome-anchor");
+  assert.equal(priorityRoutes[1]?.routeId, "nhanes-activity-shadow-lmf");
+  assert.equal(priorityRoutes.some((route) => route.routeId === "partner-aggregate-evaluator"), true);
+
+  if (midus) {
+    (midus.layers as string[]).push("outcome-anchor");
+    (midus.artifactBoundary as { rowValueExportAllowed: boolean }).rowValueExportAllowed = true;
+  }
+  const freshMidus = resolveMurphAgeSourceRoute("midus-biomarker-mortality");
+  assert.equal(freshMidus?.layers.includes("outcome-anchor"), false);
+  assert.equal(freshMidus?.artifactBoundary.rowValueExportAllowed, false);
+
+  const invalidRoutes: MurphAgeSourceRoute[] = routes.map((route) => ({
+    ...route,
+    artifactBoundary: { ...route.artifactBoundary },
+  }));
+  if (invalidRoutes[0]) {
+    (invalidRoutes[0].artifactBoundary as { rowValueExportAllowed: boolean }).rowValueExportAllowed = true;
+    invalidRoutes[0].nextAction = "Do not store review material from https://example.invalid.";
+  }
+  if (invalidRoutes[1]) {
+    invalidRoutes[1].sourceFamily = "/tmp/murph-age-source-cache";
+  }
+  if (invalidRoutes[2]) {
+    invalidRoutes[2].allowedResearchUses = ["Codebook: full variable wording"];
+  }
+  if (invalidRoutes[3]) {
+    (invalidRoutes[3] as { schemaVersion: string }).schemaVersion = "murph.age.source-route-registry.v0";
+  }
+  if (invalidRoutes[4]) {
+    (invalidRoutes[4] as { routeId: string }).routeId = "Not A Simple Route";
+  }
+  if (invalidRoutes[5]) {
+    invalidRoutes[5].priorityRank = 0;
+  }
+  if (invalidRoutes[6]) {
+    (invalidRoutes[6] as { productAuthorized: boolean }).productAuthorized = true;
+  }
+  if (invalidRoutes[7] && invalidRoutes[8]) {
+    invalidRoutes[8].routeId = invalidRoutes[7].routeId;
+  }
+  const invalidValidation = validateMurphAgeSourceRouteRegistry(invalidRoutes);
+  assert.equal(invalidValidation.status, "invalid");
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "DUPLICATE_ROUTE_ID"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_BOUNDARY"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_PRIORITY"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_ROUTE_ID"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_SCHEMA"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "PROHIBITED_TEXT"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "PRODUCT_AUTHORIZED"), true);
 });
 
 test("selects metric points by policy and exposes provenance warnings", () => {
