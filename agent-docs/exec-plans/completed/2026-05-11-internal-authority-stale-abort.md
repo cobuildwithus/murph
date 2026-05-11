@@ -1,6 +1,6 @@
 # Internal Authority Stale Abort
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -52,3 +52,4 @@ Updated: 2026-05-11
 ## Notes
 
 - No new lifecycle state should be introduced by this plan.
+Completed: 2026-05-11
