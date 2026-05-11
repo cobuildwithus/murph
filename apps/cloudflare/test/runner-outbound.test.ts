@@ -337,6 +337,11 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("records active invocation heartbeats and surfaces pending input", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "yield" as const,
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled" as const,
+      },
       inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true as const,
@@ -375,6 +380,11 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:45.000Z",
+        status: "scheduled",
+      },
       inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:45.000Z",
       ok: true,
@@ -389,6 +399,9 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("records body-only active invocation heartbeats for warm runners", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true as const,
@@ -423,6 +436,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true,
@@ -437,6 +453,9 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("records header-only active invocation heartbeats when the bridge drops the body", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true as const,
@@ -469,6 +488,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true,
@@ -523,6 +545,9 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("records proxy-context active invocation heartbeats when the request has no body or lease headers", async () => {
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true as const,
@@ -557,6 +582,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      instruction: {
+        kind: "continue",
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true,
@@ -3671,6 +3699,9 @@ function createRunnerOutboundEnv(
         },
         async recordActiveInvocationHeartbeat() {
           return {
+            instruction: {
+              kind: "continue" as const,
+            },
             inputAvailable: false,
             nextAlarmAt: null,
             ok: true as const,

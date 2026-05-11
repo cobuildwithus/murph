@@ -3824,6 +3824,60 @@ describe("RunnerContainer", () => {
     expect(invoke).toHaveBeenCalledOnce();
   });
 
+  it("aborts warm-only idle checkpoint helpers without destroying the warm shell", async () => {
+    const abortController = new AbortController();
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => {});
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<NonNullable<HostedExecutionContainerStubLike["invokeIdleCheckpointIfWarm"]>>(
+      async () => new Promise<never>(() => {}),
+    );
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      abortWorkspaceInvocation,
+      destroyInstance,
+      async invoke() {
+        throw new Error("Warm-only helper must not use foreground invoke.");
+      },
+      invokeIdleCheckpointIfWarm: invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    const job = createWorkspaceRunnerJob("member_idle_checkpoint_abort");
+    const invocation = invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm({
+      job: {
+        ...job,
+        request: {
+          ...job.request,
+          reason: "idle_shutdown_checkpoint",
+        },
+      },
+      runnerContainerNamespace: { getByName },
+      signal: abortController.signal,
+      timeoutMs: 45_000,
+      userId: "member_idle_checkpoint_abort",
+    });
+
+    abortController.abort(new Error("foreground input arrived"));
+
+    await expect(invocation).rejects.toThrow("foreground input arrived");
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: job.request.attemptId,
+      userId: "member_idle_checkpoint_abort",
+    });
+    expect(destroyInstance).not.toHaveBeenCalled();
+  });
+
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 

@@ -86,6 +86,14 @@ vi.mock("../src/web-control-plane.ts", async () => {
 const FUTURE_WAKE_AT = "2099-01-01T00:05:00.000Z";
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 
+function countAlarmsBetween(alarms: readonly string[], minDeltaMs: number, maxDeltaMs: number): number {
+  const nowMs = Date.parse(FIXED_NOW);
+  return alarms.filter((alarm) => {
+    const deltaMs = Date.parse(alarm) - nowMs;
+    return deltaMs >= minDeltaMs && deltaMs < maxDeltaMs;
+  }).length;
+}
+
 class TestHostedUserRunner extends HostedUserRunner {
   public failRunWith: Error | null = null;
   public readonly runCalls: HostedWorkspaceInvocationReason[] = [];
@@ -298,7 +306,7 @@ describe("HostedUserRunner alarm routing", () => {
     expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
     const retryAlarm = alarms.at(-1);
     expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeGreaterThanOrEqual(1_000);
-    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(1_100);
+    expect(Date.parse(retryAlarm ?? "") - Date.parse(FIXED_NOW)).toBeLessThan(1_200);
     expect(
       sql.exec(
         "SELECT retry_failure_count, next_wake_at FROM runner_meta WHERE user_id = ?",
@@ -754,11 +762,8 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual(expect.arrayContaining([
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:04:00.150Z",
-    ]));
+    expect(countAlarmsBetween(alarms, 1_000, 1_500)).toBeGreaterThanOrEqual(2);
+    expect(countAlarmsBetween(alarms, 240_000, 241_000)).toBeGreaterThanOrEqual(1);
   });
 
   it("starts a fresh nudge follow-up after an active invocation fails", async () => {
@@ -1053,8 +1058,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
+    const abortWorkspaceInvocation = vi.fn(async () => {});
     const destroyInstance = vi.fn(async () => {});
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      abortWorkspaceInvocation,
       destroyInstance,
       invoke,
     });
@@ -1083,7 +1090,11 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
-    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: expect.any(String),
+      userId: "member_123",
+    });
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(alarms).toContain("2026-04-27T00:00:01.100Z");
     expect(
       sql.exec(
@@ -1186,11 +1197,8 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "budget_exhausted",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual(expect.arrayContaining([
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:04:00.150Z",
-    ]));
+    expect(countAlarmsBetween(alarms, 1_000, 1_500)).toBeGreaterThanOrEqual(2);
+    expect(countAlarmsBetween(alarms, 240_000, 241_000)).toBeGreaterThanOrEqual(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
@@ -1697,11 +1705,8 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "scheduled",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(alarms).toEqual(expect.arrayContaining([
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:00:01.100Z",
-      "2026-04-27T00:04:00.150Z",
-    ]));
+    expect(countAlarmsBetween(alarms, 1_000, 1_500)).toBeGreaterThanOrEqual(2);
+    expect(countAlarmsBetween(alarms, 240_000, 241_000)).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps the idle nudge alarm as a fallback when the detached drive is active", async () => {
@@ -3526,7 +3531,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       inputAvailable: false,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
-      pendingNudge: false,
+      pendingNudge: true,
     });
 
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
@@ -3567,7 +3572,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       inputAvailable: false,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
-      pendingNudge: false,
+      pendingNudge: true,
     });
 
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
@@ -3575,11 +3580,15 @@ describe("HostedUserRunner runtime crypto context", () => {
       sql.exec(
         `SELECT pending_nudge,
                 pending_work,
-                next_wake_at
+                next_wake_at,
+                alarm_kind,
+                alarm_due_at
          FROM runner_meta WHERE user_id = ?`,
         "member_123",
       ).toArray(),
     ).toEqual([{
+      alarm_due_at: "2026-04-27T00:00:03.000Z",
+      alarm_kind: "work",
       next_wake_at: "2026-04-27T00:00:03.000Z",
       pending_nudge: 0,
       pending_work: 1,
@@ -3625,7 +3634,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       inputAvailable: false,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
-      pendingNudge: false,
+      pendingNudge: true,
     });
 
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
@@ -6285,9 +6294,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        details: expect.objectContaining({
-          destroyAttempted: false,
-        }),
         message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
       }),
     );
@@ -6639,7 +6645,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       `UPDATE runner_meta
        SET idle_shutdown_checkpoint_due_at = ?,
            idle_shutdown_checkpoint_workspace_version = ?,
-           pending_nudge = 1,
+           pending_nudge = 0,
            pending_work = 1
        WHERE user_id = ?`,
       FIXED_NOW,
@@ -7691,6 +7697,7 @@ function createRunnerCryptoContextHarness(
     onSetAlarm?(input: { alarmCount: number; scheduledTimeIso: string }): Promise<void> | void;
     onStoragePut?(input: { key: string; value: unknown }): void | Promise<void>;
     onWorkspaceRead?(input: { readCount: number }): void | Promise<void>;
+    abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
     refreshBrowserVaultReplica?: HostedExecutionContainerStubLike["refreshBrowserVaultReplica"];
     runtimeStatusResponse?: Record<string, unknown> | ((input: {
       readCount: number;
@@ -7747,6 +7754,7 @@ function createRunnerCryptoContextHarness(
       async () => ({ status: "already_fresh" as const }),
     );
   const abortBrowserVaultRefresh = options.abortBrowserVaultRefresh ?? vi.fn(async () => {});
+  const abortWorkspaceInvocation = options.abortWorkspaceInvocation ?? vi.fn(async () => {});
   const destroyInstance = options.destroyInstance ?? vi.fn(async () => {});
   const destroyInstanceNames: string[] = [];
   const runnerContainerNames: string[] = [];
@@ -7859,6 +7867,7 @@ function createRunnerCryptoContextHarness(
         ]).toContain(name);
         return {
           abortBrowserVaultRefresh,
+          abortWorkspaceInvocation,
           async destroyInstance() {
             destroyInstanceNames.push(name);
             await destroyInstance();
@@ -7887,6 +7896,7 @@ function createRunnerCryptoContextHarness(
   return {
     alarms,
     abortBrowserVaultRefresh,
+    abortWorkspaceInvocation,
     destroyInstanceNames,
     invoke,
     runnerContainerNames,

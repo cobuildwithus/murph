@@ -678,12 +678,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (touchCalls === 1) {
           return continueRuntimeLiveness();
         }
-        return {
-          inputAvailable: true,
-          nextAlarmAt: "2026-04-27T00:00:45.000Z",
-          ok: true,
-          pendingNudge: true,
-        };
+        return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
       },
     };
 
@@ -771,12 +766,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (touchCalls < 3) {
           return continueRuntimeLiveness();
         }
-        return {
-          inputAvailable: true,
-          nextAlarmAt: "2026-04-27T00:00:45.000Z",
-          ok: true,
-          pendingNudge: true,
-        };
+        return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
       },
     };
 
@@ -887,12 +877,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (checkpointInFlight && !pendingReported) {
           pendingReported = true;
           events.push("heartbeat:pending");
-          return {
-            inputAvailable: true,
-            nextAlarmAt: "2026-04-27T00:00:45.000Z",
-            ok: true,
-            pendingNudge: true,
-          };
+          return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
         }
         events.push("heartbeat:ok");
         return continueRuntimeLiveness();
@@ -994,12 +979,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (checkpointInFlight && !pendingReported) {
           pendingReported = true;
           events.push("heartbeat:pending");
-          return {
-            inputAvailable: true,
-            nextAlarmAt: "2026-04-27T00:00:45.000Z",
-            ok: true,
-            pendingNudge: true,
-          };
+          return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
         }
         events.push("heartbeat:ok");
         return continueRuntimeLiveness();
@@ -1100,12 +1080,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (checkpointInFlight && !pendingReported) {
           pendingReported = true;
           events.push("heartbeat:pending");
-          return {
-            inputAvailable: true,
-            nextAlarmAt: "2026-04-27T00:00:45.000Z",
-            ok: true,
-            pendingNudge: true,
-          };
+          return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
         }
         events.push("heartbeat:ok");
         return continueRuntimeLiveness();
@@ -1198,12 +1173,7 @@ describe("hosted workspace runtime entrypoint", () => {
       async touch() {
         if (checkpointInFlight && !pendingReported) {
           pendingReported = true;
-          return {
-            inputAvailable: true,
-            nextAlarmAt: "2026-04-27T00:00:45.000Z",
-            ok: true,
-            pendingNudge: true,
-          };
+          return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
         }
         return continueRuntimeLiveness();
       },
@@ -1469,12 +1439,7 @@ describe("hosted workspace runtime entrypoint", () => {
       async touch() {
         touchCalls += 1;
         events.push(`heartbeat:${touchCalls}`);
-        return {
-          inputAvailable: true,
-          nextAlarmAt: freshInputWakeAt,
-          ok: true,
-          pendingNudge: true,
-        };
+        return yieldRuntimeLiveness(freshInputWakeAt);
       },
     };
 
@@ -1627,8 +1592,8 @@ describe("hosted workspace runtime entrypoint", () => {
           return continueRuntimeLiveness();
         }
         return {
+          ...continueRuntimeLiveness(),
           nextAlarmAt: freshInputWakeAt,
-          ok: true,
           pendingNudge: true,
         };
       },

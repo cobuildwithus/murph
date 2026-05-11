@@ -43,6 +43,11 @@ export interface RuntimeLivenessHeartbeat {
   stop(): Promise<void>;
 }
 
+const RUNTIME_LIVENESS_CONTINUE_RESULT: RuntimeLivenessAcceptedResult = {
+  instruction: { kind: "continue" },
+  ok: true,
+};
+
 export function readRuntimeLivenessInstruction(
   result: RuntimeLivenessAcceptedResult,
 ): RuntimeLivenessInstruction {
@@ -69,7 +74,7 @@ export function startRuntimeLivenessHeartbeat(input: {
   const port = input.port ?? null;
   if (!port) {
     return {
-      initialTouch: Promise.resolve({ ok: true }),
+      initialTouch: Promise.resolve(RUNTIME_LIVENESS_CONTINUE_RESULT),
       async stop() {},
     };
   }
@@ -97,7 +102,7 @@ export function startRuntimeLivenessHeartbeat(input: {
     clearCurrentTimer();
     currentTouchAbortController?.abort();
     currentTouchAbortController = null;
-    settleInitialTouch({ ok: true });
+    settleInitialTouch(RUNTIME_LIVENESS_CONTINUE_RESULT);
   };
   const schedule = (delayMs: number) => {
     if (stopped || input.signal?.aborted) {
