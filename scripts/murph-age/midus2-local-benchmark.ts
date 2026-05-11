@@ -6,7 +6,15 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
+import type {
+  MurphAgeFeatureTransform,
+  MurphAgeLocalModelCardArtifact,
+  MurphAgeModelFeature,
+  MurphAgeRiskModel,
+} from "@murphai/health-metrics";
+
 export const MIDUS2_LOCAL_BENCHMARK_SCHEMA_VERSION = "murph-age-midus2-local-benchmark.v1" as const;
+const LOCAL_MODEL_CARD_ARTIFACT_SCHEMA_VERSION = "murph.age.model-card-artifact.v1" as const;
 
 const MIDUS2_SURVEY_ZIP = "ICPSR_04652-V8.zip";
 const MIDUS2_BIOMARKER_ZIP = "ICPSR_29282-V11.zip";
@@ -23,6 +31,9 @@ const DEFAULT_OUTPUT_DIR = path.join(
   "murph-age",
   "model-runs",
 );
+const DEFAULT_MODEL_CARD_OUTPUT_DIR = path.join(".runtime", "operations", "murph-age", "model-cards");
+const LOCAL_MODEL_CARD_FILE_NAME = "midus2-lab5-lipid-body-local-research.json";
+const LOCAL_MODEL_CARD_CANDIDATE_ID = "lab5_lipid_body_no_crp";
 
 const FEATURE_DEFINITIONS = [
   { column: "B4ZAGE", key: "age", transform: (value: number) => value },
@@ -118,7 +129,9 @@ const FORBIDDEN_AGGREGATE_EGRESS_KEYS = new Set([
 export interface Midus2LocalBenchmarkOptions {
   createdAt?: string;
   downloadsDir?: string;
+  modelCardOutputDir?: string;
   outputDir?: string;
+  writeLocalModelCard?: boolean;
 }
 
 export interface Midus2AggregateMetricSummary {
@@ -179,7 +192,9 @@ interface ParsedRow {
 }
 
 interface TrainedModel {
+  featureCoefficients: Record<string, number>;
   featureKeys: string[];
+  intercept: number;
   lambda: number;
   predict(row: ParsedRow): number;
   stats: Record<string, { mean: number; median: number; observedCount: number; sd: number }>;
@@ -189,16 +204,23 @@ type TsvRow = Record<string, string>;
 
 export async function runMidus2LocalBenchmark(
   options: Midus2LocalBenchmarkOptions = {},
-): Promise<{ output: Midus2LocalBenchmarkOutput; outputPath: string }> {
+): Promise<{ localModelCardArtifactPath: string | null; output: Midus2LocalBenchmarkOutput; outputPath: string }> {
   const downloadsDir = options.downloadsDir ?? path.join(os.homedir(), "Downloads");
   const outputDir = options.outputDir ?? DEFAULT_OUTPUT_DIR;
+  const modelCardOutputDir = options.modelCardOutputDir ?? DEFAULT_MODEL_CARD_OUTPUT_DIR;
   const rows = await buildBenchmarkRows(downloadsDir);
 
-  const models = Object.fromEntries(
+  const trainedCandidates = Object.fromEntries(
     Object.entries(MODEL_CANDIDATE_DEFINITIONS).map(([modelId, candidate]) => {
       const trained = selectModel(rows, [...candidate.featureKeys]);
-      return [modelId, summarizeModel(rows, trained, candidate)];
+      return [modelId, { candidate, trained }];
     }),
+  );
+  const models = Object.fromEntries(
+    Object.entries(trainedCandidates).map(([modelId, { candidate, trained }]) => [
+      modelId,
+      summarizeModel(rows, trained, candidate),
+    ]),
   );
 
   const output: Midus2LocalBenchmarkOutput = {
@@ -242,7 +264,22 @@ export async function runMidus2LocalBenchmark(
   await mkdir(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, "midus2-local-benchmark.latest.json");
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
-  return { output, outputPath };
+
+  let localModelCardArtifactPath: string | null = null;
+  if (options.writeLocalModelCard === true) {
+    const trained = trainedCandidates[LOCAL_MODEL_CARD_CANDIDATE_ID]?.trained;
+    if (!trained) {
+      throw new Error(`MIDUS 2 local model-card candidate ${LOCAL_MODEL_CARD_CANDIDATE_ID} was not trained.`);
+    }
+    const artifact = createLocalModelCardArtifact(trained);
+    assertAllowedLocalModelCardOutputDir(modelCardOutputDir);
+    assertLocalModelCardMatchesTrainedModel(trained, artifact.model);
+    await mkdir(modelCardOutputDir, { recursive: true });
+    localModelCardArtifactPath = path.join(modelCardOutputDir, LOCAL_MODEL_CARD_FILE_NAME);
+    await writeFile(localModelCardArtifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+
+  return { localModelCardArtifactPath, output, outputPath };
 }
 
 export function findForbiddenAggregateEgress(value: unknown): string[] {
@@ -374,10 +411,255 @@ function trainLogistic(rows: readonly ParsedRow[], featureKeys: string[], lambda
     }
   }
   return {
+    featureCoefficients: Object.fromEntries(
+      featureKeys.map((featureKey, index) => [featureKey, weights[index + 1]!]),
+    ),
     featureKeys,
+    intercept: weights[0]!,
     lambda,
     predict: (row) => sigmoid(dot(weights, vectorForRow(row))),
     stats,
+  };
+}
+
+function createLocalModelCardArtifact(model: TrainedModel): MurphAgeLocalModelCardArtifact {
+  const runtimeFeatures = finalizeRuntimeFeatures(
+    model,
+    model.featureKeys.map((featureKey) => createRuntimeModelFeature(model, featureKey)),
+  );
+  return {
+    cardId: "lab5_bp_bmi_transport_research",
+    model: {
+      blockedBiomarkerKeys: ["crp", "hs-crp", "hscrp", "c-reactive-protein"],
+      endpoint: "10-year all-cause mortality",
+      features: runtimeFeatures.features,
+      horizonYears: 10,
+      intercept: runtimeFeatures.intercept,
+      modelId: "midus2-lab5-lipid-body-no-crp-local-research",
+      modelVersion: "midus2-first-no-crp-candidate-batch",
+      referencePopulation: "MIDUS 2 complete-window biomarker sample; research-local only",
+      referenceRiskCurve: createReferenceRiskCurve(model),
+      uncertainty: {
+        baseYears: 4,
+        perLowConfidenceMetricYears: 1,
+        perMissingOptionalFeatureYears: 2,
+      },
+    },
+    schemaVersion: LOCAL_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  };
+}
+
+function createRuntimeModelFeature(
+  model: TrainedModel,
+  featureKey: string,
+): { feature: MurphAgeModelFeature; interceptAdjustment: number } {
+  const coefficient = model.featureCoefficients[featureKey];
+  const stat = model.stats[featureKey];
+  if (!Number.isFinite(coefficient) || !stat) {
+    throw new Error(`MIDUS 2 model-card feature ${featureKey} is missing trained parameters.`);
+  }
+  const runtimeCoefficient = coefficient / stat.sd;
+  const interceptAdjustment = -(coefficient * stat.mean) / stat.sd;
+
+  switch (featureKey) {
+    case "age":
+      return {
+        feature: {
+          coefficient: runtimeCoefficient,
+          key: "age",
+          kind: "chronological-age",
+          label: "Age",
+          moduleId: "demographics",
+        },
+        interceptAdjustment,
+      };
+    case "male":
+      return {
+        feature: {
+          coefficient: runtimeCoefficient,
+          key: "male",
+          kind: "sex",
+          label: "Male",
+          moduleId: "demographics",
+          sex: "male",
+        },
+        interceptAdjustment,
+      };
+    case "bmi":
+      return localMetricModelFeature({
+        coefficient: runtimeCoefficient,
+        expectedUnit: "kg/m^2",
+        interceptAdjustment,
+        key: "bmi",
+        label: "BMI",
+        metricKey: "bmi",
+        moduleId: "body",
+      });
+    case "hba1c":
+      return localMetricModelFeature({
+        coefficient: runtimeCoefficient,
+        expectedUnit: "percent",
+        interceptAdjustment,
+        key: "hba1c",
+        label: "HbA1c",
+        metricKey: "hba1c",
+        moduleId: "metabolic",
+      });
+    case "log-triglycerides":
+      return localMetricModelFeature({
+        coefficient: runtimeCoefficient,
+        expectedUnit: "mg/dL",
+        interceptAdjustment,
+        key: "triglycerides",
+        label: "Triglycerides",
+        metricKey: "triglycerides",
+        moduleId: "metabolic",
+        transform: { kind: "ln" },
+      });
+    case "hdl-c":
+      return localMetricModelFeature({
+        coefficient: runtimeCoefficient,
+        expectedUnit: "mg/dL",
+        interceptAdjustment,
+        key: "hdl-c",
+        label: "HDL-C",
+        metricKey: "hdl-c",
+        moduleId: "cardiovascular",
+      });
+    default:
+      throw new Error(`MIDUS 2 local model-card export does not support feature ${featureKey}.`);
+  }
+}
+
+function localMetricModelFeature(input: {
+  coefficient: number;
+  expectedUnit: string;
+  interceptAdjustment: number;
+  key: string;
+  label: string;
+  metricKey: string;
+  moduleId: string;
+  transform?: MurphAgeFeatureTransform;
+}): { feature: MurphAgeModelFeature; interceptAdjustment: number } {
+  const feature: MurphAgeModelFeature = {
+    coefficient: input.coefficient,
+    expectedUnit: input.expectedUnit,
+    key: input.key,
+    kind: "metric",
+    label: input.label,
+    metricKey: input.metricKey,
+    moduleId: input.moduleId,
+  };
+  if (input.transform) feature.transform = input.transform;
+  return { feature, interceptAdjustment: input.interceptAdjustment };
+}
+
+function createReferenceRiskCurve(model: TrainedModel): MurphAgeRiskModel["referenceRiskCurve"] {
+  const ageCoefficient = model.featureCoefficients.age;
+  const ageStats = model.stats.age;
+  if (!Number.isFinite(ageCoefficient) || !ageStats) {
+    throw new Error("MIDUS 2 model-card export requires a trained age feature.");
+  }
+
+  let previousRisk = 0;
+  return [35, 45, 55, 65, 75, 85].map((ageYears) => {
+    const riskProbability = Math.max(
+      previousRisk,
+      sigmoid(model.intercept + ageCoefficient * ((ageYears - ageStats.mean) / ageStats.sd)),
+    );
+    previousRisk = riskProbability;
+    return {
+      ageYears,
+      riskProbability: Number(riskProbability.toFixed(6)),
+    };
+  });
+}
+
+function assertAllowedLocalModelCardOutputDir(outputDir: string): void {
+  const normalized = path.normalize(outputDir);
+  const requiredSuffix = path.join(".runtime", "operations", "murph-age", "model-cards");
+  const tempRoot = path.normalize(os.tmpdir());
+  if (normalized.endsWith(requiredSuffix)) return;
+  if (normalized.startsWith(`${tempRoot}${path.sep}`)) return;
+  throw new Error("MIDUS 2 local model-card output must target an ignored local runtime model-card directory.");
+}
+
+function assertLocalModelCardMatchesTrainedModel(model: TrainedModel, runtimeModel: MurphAgeRiskModel): void {
+  for (const values of createModelCardParityFixtures(model)) {
+    const trainedProbability = scoreTrainedModelFromValues(model, values.trained);
+    const runtimeProbability = scoreRuntimeModelFromValues(runtimeModel, values.runtime);
+    if (Math.abs(trainedProbability - runtimeProbability) > 1e-10) {
+      throw new Error("MIDUS 2 local model-card export failed trained/runtime parity validation.");
+    }
+  }
+}
+
+function createModelCardParityFixtures(model: TrainedModel): Array<{
+  runtime: Record<string, number>;
+  trained: Record<string, number>;
+}> {
+  const meanValues = Object.fromEntries(
+    model.featureKeys.map((featureKey) => [featureKey, model.stats[featureKey]!.mean]),
+  );
+  const shiftedValues = {
+    ...meanValues,
+    age: model.stats.age!.mean + model.stats.age!.sd,
+    bmi: (model.stats.bmi?.mean ?? 25) + (model.stats.bmi?.sd ?? 1),
+    hba1c: (model.stats.hba1c?.mean ?? 5.5) + (model.stats.hba1c?.sd ?? 1),
+    male: 1,
+  };
+  return [meanValues, shiftedValues].map((trained) => ({
+    runtime: toRuntimeModelValues(trained),
+    trained,
+  }));
+}
+
+function toRuntimeModelValues(trainedValues: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(Object.entries(trainedValues).map(([featureKey, value]) => {
+    if (featureKey === "log-triglycerides") return ["triglycerides", Math.exp(value)];
+    return [featureKey, value];
+  }));
+}
+
+function scoreTrainedModelFromValues(model: TrainedModel, values: Record<string, number>): number {
+  const logit = model.intercept + model.featureKeys.reduce((sum, featureKey) => {
+    const stat = model.stats[featureKey]!;
+    return sum + model.featureCoefficients[featureKey]! * ((values[featureKey]! - stat.mean) / stat.sd);
+  }, 0);
+  return sigmoid(logit);
+}
+
+function scoreRuntimeModelFromValues(model: MurphAgeRiskModel, values: Record<string, number>): number {
+  const logit = model.features.reduce((sum, feature) => {
+    const value = runtimeFeatureValue(feature, values);
+    return sum + feature.coefficient * value;
+  }, model.intercept);
+  return sigmoid(logit);
+}
+
+function runtimeFeatureValue(feature: MurphAgeModelFeature, values: Record<string, number>): number {
+  const rawValue = feature.kind === "chronological-age"
+    ? values.age
+    : feature.kind === "sex"
+      ? values.male
+      : values[feature.metricKey];
+  if (!isFiniteNumber(rawValue)) {
+    throw new Error(`MIDUS 2 local model-card parity fixture is missing ${feature.key}.`);
+  }
+  if (feature.transform?.kind === "ln") return Math.log(rawValue);
+  if (feature.transform && feature.transform.kind !== "identity") {
+    throw new Error(`MIDUS 2 local model-card parity does not support ${feature.transform.kind} fixtures.`);
+  }
+  return rawValue;
+}
+
+function finalizeRuntimeFeatures(
+  model: TrainedModel,
+  runtimeFeatures: Array<{ feature: MurphAgeModelFeature; interceptAdjustment: number }>,
+): { features: MurphAgeModelFeature[]; intercept: number } {
+  return {
+    features: runtimeFeatures.map((entry) => entry.feature),
+    intercept: model.intercept + runtimeFeatures.reduce((sum, entry) => sum + entry.interceptAdjustment, 0),
   };
 }
 
@@ -543,7 +825,9 @@ function isFiniteNumber(value: number | null | undefined): value is number {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const result = await runMidus2LocalBenchmark({
     downloadsDir: process.env.MURPH_AGE_DOWNLOADS_DIR,
+    modelCardOutputDir: process.env.MURPH_AGE_MODEL_CARD_OUTPUT_DIR,
     outputDir: process.env.MURPH_AGE_RESEARCH_OUTPUT_DIR,
+    writeLocalModelCard: true,
   });
   const aggregateSummary = {
     candidateBatch: result.output.candidateBatch,
@@ -558,6 +842,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     ),
     status: result.output.status,
     artifact: path.basename(result.outputPath),
+    localModelCardArtifact: result.localModelCardArtifactPath === null
+      ? null
+      : path.basename(result.localModelCardArtifactPath),
   };
   console.log(JSON.stringify(aggregateSummary, null, 2));
 }

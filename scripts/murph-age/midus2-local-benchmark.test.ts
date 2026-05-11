@@ -6,6 +6,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  parseMurphAgeLocalModelCardArtifact,
+  validateMurphAgeLocalModelCardArtifactPolicy,
+} from "@murphai/health-metrics";
+
+import {
   calculateAuc,
   findForbiddenAggregateEgress,
   MIDUS2_LOCAL_BENCHMARK_SCHEMA_VERSION,
@@ -17,14 +23,17 @@ describe("MIDUS 2 local benchmark runner", () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-midus2-"));
     try {
       const downloadsDir = path.join(tmp, "downloads");
+      const modelCardOutputDir = path.join(tmp, "model-cards");
       const outputDir = path.join(tmp, "runtime");
       await mkdir(downloadsDir, { recursive: true });
       await writeSyntheticMidus2Downloads(downloadsDir);
 
-      const { output, outputPath } = await runMidus2LocalBenchmark({
+      const { localModelCardArtifactPath, output, outputPath } = await runMidus2LocalBenchmark({
         createdAt: "2026-05-12T00:00:00.000Z",
         downloadsDir,
+        modelCardOutputDir,
         outputDir,
+        writeLocalModelCard: true,
       });
 
       expect(output.schemaVersion).toBe(MIDUS2_LOCAL_BENCHMARK_SCHEMA_VERSION);
@@ -109,6 +118,21 @@ describe("MIDUS 2 local benchmark runner", () => {
 
       const roundTripped = JSON.parse(await readFile(outputPath, "utf8"));
       expect(roundTripped).toEqual(output);
+
+      expect(path.basename(localModelCardArtifactPath ?? "")).toBe("midus2-lab5-lipid-body-local-research.json");
+      const modelCardArtifact = JSON.parse(await readFile(localModelCardArtifactPath ?? "", "utf8"));
+      expect(modelCardArtifact.schemaVersion).toBe(MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION);
+      expect(modelCardArtifact.cardId).toBe("lab5_bp_bmi_transport_research");
+      expect(modelCardArtifact.model.modelId).toBe("midus2-lab5-lipid-body-no-crp-local-research");
+      expect(modelCardArtifact.model.features.some((feature: { metricKey?: string; transform?: { kind: string } }) =>
+        feature.metricKey === "triglycerides" && feature.transform?.kind === "ln"
+      )).toBe(true);
+      expect(JSON.stringify(output)).not.toContain("midus2-lab5-lipid-body-local-research.json");
+      const parsedModelCard = parseMurphAgeLocalModelCardArtifact(modelCardArtifact);
+      expect(parsedModelCard.warnings).toEqual([]);
+      expect(parsedModelCard.value?.model.features.some((feature) => feature.key === "triglycerides")).toBe(true);
+      expect(parsedModelCard.value ? validateMurphAgeLocalModelCardArtifactPolicy(parsedModelCard.value) : null)
+        .toEqual([]);
     } finally {
       await rm(tmp, { force: true, recursive: true });
     }
@@ -118,6 +142,7 @@ describe("MIDUS 2 local benchmark runner", () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-midus2-cli-"));
     try {
       const downloadsDir = path.join(tmp, "downloads");
+      const modelCardOutputDir = path.join(tmp, "model-cards");
       const outputDir = path.join(tmp, "absolute-output-dir");
       await mkdir(downloadsDir, { recursive: true });
       await writeSyntheticMidus2Downloads(downloadsDir);
@@ -131,6 +156,7 @@ describe("MIDUS 2 local benchmark runner", () => {
         env: {
           ...process.env,
           MURPH_AGE_DOWNLOADS_DIR: downloadsDir,
+          MURPH_AGE_MODEL_CARD_OUTPUT_DIR: modelCardOutputDir,
           MURPH_AGE_RESEARCH_OUTPUT_DIR: outputDir,
         },
       });
@@ -150,10 +176,13 @@ describe("MIDUS 2 local benchmark runner", () => {
         testSelectionAuthorized: false,
       });
       expect(parsed.artifact).toBe("midus2-local-benchmark.latest.json");
+      expect(parsed.localModelCardArtifact).toBe("midus2-lab5-lipid-body-local-research.json");
       expect(parsed.wrote).toBeUndefined();
       expect(stdout).not.toContain(outputDir);
+      expect(stdout).not.toContain(modelCardOutputDir);
       expect(stdout).not.toContain(tmp);
       expect(stdout).not.toContain("M0001");
+      expect(stdout).not.toContain("coefficient");
       expect(findForbiddenAggregateEgress(parsed)).toEqual([]);
     } finally {
       await rm(tmp, { force: true, recursive: true });
@@ -176,6 +205,26 @@ describe("MIDUS 2 local benchmark runner", () => {
     expect(findForbiddenAggregateEgress({ nested: { coefficients: [1, 2, 3] } })).toEqual([
       "forbidden key nested.coefficients",
     ]);
+  });
+
+  it("rejects coefficient-bearing model-card output outside ignored local runtime roots", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-midus2-unsafe-card-"));
+    try {
+      const downloadsDir = path.join(tmp, "downloads");
+      const outputDir = path.join(tmp, "runtime");
+      await mkdir(downloadsDir, { recursive: true });
+      await writeSyntheticMidus2Downloads(downloadsDir);
+
+      await expect(runMidus2LocalBenchmark({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        downloadsDir,
+        modelCardOutputDir: path.join(process.cwd(), "not-runtime-model-cards"),
+        outputDir,
+        writeLocalModelCard: true,
+      })).rejects.toThrow("ignored local runtime model-card directory");
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
   });
 
   it("uses half-credit for tied AUC predictions", () => {
