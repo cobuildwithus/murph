@@ -8,6 +8,7 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   assessMurphAgeSecondaryContextBundles,
+  assessMurphAgeWearableShadowIncrements,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   createMurphAgeAbstainedAuthorization,
@@ -42,6 +43,9 @@ import {
   type MurphAgeResult,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
+  type MurphAgeWearableShadowIncrementAssessment,
+  type MurphAgeWearableShadowIncrementFamily,
+  type MurphAgeWearableShadowIncrementStatus,
   type MurphAgeWarning,
 } from "@murphai/health-metrics";
 
@@ -129,6 +133,48 @@ export interface MurphAgeInputReadinessForVault {
 export interface MurphAgeLocalModelCardLoadResult {
   models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
   warnings: MurphAgeWarning[];
+}
+
+export interface AssessMurphAgeWearableShadowReadinessFromVaultInput {
+  asOf: string;
+  vaultRoot: string;
+}
+
+export interface MurphAgeWearableShadowAnchorReadiness {
+  anchorCardId: MurphAgeScoreBearingCardId | null;
+  bundleId: MurphAgeInputBundleReadiness["bundleId"];
+  recommendedCardId: MurphAgeInputBundleReadiness["recommendedCardId"];
+  status: MurphAgeInputBundleReadiness["status"];
+}
+
+export interface MurphAgeWearableShadowIncrementReadiness {
+  anchorCardId: MurphAgeScoreBearingCardId | null;
+  anchorCompatible: boolean;
+  availableMetricKeys: string[];
+  compatibleAnchorCardIds: MurphAgeScoreBearingCardId[];
+  family: MurphAgeWearableShadowIncrementFamily;
+  missingMetricKeys: string[];
+  missingQualityMetricKeys: string[];
+  outputBoundary: MurphAgeWearableShadowIncrementAssessment["outputBoundary"];
+  productAuthorized: false;
+  readySignalMetricKeys: string[];
+  riskEffect: "not-estimated";
+  schemaVersion: MurphAgeWearableShadowIncrementAssessment["schemaVersion"];
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  selectedMetricKeys: string[];
+  status: MurphAgeWearableShadowIncrementStatus;
+  warnings: MurphAgeInputReadinessWarning[];
+}
+
+export interface MurphAgeWearableShadowReadinessForVault {
+  anchor: MurphAgeWearableShadowAnchorReadiness;
+  assessments: MurphAgeWearableShadowIncrementReadiness[];
+  blockedFamilies: MurphAgeWearableShadowIncrementFamily[];
+  missingFamilies: MurphAgeWearableShadowIncrementFamily[];
+  readyFamilies: MurphAgeWearableShadowIncrementFamily[];
+  schemaVersion: "murph.age.wearable-shadow-readiness.v1";
+  warnings: MurphAgeInputReadinessWarning[];
 }
 
 const MURPH_AGE_MODEL_CARD_RELATIVE_DIR = path.join(".runtime", "operations", "murph-age", "model-cards");
@@ -320,6 +366,60 @@ export async function assessMurphAgeInputReadinessFromVault(
   };
 }
 
+export async function assessMurphAgeWearableShadowReadinessFromVault(
+  input: AssessMurphAgeWearableShadowReadinessFromVaultInput,
+): Promise<MurphAgeWearableShadowReadinessForVault> {
+  const asOf = parseStrictUtcAsOf(input.asOf);
+  if (!asOf) {
+    return {
+      anchor: {
+        anchorCardId: null,
+        bundleId: "insufficient",
+        recommendedCardId: "none",
+        status: "abstain",
+      },
+      assessments: [],
+      blockedFamilies: [],
+      missingFamilies: [],
+      readyFamilies: [],
+      schemaVersion: "murph.age.wearable-shadow-readiness.v1",
+      warnings: [{
+        code: "INVALID_INPUT",
+      }],
+    };
+  }
+
+  const points = await loadMurphAgeInputBundleMetricPoints({
+    asOf,
+    vaultRoot: input.vaultRoot,
+  });
+  const bundleAssessment = assessMurphAgeInputBundle({
+    asOf,
+    points,
+  });
+  const anchorCardId = inferWearableShadowAnchorCardId(bundleAssessment);
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId,
+    asOf,
+    points,
+  }).map(sanitizeWearableShadowIncrementAssessment);
+
+  return {
+    anchor: {
+      anchorCardId,
+      bundleId: bundleAssessment.bundleId,
+      recommendedCardId: bundleAssessment.recommendedCardId,
+      status: bundleAssessment.status,
+    },
+    assessments,
+    blockedFamilies: wearableShadowFamiliesByStatus(assessments, "blocked"),
+    missingFamilies: wearableShadowFamiliesByStatus(assessments, "missing"),
+    readyFamilies: wearableShadowFamiliesByStatus(assessments, "ready"),
+    schemaVersion: "murph.age.wearable-shadow-readiness.v1",
+    warnings: bundleAssessment.warnings.map(toMurphAgeReadinessWarning),
+  };
+}
+
 function buildMurphAgeRuntimeInputReadiness(): MurphAgeRuntimeInputReadiness[] {
   return MURPH_AGE_RUNTIME_INPUT_READINESS.map((input) => ({ ...input }));
 }
@@ -408,12 +508,62 @@ function sanitizeMurphAgeInputBundleAssessment(
     schemaVersion: assessment.schemaVersion,
     selectedMetricKeys: [...assessment.selectedMetricKeys],
     status: assessment.status,
-    warnings: assessment.warnings.map((warning) => ({
-      code: warning.code,
-      ...(warning.featureKey ? { featureKey: warning.featureKey } : {}),
-      ...(warning.metricKey ? { metricKey: warning.metricKey } : {}),
-    })),
+    warnings: assessment.warnings.map(toMurphAgeReadinessWarning),
   };
+}
+
+function sanitizeWearableShadowIncrementAssessment(
+  assessment: MurphAgeWearableShadowIncrementAssessment,
+): MurphAgeWearableShadowIncrementReadiness {
+  return {
+    anchorCardId: assessment.anchorCardId,
+    anchorCompatible: assessment.anchorCompatible,
+    availableMetricKeys: [...assessment.availableMetricKeys],
+    compatibleAnchorCardIds: [...assessment.compatibleAnchorCardIds],
+    family: assessment.family,
+    missingMetricKeys: [...assessment.missingMetricKeys],
+    missingQualityMetricKeys: [...assessment.missingQualityMetricKeys],
+    outputBoundary: { ...assessment.outputBoundary },
+    productAuthorized: false,
+    readySignalMetricKeys: [...assessment.readySignalMetricKeys],
+    riskEffect: "not-estimated",
+    schemaVersion: assessment.schemaVersion,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    selectedMetricKeys: [...assessment.selectedMetricKeys],
+    status: assessment.status,
+    warnings: assessment.warnings.map(toMurphAgeReadinessWarning),
+  };
+}
+
+function toMurphAgeReadinessWarning(warning: MurphAgeWarning): MurphAgeInputReadinessWarning {
+  return {
+    code: warning.code,
+    ...(warning.featureKey ? { featureKey: warning.featureKey } : {}),
+    ...(warning.metricKey ? { metricKey: warning.metricKey } : {}),
+  };
+}
+
+function inferWearableShadowAnchorCardId(
+  assessment: MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+): MurphAgeScoreBearingCardId | null {
+  if (assessment.status !== "ready") return null;
+  switch (assessment.recommendedCardId) {
+    case "lab5_bp_bmi_transport_research":
+    case "lab9_bp_body_10y_acm_research":
+      return assessment.recommendedCardId;
+    default:
+      return null;
+  }
+}
+
+function wearableShadowFamiliesByStatus(
+  assessments: readonly MurphAgeWearableShadowIncrementReadiness[],
+  status: MurphAgeWearableShadowIncrementStatus,
+): MurphAgeWearableShadowIncrementFamily[] {
+  return assessments
+    .filter((assessment) => assessment.status === status)
+    .map((assessment) => assessment.family);
 }
 
 function buildMurphAgeWearableBridgeReadiness(input: {
