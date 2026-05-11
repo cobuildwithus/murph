@@ -7,7 +7,6 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
-  createMurphAgeLocalModelCardWarning,
   createMurphAgeAbstainedAuthorization,
   createMurphAgeCustomModelAuthorization,
   isMurphAgeInputBundleMetricPointAllowed,
@@ -199,7 +198,7 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
     }
     return {
       models: {},
-      warnings: [createMurphAgeLocalModelCardWarning(
+      warnings: [localModelCardWarning(
         "A local Murph Age model-card artifact directory could not be read.",
       )],
     };
@@ -216,7 +215,7 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
     warnings.push(...artifact.warnings);
     if (!artifact.value) continue;
     if (models[artifact.value.cardId]) {
-      warnings.push(createMurphAgeLocalModelCardWarning(
+      warnings.push(localModelCardWarning(
         "Duplicate local Murph Age model-card artifacts were found for the same card id.",
       ));
       continue;
@@ -237,7 +236,7 @@ async function readLocalModelCardArtifact(filePath: string): Promise<{
   } catch {
     return {
       value: null,
-      warnings: [createMurphAgeLocalModelCardWarning("A local Murph Age model-card artifact could not be read.")],
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact could not be read.")],
     };
   }
 
@@ -247,7 +246,7 @@ async function readLocalModelCardArtifact(filePath: string): Promise<{
   } catch {
     return {
       value: null,
-      warnings: [createMurphAgeLocalModelCardWarning("A local Murph Age model-card artifact is not valid JSON.")],
+      warnings: [localModelCardWarning("A local Murph Age model-card artifact is not valid JSON.")],
     };
   }
 
@@ -259,6 +258,13 @@ async function readLocalModelCardArtifact(filePath: string): Promise<{
     return { value: null, warnings };
   }
   return { value: artifact.value, warnings: [] };
+}
+
+function localModelCardWarning(message: string): MurphAgeWarning {
+  return {
+    code: "INVALID_INPUT",
+    message,
+  };
 }
 
 function withPrependedWarnings(
