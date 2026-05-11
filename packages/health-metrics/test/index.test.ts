@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   buildMetricSeries,
@@ -30,6 +31,7 @@ import {
   selectMetricValue,
   selectMetricWindowComparison,
   summarizeMurphAgeCalculatorOutput,
+  summarizeMurphAgeCalculatorPublicOutput,
   validateMurphAgeRiskModel,
   type GoalMetricTarget,
   type MetricPoint,
@@ -1991,6 +1993,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.wearableContext.uncertaintyAction, "context-only");
   assert.equal(researchSummary.wearableContext.scoreBearing, false);
   assert.equal(researchSummary.wearableContext.scoreContributionAuthorized, false);
+  const publicResearchSummary = summarizeMurphAgeCalculatorPublicOutput(research);
+  assert.equal(publicResearchSummary.schemaVersion, MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION);
+  assert.equal(publicResearchSummary.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(publicResearchSummary.wearableContext.readyPointCount, 7);
+  assert.equal("contextOnlyPointIds" in publicResearchSummary, false);
+  assert.equal("selectedScoreBearingPointIds" in publicResearchSummary, false);
   const productRiskOnlySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
     authorization: {

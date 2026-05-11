@@ -12,6 +12,7 @@ import type {
 export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
 export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summary.v2" as const;
+export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -305,6 +306,13 @@ export interface MurphAgeDisplaySummary {
   selectedScoreBearingMetricKeys: string[];
   selectedScoreBearingPointIds: string[];
   wearableContext: MurphAgeWearableContextSummary;
+}
+
+export interface MurphAgePublicDisplaySummary extends Omit<
+  MurphAgeDisplaySummary,
+  "contextOnlyPointIds" | "schemaVersion" | "selectedScoreBearingPointIds"
+> {
+  schemaVersion: typeof MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION;
 }
 
 export interface MurphAgeModelValidationResult {
@@ -882,6 +890,30 @@ export function summarizeMurphAgeCalculatorOutput(
     selectedScoreBearingMetricKeys: uniqueStrings(readyAttributions.map((feature) => feature.metricKey)),
     selectedScoreBearingPointIds: uniqueStrings(readyAttributions.flatMap((feature) => feature.selectedPointIds)),
     wearableContext,
+  };
+}
+
+export function summarizeMurphAgeCalculatorPublicOutput(
+  output: MurphAgeCalculatorOutput,
+): MurphAgePublicDisplaySummary {
+  return toPublicMurphAgeDisplaySummary(summarizeMurphAgeCalculatorOutput(output));
+}
+
+export function toPublicMurphAgeDisplaySummary(
+  summary: MurphAgeDisplaySummary,
+): MurphAgePublicDisplaySummary {
+  const {
+    contextOnlyPointIds: _contextOnlyPointIds,
+    selectedScoreBearingPointIds: _selectedScoreBearingPointIds,
+    schemaVersion: _schemaVersion,
+    ...publicSummary
+  } = summary;
+  void _contextOnlyPointIds;
+  void _selectedScoreBearingPointIds;
+  void _schemaVersion;
+  return {
+    ...publicSummary,
+    schemaVersion: MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   };
 }
 

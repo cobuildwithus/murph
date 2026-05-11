@@ -9,6 +9,8 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   normalizeMetricValue,
+  summarizeMurphAgeCalculatorOutput,
+  summarizeMurphAgeCalculatorPublicOutput,
   type MetricPoint,
   type MurphAgeRiskModel,
 } from "@murphai/health-metrics";
@@ -430,6 +432,13 @@ test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary w
     insertMetricPoints(vaultRoot, [
       wearablePoint("steps", null, 10_000, "count", "activity-summary"),
       wearablePoint("total-sleep-minutes", null, 450, "minutes", "sleep-summary"),
+      wearablePoint("sleep-efficiency", null, 91, "percent", "sleep-summary"),
+      wearablePoint("sleep-duration-variability-minutes", null, 32, "minutes", "sleep-summary"),
+      wearablePoint("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm"),
+      wearablePoint("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms"),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-valid-night-count-28d", null, 24, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
     ]);
 
     const output = await calculateMurphAgeFromVaultInputBundle({
@@ -444,6 +453,32 @@ test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary w
     assert.equal(output.bundleAssessment.bundleId, "wearable-context");
     assert.equal(output.bundleAssessment.selectedMetricKeys.includes("steps"), true);
     assert.equal(output.bundleAssessment.selectedMetricKeys.includes("total-sleep-minutes"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("sleep-efficiency"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("sleep-duration-variability-minutes"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("resting-heart-rate"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("hrv-rmssd"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("wearable-valid-day-count-28d"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("wearable-valid-night-count-28d"), true);
+    assert.equal(output.bundleAssessment.selectedMetricKeys.includes("wearable-coverage-index"), true);
+
+    const summary = summarizeMurphAgeCalculatorOutput(output);
+    assert.equal(summary.displayStatus, "context-only");
+    assert.equal(summary.wearableContext.quality, "strong-context");
+    assert.equal(summary.wearableContext.scoreBearing, false);
+    assert.equal(summary.wearableContext.scoreContributionAuthorized, false);
+    assert.equal(summary.wearableContext.riskEffect, "not-estimated");
+    assert.equal(summary.wearableContext.availableFeatureFamilies.includes("activity"), true);
+    assert.equal(summary.wearableContext.availableFeatureFamilies.includes("sleep"), true);
+    assert.equal(summary.wearableContext.availableFeatureFamilies.includes("recovery"), true);
+    assert.equal(summary.wearableContext.availableFeatureFamilies.includes("quality"), true);
+    assert.equal(summary.wearableContext.missingQualityFeatureKeys.length, 0);
+
+    const publicSummary = summarizeMurphAgeCalculatorPublicOutput(output);
+    assert.equal(publicSummary.displayStatus, "context-only");
+    assert.equal(publicSummary.contextOnlyMetricKeys.includes("wearable-coverage-index"), true);
+    assert.equal(publicSummary.wearableContext.readyPointCount, 9);
+    assert.equal("contextOnlyPointIds" in publicSummary, false);
+    assert.equal("selectedScoreBearingPointIds" in publicSummary, false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

@@ -640,8 +640,13 @@ const WEARABLE_CONTEXT_METRIC_KEYS = new Set([
   "sedentary-minutes",
   "estimated-vo2-max",
   "total-sleep-minutes",
+  "sleep-duration-variability-minutes",
+  "sleep-efficiency",
   "sleep-regularity-score",
   "sleep-midpoint-variability-minutes",
   "resting-heart-rate",
   "hrv-rmssd",
+  "wearable-valid-day-count-28d",
+  "wearable-valid-night-count-28d",
+  "wearable-coverage-index",
 ]);
