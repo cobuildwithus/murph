@@ -411,7 +411,7 @@ export class RunnerStateStore {
       return {
         dueWake: true,
         kind: "work",
-        reason: dueAlarm.record.pendingWork ? "nudge" : "alarm",
+        reason: hasPendingForegroundWork(dueAlarm.record) ? "nudge" : "alarm",
         record: dueAlarm.record,
       };
     }
@@ -832,7 +832,7 @@ export class RunnerStateStore {
   > {
     const meta = this.requireMetaRowSync();
     const currentRecord = this.readStateFromMetaSync(meta);
-    if (currentRecord.pendingWork || currentRecord.active !== null) {
+    if (hasPendingForegroundWork(currentRecord) || currentRecord.active !== null) {
       return {
         record: currentRecord,
         scheduled: false,
@@ -1543,6 +1543,10 @@ function isHostedWorkspaceInvocationReasonValue(
     || value === "retry"
     || value === "manual"
     || value === "idle_shutdown_checkpoint";
+}
+
+function hasPendingForegroundWork(record: RunnerStateRecord): boolean {
+  return record.pendingWork || record.pendingNudge;
 }
 
 function preserveConsumedNudgeAfterActiveInvocationClears(meta: RunnerMetaRow): void {

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createVaultCli } from "../src/vault-cli.js";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
-import { requireData, runCli } from "./cli-test-helpers.js";
+import { requireData, runCli, runInProcessJsonCli } from "./cli-test-helpers.js";
 
 test("intake show and intake list route assessment reads through the noun-specific commands", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
@@ -480,13 +481,14 @@ test("goal import-json rejects reserved vault-root overrides from JSON payloads"
 });
 
 test("goal import-json preserves omitted fields on patch updates", async () => {
+  const cli = createVaultCli();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "goal-create.json");
   const patchPriorityPayloadPath = path.join(vaultRoot, "goal-patch-priority.json");
   const patchTitlePayloadPath = path.join(vaultRoot, "goal-patch-title.json");
 
   try {
-    await runCli(["init", "--vault", vaultRoot]);
+    await runInProcessJsonCli(cli, ["init", "--vault", vaultRoot]);
     await writeFile(
       createPayloadPath,
       JSON.stringify({
@@ -497,9 +499,9 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
       "utf8",
     );
 
-    const created = await runCli<{
+    const { envelope: created } = await runInProcessJsonCli<{
       goalId: string;
-    }>([
+    }>(cli, [
       "goal",
       "import-json",
       "--input",
@@ -518,7 +520,7 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
       "utf8",
     );
 
-    const patchPriority = await runCli([
+    const { envelope: patchPriority } = await runInProcessJsonCli(cli, [
       "goal",
       "import-json",
       "--input",
@@ -536,7 +538,7 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
       "utf8",
     );
 
-    const patchTitle = await runCli([
+    const { envelope: patchTitle } = await runInProcessJsonCli(cli, [
       "goal",
       "import-json",
       "--input",
@@ -544,12 +546,12 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
       "--vault",
       vaultRoot,
     ]);
-    const shown = await runCli<{
+    const { envelope: shown } = await runInProcessJsonCli<{
       entity: {
         id: string;
         data: Record<string, unknown>;
       };
-    }>([
+    }>(cli, [
       "goal",
       "show",
       goalId,

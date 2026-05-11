@@ -256,15 +256,19 @@ test.sequential("public core mutators reject concurrent writers while another pr
     const heldLock = await holdCanonicalWriteLock(vaultRoot);
 
     try {
-      await assert.rejects(
-        () =>
+      vi.useFakeTimers();
+      const rejection = assert.rejects(
+        async () =>
           ensureJournalDay({
             vaultRoot,
             date: "2026-03-13",
           }),
         (error: unknown) => error instanceof VaultError && error.code === "CANONICAL_WRITE_LOCKED",
       );
+      await vi.advanceTimersByTimeAsync(31_000);
+      await rejection;
     } finally {
+      vi.useRealTimers();
       await heldLock.release();
     }
   } finally {

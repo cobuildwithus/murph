@@ -649,6 +649,11 @@ export class HostedUserRunner {
         decision.activeInvocation,
         new Error(FOREGROUND_NUDGE_PREEMPTED_IDLE_CHECKPOINT_ABORT_MESSAGE),
       );
+      immediateDriveStarted = this.queueOrStartRunnerDriveAfterInvocation({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+        reason: "nudge",
+        userId: record.userId,
+      });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1164,10 +1169,16 @@ export class HostedUserRunner {
           finishedAt: new Date().toISOString(),
           lease,
         });
-        const record = await this.syncRunnerFollowUpAfterInvocation({
-          record: completion.record,
-          userId: initialRecord.userId,
-        });
+        const record = hasPendingForegroundWork(completion.record)
+          ? await this.queuePendingNudgeContinuationAfterInvocation({
+            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+            record: completion.record,
+            userId: initialRecord.userId,
+          })
+          : await this.syncRunnerFollowUpAfterInvocation({
+            record: completion.record,
+            userId: initialRecord.userId,
+          });
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
@@ -1179,6 +1190,14 @@ export class HostedUserRunner {
           phase: "scheduled",
           userId: initialRecord.userId,
         });
+        if (hasPendingForegroundWork(record)) {
+          this.pendingRunnerDriveAfterInvocation = null;
+          return await this.runUntilIdleOrBudgetInternal({
+            aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+            dueWake: true,
+            reason: "nudge",
+          });
+        }
         return {
           nextWakeAt: record.nextWakeAt,
           status: "scheduled",
@@ -2607,44 +2626,12 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: input.preferredWakeAt,
     });
-    const destroyAttempted = await this.destroyRunnerContainerAfterIdleCheckpointBestEffort({
-      userId: input.userId,
-    });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      details: {
-        destroyAttempted,
-      },
-      message: "Hosted runner completed idle-shutdown checkpoint cleanup.",
+      message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
       phase: "checkpoint",
       userId: input.userId,
     });
-  }
-
-  private async destroyRunnerContainerAfterIdleCheckpointBestEffort(input: {
-    userId: string;
-  }): Promise<boolean> {
-    if (!this.runnerContainerNamespace) {
-      return false;
-    }
-
-    try {
-      await this.runnerContainerNamespace.getByName(resolveHostedExecutionRunnerContainerName({
-        source: this.runnerRuntimeEnvSource,
-        userId: input.userId,
-      })).destroyInstance();
-      return true;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted runner could not destroy idle-shutdown checkpoint container after cleanup.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return true;
-    }
   }
 
   private async scheduleHostedWakeRetryAlarm(input: {
@@ -2864,14 +2851,15 @@ export class HostedUserRunner {
 
         try {
           if (input.reason === "nudge") {
-	            if (isRecoveredActiveInvocationAbortError(error) && record) {
-	              const durableRecoverySettled =
-	                (hasPendingForegroundWork(record) && record.nextWakeAt !== null)
-	                || (
-	                  !hasPendingForegroundWork(record)
-	                  && !hasActiveRunnerInvocation(record)
-	                  && record.retryFailureCount === 0
-	                );
+            if (isRecoveredActiveInvocationAbortError(error) && record) {
+              const pendingForegroundWork = hasPendingForegroundWork(record);
+              const durableRecoverySettled =
+                (pendingForegroundWork && record.nextWakeAt !== null)
+                || (
+                  !pendingForegroundWork
+                  && !hasActiveRunnerInvocation(record)
+                  && record.retryFailureCount === 0
+                );
               if (!durableRecoverySettled) {
                 await this.preservePendingNudgeRetryAfterFailure({
                   retryDelayMs,
@@ -2882,12 +2870,12 @@ export class HostedUserRunner {
               await this.runtimeAlarmScheduler.syncStoredAlarm();
               return;
             }
-	            if (
-	              record
-	              && !hasPendingForegroundWork(record)
-	              && !hasActiveRunnerInvocation(record)
-	              && record.retryFailureCount === 0
-	            ) {
+            if (
+              record
+              && !hasPendingForegroundWork(record)
+              && !hasActiveRunnerInvocation(record)
+              && record.retryFailureCount === 0
+            ) {
               await this.runtimeAlarmScheduler.syncStoredAlarm();
               return;
             }
@@ -3089,7 +3077,7 @@ function safeCleanupErrorCode(error: unknown): string {
 }
 
 function hasPendingForegroundWork(record: RunnerStateRecord): boolean {
-  return record.pendingWork;
+  return record.pendingWork || record.pendingNudge;
 }
 
 function hasActiveRunnerInvocation(record: RunnerStateRecord): boolean {

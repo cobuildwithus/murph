@@ -19,6 +19,7 @@ import {
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
+  hasMurphAgeProductPromotionEvidenceTier,
   isMurphAgeInputBundleMetricPointAllowed,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
@@ -55,6 +56,7 @@ import {
   type MetricSeriesPoint,
   type MurphAgeModelCardPolicy,
   type MurphAgeRiskModel,
+  type MurphAgeValidationEvidenceTier,
 } from "../src/index.ts";
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
@@ -1923,23 +1925,94 @@ test("requires explicit validation-gate evidence before product-authorizing Murp
   assert.equal(isMurphAgeModelCardProductAuthorized(rawProductFlagOnly), false);
   assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(rawProductFlagOnly), false);
 
-  const productValidatedPolicy: MurphAgeModelCardPolicy = {
+  const internalOnlyPassedPolicy: MurphAgeModelCardPolicy = {
     ...lab9Policy,
     productAuthorized: true,
     riskToAgeDisplayAuthorized: true,
     validationGate: {
-      evidenceTiers: ["true-external-validation", "partner-aggregate-validation"],
+      evidenceTiers: ["internal-anchor", "same-family-sanity"],
       productPromotionEvidence: true,
       status: "passed",
-      summary: "Test-only product validation fixture.",
+      summary: "Test-only internal evidence fixture.",
     },
   };
-  assert.equal(isMurphAgeModelCardProductAuthorized(productValidatedPolicy), true);
-  assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(productValidatedPolicy), true);
+  assert.equal(hasMurphAgeProductPromotionEvidenceTier(internalOnlyPassedPolicy.validationGate), false);
+  assert.equal(isMurphAgeModelCardProductAuthorized(internalOnlyPassedPolicy), false);
+  assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(internalOnlyPassedPolicy), false);
+
+  const promotionTiers: MurphAgeValidationEvidenceTier[] = [
+    "murph-native-prospective-validation",
+    "partner-aggregate-validation",
+    "true-external-validation",
+  ];
+  for (const evidenceTier of promotionTiers) {
+    const productValidatedPolicy: MurphAgeModelCardPolicy = {
+      ...lab9Policy,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: true,
+      validationGate: {
+        evidenceTiers: [evidenceTier],
+        productPromotionEvidence: true,
+        status: "passed",
+        summary: "Test-only product validation fixture.",
+      },
+    };
+    assert.equal(hasMurphAgeProductPromotionEvidenceTier(productValidatedPolicy.validationGate), true);
+    assert.equal(isMurphAgeModelCardProductAuthorized(productValidatedPolicy), true);
+    assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(productValidatedPolicy), true);
+  }
+
+  const otherwisePromotionValidatedPolicies: MurphAgeModelCardPolicy[] = [
+    {
+      ...lab9Policy,
+      productAuthorized: false,
+      riskToAgeDisplayAuthorized: true,
+      validationGate: {
+        evidenceTiers: ["true-external-validation"],
+        productPromotionEvidence: true,
+        status: "passed",
+        summary: "Test-only raw product authorization hold fixture.",
+      },
+    },
+    {
+      ...lab9Policy,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: true,
+      validationGate: {
+        evidenceTiers: ["true-external-validation"],
+        productPromotionEvidence: true,
+        status: "blocked",
+        summary: "Test-only blocked validation gate fixture.",
+      },
+    },
+    {
+      ...lab9Policy,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: true,
+      validationGate: {
+        evidenceTiers: ["true-external-validation"],
+        productPromotionEvidence: false,
+        status: "passed",
+        summary: "Test-only promotion evidence hold fixture.",
+      },
+    },
+  ];
+  for (const policy of otherwisePromotionValidatedPolicies) {
+    assert.equal(hasMurphAgeProductPromotionEvidenceTier(policy.validationGate), true);
+    assert.equal(isMurphAgeModelCardProductAuthorized(policy), false);
+    assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy), false);
+  }
 
   const riskToAgeHeldPolicy: MurphAgeModelCardPolicy = {
-    ...productValidatedPolicy,
+    ...lab9Policy,
+    productAuthorized: true,
     riskToAgeDisplayAuthorized: false,
+    validationGate: {
+      evidenceTiers: ["true-external-validation"],
+      productPromotionEvidence: true,
+      status: "passed",
+      summary: "Test-only risk-to-age held fixture.",
+    },
   };
   assert.equal(isMurphAgeModelCardProductAuthorized(riskToAgeHeldPolicy), true);
   assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(riskToAgeHeldPolicy), false);

@@ -703,7 +703,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform: createPlatform({
             mailboxPort: null,
-            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessIntervalMs: 60_000,
             runtimeLivenessPort,
             workspacePort: {
               async read() {

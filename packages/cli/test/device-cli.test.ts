@@ -11,7 +11,13 @@ import { test, vi } from 'vitest'
 import {
   createIntegratedDeviceSyncServices,
 } from '../src/device-services.js'
-import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
+import { createVaultCli } from '../src/vault-cli.js'
+import {
+  requireData,
+  runCli,
+  runInProcessJsonCli,
+  runRawCli,
+} from './cli-test-helpers.js'
 
 interface DeviceTestState {
   lastConnectBody: Record<string, unknown> | null
@@ -70,12 +76,27 @@ const supportsLoopbackListen = (() => {
 
 const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
 
+async function runSourceDeviceCliRaw(args: string[]): Promise<string> {
+  const cli = createVaultCli()
+  const output: string[] = []
+
+  await cli.serve(args, {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
+}
+
 test.sequential('device daemon commands stay in the generated CLI schema', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
 
   try {
     const schema = JSON.parse(
-      await runRawCli([
+      await runSourceDeviceCliRaw([
         'device',
         'daemon',
         'start',
@@ -84,11 +105,7 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
         '--schema',
         '--format',
         'json',
-      ], {
-        env: {
-          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-        },
-      }),
+      ]),
     ) as {
       options: {
         properties: Record<string, unknown>
@@ -101,7 +118,7 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
     assert.deepEqual(schema.options.required, ['vault'])
 
     const connectSchema = JSON.parse(
-      await runRawCli([
+      await runSourceDeviceCliRaw([
         'device',
         'connect',
         'whoop',
@@ -110,11 +127,7 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
         '--schema',
         '--format',
         'json',
-      ], {
-        env: {
-          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-        },
-      }),
+      ]),
     ) as {
       options: {
         properties: Record<string, {
@@ -136,7 +149,7 @@ test('device account provider inputs reject public connect targets before daemon
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-provider-guard-'))
 
   try {
-    const result = await runCli([
+    const result = await runInProcessJsonCli(createVaultCli(), [
       'device',
       'account',
       'list',
@@ -144,16 +157,12 @@ test('device account provider inputs reject public connect targets before daemon
       'fitbit',
       '--vault',
       vaultRoot,
-    ], {
-      env: {
-        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-      },
-    })
+    ])
 
-    assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.match(result.error.message ?? '', /Unsupported device-sync provider/u)
-      assert.match(result.error.message ?? '', /junction, oura, whoop, strava/u)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.match(result.envelope.error.message ?? '', /Unsupported device-sync provider/u)
+      assert.match(result.envelope.error.message ?? '', /junction, oura, whoop, strava/u)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -164,21 +173,17 @@ test('device connect rejects Junction as a public connect target', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-target-guard-'))
 
   try {
-    const result = await runCli([
+    const result = await runInProcessJsonCli(createVaultCli(), [
       'device',
       'connect',
       'junction',
       '--vault',
       vaultRoot,
-    ], {
-      env: {
-        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
-      },
-    })
+    ])
 
-    assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.match(result.error.message ?? '', /Expected a device connect target/u)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.match(result.envelope.error.message ?? '', /Expected a device connect target/u)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

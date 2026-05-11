@@ -627,6 +627,61 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("classifies legacy pending_nudge mirror drift as foreground work", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    db.prepare(`
+      UPDATE runner_meta
+      SET pending_nudge = 1,
+          pending_work = 0,
+          alarm_kind = 'idle_checkpoint',
+          alarm_due_at = ?,
+          alarm_workspace_version = ?,
+          alarm_checkpoint_next_wake_at = NULL
+      WHERE singleton = 1
+    `).run("2026-04-27T00:00:00.000Z", "4");
+
+    await expect(store.consumeDueRunnerAlarmAndDecide(
+      Date.parse("2026-04-27T00:00:00.000Z"),
+    )).resolves.toMatchObject({
+      kind: "work",
+      reason: "nudge",
+      record: {
+        alarm: null,
+        pendingNudge: true,
+        pendingWork: true,
+      },
+    });
+  });
+
+  it("classifies pending_work without the pending_nudge mirror as foreground work", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    db.prepare(`
+      UPDATE runner_meta
+      SET pending_nudge = 0,
+          pending_work = 1,
+          alarm_kind = 'work',
+          alarm_due_at = ?,
+          alarm_workspace_version = NULL,
+          alarm_checkpoint_next_wake_at = NULL
+      WHERE singleton = 1
+    `).run("2026-04-27T00:00:00.000Z");
+
+    await expect(store.consumeDueRunnerAlarmAndDecide(
+      Date.parse("2026-04-27T00:00:00.000Z"),
+    )).resolves.toMatchObject({
+      dueWake: true,
+      kind: "work",
+      reason: "nudge",
+      record: {
+        alarm: null,
+        pendingNudge: false,
+        pendingWork: true,
+      },
+    });
+  });
+
   it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");
@@ -675,7 +730,7 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("continues active foreground heartbeats while preserving pending work", async () => {
+  it("yields active foreground heartbeats while preserving pending work", async () => {
     const { db, store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");
     const lease = await store.beginInvocation({
@@ -702,7 +757,13 @@ describe("RunnerStateStore schema guard", () => {
       runnerTimeoutMs: 45_000,
       userId: lease.userId,
     })).resolves.toMatchObject({
-      kind: "continue",
+      activeInvocation: {
+        attemptId: lease.attemptId,
+        reason: "nudge",
+        userId: "user-existing",
+      },
+      kind: "yield",
+      nextWakeAt: "2026-04-27T00:00:13.000Z",
       record: {
         alarm: {
           dueAt: "2026-04-27T00:00:13.000Z",
@@ -711,6 +772,7 @@ describe("RunnerStateStore schema guard", () => {
         pendingNudge: false,
         pendingWork: true,
       },
+      status: "scheduled",
     });
   });
 
