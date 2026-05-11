@@ -134,7 +134,6 @@ export class RunnerStateStore {
   }
 
   async markWakePending(input: {
-    clearIdleCheckpoint?: boolean;
     preferredWakeAt?: string | null;
     resetRetry?: boolean;
   } = {}): Promise<RunnerStateRecord> {
@@ -146,9 +145,6 @@ export class RunnerStateStore {
       meta.failure_count = 0;
       meta.last_error_at = null;
       meta.last_error_code = null;
-    }
-    if (input.clearIdleCheckpoint !== false) {
-      this.clearIdleCheckpointMetaSync(meta);
     }
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
@@ -198,12 +194,10 @@ export class RunnerStateStore {
   }
 
   async beginWriteFence(input: {
-    consumePendingNudge?: boolean;
     kind?: RunnerWriteFenceKind;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
     expiresAt?: string | null;
-    workerVersionId?: string | null;
   }): Promise<RunnerWriteFenceToken> {
     await this.bindUser(input.userId);
 
@@ -788,10 +782,6 @@ export class RunnerStateStore {
     meta.active_kind = null;
     meta.active_started_at = null;
     meta.active_workspace_version = null;
-  }
-
-  private clearIdleCheckpointMetaSync(meta: RunnerMetaRow): void {
-    void meta;
   }
 
   private hasWriteFenceTokenSync(

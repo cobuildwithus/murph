@@ -99,8 +99,6 @@ class TestHostedUserRunner extends HostedUserRunner {
   public readonly runCalls: HostedWorkspaceInvocationReason[] = [];
 
   override async runUntilIdleOrBudget(input: {
-    dueWake?: boolean;
-    idleCheckpointWorkspaceVersion?: string | null;
     reason: HostedWorkspaceInvocationReason;
   }) {
     this.runCalls.push(input.reason);
@@ -980,7 +978,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.bindUser("member_123");
 
     const activeRun = runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -1037,7 +1034,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     const activeRun = runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -2453,7 +2449,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     })).resolves.toMatchObject({
       nextWakeAt: null,
@@ -2782,7 +2777,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     })).resolves.toMatchObject({
       status: "idle",
@@ -3018,7 +3012,6 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     })).resolves.toMatchObject({
       nextWakeAt: null,
@@ -3081,7 +3074,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     })).resolves.toMatchObject({
       nextWakeAt: null,
@@ -3867,7 +3859,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
       reason: "alarm",
     })).resolves.toMatchObject({
       status: "idle",
@@ -6442,8 +6433,6 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
 
     await expect(runner.runUntilIdleOrBudget({
-      dueWake: true,
-      idleCheckpointWorkspaceVersion: "4",
       reason: "idle_shutdown_checkpoint",
     })).resolves.toMatchObject({
       idleShutdownCheckpointed: true,

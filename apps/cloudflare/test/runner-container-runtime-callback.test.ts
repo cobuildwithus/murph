@@ -69,6 +69,34 @@ describe("RunnerContainer runtime callback dispatch", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
+  it("fails fast before starting a container when the callback authority is missing", async () => {
+    const storage = createContainerStorageDouble();
+    const startAndWaitForPorts = vi.fn(async () => {});
+    const containerFetch = vi.fn(async () => new Response(null, { status: 500 }));
+    const container = new RunnerContainer({
+      storage,
+    } as never, {} as never);
+    Object.assign(container, {
+      containerFetch,
+      destroy: vi.fn(async () => {}),
+      getState: vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "stopped",
+      })),
+      startAndWaitForPorts,
+    });
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL must be configured",
+    );
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
   it("runs a pending idle checkpoint from the activity-expired lifecycle hook", async () => {
     const beginIdleCheckpointLease = vi.fn(async () => ({
       attemptId: "checkpoint_attempt_123",

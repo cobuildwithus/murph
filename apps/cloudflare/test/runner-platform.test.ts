@@ -462,6 +462,34 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith("/api/internal/hosted-execution/issues/record")) {
+        return new Response(JSON.stringify({
+          issueIds: ["issue_123"],
+          recorded: 1,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/hosted-execution/usage/record")) {
+        return new Response(JSON.stringify({
+          recorded: true,
+          usageId: "turn_usage.runtime_write_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/device-sync/runtime/snapshot")) {
+        return new Response(JSON.stringify({
+          connections: [],
+          generatedAt: "2026-04-26T00:00:02.000Z",
+          userId: "member_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       throw new Error(`Unexpected callback URL: ${request.url}`);
     });
     const platform = buildHostedExecutionRuntimePlatform({
@@ -482,6 +510,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.mailboxPort).toBeDefined();
     expect(platform.workspacePort).toBeDefined();
     expect(platform.logPort).toBeDefined();
+    expect(platform.issueExportPort).toBeDefined();
+    expect(platform.usageRecordPort).toBeDefined();
+    expect(platform.deviceSyncPort).toBeDefined();
     await platform.mailboxPort!.fetch({
       lanes: [{ importedSeq: "0", lane: "conversation" }],
       limitPerLane: 10,
@@ -506,8 +537,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       ],
     });
+    await platform.issueExportPort!.recordIssues([{ code: "runtime.issue" }]);
+    await platform.usageRecordPort!.recordUsage(createAssistantUsageRecord());
+    await platform.deviceSyncPort!.fetchSnapshot({
+      connectionId: "conn_123",
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -515,6 +551,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-mailbox/fetch",
       "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace",
       "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-runtime/log",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-execution/issues/record",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-execution/usage/record",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {
       expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
@@ -1554,6 +1593,70 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
     await expect(request.json()).resolves.toEqual({ replica });
+  });
+
+  it("exposes callback-only browser-vault writes and provider effects", async () => {
+    const sourceBundleHash = "c".repeat(64);
+    const replica = {
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      schema: "murph.browser-vault-replica",
+      source: {
+        dataVersion: "runner-platform-callback-test",
+        sourceBundleHash,
+      },
+    };
+    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/telegram/send")) {
+        return new Response(JSON.stringify({
+          providerMessageId: "telegram_message_123",
+          target: "telegram_chat_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify({ replicaRef }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      runtimeCallbackBaseUrl: "https://worker.example.test",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    expect(platform.browserVaultReplicaPort).toBeDefined();
+    expect(platform.effectsPort.sendTelegram).toBeDefined();
+    await platform.browserVaultReplicaPort!.write({ replica });
+    await platform.effectsPort.sendTelegram!({
+      message: "hello",
+      target: "telegram_chat_123",
+    });
+
+    const replicaRequest = requireFetchRequest(fetchMock.mock.calls[0], "callback browser-vault write");
+    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[1], "callback telegram send");
+    expect(replicaRequest.url).toBe(
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/browser-vault.worker/replicas",
+    );
+    expect(telegramRequest.url).toBe(
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/telegram/send",
+    );
+    expect(replicaRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(replicaRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(telegramRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
   });
 
   it("rejects browser-vault replica write headers without an active runtime write fence", async () => {

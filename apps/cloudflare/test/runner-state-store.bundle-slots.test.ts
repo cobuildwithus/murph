@@ -611,7 +611,6 @@ describe("RunnerStateStore schema guard", () => {
       await store.bindUser("user-existing");
       await store.markPendingInvocationNudge();
       const lease = await store.beginInvocation({
-        consumePendingNudge: false,
         expiresAt: "2026-04-27T00:00:45.000Z",
         reason: "idle_shutdown_checkpoint",
         userId: "user-existing",

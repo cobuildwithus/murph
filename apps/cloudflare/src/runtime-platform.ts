@@ -196,6 +196,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
   });
+  const hasHostedInternalProxyTransport =
+    Boolean(input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl);
   const hostedWebDeviceSyncPort = hostedWebControlTransport
     ? createHostedWebDeviceSyncPort({
         boundUserId: input.boundUserId,
@@ -266,7 +268,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     inFlightArtifactUploads.set(artifact.sha256, upload);
     await upload;
   };
-  const providerEffectsPort = input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+  const providerEffectsPort = hasHostedInternalProxyTransport && input.workspaceCheckpointBridge
     ? createCloudflareRunnerProviderEffectsPort({
         fetchImpl,
         timeoutMs,
@@ -318,7 +320,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+    ...(hasHostedInternalProxyTransport && input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
