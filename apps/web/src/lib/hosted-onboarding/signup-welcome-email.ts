@@ -254,20 +254,22 @@ function buildHostedSignupWelcomeEmailText(input: {
 }): string {
   const murphStartLine = normalizeNullableString(input.murphStartLine);
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph."
-    : "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph to start your first experiment!";
+    ? "Best next step: sync your data and text Murph."
+    : "Best next step: sync your data and text Murph to kick off your first experiment.";
 
   return [
     "Hey, welcome to Murph!",
     "",
-    `I'm ${input.founderName}, the founder of Murph. I built Murph because I had a WHOOP and kept looking at my scores every morning without really using the data.`,
+    `I'm ${input.founderName}, the founder. I built Murph because I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
     "",
-    "What I really wanted was a way to try a new health experiment and actually know whether it's working. That's basically what Murph does. You sync your wearable or health data, pick a protocol, and it runs you through an experiment over text.",
+    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers (without having to build a spreadsheet to track it all).",
+    "",
+    "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
     "",
     nextStep,
     ...(murphStartLine ? ["", murphStartLine] : []),
     "",
-    "Email me if anything's confusing or not working. We're early, shipping fast, and I want to hear it!",
+    "Hit reply if anything's confusing or broken. We're early and shipping fast, and I want to hear it.",
     "",
     `- ${input.founderName}`,
   ].join("\n");
@@ -282,12 +284,13 @@ function buildHostedSignupWelcomeEmailHtml(input: {
     input.murphStartAction?.line ?? input.murphStartLine,
   );
   const nextStep = murphStartLine
-    ? "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph."
-    : "At the end you see what actually improved. Best thing to do right now is sync your wearable or health data and text Murph to start your first experiment!";
+    ? "Best next step: sync your data and text Murph."
+    : "Best next step: sync your data and text Murph to kick off your first experiment.";
   const paragraphs = [
     "Hey, welcome to Murph!",
-    `I'm ${input.founderName}, the founder of Murph. I built Murph because I had a WHOOP and kept looking at my scores every morning without really using the data.`,
-    "What I really wanted was a way to try a new health experiment and actually know whether it's working. That's basically what Murph does. You sync your wearable or health data, pick a protocol, and it runs you through an experiment over text.",
+    `I'm ${input.founderName}, the founder. I built Murph because I owned a WHOOP, checked my scores every morning, and never really used the data to build healthier habits.`,
+    "What I really wanted was to try a fun health experiment and see if it worked. Stuff like saunas, cold plunges, sprint routines, supplements, and measure how they changed my biomarkers (without having to build a spreadsheet to track it all).",
+    "That's basically what Murph does. You pick a protocol, and Murph runs the experiment and keeps you accountable over text, no busywork for you. At the end, it compares your data before and after so you can see what's actually making you healthier.",
     nextStep,
   ];
   const body = [
@@ -303,7 +306,7 @@ function buildHostedSignupWelcomeEmailHtml(input: {
         ]
       : []),
     renderHostedSignupWelcomeEmailParagraphHtml(
-      "Email me if anything's confusing or not working. We're early, shipping fast, and I want to hear it!",
+      "Hit reply if anything's confusing or broken. We're early and shipping fast, and I want to hear it.",
     ),
     renderHostedSignupWelcomeEmailParagraphHtml(`- ${input.founderName}`),
   ];
