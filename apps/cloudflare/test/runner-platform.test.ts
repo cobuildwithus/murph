@@ -26,6 +26,14 @@ import {
   isHostedRuntimeInternalAuthorityRejectedError,
 } from "../src/runtime-platform.ts";
 import {
+  ACTIVE_INVOCATION_HEARTBEAT_STALE_MIN_MS,
+  ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+  CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
+} from "../src/runner-liveness.ts";
+import {
+  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
 } from "../src/runner-outbound/browser-vault-refresh-authority.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -115,6 +123,81 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
 describe("buildHostedExecutionRuntimePlatform", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
+  it("keeps the stale window above the heartbeat interval and touch timeout budget", () => {
+    expect(CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS).toBe(5_000);
+    expect(RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS).toBe(5_000);
+    expect(ACTIVE_INVOCATION_HEARTBEAT_STALE_MS).toBeGreaterThanOrEqual(
+      ACTIVE_INVOCATION_HEARTBEAT_STALE_MIN_MS,
+    );
+  });
+
+  it("fails fast when required runtime liveness wiring is missing", () => {
+    expect(() =>
+      buildHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        requireRuntimeLivenessPort: true,
+        workspaceCheckpointBridge: {
+          readCurrentLease: () => ({
+            attemptId: "attempt_1",
+            leaseGeneration: "9",
+            userId: "member_123",
+            workspaceVersion: "5",
+          }),
+        },
+      })
+    ).toThrow(/requires runtime liveness/u);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          internalWorkerProxyTokenPresent: false,
+          runtimeLivenessPortPresent: false,
+          runtimeLivenessRequired: true,
+          workspaceCheckpointBridgePresent: true,
+        }),
+        message: "Hosted runner resolved runtime liveness configuration.",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("builds required runtime liveness with metadata-only timing logs", () => {
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      requireRuntimeLivenessPort: true,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    expect(platform.runtimeLivenessRequired).toBe(true);
+    expect(platform.runtimeLivenessIntervalMs).toBe(CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS);
+    expect(platform.runtimeLivenessPort).toBeDefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          heartbeatIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
+          heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+          heartbeatTouchTimeoutMs: RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+          internalWorkerProxyTokenPresent: true,
+          runtimeLivenessPortPresent: true,
+          runtimeLivenessRequired: true,
+          workspaceCheckpointBridgePresent: true,
+        }),
+        message: "Hosted runner resolved runtime liveness configuration.",
+        userId: "member_123",
+      }),
+    );
   });
 
   it("logs upstream request failures with safe request metadata", async () => {

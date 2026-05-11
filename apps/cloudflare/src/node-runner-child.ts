@@ -172,6 +172,7 @@ async function runWorkspaceChildJob(input: {
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
     internalWorkerProxyToken: input.internalWorkerProxyToken,
     localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+    requireRuntimeLivenessPort: true,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,
       recordCheckpoint: ({ workspaceVersion }) => {

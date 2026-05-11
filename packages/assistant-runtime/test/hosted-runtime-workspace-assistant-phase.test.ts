@@ -2098,7 +2098,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("yields post-checkpoint delivery cleanup when runtime liveness says foreground input is available", async () => {
+  it("continues post-checkpoint delivery cleanup when runtime liveness says foreground input is available", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_notification",
@@ -2127,10 +2127,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await result.afterCheckpoint?.();
     const deliveryDrainInput = mocks.drainHostedPreparedAssistantDeliveries
       .mock.calls[0]?.[0];
-    await expect(deliveryDrainInput.assertLiveness()).rejects.toMatchObject({
-      name: "HostedWorkspaceAssistantPhaseInputAvailableError",
-      nextWakeAt: "2026-04-27T00:00:45.000Z",
-    });
+    await expect(deliveryDrainInput.assertLiveness()).resolves.toBeUndefined();
   });
 
   it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {

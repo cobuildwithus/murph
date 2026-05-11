@@ -32,6 +32,7 @@ import {
 } from "./runner-outbound/browser-vault-refresh-authority.ts";
 import {
   assertHostedExecutionRunnerJobResult,
+  HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
@@ -61,6 +62,7 @@ const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX = "runner-container-active-operation:v1:";
 const RUNNER_ACTIVE_OPERATION_SCHEMA_VERSION = 1;
 const RUNNER_ACTIVE_OPERATION_EXPIRY_GRACE_MS = 5_000;
+const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -288,7 +290,7 @@ export class RunnerContainer extends Container {
       return;
     }
     if (!abortController.signal.aborted) {
-      abortController.abort(new Error("workspace invocation preempted"));
+      abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
     }
   }
 
@@ -783,7 +785,10 @@ export class RunnerContainer extends Container {
       try {
         if (activeOperationAcquired) {
           const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-          const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
+          const shouldKeepWarm = (
+            completedSuccessfully
+            || isWorkspaceInvocationPreemptedAbort(operationAbortController.signal.reason)
+          ) && outboundProxyExpired;
           if (!shouldKeepWarm) {
             await this.stopWarmContainer({
               failClosed: true,
@@ -1596,15 +1601,49 @@ export async function invokeHostedExecutionContainerRunner(
   });
   return input.signal
     ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
-        void container.destroyInstance().catch((error: unknown) => {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "warn",
-            message: "Hosted runner could not destroy a preempted invocation container.",
-            phase: "failed",
-            userId: jobUserId,
+        if (isRunnerContainerAbortHardTimeout(input.signal?.reason)) {
+          await container.destroyInstance().catch((error: unknown) => {
+            emitHostedExecutionStructuredLog({
+              component: "container",
+              error,
+              level: "warn",
+              message: "Hosted runner could not destroy a timed-out invocation container.",
+              phase: "failed",
+              userId: jobUserId,
+            });
           });
+          return;
+        }
+
+        if (
+          input.job.kind === HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND
+          && container.abortWorkspaceInvocation
+        ) {
+          await container.abortWorkspaceInvocation({
+            attemptId: input.job.request.attemptId,
+            userId: jobUserId,
+          }).catch((error: unknown) => {
+            emitHostedExecutionStructuredLog({
+              component: "container",
+              error,
+              level: "warn",
+              message: "Hosted runner could not abort a preempted invocation request.",
+              phase: "failed",
+              userId: jobUserId,
+            });
+          });
+          return;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            abortWorkspaceInvocationSupported: Boolean(container.abortWorkspaceInvocation),
+          },
+          level: "warn",
+          message: "Hosted runner left a preempted invocation request for lease fencing.",
+          phase: "failed",
+          userId: jobUserId,
         });
       })
     : await invocation;
@@ -1695,7 +1734,10 @@ async function raceRunnerContainerOperationAbort<T>(
   signal: AbortSignal,
   onOperationAbort?: () => Promise<void>,
 ): Promise<T> {
-  throwIfRunnerContainerOperationAborted(signal);
+  if (signal.aborted) {
+    await onOperationAbort?.().catch(() => undefined);
+    throwIfRunnerContainerOperationAborted(signal);
+  }
 
   let removeAbortListener: () => void = () => undefined;
   const abortCleanup: {
@@ -1725,6 +1767,15 @@ async function raceRunnerContainerOperationAbort<T>(
   } finally {
     removeAbortListener();
   }
+}
+
+function isWorkspaceInvocationPreemptedAbort(reason: unknown): boolean {
+  return reason instanceof Error
+    && reason.message === WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE;
+}
+
+function isRunnerContainerAbortHardTimeout(reason: unknown): boolean {
+  return reason instanceof DOMException && reason.name === "TimeoutError";
 }
 
 async function waitForRunnerContainerOperationCompletion(

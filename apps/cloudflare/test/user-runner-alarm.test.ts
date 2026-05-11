@@ -1818,6 +1818,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
+    const abortWorkspaceInvocation = vi.fn(async () => {});
     const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
@@ -1832,6 +1833,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       throw new Error("Unexpected extra workspace invocation.");
     });
     const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      abortWorkspaceInvocation,
       destroyInstance,
       invoke,
       runnerReadyTimeoutMs: 200,
@@ -1851,7 +1853,11 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: expect.any(String),
+      userId: "member_123",
+    });
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(
       sql.exec(
         `SELECT in_flight,
@@ -1876,6 +1882,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       nextWakeAt: null;
       status: "idle";
     }>();
+    const abortWorkspaceInvocation = vi.fn(async () => {});
     const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
       if (invoke.mock.calls.length === 1) {
@@ -1890,6 +1897,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       throw new Error("Unexpected extra workspace invocation.");
     });
     const { runner, sql } = createRunnerCryptoContextHarness(null, {
+      abortWorkspaceInvocation,
       destroyInstance,
       invoke,
     });
@@ -1909,7 +1917,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     );
 
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
       alreadyRunning: true,
@@ -1921,7 +1929,11 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
-    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: expect.any(String),
+      userId: "member_123",
+    });
+    expect(destroyInstance).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(
       sql.exec(
         `SELECT in_flight,
@@ -2862,6 +2874,62 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("does not clear a live invocation during one heartbeat transport timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:10.000Z"));
+    const { alarms, invoke, runner, sql } = createRunnerCryptoContextHarness(null, {
+      runnerReadyTimeoutMs: 20_000,
+      runnerRuntimeEnvSource: TEST_VERSIONED_RUNNER_RUNTIME_ENV_SOURCE,
+      runnerTimeoutMs: 60_000,
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_worker_version_id = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-27T00:00:05.000Z",
+      "nudge",
+      "2026-04-27T00:00:00.000Z",
+      "worker-version-current",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:11.000Z"]);
+    expect(
+      sql.exec(
+        `SELECT active_invocation_id,
+                in_flight,
+                next_wake_at,
+                pending_nudge
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: "workspace-invocation-1",
+      in_flight: 1,
+      next_wake_at: "2026-04-27T00:00:11.000Z",
+      pending_nudge: 1,
+    }]);
+  });
+
   it("retries a consumed persisted nudge after no-heartbeat readiness times out", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-27T00:00:01.000Z"));
@@ -3259,7 +3327,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(alarms).toEqual(["2026-04-27T00:00:02.500Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:29.500Z"]);
     expect(
       sql.exec(
         "SELECT in_flight, next_wake_at, pending_nudge FROM runner_meta WHERE user_id = ?",
@@ -3267,7 +3335,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       in_flight: 1,
-      next_wake_at: "2026-04-27T00:00:02.500Z",
+      next_wake_at: "2026-04-27T00:00:29.500Z",
       pending_nudge: 1,
     }]);
   });
@@ -3305,7 +3373,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "0",
     })).resolves.toBe(true);
 
-    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
   });
 
   it("keeps a pending nudge on recovery when checkpoint liveness clears orphan observation", async () => {
@@ -3341,7 +3409,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       workspaceVersion: "1",
     })).resolves.toEqual({ recorded: true });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
   });
 
   it("records container stop liveness and schedules immediate recovery for a consumed nudge", async () => {
@@ -3586,16 +3654,16 @@ describe("HostedUserRunner runtime crypto context", () => {
     })).resolves.toEqual({
       instruction: {
         kind: "yield",
-        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
         status: "scheduled",
       },
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:03.000Z",
+      nextAlarmAt: "2026-04-27T00:00:30.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
   });
 
   it("yields heartbeat liveness for pending work without the legacy nudge mirror", async () => {
@@ -3629,16 +3697,16 @@ describe("HostedUserRunner runtime crypto context", () => {
     })).resolves.toEqual({
       instruction: {
         kind: "yield",
-        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
         status: "scheduled",
       },
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:03.000Z",
+      nextAlarmAt: "2026-04-27T00:00:30.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
     expect(
       sql.exec(
         `SELECT pending_nudge,
@@ -3650,9 +3718,9 @@ describe("HostedUserRunner runtime crypto context", () => {
         "member_123",
       ).toArray(),
     ).toEqual([{
-      alarm_due_at: "2026-04-27T00:00:03.000Z",
+      alarm_due_at: "2026-04-27T00:00:30.000Z",
       alarm_kind: "work",
-      next_wake_at: "2026-04-27T00:00:03.000Z",
+      next_wake_at: "2026-04-27T00:00:30.000Z",
       pending_nudge: 0,
       pending_work: 1,
     }]);
@@ -3693,16 +3761,16 @@ describe("HostedUserRunner runtime crypto context", () => {
     })).resolves.toEqual({
       instruction: {
         kind: "yield",
-        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        nextWakeAt: "2026-04-27T00:00:30.000Z",
         status: "scheduled",
       },
       inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:03.000Z",
+      nextAlarmAt: "2026-04-27T00:00:30.000Z",
       ok: true,
       pendingNudge: true,
     });
 
-    expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
+    expect(alarms).toEqual(["2026-04-27T00:00:30.000Z"]);
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -3713,14 +3781,14 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       idle_shutdown_checkpoint_due_at: null,
-      next_wake_at: "2026-04-27T00:00:03.000Z",
+      next_wake_at: "2026-04-27T00:00:30.000Z",
       pending_nudge: 1,
     }]);
   });
 
   it("clears a persisted-only invocation after the last heartbeat goes stale and starts a replacement", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:01:05.000Z"));
     const { invoke, runner, sql } = createRunnerCryptoContextHarness(null);
     await runner.bindUser("member_123");
     sql.exec(
