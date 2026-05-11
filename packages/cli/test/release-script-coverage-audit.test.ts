@@ -704,11 +704,24 @@ Updated: 2026-04-24
     const cliCoverageBranch = workspaceVerify.match(
       /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
     )?.[0]
+    const packageCoverageDirs = workspaceVerify.match(
+      /local package_coverage_dirs=\([\s\S]*?^  \)/m,
+    )?.[0]
 
     expect(runTimedStep).toBeTruthy()
     expect(cliCoverageBranch).toBeTruthy()
+    expect(packageCoverageDirs).toBeTruthy()
     expect(cliCoverageBranch).toContain(
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+    )
+    expect(cliCoverageBranch).toContain(
+      "pnpm --dir packages/contracts test:coverage:vitest && pnpm --dir packages/contracts test:artifacts",
+    )
+    expect(packageCoverageDirs!.indexOf('"packages/cli"')).toBeLessThan(
+      packageCoverageDirs!.indexOf('"packages/contracts"'),
+    )
+    expect(packageCoverageDirs!.indexOf('"packages/contracts"')).toBeLessThan(
+      packageCoverageDirs!.indexOf('"packages/device-syncd"'),
     )
     expect(cliCoverageBranch).toContain('return $?')
     const harnessDir = mkdtempSync(

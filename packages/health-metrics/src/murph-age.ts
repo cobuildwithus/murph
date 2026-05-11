@@ -162,6 +162,12 @@ export interface MurphAgeModelCardPolicy {
   wearableScoreBearingAuthorized: boolean;
 }
 
+const MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS = new Set<MurphAgeValidationEvidenceTier>([
+  "murph-native-prospective-validation",
+  "partner-aggregate-validation",
+  "true-external-validation",
+]);
+
 export interface MurphAgeCalculatorInput {
   asOf?: string;
   chronologicalAgeYears: number;
@@ -1165,11 +1171,16 @@ export function resolveMurphAgeModelCardPolicy(
 export function isMurphAgeModelCardProductAuthorized(policy: MurphAgeModelCardPolicy): boolean {
   return policy.productAuthorized
     && policy.validationGate.status === "passed"
-    && policy.validationGate.productPromotionEvidence;
+    && policy.validationGate.productPromotionEvidence
+    && hasMurphAgeProductPromotionEvidenceTier(policy.validationGate);
 }
 
 export function isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy: MurphAgeModelCardPolicy): boolean {
   return policy.riskToAgeDisplayAuthorized && isMurphAgeModelCardProductAuthorized(policy);
+}
+
+export function hasMurphAgeProductPromotionEvidenceTier(summary: MurphAgeValidationGateSummary): boolean {
+  return summary.evidenceTiers.some((tier) => MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS.has(tier));
 }
 
 export function resolveMurphAgeWearableShadowIncrementPolicy(

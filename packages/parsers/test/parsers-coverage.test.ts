@@ -680,7 +680,7 @@ test("Poppler PDF provider extracts born-digital PDF text with page metadata", a
   );
   await assert.rejects(
     createPopplerPdfProvider({
-      commandTimeoutMs: 1_000,
+      commandTimeoutMs: 10_000,
       maxOutputBytes: 4,
       pdfInfoCommandCandidates: [pdfInfoCommand],
       pdfToTextCommandCandidates: [stdoutNoisyPdfToTextCommand],

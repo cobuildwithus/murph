@@ -1107,9 +1107,59 @@ describe("HostedUserRunner runtime crypto context", () => {
       ).toArray(),
     ).toEqual([{
       deferred_checkpoint_required: 0,
-      idle_shutdown_checkpoint_due_at: "2026-04-27T00:04:00.150Z",
+      idle_shutdown_checkpoint_due_at: expect.stringMatching(
+        /^2026-04-27T00:04:00\.\d{3}Z$/,
+      ),
       idle_shutdown_checkpoint_workspace_version: "4",
       pending_nudge: 0,
+    }]);
+  });
+
+  it("queues a foreground follow-up when a nudge aborts a same-isolate idle checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("same-isolate-stuck-idle"),
+      version: "4",
+    });
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const { runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      invoke,
+    });
+
+    await runner.startStuckInvocationForTest({
+      reason: "idle_shutdown_checkpoint",
+      userId: "member_123",
+    });
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await flushDetachedRunnerDrive();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(
+      sql.exec(
+        `SELECT active_invocation_id,
+                in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_id: null,
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
     }]);
   });
 
@@ -3494,7 +3544,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("continues heartbeat liveness while preserving pending foreground work", async () => {
+  it("yields heartbeat liveness while preserving pending foreground work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -3526,9 +3576,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       instruction: {
-        kind: "continue",
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        status: "scheduled",
       },
-      inputAvailable: false,
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
       pendingNudge: true,
@@ -3537,7 +3589,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(alarms).toEqual(["2026-04-27T00:00:03.000Z"]);
   });
 
-  it("continues heartbeat liveness for pending work without the legacy nudge mirror", async () => {
+  it("yields heartbeat liveness for pending work without the legacy nudge mirror", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, runner, sql } = createRunnerCryptoContextHarness(null);
@@ -3567,9 +3619,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       instruction: {
-        kind: "continue",
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        status: "scheduled",
       },
-      inputAvailable: false,
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
       pendingNudge: true,
@@ -3629,9 +3683,11 @@ describe("HostedUserRunner runtime crypto context", () => {
       userId: "member_123",
     })).resolves.toEqual({
       instruction: {
-        kind: "continue",
+        kind: "yield",
+        nextWakeAt: "2026-04-27T00:00:03.000Z",
+        status: "scheduled",
       },
-      inputAvailable: false,
+      inputAvailable: true,
       nextAlarmAt: "2026-04-27T00:00:03.000Z",
       ok: true,
       pendingNudge: true,

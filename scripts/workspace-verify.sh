@@ -558,7 +558,7 @@ run_workspace_package_coverage() {
     run_timed_step \
       "$label" \
       env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
-        bash -c 'pnpm --dir packages/contracts test:coverage:vitest && node packages/contracts/dist/scripts/verify.js'
+        bash -c 'pnpm --dir packages/contracts test:coverage:vitest && pnpm --dir packages/contracts test:artifacts'
     return $?
   fi
 
@@ -570,17 +570,18 @@ run_workspace_package_coverage() {
 run_all_package_coverage() {
   local contracts_artifacts_prepared="${1:-0}"
   local package_coverage_dirs=(
-    "packages/assistant-cli"
-    "packages/assistant-engine"
-    "packages/assistant-runtime"
-    "packages/assistantd"
-    # Keep CLI out of the same outer batch as contracts: contracts artifact
-    # verification rebuilds shared dist outputs that the CLI built-runtime tests import.
-    "packages/cloudflare-hosted-control"
-    "packages/contracts"
-    "packages/core"
-    "packages/device-syncd"
     "packages/cli"
+    "packages/assistant-engine"
+    "packages/core"
+    "packages/assistant-runtime"
+    "packages/setup-cli"
+    "packages/assistant-cli"
+    "packages/assistantd"
+    "packages/cloudflare-hosted-control"
+    # Keep contracts out of the same outer batch as CLI: contracts artifact
+    # verification rebuilds shared dist outputs that the CLI built-runtime tests import.
+    "packages/contracts"
+    "packages/device-syncd"
     "packages/gateway-core"
     "packages/gateway-local"
     "packages/health-metrics"
@@ -594,19 +595,19 @@ run_all_package_coverage() {
     "packages/parsers"
     "packages/query"
     "packages/runtime-state"
-    "packages/setup-cli"
     "packages/vault-usecases"
   )
   local package_coverage_labels=(
-    "Assistant CLI package coverage"
+    "CLI package coverage"
     "Assistant engine package coverage"
+    "Core owner coverage"
     "Assistant runtime package coverage"
+    "Setup CLI package coverage"
+    "Assistant CLI package coverage"
     "Assistantd package coverage"
     "Cloudflare hosted control package coverage"
     "Contracts package coverage"
-    "Core owner coverage"
     "Device syncd package coverage"
-    "CLI package coverage"
     "Gateway core package coverage"
     "Gateway local package coverage"
     "Health metrics package coverage"
@@ -620,7 +621,6 @@ run_all_package_coverage() {
     "Parsers package coverage"
     "Query owner coverage"
     "Runtime state package coverage"
-    "Setup CLI package coverage"
     "Vault usecases package coverage"
   )
   local package_count="${#package_coverage_dirs[@]}"
