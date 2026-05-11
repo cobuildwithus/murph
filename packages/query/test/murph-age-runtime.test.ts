@@ -223,6 +223,8 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
     insertMetricPoints(vaultRoot, [
       ...lab9BpBodyMetricPoints(),
       ...wearableContextMetricPoints(),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
     ]);
 
     const output = await calculateMurphAgeFromVaultInputBundle({
@@ -246,6 +248,29 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
     assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
     assert.equal(output.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
     assert.equal(output.contextAssessments[0]?.selectedMetricKeys.includes("resting-heart-rate"), true);
+    assert.equal(output.wearableShadowIncrementAssessments.length, 4);
+    const activityShadow = output.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "activity"
+    );
+    assert.equal(activityShadow?.status, "ready");
+    assert.equal(activityShadow?.scoreBearing, false);
+    assert.equal(activityShadow?.scoreContributionAuthorized, false);
+    assert.equal(activityShadow?.selectedMetricKeys.includes("steps"), true);
+    assert.equal(activityShadow?.selectedMetricKeys.includes("wearable-coverage-index"), true);
+    assert.equal(activityShadow?.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
+    assert.equal(activityShadow ? "value" in activityShadow : true, false);
+    assert.equal(activityShadow ? "unit" in activityShadow : true, false);
+    const restingHeartRateShadow = output.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "resting-heart-rate"
+    );
+    assert.equal(restingHeartRateShadow?.status, "ready");
+    const hrvShadow = output.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "hrv");
+    assert.equal(hrvShadow?.status, "ready");
+    const sleepShadow = output.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "sleep");
+    assert.equal(sleepShadow?.status, "missing");
+    assert.equal(sleepShadow?.missingMetricKeys.includes("total-sleep-minutes"), true);
+    const publicSummary = summarizeMurphAgeCalculatorPublicOutput(output);
+    assert.equal("wearableShadowIncrementAssessments" in publicSummary, false);
     const contextStepStatus = output.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
     assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
     assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);
