@@ -1928,6 +1928,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefaultSummary.ageEstimateAvailable, false);
   assert.equal(productDefaultSummary.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(productDefaultSummary.selectedScoreBearingMetricKeys.length, 0);
+  assert.equal(productDefaultSummary.wearableContext.quality, "strong-context");
+  assert.equal(productDefaultSummary.wearableContext.scoreBearing, false);
+  assert.equal(productDefaultSummary.wearableContext.scoreContributionAuthorized, false);
+  assert.equal(productDefaultSummary.wearableContext.riskEffect, "not-estimated");
+  assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("activity"), true);
+  assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("sleep"), true);
+  assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("recovery"), true);
+  assert.equal(productDefaultSummary.wearableContext.availableFeatureFamilies.includes("quality"), true);
 
   const research = calculateMurphAgeFromInputBundle({
     asOf,
@@ -1974,6 +1982,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.contextOnlyMetricKeys.includes("sleep-duration-variability-minutes"), true);
   assert.equal(researchSummary.contextOnlyMetricKeys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(researchSummary.contextOnlyPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), true);
+  assert.equal(researchSummary.wearableContext.quality, "strong-context");
+  assert.equal(researchSummary.wearableContext.readyFeatureCount, 7);
+  assert.equal(researchSummary.wearableContext.readyMetricCount, 7);
+  assert.equal(researchSummary.wearableContext.readyPointCount, 7);
+  assert.equal(researchSummary.wearableContext.availableQualityFeatureKeys.includes("wearable-coverage-index"), true);
+  assert.equal(researchSummary.wearableContext.missingQualityFeatureKeys.length, 0);
+  assert.equal(researchSummary.wearableContext.uncertaintyAction, "context-only");
+  assert.equal(researchSummary.wearableContext.scoreBearing, false);
+  assert.equal(researchSummary.wearableContext.scoreContributionAuthorized, false);
   const productRiskOnlySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
     authorization: {
@@ -2108,6 +2125,41 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("resting-heart-rate"), true);
   assert.equal(wearableOnlySummary.contextOnlyFeatureKeys.includes("sleep-duration-variability-minutes"), true);
   assert.equal(wearableOnlySummary.selectedScoreBearingMetricKeys.length, 0);
+  assert.equal(wearableOnlySummary.ageEstimateAvailable, false);
+  assert.equal(wearableOnlySummary.productAgeDisplayReady, false);
+  assert.equal(wearableOnlySummary.wearableContext.quality, "strong-context");
+  assert.deepEqual(Object.keys(wearableOnlySummary.wearableContext).sort(), [
+    "availableFeatureFamilies",
+    "availableQualityFeatureKeys",
+    "missingQualityFeatureKeys",
+    "quality",
+    "readyFeatureCount",
+    "readyMetricCount",
+    "readyPointCount",
+    "riskEffect",
+    "scoreBearing",
+    "scoreContributionAuthorized",
+    "uncertaintyAction",
+  ]);
+  assert.equal(wearableOnlySummary.wearableContext.riskEffect, "not-estimated");
+  assert.equal(wearableOnlySummary.wearableContext.scoreBearing, false);
+  assert.equal(wearableOnlySummary.wearableContext.scoreContributionAuthorized, false);
+
+  const thinWearableOnly = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: [wearableContextPoints[0]!],
+    sex: "female",
+  });
+  const thinWearableSummary = summarizeMurphAgeCalculatorOutput(thinWearableOnly);
+  assert.equal(thinWearableSummary.displayStatus, "context-only");
+  assert.equal(thinWearableSummary.wearableContext.quality, "thin");
+  assert.equal(thinWearableSummary.wearableContext.availableFeatureFamilies.includes("activity"), true);
+  assert.equal(thinWearableSummary.wearableContext.availableFeatureFamilies.includes("quality"), false);
+  assert.equal(thinWearableSummary.wearableContext.missingQualityFeatureKeys.includes("wearable-coverage-index"), true);
+  assert.equal(thinWearableSummary.wearableContext.readyFeatureCount, 1);
+  assert.equal(thinWearableSummary.wearableContext.scoreContributionAuthorized, false);
 
   const policyViolation = calculateMurphAgeFromInputBundle({
     asOf,
