@@ -132,6 +132,17 @@ class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
   }
 }
 
+class HostedRunnerRetryAlreadyRecordedError extends Error {
+  constructor(
+    message: string,
+    readonly record: RunnerStateRecord,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "HostedRunnerRetryAlreadyRecordedError";
+  }
+}
+
 export class HostedUserRunner {
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
@@ -588,7 +599,9 @@ export class HostedUserRunner {
         token,
         retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
       });
-      await this.syncAlarm(failed.record);
+      if (!failed.failed) {
+        throw error;
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -603,6 +616,15 @@ export class HostedUserRunner {
         phase: "failed",
         userId: initialRecord.userId,
       });
+      try {
+        await this.syncAlarm(failed.record);
+      } catch (alarmError) {
+        throw new HostedRunnerRetryAlreadyRecordedError(
+          "Hosted runner retry was recorded, but alarm sync failed.",
+          failed.record,
+          { cause: alarmError },
+        );
+      }
       return {
         nextWakeAt: readRunnerStateAlarmAt(failed.record),
         status: "scheduled",
@@ -901,6 +923,10 @@ export class HostedUserRunner {
 
   private async scheduleRetryAfterFailure(error: unknown): Promise<void> {
     try {
+      if (error instanceof HostedRunnerRetryAlreadyRecordedError) {
+        await this.syncAlarm(error.record);
+        return;
+      }
       const record = await this.stateStore.scheduleRetry({
         error,
         retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
