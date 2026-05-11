@@ -911,7 +911,15 @@ describe("hosted local dev stack", () => {
       tunnelName: "dev",
     });
     spawnChildProcess
-      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 141 }))
+      .mockReturnValueOnce(createBufferedChild({
+        exitCode: null,
+        name: "cloudflare",
+        pid: 141,
+        stdoutText: [
+          "#8 exporting manifest sha256:be00319900000000000000000000000000000000000000000000000000000000 done",
+          "#8 naming to docker.io/cloudflare-dev/runnercontainer:be003199 done",
+        ].join("\n"),
+      }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "linq-tunnel", pid: 142 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 143 }));
 
@@ -967,6 +975,17 @@ describe("hosted local dev stack", () => {
     expect(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]).toBeLessThan(
       registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0],
     );
+    const runnerImageInspectCallIndex = spawnSync.mock.calls.findIndex(([command, args]) =>
+      command === "docker" &&
+      Array.isArray(args) &&
+      args[0] === "image" &&
+      args[1] === "inspect" &&
+      args[2] === "cloudflare-dev/runnercontainer:be003199"
+    );
+    expect(runnerImageInspectCallIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      spawnSync.mock.invocationCallOrder[runnerImageInspectCallIndex] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(waitForHostedLocalLinqWebhookTarget.mock.invocationCallOrder[0]);
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
