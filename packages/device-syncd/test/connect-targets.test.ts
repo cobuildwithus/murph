@@ -7,6 +7,7 @@ import {
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
 } from "../src/config.ts";
+import { readConfiguredDeviceSyncConnectTargetConfigs } from "../src/connect-config.ts";
 
 test("connect targets prefer direct providers when direct and Junction routes are configured", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
@@ -56,6 +57,31 @@ test("connect targets prefer direct providers when direct and Junction routes ar
     label: "WHOOP",
     provider: "whoop",
   });
+});
+
+test("lightweight connect target config reader matches provider config target presence", () => {
+  const env = {
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "oura,strava,whoop,fitbit",
+    JUNCTION_REGION: "us",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+  };
+
+  assert.deepEqual(
+    listConfiguredDeviceSyncConnectTargets(
+      readConfiguredDeviceSyncConnectTargetConfigs(env),
+    ),
+    listConfiguredDeviceSyncConnectTargets(
+      readConfiguredDeviceSyncProviderConfigs(env),
+    ),
+  );
 });
 
 test("connect target source-id lookups resolve direct and Junction sources", () => {

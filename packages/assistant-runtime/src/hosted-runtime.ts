@@ -768,11 +768,6 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
     if (!scheduled) {
       throw error;
     }
-    observeIdleShutdownCheckpointAfterPreemption({
-      checkpointPromise,
-      expectedUserId: input.expectedUserId,
-      onCheckpointValidated: input.onCheckpointValidated,
-    });
     return scheduled;
   }
   input.assertRuntimeLiveness();
@@ -843,19 +838,6 @@ function isNodeFileNotFoundError(error: unknown): boolean {
     && "code" in error
     && error.code === "ENOENT"
   );
-}
-
-function observeIdleShutdownCheckpointAfterPreemption(input: {
-  checkpointPromise: Promise<HostedWorkspaceCheckpointResponse>;
-  expectedUserId: string;
-  onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
-}): void {
-  void input.checkpointPromise
-    .then(async (checkpoint) => {
-      assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
-      await input.onCheckpointValidated?.(checkpoint);
-    })
-    .catch(() => undefined);
 }
 
 function assertIdleShutdownCheckpointAccepted(

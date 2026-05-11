@@ -4,9 +4,9 @@ import {
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
-  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncConnectTargetConfigs,
   resolveJunctionConnectTargetForSourceId,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
@@ -313,7 +313,7 @@ export function resolveConfiguredConnectSources(
 ): ConnectSource[] {
   const connectTargetBySourceId = new Map(
     listConfiguredDeviceSyncConnectTargets(
-      readConfiguredDeviceSyncProviderConfigs(process.env),
+      readConfiguredDeviceSyncConnectTargetConfigs(process.env),
     ).map((target) => [target.connectSourceId, target.connectTarget] as const),
   );
 

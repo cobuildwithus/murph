@@ -158,6 +158,18 @@ test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
   assert.match(source, /from ["']@murphai\/runtime-state\/node\/assistant-runtime-issues["']/u);
 });
 
+test("device connect routes use the narrow connect-config entrypoint", () => {
+  for (const relativePath of [
+    "apps/web/app/(dashboard)/connect/page.tsx",
+    "apps/web/app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route.ts",
+  ]) {
+    const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
+
+    assert.doesNotMatch(source, /from ["']@murphai\/device-syncd\/config["']/u);
+    assert.match(source, /from ["']@murphai\/device-syncd\/connect-config["']/u);
+  }
+});
+
 test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops", () => {
   assert.deepEqual(HOSTED_WEB_WORKFLOW_OPTIONS, {
     workflows: {

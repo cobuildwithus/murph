@@ -1,8 +1,8 @@
+import { getConfiguredDeviceSyncProviderManifest } from "./provider-manifests.ts";
 import {
   configuredDeviceSyncProviderKeys,
-  getConfiguredDeviceSyncProviderManifest,
   listConfiguredDeviceSyncProviderNames,
-} from "./provider-manifests.ts";
+} from "./provider-keys.ts";
 import {
   optionalEnv,
   parseCsvEnv,
