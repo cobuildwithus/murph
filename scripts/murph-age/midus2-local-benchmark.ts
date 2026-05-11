@@ -33,12 +33,11 @@ const FEATURE_DEFINITIONS = [
   { column: "B4BTRIGL", key: "log-triglycerides", transform: (value: number) => value > 0 ? Math.log(value) : null },
   { column: "B4BHDL", key: "hdl-c", transform: (value: number) => value },
   { column: "B4BLDL", key: "ldl-c", transform: (value: number) => value },
-  { column: "B4BCRP", key: "log-crp", transform: (value: number) => value >= 0 ? Math.log1p(value) : null },
 ] as const;
 
 const MODEL_FEATURE_SETS = {
   age_sex_reference: ["age", "male"],
-  clinical_core_labs_no_albumin: [
+  clinical_core_labs_no_albumin_no_crp: [
     "age",
     "male",
     "bmi",
@@ -47,7 +46,6 @@ const MODEL_FEATURE_SETS = {
     "log-triglycerides",
     "hdl-c",
     "ldl-c",
-    "log-crp",
   ],
 } as const;
 

@@ -51,9 +51,10 @@ describe("MIDUS 2 local benchmark runner", () => {
       expect(serialized).not.toContain("coefficients\":");
       expect(serialized).not.toContain("predictions\":");
 
-      const clinical = output.models.clinical_core_labs_no_albumin;
-      expect(clinical?.featureKeys).toContain("log-crp");
+      const clinical = output.models.clinical_core_labs_no_albumin_no_crp;
       expect(clinical?.featureKeys).not.toContain("albumin");
+      expect(clinical?.featureKeys).not.toContain("log-crp");
+      expect(JSON.stringify(output)).not.toContain("log-crp");
       expect(Number.isFinite(clinical?.splitMetrics.test.logLoss)).toBe(true);
       expect(Number.isFinite(clinical?.splitMetrics.test.brier)).toBe(true);
 
@@ -129,7 +130,6 @@ async function writeSyntheticMidus2Downloads(downloadsDir: string): Promise<void
     "B4BTRIGL",
     "B4BHDL",
     "B4BLDL",
-    "B4BCRP",
   ]];
   const mortalityRows = [["M2ID", "DOD_Y"]];
 
@@ -149,7 +149,6 @@ async function writeSyntheticMidus2Downloads(downloadsDir: string): Promise<void
       String(70 + (index % 100) + (event ? 25 : 0)),
       String(40 + (index % 35) - (event ? 4 : 0)),
       String(80 + (index % 65) + (event ? 10 : 0)),
-      String(0.4 + (index % 10) * 0.35 + (event ? 1.4 : 0)),
     ]);
     if (event) {
       mortalityRows.push([id, String(2008 + (index % 7))]);
