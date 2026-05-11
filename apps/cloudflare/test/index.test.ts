@@ -2349,6 +2349,9 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     nudgeHostedRunnerForUser,
     ownsActiveInvocationLease: vi.fn(async () => true),
     recordActiveInvocationHeartbeat: vi.fn(async () => ({
+      instruction: {
+        kind: "continue" as const,
+      },
       inputAvailable: false,
       nextAlarmAt: null,
       ok: true as const,

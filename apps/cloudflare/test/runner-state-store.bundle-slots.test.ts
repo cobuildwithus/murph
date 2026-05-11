@@ -675,6 +675,45 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("continues active foreground heartbeats while preserving pending work", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const lease = await store.beginInvocation({
+      reason: "nudge",
+      userId: "user-existing",
+    });
+    await store.bindInvocationWorkspaceVersion({
+      lease,
+      workspaceVersion: "0",
+    });
+    db.prepare(`
+      UPDATE runner_meta
+      SET pending_nudge = 0,
+          pending_work = 1
+      WHERE singleton = 1
+    `).run();
+
+    await expect(store.recordActiveInvocationHeartbeatInstruction({
+      attemptId: lease.attemptId,
+      heartbeatStaleMs: 3_000,
+      leaseGeneration: lease.leaseGeneration,
+      nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+      runnerReadyTimeoutMs: 20_000,
+      runnerTimeoutMs: 45_000,
+      userId: lease.userId,
+    })).resolves.toMatchObject({
+      kind: "continue",
+      record: {
+        alarm: {
+          dueAt: "2026-04-27T00:00:13.000Z",
+          kind: "work",
+        },
+        pendingNudge: false,
+        pendingWork: true,
+      },
+    });
+  });
+
   it("rejects expired active invocation heartbeats and clears the stale lease", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");

@@ -1638,7 +1638,7 @@ export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
         if (!container.abortWorkspaceInvocation) {
           return;
         }
-        void container.abortWorkspaceInvocation({
+        await container.abortWorkspaceInvocation({
           attemptId: input.job.request.attemptId,
           userId: jobUserId,
         }).catch((error: unknown) => {

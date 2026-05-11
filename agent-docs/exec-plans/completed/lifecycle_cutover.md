@@ -500,3 +500,10 @@ With your clarification, the final architecture is even simpler:
 > **Idle checkpoint is warm-only, best-effort compaction. Foreground work is the only thing allowed to cold-start or restore. RunnerStateStore is the only lifecycle brain.**
 
 That is the maintainable shape.
+
+## Evidence
+
+- 2026-05-11: Follow-up cutover pass kept heartbeat responses instruction-shaped through runtime liveness and post-checkpoint cleanup, kept skipped/scheduled idle checkpoints non-destroying/non-retrying, destroyed quiet committed warm checkpoints, and made warm-only idle preemption abort the invocation without destroying the shell. Focused `apps/cloudflare` and `packages/assistant-runtime` typechecks and regression suites passed.
+Status: completed
+Updated: 2026-05-11
+Completed: 2026-05-11

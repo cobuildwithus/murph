@@ -136,6 +136,42 @@ describe("startRuntimeLivenessHeartbeat", () => {
     await heartbeat.stop();
   });
 
+  test("uses explicit continue instructions instead of legacy input metadata", async () => {
+    vi.useFakeTimers();
+    const available: string[] = [];
+    const port: RuntimeLivenessPort = {
+      async touch() {
+        return {
+          instruction: { kind: "continue" },
+          inputAvailable: true,
+          nextAlarmAt: "2026-04-27T00:00:45.000Z",
+          ok: true,
+          pendingNudge: true,
+        };
+      },
+    };
+
+    const heartbeat = startRuntimeLivenessHeartbeat({
+      intervalMs: 1_000,
+      onInputAvailable(result) {
+        available.push(result.instruction.kind);
+      },
+      port,
+      requestId: "request_123",
+    });
+
+    assert.deepEqual(await heartbeat.initialTouch, {
+      instruction: { kind: "continue" },
+      inputAvailable: true,
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+      pendingNudge: true,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    assert.deepEqual(available, []);
+    await heartbeat.stop();
+  });
+
   test("skips overlapping touches and reports rejected liveness", async () => {
     vi.useFakeTimers();
     let releaseFirstTouch!: () => void;

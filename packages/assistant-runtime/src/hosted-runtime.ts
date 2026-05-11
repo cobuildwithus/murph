@@ -913,7 +913,10 @@ async function touchRuntimeLivenessOnce(input: {
 }): Promise<RuntimeLivenessTouchResult> {
   const port = input.port ?? null;
   if (!port) {
-    return { ok: true };
+    return {
+      instruction: { kind: "continue" },
+      ok: true,
+    };
   }
 
   return await raceHostedRuntimeLiveness(

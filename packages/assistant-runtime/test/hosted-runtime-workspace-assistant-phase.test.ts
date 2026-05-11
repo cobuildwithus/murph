@@ -9,6 +9,9 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  RuntimeLivenessTouchResult,
+} from "../src/hosted-runtime-contracts.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -87,6 +90,24 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
 }));
+
+function continueRuntimeLiveness(): RuntimeLivenessTouchResult {
+  return {
+    instruction: { kind: "continue" },
+    ok: true,
+  };
+}
+
+function yieldRuntimeLiveness(nextWakeAt: string | null): RuntimeLivenessTouchResult {
+  return {
+    instruction: {
+      kind: "yield",
+      nextWakeAt,
+      status: "scheduled",
+    },
+    ok: true,
+  };
+}
 
 import {
   runHostedWorkspaceAssistantPhase,
@@ -2075,6 +2096,41 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "hosted-workspace-invocation:attempt_synthetic_phase:post-checkpoint",
       "hosted-workspace-invocation:attempt_synthetic_phase:post-checkpoint",
     ]);
+  });
+
+  it("yields post-checkpoint delivery cleanup when runtime liveness says foreground input is available", async () => {
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_notification",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(null);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeLivenessPort: {
+        async touch() {
+          return yieldRuntimeLiveness("2026-04-27T00:00:45.000Z");
+        },
+      },
+    }));
+
+    await result.afterCheckpoint?.();
+    const deliveryDrainInput = mocks.drainHostedPreparedAssistantDeliveries
+      .mock.calls[0]?.[0];
+    await expect(deliveryDrainInput.assertLiveness()).rejects.toMatchObject({
+      name: "HostedWorkspaceAssistantPhaseInputAvailableError",
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+    });
   });
 
   it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {

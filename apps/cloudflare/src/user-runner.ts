@@ -2396,18 +2396,10 @@ export class HostedUserRunner {
   }): Promise<void> {
     if (input.result.idleShutdownCheckpointSkipped) {
       await this.stateStore.clearDeferredCheckpointRequired();
-      if (input.result.idleShutdownCheckpointSkipped === "container_not_warm") {
-        await this.finishSkippedIdleShutdownCheckpointWithoutContainerCleanupBestEffort({
-          preferredWakeAt: input.result.nextWakeAt ?? null,
-          userId: input.userId,
-        });
-      } else {
-        await this.finishIdleShutdownCheckpointBestEffort({
-          cleanupFailureMessage: "Hosted skipped idle-shutdown checkpoint cleanup failed.",
-          preferredWakeAt: input.result.nextWakeAt ?? null,
-          userId: input.userId,
-        });
-      }
+      await this.finishSkippedIdleShutdownCheckpointWithoutContainerCleanupBestEffort({
+        preferredWakeAt: input.result.nextWakeAt ?? null,
+        userId: input.userId,
+      });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -2415,6 +2407,15 @@ export class HostedUserRunner {
         },
         message: "Hosted runner skipped idle-shutdown checkpoint without retry.",
         phase: "checkpoint",
+        userId: input.userId,
+      });
+      return;
+    }
+
+    if (input.result.status === "scheduled") {
+      await this.stateStore.clearDeferredCheckpointRequired();
+      await this.finishSkippedIdleShutdownCheckpointWithoutContainerCleanupBestEffort({
+        preferredWakeAt: input.result.nextWakeAt ?? null,
         userId: input.userId,
       });
       return;
