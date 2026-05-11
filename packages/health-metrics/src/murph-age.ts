@@ -257,6 +257,7 @@ export interface MurphAgeCalculatorOutput {
   schemaVersion: typeof MURPH_AGE_RESULT_SCHEMA_VERSION;
   status: MurphAgeInputBundleStatus;
   warnings: MurphAgeWarning[];
+  wearableShadowIncrementAssessments: MurphAgeWearableShadowIncrementAssessment[];
 }
 
 export type MurphAgeDisplayStatus =
@@ -281,6 +282,7 @@ export type MurphAgeWearableShadowIncrementFamily =
   | "hrv"
   | "resting-heart-rate"
   | "sleep";
+export type MurphAgeWearableShadowIncrementStatus = "blocked" | "missing" | "ready";
 
 export interface MurphAgeWearableContextSummary {
   availableFeatureFamilies: MurphAgeWearableContextFamily[];
@@ -338,10 +340,44 @@ export interface MurphAgeWearableShadowIncrementPolicy {
   family: MurphAgeWearableShadowIncrementFamily;
   outputBoundary: MurphAgeWearableShadowIncrementOutputBoundary;
   productAuthorized: false;
+  requiredQualityMetricKeys: readonly string[];
   riskEffect: "not-estimated";
   schemaVersion: typeof MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION;
   scoreBearing: false;
   scoreContributionAuthorized: false;
+  signalMetricKeys: readonly string[];
+}
+
+type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
+  MurphAgeWearableShadowIncrementPolicy,
+  "allowedMetricKeys"
+>;
+
+export interface MurphAgeWearableShadowIncrementAssessmentInput {
+  anchorCardId?: MurphAgeScoreBearingCardId | null;
+  asOf?: string;
+  points: readonly MetricPoint[];
+}
+
+export interface MurphAgeWearableShadowIncrementAssessment {
+  anchorCardId: MurphAgeScoreBearingCardId | null;
+  anchorCompatible: boolean;
+  availableMetricKeys: string[];
+  compatibleAnchorCardIds: MurphAgeScoreBearingCardId[];
+  family: MurphAgeWearableShadowIncrementFamily;
+  missingMetricKeys: string[];
+  missingQualityMetricKeys: string[];
+  outputBoundary: MurphAgeWearableShadowIncrementOutputBoundary;
+  productAuthorized: false;
+  readySignalMetricKeys: string[];
+  riskEffect: "not-estimated";
+  schemaVersion: typeof MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION;
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  selectedMetricKeys: string[];
+  selectedPointIds: string[];
+  status: MurphAgeWearableShadowIncrementStatus;
+  warnings: MurphAgeWarning[];
 }
 
 export interface MurphAgeModelValidationResult {
@@ -543,6 +579,12 @@ const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
   "lab5_bp_bmi_transport_research",
 ] satisfies readonly MurphAgeScoreBearingCardId[];
 
+const MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS = [
+  "activity-summary",
+  "sleep-summary",
+  "wearable-summary",
+] as const;
+
 const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
     acceptedBundleIds: ["lab9-bp-body"],
@@ -609,80 +651,91 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
   },
 ] satisfies readonly MurphAgeModelCardPolicy[];
 
-const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES = [
+const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   {
-    allowedMetricKeys: [
-      "steps",
-      "activity-minutes",
-      "mvpa-minutes",
-      "sedentary-minutes",
-      "estimated-vo2-max",
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
     evidenceSummary: "Activity features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
     family: "activity",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
+    requiredQualityMetricKeys: [
+      "wearable-valid-day-count-28d",
+      "wearable-coverage-index",
+    ],
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "steps",
+      "activity-minutes",
+      "mvpa-minutes",
+      "sedentary-minutes",
+      "estimated-vo2-max",
+    ],
   },
   {
-    allowedMetricKeys: [
-      "total-sleep-minutes",
-      "sleep-duration-variability-minutes",
-      "sleep-efficiency",
-      "sleep-regularity-score",
-      "sleep-midpoint-variability-minutes",
-      "wearable-valid-night-count-28d",
-      "wearable-coverage-index",
-    ],
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
     evidenceSummary: "Sleep features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
     family: "sleep",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
+    requiredQualityMetricKeys: [
+      "wearable-valid-night-count-28d",
+      "wearable-coverage-index",
+    ],
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "total-sleep-minutes",
+      "sleep-duration-variability-minutes",
+      "sleep-efficiency",
+      "sleep-regularity-score",
+      "sleep-midpoint-variability-minutes",
+    ],
   },
   {
-    allowedMetricKeys: [
-      "resting-heart-rate",
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
     evidenceSummary: "Resting-heart-rate features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
     family: "resting-heart-rate",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
+    requiredQualityMetricKeys: [
+      "wearable-valid-day-count-28d",
+      "wearable-coverage-index",
+    ],
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "resting-heart-rate",
+    ],
   },
   {
-    allowedMetricKeys: [
-      "hrv-rmssd",
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
     compatibleAnchorCardIds: MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS,
     evidenceSummary: "HRV features may be evaluated as a shadow increment over the frozen lab/BP/body anchor, but they are not score-bearing.",
     family: "hrv",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
+    requiredQualityMetricKeys: [
+      "wearable-valid-day-count-28d",
+      "wearable-coverage-index",
+    ],
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "hrv-rmssd",
+    ],
   },
-] satisfies readonly MurphAgeWearableShadowIncrementPolicy[];
+] satisfies readonly MurphAgeWearableShadowIncrementPolicyDefinition[];
+
+const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES =
+  MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS.map(completeWearableShadowIncrementPolicy);
 
 export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
   return MURPH_AGE_MODEL_CARD_POLICIES.map(cloneMurphAgeModelCardPolicy);
@@ -716,6 +769,14 @@ export function resolveMurphAgeWearableShadowIncrementPolicy(
     candidate.family === family
   ) ?? null;
   return policy ? cloneMurphAgeWearableShadowIncrementPolicy(policy) : null;
+}
+
+export function assessMurphAgeWearableShadowIncrements(
+  input: MurphAgeWearableShadowIncrementAssessmentInput,
+): MurphAgeWearableShadowIncrementAssessment[] {
+  return MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES.map((policy) =>
+    assessMurphAgeWearableShadowIncrementPolicy({ input, policy })
+  );
 }
 
 export function createMurphAgeAbstainedAuthorization(input: {
@@ -766,6 +827,13 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     primaryBundleId: bundleAssessment.bundleId,
   });
   const cardPolicy = resolveMurphAgeModelCardPolicy(bundleAssessment.recommendedCardId);
+  const wearableShadowIncrementAssessments = cardPolicy && isScoreBearingCardId(cardPolicy.cardId)
+    ? assessMurphAgeWearableShadowIncrements({
+      anchorCardId: cardPolicy.cardId,
+      asOf: input.asOf,
+      points: input.points,
+    })
+    : [];
   const authorization = createMurphAgeCardPolicyAuthorization({
     bundleAssessment,
     cardPolicy,
@@ -786,6 +854,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       status: bundleAssessment.status,
       authorization,
       warnings,
+      wearableShadowIncrementAssessments,
     });
   }
 
@@ -803,6 +872,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       status: "abstain",
       authorization,
       warnings,
+      wearableShadowIncrementAssessments,
     });
   }
 
@@ -821,6 +891,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       status: "abstain",
       authorization,
       warnings,
+      wearableShadowIncrementAssessments,
     });
   }
 
@@ -851,6 +922,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       status: "abstain",
       authorization,
       warnings,
+      wearableShadowIncrementAssessments,
     });
   }
 
@@ -874,6 +946,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     status: result.status === "ready" ? "ready" : "abstain",
     authorization,
     warnings: [...warnings, ...result.warnings],
+    wearableShadowIncrementAssessments,
   });
 }
 
@@ -1224,6 +1297,7 @@ function buildCalculatorOutput(input: {
   result: MurphAgeResult | null;
   status: MurphAgeInputBundleStatus;
   warnings: readonly MurphAgeWarning[];
+  wearableShadowIncrementAssessments: readonly MurphAgeWearableShadowIncrementAssessment[];
 }): MurphAgeCalculatorOutput {
   return {
     authorization: cloneMurphAgeAuthorization(input.authorization),
@@ -1235,6 +1309,9 @@ function buildCalculatorOutput(input: {
     schemaVersion: MURPH_AGE_RESULT_SCHEMA_VERSION,
     status: input.status,
     warnings: [...input.warnings],
+    wearableShadowIncrementAssessments: input.wearableShadowIncrementAssessments.map(
+      cloneMurphAgeWearableShadowIncrementAssessment,
+    ),
   };
 }
 
@@ -1262,6 +1339,91 @@ function assessMurphAgeWearableContext(
     status: "abstain",
     warnings: [],
   });
+}
+
+function assessMurphAgeWearableShadowIncrementPolicy(input: {
+  input: MurphAgeWearableShadowIncrementAssessmentInput;
+  policy: MurphAgeWearableShadowIncrementPolicy;
+}): MurphAgeWearableShadowIncrementAssessment {
+  const anchorCardId = input.input.anchorCardId ?? null;
+  const anchorCompatible = anchorCardId !== null
+    && input.policy.compatibleAnchorCardIds.includes(anchorCardId);
+  const selectedByMetricKey = new Map<string, MetricSelection>();
+  const wearablePoints = input.input.points.filter(isMurphAgeWearableShadowPoint);
+  for (const metricKey of input.policy.allowedMetricKeys) {
+    const selection = selectMetricValue({
+      metricKey,
+      now: input.input.asOf,
+      points: wearablePoints,
+    });
+    if (selection.status === "ready" && selection.value !== null && Number.isFinite(selection.value)) {
+      selectedByMetricKey.set(metricKey, selection);
+    }
+  }
+
+  const readySignalMetricKeys = input.policy.signalMetricKeys.filter((metricKey) =>
+    selectedByMetricKey.has(metricKey)
+  );
+  const missingQualityMetricKeys = input.policy.requiredQualityMetricKeys.filter((metricKey) =>
+    !selectedByMetricKey.has(metricKey)
+  );
+  const missingMetricKeys = readySignalMetricKeys.length > 0
+    ? missingQualityMetricKeys
+    : uniqueStrings([...input.policy.signalMetricKeys, ...missingQualityMetricKeys]);
+  const selectedMetricKeys = uniqueStrings([...selectedByMetricKey.keys()]);
+  const selectedPointIds = uniqueStrings(
+    [...selectedByMetricKey.values()].flatMap((selection) => selection.provenance.pointIds),
+  );
+  const status: MurphAgeWearableShadowIncrementStatus = !anchorCompatible
+    ? "blocked"
+    : missingMetricKeys.length === 0
+      ? "ready"
+      : "missing";
+  const warnings = wearableShadowIncrementWarnings({
+    anchorCardId,
+    family: input.policy.family,
+    missingMetricKeys,
+    status,
+  });
+
+  return {
+    anchorCardId,
+    anchorCompatible,
+    availableMetricKeys: selectedMetricKeys,
+    compatibleAnchorCardIds: [...input.policy.compatibleAnchorCardIds],
+    family: input.policy.family,
+    missingMetricKeys,
+    missingQualityMetricKeys,
+    outputBoundary: { ...input.policy.outputBoundary },
+    productAuthorized: false,
+    readySignalMetricKeys,
+    riskEffect: "not-estimated",
+    schemaVersion: input.policy.schemaVersion,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    selectedMetricKeys,
+    selectedPointIds,
+    status,
+    warnings,
+  };
+}
+
+function completeWearableShadowIncrementPolicy(
+  policy: MurphAgeWearableShadowIncrementPolicyDefinition,
+): MurphAgeWearableShadowIncrementPolicy {
+  return {
+    ...policy,
+    allowedMetricKeys: uniqueStrings([
+      ...policy.signalMetricKeys,
+      ...policy.requiredQualityMetricKeys,
+    ]),
+  };
+}
+
+function isMurphAgeWearableShadowPoint(point: MetricPoint): boolean {
+  return MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS.includes(
+    point.source.kind as typeof MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS[number],
+  );
 }
 
 function cloneInputBundleAssessment(assessment: MurphAgeInputBundleAssessment): MurphAgeInputBundleAssessment {
@@ -1425,7 +1587,52 @@ function cloneMurphAgeWearableShadowIncrementPolicy(
     allowedMetricKeys: [...policy.allowedMetricKeys],
     compatibleAnchorCardIds: [...policy.compatibleAnchorCardIds],
     outputBoundary: { ...policy.outputBoundary },
+    requiredQualityMetricKeys: [...policy.requiredQualityMetricKeys],
+    signalMetricKeys: [...policy.signalMetricKeys],
   };
+}
+
+function cloneMurphAgeWearableShadowIncrementAssessment(
+  assessment: MurphAgeWearableShadowIncrementAssessment,
+): MurphAgeWearableShadowIncrementAssessment {
+  return {
+    ...assessment,
+    availableMetricKeys: [...assessment.availableMetricKeys],
+    compatibleAnchorCardIds: [...assessment.compatibleAnchorCardIds],
+    missingMetricKeys: [...assessment.missingMetricKeys],
+    missingQualityMetricKeys: [...assessment.missingQualityMetricKeys],
+    outputBoundary: { ...assessment.outputBoundary },
+    readySignalMetricKeys: [...assessment.readySignalMetricKeys],
+    selectedMetricKeys: [...assessment.selectedMetricKeys],
+    selectedPointIds: [...assessment.selectedPointIds],
+    warnings: assessment.warnings.map((warning) => ({ ...warning })),
+  };
+}
+
+function wearableShadowIncrementWarnings(input: {
+  anchorCardId: MurphAgeScoreBearingCardId | null;
+  family: MurphAgeWearableShadowIncrementFamily;
+  missingMetricKeys: readonly string[];
+  status: MurphAgeWearableShadowIncrementStatus;
+}): MurphAgeWarning[] {
+  if (input.status === "blocked") {
+    return [{
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: input.anchorCardId
+        ? `${input.family} wearable shadow increments are not compatible with ${input.anchorCardId}.`
+        : `${input.family} wearable shadow increments require a score-bearing lab/BP/body anchor.`,
+    }];
+  }
+  if (input.status === "missing") {
+    return [{
+      code: "MODEL_FEATURE_MISSING",
+      message: `${input.family} wearable shadow increment is missing required signal or quality metrics: ${input.missingMetricKeys.join(", ")}.`,
+    }];
+  }
+  return [{
+    code: "CONTEXT_NOT_SCORE_BEARING",
+    message: `${input.family} wearable metrics are ready for shadow research assessment, but they are not authorized to affect Murph Age scoring.`,
+  }];
 }
 
 function createMurphAgeCardPolicyAuthorization(input: {

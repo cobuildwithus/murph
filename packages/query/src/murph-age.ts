@@ -502,6 +502,7 @@ function invalidCalculatorOutput(input: {
     schemaVersion: MURPH_AGE_RESULT_SCHEMA_VERSION,
     status: "abstain",
     warnings: [warning],
+    wearableShadowIncrementAssessments: [],
   };
 }
 

@@ -9,6 +9,7 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
+  assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
@@ -1796,6 +1797,8 @@ test("exposes wearable shadow increment policies without score authorization", (
     assert.equal(policy.compatibleAnchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
     assert.equal(policy.compatibleAnchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
     assert.equal(policy.allowedMetricKeys.includes("wearable-coverage-index"), true);
+    assert.equal(policy.requiredQualityMetricKeys.includes("wearable-coverage-index"), true);
+    assert.ok(policy.signalMetricKeys.length >= 1);
     assert.equal(policy.outputBoundary.aggregateOnly, true);
     assert.equal(policy.outputBoundary.rowValuesExportAllowed, false);
     assert.equal(policy.outputBoundary.participantLevelExportAllowed, false);
@@ -1808,10 +1811,13 @@ test("exposes wearable shadow increment policies without score authorization", (
   assert.equal(activity?.allowedMetricKeys.includes("steps"), true);
   assert.equal(activity?.allowedMetricKeys.includes("mvpa-minutes"), true);
   assert.equal(activity?.allowedMetricKeys.includes("sleep-efficiency"), false);
+  assert.equal(activity?.signalMetricKeys.includes("steps"), true);
+  assert.equal(activity?.requiredQualityMetricKeys.includes("wearable-valid-day-count-28d"), true);
 
   const sleep = resolveMurphAgeWearableShadowIncrementPolicy("sleep");
   assert.equal(sleep?.allowedMetricKeys.includes("sleep-duration-variability-minutes"), true);
   assert.equal(sleep?.allowedMetricKeys.includes("wearable-valid-night-count-28d"), true);
+  assert.equal(sleep?.requiredQualityMetricKeys.includes("wearable-valid-night-count-28d"), true);
 
   const restingHeartRate = resolveMurphAgeWearableShadowIncrementPolicy("resting-heart-rate");
   assert.equal(restingHeartRate?.allowedMetricKeys.includes("resting-heart-rate"), true);
@@ -1824,11 +1830,183 @@ test("exposes wearable shadow increment policies without score authorization", (
   if (activity) {
     (activity.allowedMetricKeys as string[]).push("hba1c");
     (activity.outputBoundary as { rowValuesExportAllowed: boolean }).rowValuesExportAllowed = true;
+    (activity.signalMetricKeys as string[]).push("sleep-efficiency");
   }
 
   const freshActivity = resolveMurphAgeWearableShadowIncrementPolicy("activity");
   assert.equal(freshActivity?.allowedMetricKeys.includes("hba1c"), false);
   assert.equal(freshActivity?.outputBoundary.rowValuesExportAllowed, false);
+  assert.equal(freshActivity?.signalMetricKeys.includes("sleep-efficiency"), false);
+});
+
+test("assesses wearable shadow increment readiness without exposing values", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const shadowPoints = [
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:steps:2026-05-08:shadow:0",
+      metricKey: "steps",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "shadow_steps",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 9_500,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:resting-heart-rate:2026-05-08:shadow:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "shadow_rhr",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 61,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-valid-days:2026-05-08:shadow:0",
+      metricKey: "wearable-valid-day-count-28d",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "shadow_valid_days",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 24,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-coverage:2026-05-08:shadow:0",
+      metricKey: "wearable-coverage-index",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "shadow_coverage",
+      sourceKind: "wearable-summary",
+      unit: "score",
+      value: 0.82,
+    }),
+  ];
+
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    asOf,
+    points: shadowPoints,
+  });
+
+  const activity = assessments.find((assessment) => assessment.family === "activity");
+  assert.equal(activity?.status, "ready");
+  assert.equal(activity?.anchorCompatible, true);
+  assert.equal(activity?.scoreBearing, false);
+  assert.equal(activity?.scoreContributionAuthorized, false);
+  assert.equal(activity?.riskEffect, "not-estimated");
+  assert.equal(activity?.readySignalMetricKeys.includes("steps"), true);
+  assert.equal(activity?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(activity?.selectedMetricKeys.includes("wearable-coverage-index"), true);
+  assert.equal(activity?.selectedPointIds.includes("metric-point:steps:2026-05-08:shadow:0"), true);
+  assert.equal(activity ? "value" in activity : true, false);
+  assert.equal(activity ? "unit" in activity : true, false);
+  assert.equal(activity?.warnings.some((warning) => warning.code === "CONTEXT_NOT_SCORE_BEARING"), true);
+
+  const restingHeartRate = assessments.find((assessment) => assessment.family === "resting-heart-rate");
+  assert.equal(restingHeartRate?.status, "ready");
+  assert.equal(restingHeartRate?.readySignalMetricKeys.includes("resting-heart-rate"), true);
+
+  const hrv = assessments.find((assessment) => assessment.family === "hrv");
+  assert.equal(hrv?.status, "missing");
+  assert.equal(hrv?.missingMetricKeys.includes("hrv-rmssd"), true);
+
+  const sleep = assessments.find((assessment) => assessment.family === "sleep");
+  assert.equal(sleep?.status, "missing");
+  assert.equal(sleep?.missingMetricKeys.includes("sleep-efficiency"), true);
+  assert.equal(sleep?.missingMetricKeys.includes("wearable-valid-night-count-28d"), true);
+
+  const blocked = assessMurphAgeWearableShadowIncrements({ asOf, points: shadowPoints });
+  assert.equal(blocked.every((assessment) => assessment.status === "blocked"), true);
+  assert.equal(blocked.every((assessment) => assessment.anchorCompatible === false), true);
+
+  const nonWearableAssessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    asOf,
+    points: shadowPoints.map((point) => ({
+      ...point,
+      id: `${point.id}:manual`,
+      source: {
+        ...point.source,
+        family: "event",
+        kind: "measurement",
+      },
+    })),
+  });
+  const nonWearableActivity = nonWearableAssessments.find((assessment) => assessment.family === "activity");
+  assert.equal(nonWearableActivity?.status, "missing");
+  assert.equal(nonWearableActivity?.selectedMetricKeys.length, 0);
+  assert.equal(nonWearableActivity?.selectedPointIds.length, 0);
+  assert.equal(nonWearableActivity?.missingMetricKeys.includes("steps"), true);
+
+  const typedWearableSourceAssessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    asOf,
+    points: [
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:steps:2026-05-08:activity-summary:0",
+        metricKey: "steps",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "shadow_activity_steps",
+        sourceKind: "activity-summary",
+        unit: "count",
+        value: 9_500,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:total-sleep-minutes:2026-05-08:sleep-summary:0",
+        metricKey: "total-sleep-minutes",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "shadow_sleep_duration",
+        sourceKind: "sleep-summary",
+        unit: "minutes",
+        value: 450,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-valid-days:2026-05-08:activity-summary:0",
+        metricKey: "wearable-valid-day-count-28d",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "shadow_activity_valid_days",
+        sourceKind: "activity-summary",
+        unit: "count",
+        value: 24,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-valid-nights:2026-05-08:sleep-summary:0",
+        metricKey: "wearable-valid-night-count-28d",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "shadow_sleep_valid_nights",
+        sourceKind: "sleep-summary",
+        unit: "count",
+        value: 22,
+      }),
+      metricPoint({
+        effectiveDate: "2026-05-08",
+        id: "metric-point:wearable-coverage:2026-05-08:wearable-summary:0",
+        metricKey: "wearable-coverage-index",
+        observedAt: "2026-05-08T08:00:00.000Z",
+        recordId: "shadow_typed_source_coverage",
+        sourceKind: "wearable-summary",
+        unit: "score",
+        value: 0.82,
+      }),
+    ],
+  });
+  const typedSourceActivity = typedWearableSourceAssessments.find((assessment) =>
+    assessment.family === "activity"
+  );
+  assert.equal(typedSourceActivity?.status, "ready");
+  assert.equal(typedSourceActivity?.selectedPointIds.includes("metric-point:steps:2026-05-08:activity-summary:0"), true);
+  const typedSourceSleep = typedWearableSourceAssessments.find((assessment) => assessment.family === "sleep");
+  assert.equal(typedSourceSleep?.status, "ready");
+  assert.equal(
+    typedSourceSleep?.selectedPointIds.includes("metric-point:total-sleep-minutes:2026-05-08:sleep-summary:0"),
+    true,
+  );
 });
 
 test("dispatches Murph Age cards while keeping research and wearable boundaries explicit", () => {
@@ -1978,6 +2156,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefault.authorization.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(productDefault.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
   assert.equal(productDefault.contextAssessments[0]?.bundleId, "wearable-context");
+  assert.equal(productDefault.wearableShadowIncrementAssessments.length, 4);
+  assert.equal(
+    productDefault.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.status,
+    "ready",
+  );
   assert.equal(productDefault.cardPolicy?.productAuthorized, false);
   assert.equal(productDefault.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
   const productDefaultSummary = summarizeMurphAgeCalculatorOutput(productDefault);
@@ -2057,6 +2240,29 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   const contextStepStatus = research.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
   assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
   assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);
+  const researchActivityShadow = research.wearableShadowIncrementAssessments.find((assessment) =>
+    assessment.family === "activity"
+  );
+  assert.equal(researchActivityShadow?.status, "ready");
+  assert.equal(researchActivityShadow?.scoreBearing, false);
+  assert.equal(researchActivityShadow?.scoreContributionAuthorized, false);
+  assert.equal(researchActivityShadow?.productAuthorized, false);
+  assert.equal(researchActivityShadow?.riskEffect, "not-estimated");
+  assert.equal(researchActivityShadow?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(researchActivityShadow?.selectedMetricKeys.includes("wearable-coverage-index"), true);
+  assert.equal(researchActivityShadow ? "value" in researchActivityShadow : true, false);
+  assert.equal(researchActivityShadow ? "unit" in researchActivityShadow : true, false);
+  const researchSleepShadow = research.wearableShadowIncrementAssessments.find((assessment) =>
+    assessment.family === "sleep"
+  );
+  assert.equal(researchSleepShadow?.status, "ready");
+  assert.equal(researchSleepShadow?.readySignalMetricKeys.includes("sleep-efficiency"), true);
+  assert.equal(researchSleepShadow?.missingQualityMetricKeys.length, 0);
+  const researchHrvShadow = research.wearableShadowIncrementAssessments.find((assessment) =>
+    assessment.family === "hrv"
+  );
+  assert.equal(researchHrvShadow?.status, "missing");
+  assert.equal(researchHrvShadow?.missingMetricKeys.includes("hrv-rmssd"), true);
   assert.equal(research.result?.featureAttributions.find((feature) => feature.featureKey === "hba1c")?.status, "ready");
   assert.equal(research.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
   assert.equal(research.warnings.some((warning) => warning.code === "CONTEXT_NOT_SCORE_BEARING"), true);
@@ -2088,6 +2294,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchSummary.wearableContext.readyPointCount, 7);
   assert.equal("contextOnlyPointIds" in publicResearchSummary, false);
   assert.equal("selectedScoreBearingPointIds" in publicResearchSummary, false);
+  assert.equal("wearableShadowIncrementAssessments" in publicResearchSummary, false);
   const productRiskOnlySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
     authorization: {
@@ -2198,6 +2405,18 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(lab5ResearchWithWearables.result?.risk?.probability, lab5Research.result?.risk?.probability);
   assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(
+    lab5ResearchWithWearables.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "activity"
+    )?.anchorCardId,
+    "lab5_bp_bmi_transport_research",
+  );
+  assert.equal(
+    lab5ResearchWithWearables.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "activity"
+    )?.status,
+    "ready",
+  );
   assert.equal(lab5ResearchWithWearables.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
 
   const wearableOnly = calculateMurphAgeFromInputBundle({
@@ -2217,6 +2436,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("sleep-efficiency"), true);
   assert.equal(wearableOnly.authorization.contextOnlyMetricKeys.includes("wearable-coverage-index"), true);
   assert.equal(wearableOnly.contextAssessments.length, 0);
+  assert.equal(wearableOnly.wearableShadowIncrementAssessments.length, 0);
   const wearableOnlySummary = summarizeMurphAgeCalculatorOutput(wearableOnly);
   assert.equal(wearableOnlySummary.displayStatus, "context-only");
   assert.equal(wearableOnlySummary.displayBlockedReason, "context-only");
