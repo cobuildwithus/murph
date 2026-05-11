@@ -18,7 +18,7 @@ import {
 import {
   requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
-} from "./active-lease.ts";
+} from "./write-fence.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,

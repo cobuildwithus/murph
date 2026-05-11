@@ -59,7 +59,10 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
   HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
 } from "../src/runner-effects-contract.ts";
-import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
+import {
+  asWorkerStringEnvironment,
+  LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER,
+} from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
@@ -213,6 +216,10 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
 ] as const;
 
 describe("handleRunnerOutboundRequest", () => {
+  it("keeps the active-invocation compatibility hard cut dated", () => {
+    expect(LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER).toBe("2026-05-25");
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -937,6 +944,65 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(recordActiveInvocationWorkspaceCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("prefers runtime write-fence validation over the legacy active-invocation method", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const ownsActiveInvocationLease = vi.fn(async () => {
+      throw new Error("legacy active-invocation validation should not be used");
+    });
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(
+      JSON.stringify(createHostedWorkspaceCheckpointResponse("5")),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              ownsActiveInvocationLease,
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
 
   it("rejects workspace checkpoints when the live invocation lease is stale", async () => {

@@ -158,10 +158,10 @@ interface MurphAgeInputReadinessReport {
     bundleId: string
     contextOnly: boolean
     inputReady: boolean
-    productAgeReady: boolean
+    productAgePolicyReady: boolean
     productBlockedReasons: string[]
     productPromotionBlockers: string[]
-    productRiskReady: boolean
+    productRiskPolicyReady: boolean
     recommendedCardId: string
     researchModelCardRequired: boolean
     researchReadiness: string
@@ -333,7 +333,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
       bundleId: 'lab9-bp-body',
       contextOnly: false,
       inputReady: true,
-      productAgeReady: false,
+      productAgePolicyReady: false,
       productBlockedReasons: [
         'PRODUCT_POLICY_NOT_AUTHORIZED',
         'VALIDATION_GATE_BLOCKED',
@@ -348,7 +348,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
         'PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING',
         'RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED',
       ],
-      productRiskReady: false,
+      productRiskPolicyReady: false,
       recommendedCardId: 'lab9_bp_body_10y_acm_research',
       researchModelCardRequired: true,
       researchReadiness: 'ready-if-local-model-card-loaded',
@@ -422,10 +422,10 @@ test('age inputs reports an empty vault as metadata-only abstain readiness', asy
       bundleId: 'insufficient',
       contextOnly: false,
       inputReady: false,
-      productAgeReady: false,
+      productAgePolicyReady: false,
       productBlockedReasons: ['INPUT_BUNDLE_INCOMPLETE'],
       productPromotionBlockers: [],
-      productRiskReady: false,
+      productRiskPolicyReady: false,
       recommendedCardId: 'none',
       researchModelCardRequired: false,
       researchReadiness: 'input-incomplete',

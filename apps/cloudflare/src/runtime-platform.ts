@@ -56,7 +56,7 @@ import {
 } from "./runner-effects-contract.ts";
 import {
   writeRunnerRuntimeWriteFenceHeaders,
-} from "./runner-outbound/active-lease.ts";
+} from "./runner-outbound/write-fence.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,

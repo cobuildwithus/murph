@@ -65,7 +65,8 @@ export interface RunnerStateRecord {
   activeRun: RunnerWriteFenceRecord | null;
   /**
    * Legacy projection for deployed/test callers that still ask whether any
-   * write-fenced invocation exists. New scheduling code uses `writeFence`.
+   * write-fenced invocation exists. Delete after 2026-05-25. New scheduling
+   * code uses `writeFence`.
    */
   active: {
     attemptId: string;
@@ -79,6 +80,7 @@ export interface RunnerStateRecord {
   deferredCheckpointRequired: boolean;
   deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
   idleCheckpoint: RunnerIdleCheckpointRecord | null;
+  /** Legacy projection. Delete after 2026-05-25; live code uses `writeFence`. */
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
@@ -86,8 +88,11 @@ export interface RunnerStateRecord {
   lastInvocationAt: string | null;
   leaseGeneration: number;
   nextWakeAt: string | null;
+  /** Legacy projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingNudge: boolean;
+  /** Legacy projection. Delete after 2026-05-25; live code uses `writeFence`. */
   pendingNudgeGeneration: number;
+  /** Legacy projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingWork: boolean;
   retry: RunnerRetryRecord;
   retryFailureCount: number;

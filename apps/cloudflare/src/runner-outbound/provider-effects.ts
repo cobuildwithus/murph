@@ -37,7 +37,7 @@ import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   requireRunnerRuntimeWriteFence,
   RunnerRuntimeWriteFenceError,
-} from "./active-lease.ts";
+} from "./write-fence.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "./shared.ts";

@@ -13,7 +13,7 @@ import {
 } from "./runtime-mailbox-payload-decode-contract.ts";
 import {
   writeRunnerRuntimeWriteFenceHeaders,
-} from "./runner-outbound/active-lease.ts";
+} from "./runner-outbound/write-fence.ts";
 
 export function createCloudflareHostedMailboxPayloadDecoder(input: {
   fetchImpl: typeof fetch;

@@ -58,11 +58,12 @@ The live ownership split is:
   the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
   During active mailbox import, the runner container calls a Worker-owned
   mailbox-payload decode route over the invocation outbound proxy. That route
-  requires the active invocation lease, decrypts the mailbox payload with the
+  requires the runtime write fence, decrypts the mailbox payload with the
   Worker-owned ingress crypto context, and returns only a parsed hosted wake or
-  a semantic blocked result. The container must not receive ingress root keys,
-  callback-signing private material, private JWKs, or a root-fetch capability
-  for mailbox import.
+  a semantic blocked result. Legacy active-invocation RPC names remain only for
+  deployed-caller compatibility and must be deleted after 2026-05-25. The
+  container must not receive ingress root keys, callback-signing private
+  material, private JWKs, or a root-fetch capability for mailbox import.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
@@ -103,17 +104,16 @@ hosted callers must not stage hidden runtime-only inbox rows to make Codex
 admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
-runner by active invocation identity (`attemptId`, `leaseGeneration`, and
-`userId`). `workspaceVersion` is the workspace checkpoint compare-and-swap
-guard and must stay on the checkpoint path rather than becoming generic
-side-effect authorization.
-Active invocation heartbeats are recovery hints, not the normal way to control
-container lifecycle. If the current Durable Object isolate still owns the live
-workspace invocation request, a stale heartbeat reschedules recovery and leaves
-the request running so foreground work can finish or fail under its own timeout.
-Heartbeat-stale lease clearing is reserved for persisted/orphaned invocations
-without a local request owner; hard timeouts, explicit cleanup, and
-container-stopped signals remain terminal.
+runner by runtime write-fence identity (`attemptId`, `generation`, and
+`userId`). The transport still carries the generation in the historical
+`leaseGeneration` header until the 2026-05-25 compatibility deletion.
+`workspaceVersion` is the workspace checkpoint compare-and-swap guard and must
+stay on the checkpoint path rather than becoming generic side-effect
+authorization.
+Legacy active-invocation heartbeat and container-stopped methods are inert
+compatibility shims, not lifecycle policy, and must be deleted after
+2026-05-25. Live lifecycle control is the runtime write fence plus the Durable
+Object alarm and hard timeout path.
 
 ## Current Protocol
 

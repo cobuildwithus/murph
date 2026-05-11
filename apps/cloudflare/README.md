@@ -138,13 +138,12 @@ fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
 or Cloudflare reports idle activity expiry. A successful idle-shutdown base
 checkpoint does not force container teardown.
 
-Foreground liveness recovery is lease-fenced instead of container-destroy
-driven. If the Durable Object still owns the local active invocation and a
-heartbeat goes stale, it keeps the container request alive and schedules another
-recovery alarm; pending nudges wait for the active request to finish. Stale
-heartbeat recovery clears the durable active lease only for orphaned/persisted
-invocations that no longer have a local request owner, while hard timeouts and
-container-stopped signals remain terminal.
+Foreground liveness recovery is write-fenced instead of container-destroy
+driven. The legacy active-invocation heartbeat and container-stopped RPC shims
+are retained only for deployed-caller compatibility until 2026-05-25 and return
+inert responses. Live runner side effects validate the runtime write fence;
+pending nudges wait for the active request to finish, while stale persisted
+write fences recover through the Durable Object alarm and hard timeout path.
 
 ## Deploy Artifacts
 

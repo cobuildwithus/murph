@@ -460,7 +460,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       bundleId: "lab9-bp-body",
       contextOnly: false,
       inputReady: true,
-      productAgeReady: false,
+      productAgePolicyReady: false,
       productBlockedReasons: [
         "PRODUCT_POLICY_NOT_AUTHORIZED",
         "VALIDATION_GATE_BLOCKED",
@@ -475,7 +475,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
         "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
         "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
       ],
-      productRiskReady: false,
+      productRiskPolicyReady: false,
       recommendedCardId: "lab9_bp_body_10y_acm_research",
       researchModelCardRequired: true,
       researchReadiness: "ready-if-local-model-card-loaded",
@@ -535,10 +535,10 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
       bundleId: "insufficient",
       contextOnly: false,
       inputReady: false,
-      productAgeReady: false,
+      productAgePolicyReady: false,
       productBlockedReasons: ["INPUT_BUNDLE_INCOMPLETE"],
       productPromotionBlockers: [],
-      productRiskReady: false,
+      productRiskPolicyReady: false,
       recommendedCardId: "none",
       researchModelCardRequired: false,
       researchReadiness: "input-incomplete",
@@ -568,6 +568,94 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
+});
+
+test("assessMurphAgeInputReadinessFromVault reports context-only and invalid asOf score readiness", async () => {
+  const wearableVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(wearableVaultRoot);
+    insertMetricPoints(wearableVaultRoot, wearableContextMetricPoints());
+
+    const wearableReadiness = await assessMurphAgeInputReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot: wearableVaultRoot,
+    });
+
+    assert.equal(wearableReadiness.bundle.bundleId, "wearable-context");
+    assert.equal(wearableReadiness.bundle.status, "context-only");
+    assert.deepEqual(wearableReadiness.scoreReadiness, {
+      bundleId: "wearable-context",
+      contextOnly: true,
+      inputReady: true,
+      productAgePolicyReady: false,
+      productBlockedReasons: ["CONTEXT_ONLY_NOT_SCORE_BEARING"],
+      productPromotionBlockers: [],
+      productRiskPolicyReady: false,
+      recommendedCardId: "wearable_context_no_risk",
+      researchModelCardRequired: false,
+      researchReadiness: "context-only",
+      researchUsableIfModelLoaded: false,
+      scoreBearingInput: false,
+      status: "context-only",
+    });
+  } finally {
+    await rm(wearableVaultRoot, { force: true, recursive: true });
+  }
+
+  const functionVaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(functionVaultRoot);
+    insertMetricPoints(functionVaultRoot, functionContextMetricPoints());
+
+    const functionReadiness = await assessMurphAgeInputReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot: functionVaultRoot,
+    });
+
+    assert.equal(functionReadiness.bundle.bundleId, "function-context");
+    assert.equal(functionReadiness.bundle.status, "context-only");
+    assert.deepEqual(functionReadiness.scoreReadiness, {
+      bundleId: "function-context",
+      contextOnly: true,
+      inputReady: true,
+      productAgePolicyReady: false,
+      productBlockedReasons: ["CONTEXT_ONLY_NOT_SCORE_BEARING"],
+      productPromotionBlockers: [],
+      productRiskPolicyReady: false,
+      recommendedCardId: "function_context_no_risk",
+      researchModelCardRequired: false,
+      researchReadiness: "context-only",
+      researchUsableIfModelLoaded: false,
+      scoreBearingInput: false,
+      status: "context-only",
+    });
+  } finally {
+    await rm(functionVaultRoot, { force: true, recursive: true });
+  }
+
+  const invalidReadiness = await assessMurphAgeInputReadinessFromVault({
+    asOf: "not-a-date",
+    vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
+  });
+
+  assert.equal(invalidReadiness.schemaVersion, "murph.age.input-readiness.v4");
+  assert.equal(invalidReadiness.bundle.bundleId, "insufficient");
+  assert.equal(invalidReadiness.bundle.warnings[0]?.code, "INVALID_INPUT");
+  assert.deepEqual(invalidReadiness.scoreReadiness, {
+    bundleId: "insufficient",
+    contextOnly: false,
+    inputReady: false,
+    productAgePolicyReady: false,
+    productBlockedReasons: ["INPUT_BUNDLE_INCOMPLETE"],
+    productPromotionBlockers: [],
+    productRiskPolicyReady: false,
+    recommendedCardId: "none",
+    researchModelCardRequired: false,
+    researchReadiness: "input-incomplete",
+    researchUsableIfModelLoaded: false,
+    scoreBearingInput: false,
+    status: "input-incomplete",
+  });
 });
 
 test("calculateMurphAgeFromVaultInputBundle ignores local model-card artifacts in product mode", async () => {

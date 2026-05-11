@@ -93,8 +93,8 @@ export type MurphAgeWearableBridgeInputReadiness = MurphAgePublicDisplaySummary[
 export type MurphAgeInputScoreReadinessStatus =
   | "context-only"
   | "input-incomplete"
-  | "product-age-ready"
-  | "product-risk-ready"
+  | "product-age-policy-ready"
+  | "product-risk-policy-ready"
   | "research-ready-product-blocked";
 export type MurphAgeInputProductBlockedReason =
   | "CONTEXT_ONLY_NOT_SCORE_BEARING"
@@ -105,10 +105,10 @@ export interface MurphAgeInputScoreReadiness {
   bundleId: MurphAgeInputBundleReadiness["bundleId"];
   contextOnly: boolean;
   inputReady: boolean;
-  productAgeReady: boolean;
+  productAgePolicyReady: boolean;
   productBlockedReasons: MurphAgeInputProductBlockedReason[];
   productPromotionBlockers: MurphAgeProductPromotionBlocker[];
-  productRiskReady: boolean;
+  productRiskPolicyReady: boolean;
   recommendedCardId: MurphAgeInputBundleReadiness["recommendedCardId"];
   researchModelCardRequired: boolean;
   researchReadiness: "context-only" | "input-incomplete" | "ready-if-local-model-card-loaded";
@@ -340,10 +340,10 @@ function buildMurphAgeInputScoreReadiness(
   const productPromotionBlockers = scoreBearingInput && policy
     ? listMurphAgeModelCardProductPromotionBlockers(policy)
     : [];
-  const productRiskReady = scoreBearingInput && policy
+  const productRiskPolicyReady = scoreBearingInput && policy
     ? isMurphAgeModelCardProductAuthorized(policy)
     : false;
-  const productAgeReady = scoreBearingInput && policy
+  const productAgePolicyReady = scoreBearingInput && policy
     ? isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy)
     : false;
   const productBlockedReasons: MurphAgeInputProductBlockedReason[] = [];
@@ -362,10 +362,10 @@ function buildMurphAgeInputScoreReadiness(
     : contextOnly
       ? "context-only"
       : "input-incomplete";
-  const status = productAgeReady
-    ? "product-age-ready"
-    : productRiskReady
-      ? "product-risk-ready"
+  const status = productAgePolicyReady
+    ? "product-age-policy-ready"
+    : productRiskPolicyReady
+      ? "product-risk-policy-ready"
       : researchUsableIfModelLoaded
         ? "research-ready-product-blocked"
         : contextOnly
@@ -376,10 +376,10 @@ function buildMurphAgeInputScoreReadiness(
     bundleId: assessment.bundleId,
     contextOnly,
     inputReady,
-    productAgeReady,
+    productAgePolicyReady,
     productBlockedReasons,
     productPromotionBlockers,
-    productRiskReady,
+    productRiskPolicyReady,
     recommendedCardId: assessment.recommendedCardId,
     researchModelCardRequired: researchUsableIfModelLoaded,
     researchReadiness,
