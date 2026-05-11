@@ -395,6 +395,18 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
   {
+    featureKey: "sleep-duration-variability-minutes",
+    label: "Sleep duration variability",
+    metricKeys: ["sleep-duration-variability-minutes"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "sleep-efficiency",
+    label: "Sleep efficiency",
+    metricKeys: ["sleep-efficiency"],
+    requiredFor: "wearable-context",
+  },
+  {
     featureKey: "sleep-regularity-score",
     label: "Sleep regularity",
     metricKeys: ["sleep-regularity-score"],
@@ -413,6 +425,24 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
     requiredFor: "wearable-context",
   },
   { featureKey: "hrv-rmssd", label: "HRV", metricKeys: ["hrv-rmssd"], requiredFor: "wearable-context" },
+  {
+    featureKey: "wearable-valid-day-count-28d",
+    label: "Wearable valid days",
+    metricKeys: ["wearable-valid-day-count-28d"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "wearable-valid-night-count-28d",
+    label: "Wearable valid nights",
+    metricKeys: ["wearable-valid-night-count-28d"],
+    requiredFor: "wearable-context",
+  },
+  {
+    featureKey: "wearable-coverage-index",
+    label: "Wearable coverage",
+    metricKeys: ["wearable-coverage-index"],
+    requiredFor: "wearable-context",
+  },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
 
 const MURPH_AGE_MODEL_CARD_POLICIES = [
