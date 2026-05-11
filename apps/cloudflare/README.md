@@ -31,9 +31,9 @@ Internal control routes:
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
-The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, and the public banner and health checks.
+The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, the runtime callback route described below, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
-When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same lease-scoped internal-worker bridge contract used by direct `http://*.worker` requests.
+The runner container sends child-runtime internal Worker requests through `__murph/runtime-callback/users/:userId/:host/...`, using the runtime write-fence headers as authority. When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only for deployed-caller compatibility.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` through Worker secrets or encrypted runner secrets.
 
@@ -74,10 +74,14 @@ Required worker vars:
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+- `HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL`
 
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
 callback routes to that origin.
+`HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL` must be the origin-only Worker URL
+that the runner container can call back into for runtime internal-host requests.
+Production deploy preflight requires it to equal `CF_PUBLIC_BASE_URL`.
 Production deploy preflight also requires `HOSTED_WEB_PRODUCTION_BASE_URL` and
 rejects a production Worker when `HOSTED_WEB_BASE_URL` does not match that
 production origin or when callback origins use HTTP, localhost, Docker bridge,
@@ -122,21 +126,20 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
-invocations that finish idle schedule one lease-scoped idle-shutdown base
-checkpoint at T-minus 60 seconds before the configured idle window by default.
-That Durable Object alarm owns checkpoint ordering, while normal warm-shell
-teardown is left to the Cloudflare/container lifecycle. The container's own
-`sleepAfter` lifecycle uses the same configured idle window, so the checkpoint
-remains lifecycle-end maintenance rather than a separate foreground checkpoint.
-New user activity clears or aborts that checkpoint and pushes the idle window
-forward; foreground input always outranks idle checkpoint maintenance.
+invocations that finish idle leave one pending idle-shutdown base checkpoint in
+container memory. When Cloudflare reports the container `sleepAfter` lifecycle
+expiry, the container takes a short Durable Object write-fence lease, posts one
+idle-shutdown checkpoint to the warm runner, and then tears down the shell.
+Fresh foreground work keeps using the Durable Object write fence and pending
+nudge state, so foreground input outranks idle checkpoint maintenance.
 Each invocation still runs through an isolated child process with fresh
-invocation-local cache/temp roots and a fresh outbound worker-proxy token.
+invocation-local cache/temp roots, but child-to-worker effects use the stable
+runtime callback route and write-fence headers instead of per-invocation
+outbound proxy tokens or dynamically installed outbound handlers.
 
-The warm shell is destroyed when an invocation fails, outbound proxy cleanup
-fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
-or Cloudflare reports idle activity expiry. A successful idle-shutdown base
-checkpoint does not force container teardown.
+The warm shell is destroyed when an invocation fails, warm health is stale,
+deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle
+activity expiry after any pending checkpoint work is attempted.
 
 Foreground liveness recovery is write-fenced instead of container-destroy
 driven. The legacy active-invocation heartbeat and container-stopped RPC shims

@@ -35,7 +35,7 @@ import {
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
 import type {
@@ -58,7 +58,7 @@ export async function handleRunnerProviderEffectsRequest(input: {
   }
 
   try {
-    await requireRunnerRuntimeWriteFence({
+    await requireRunnerRuntimeWriteFenceWrite({
       env: input.env,
       request: input.request,
       userId: input.userId,

@@ -192,6 +192,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
   const hostedWebControlTransport = resolveHostedWebControlTransport({
     internalWorkerProxyToken: input.internalWorkerProxyToken ?? null,
+    runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
   });
@@ -627,10 +628,11 @@ export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
 
 function resolveHostedWebControlTransport(input: {
   internalWorkerProxyToken: string | null;
+  runtimeCallbackBaseUrl: string | null;
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
 }): HostedWebControlTransport | null {
-  if (input.internalWorkerProxyToken) {
+  if (input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl) {
     return {
       mode: "proxy",
     };

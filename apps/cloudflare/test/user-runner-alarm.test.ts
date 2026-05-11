@@ -766,6 +766,43 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(countAlarmsBetween(alarms, 240_000, 241_000)).toBeGreaterThanOrEqual(1);
   });
 
+  it("does not start a drain when nudged during retry backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const { alarms, runner } = createRunnerCryptoContextHarness(null, {
+      invoke,
+    });
+    await runner.bindUser("member_123");
+    const store = getRunnerStateStoreForTest(runner);
+    await store.markWakePending({ preferredWakeAt: FIXED_NOW });
+    const token = await store.beginWriteFence({
+      expiresAt: "2026-04-27T00:01:00.000Z",
+      reason: "nudge",
+      userId: "member_123",
+    });
+    await store.clearWriteFenceAfterFailure({
+      error: new Error("runner failed"),
+      finishedAt: FIXED_NOW,
+      retryAt: "2026-04-27T00:00:05.000Z",
+      token,
+    });
+    alarms.splice(0);
+
+    const result = await runner.nudgeHostedRunner();
+
+    expect(result).toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      nextAlarmAt: "2026-04-27T00:00:05.000Z",
+    });
+    expect(alarms).toEqual(["2026-04-27T00:00:05.000Z"]);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("starts a fresh nudge follow-up after an active invocation fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

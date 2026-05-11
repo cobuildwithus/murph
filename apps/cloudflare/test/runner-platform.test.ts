@@ -420,6 +420,110 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("GET");
   });
 
+  it("attaches web-control ports in callback-only mode and routes them through runtime callbacks", async () => {
+    const fetchMock = vi.fn(async (requestInput: RequestInfo | URL) => {
+      const request = requestInput instanceof Request ? requestInput : new Request(requestInput);
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/api/internal/hosted-mailbox/fetch")) {
+        return new Response(JSON.stringify({
+          fetchedAt: "2026-04-26T00:00:02.000Z",
+          items: [],
+          maxSeqByLane: [],
+          userId: "member_123",
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/hosted-workspace")) {
+        return new Response(JSON.stringify({
+          fetchedAt: "2026-04-26T00:00:02.000Z",
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:00.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: null,
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:02.000Z",
+            userId: "member_123",
+            version: "6",
+          },
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.pathname.endsWith("/api/internal/hosted-runtime/log")) {
+        return new Response(JSON.stringify({
+          loggedCount: 1,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected callback URL: ${request.url}`);
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: null,
+      runtimeCallbackBaseUrl: "https://worker.example.test",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    expect(platform.mailboxPort).toBeDefined();
+    expect(platform.workspacePort).toBeDefined();
+    expect(platform.logPort).toBeDefined();
+    await platform.mailboxPort!.fetch({
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+      limitPerLane: 10,
+      requestId: "request_mailbox_1",
+    });
+    await platform.workspacePort!.read!();
+    await platform.logPort!.write({
+      entries: [
+        {
+          at: "2026-04-26T00:00:03.000Z",
+          attemptId: "runtime_write_123",
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          leaseGeneration: "7",
+          level: "info",
+          mailboxLane: "conversation",
+          mailboxSeqEnd: "1",
+          mailboxSeqStart: "1",
+          phase: "import",
+          redactedJson: { importedCount: 1 },
+          workspaceVersion: "6",
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const requests = fetchMock.mock.calls.map((call, index) =>
+      requireFetchRequest(call, `callback web-control request ${index}`)
+    );
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-mailbox/fetch",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-runtime/log",
+    ]);
+    for (const request of requests) {
+      expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+      expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+      expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+      expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    }
+  });
+
   it("fails closed before issuing internal-host requests when the invocation proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

@@ -64,11 +64,30 @@ export async function requireRunnerRuntimeWriteFence(input: {
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  // Workspace version is enforced by the checkpoint route, not by invocation-local side effects.
   const ownsWriteFence = await validateRunnerRuntimeWriteFenceWithDeployFallback(stub, {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
+  });
+  if (!ownsWriteFence) {
+    throw new RunnerRuntimeWriteFenceError();
+  }
+
+  return headers;
+}
+
+export async function requireRunnerRuntimeWriteFenceWrite(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerRuntimeWriteFenceWriteHeaders> {
+  const headers = requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const ownsWriteFence = await validateRunnerRuntimeWriteFenceWithDeployFallback(stub, {
+    attemptId: headers.attemptId,
+    generation: headers.generation,
+    userId: input.userId,
+    workspaceVersion: headers.workspaceVersion,
   });
   if (!ownsWriteFence) {
     throw new RunnerRuntimeWriteFenceError();
@@ -83,6 +102,7 @@ async function validateRunnerRuntimeWriteFenceWithDeployFallback(
     attemptId: string;
     generation: string;
     userId: string;
+    workspaceVersion?: string | null;
   },
 ): Promise<boolean> {
   try {
@@ -105,6 +125,7 @@ async function validateRunnerRuntimeWriteFenceWithDeployFallback(
     attemptId: input.attemptId,
     leaseGeneration: input.generation,
     userId: input.userId,
+    workspaceVersion: input.workspaceVersion,
   });
 }
 

@@ -15,8 +15,7 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
-  requireRunnerRuntimeWriteFence,
-  requireRunnerRuntimeWriteFenceWriteHeaders,
+  requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
@@ -263,8 +262,7 @@ async function writeRequestOwnsRuntimeWriteFence(input: {
   userId: string;
 }): Promise<boolean> {
   try {
-    requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
-    await requireRunnerRuntimeWriteFence({
+    await requireRunnerRuntimeWriteFenceWrite({
       env: input.env,
       request: input.request,
       userId: input.userId,

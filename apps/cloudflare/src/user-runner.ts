@@ -261,11 +261,14 @@ export class HostedUserRunner {
       preferredWakeAt: new Date().toISOString(),
     });
     await this.syncAlarm(record);
-    const immediateDriveStarted = this.kickDrain({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      reason: "nudge",
-      wait: false,
-    });
+    const due = await this.stateStore.readDueWork(Date.now());
+    const immediateDriveStarted = due.kind === "runtime"
+      ? this.kickDrain({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+        reason: "nudge",
+        wait: false,
+      })
+      : false;
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",

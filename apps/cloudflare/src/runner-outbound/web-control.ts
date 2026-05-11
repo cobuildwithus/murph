@@ -18,7 +18,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceWrite,
   requireRunnerRuntimeWriteFenceWriteHeaders,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
@@ -67,8 +67,7 @@ export async function handleRunnerWebControlRequest(input: {
     null;
   if (isCheckpointRequest) {
     try {
-      checkpointHeaders = requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
-      await requireRunnerRuntimeWriteFence({
+      checkpointHeaders = await requireRunnerRuntimeWriteFenceWrite({
         env: input.env,
         request: input.request,
         userId: input.userId,

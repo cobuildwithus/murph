@@ -115,10 +115,34 @@ describe("RunnerStateStore wake/backoff authority", () => {
       userId: "member_123",
     } satisfies Partial<RunnerWriteFenceToken>);
   });
+
+  it("migrates legacy pending_nudge-only state into runtime due work", async () => {
+    const { store } = createHarness((db) => {
+      db.exec(`
+        CREATE TABLE runner_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          user_id TEXT NOT NULL,
+          pending_nudge INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      db.exec(`
+        INSERT INTO runner_meta (singleton, user_id, pending_nudge)
+        VALUES (1, 'member_123', 1)
+      `);
+    });
+
+    const state = await store.readState();
+    expect(state.wakeAt).not.toBeNull();
+    await expect(store.readDueWork(Date.now() + 60_000)).resolves.toMatchObject({
+      kind: "runtime",
+      reason: "wake",
+    });
+  });
 });
 
-function createHarness(): { store: RunnerStateStore } {
+function createHarness(setup?: (db: DatabaseSync) => void): { store: RunnerStateStore } {
   const db = new DatabaseSync(":memory:");
+  setup?.(db);
   return {
     store: new RunnerStateStore(createDurableObjectState(db)),
   };
