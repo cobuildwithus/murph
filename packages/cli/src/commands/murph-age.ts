@@ -104,7 +104,7 @@ export const murphAgeModelCardStatusResultSchema = z.object({
   policies: z.array(murphAgeModelCardStatusPolicySchema),
   productReadyCardIds: z.array(murphAgeModelCardIdSchema),
   researchReadyCardIds: z.array(murphAgeModelCardIdSchema),
-  schemaVersion: z.literal('murph.age.model-card-status.v1'),
+  schemaVersion: z.literal('murph.age.model-card-status.v2'),
   warnings: z.array(z.object({
     code: murphAgeWarningCodeSchema,
   })),
@@ -433,7 +433,7 @@ export function registerMurphAgeCommands(
         researchReadyCardIds: policies
           .filter((policy) => policy.researchUsable)
           .map((policy) => policy.cardId),
-        schemaVersion: 'murph.age.model-card-status.v1' as const,
+        schemaVersion: 'murph.age.model-card-status.v2' as const,
         warnings: loaded.warnings.map((warning) => ({ code: warning.code })),
       }
     },
