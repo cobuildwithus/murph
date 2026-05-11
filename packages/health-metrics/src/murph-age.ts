@@ -1,4 +1,5 @@
 import { resolveMetricDefinition, resolveMetricInputKey, uniqueStrings } from "./catalog.ts";
+import { resolveMurphAgeSourceRoute, type MurphAgeSourceRouteArtifactBoundary } from "./murph-age-source-routes.ts";
 import { normalizeUnit, unitsEquivalent } from "./normalize.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
@@ -1870,6 +1871,27 @@ export function validateMurphAgeWearableShadowIncrementResultCard(
       code: "INVALID_INPUT",
       message: "Wearable shadow result card source route id must be a non-empty simple key.",
     });
+  } else {
+    const sourceRoute = resolveMurphAgeSourceRoute(sourceRouteId);
+    if (!sourceRoute) {
+      warnings.push({
+        code: "INVALID_INPUT",
+        message: "Wearable shadow result card source route id must reference a registered Murph Age source route.",
+      });
+    } else {
+      if (!sourceRoute.layers.includes("wearable-shadow-increment")) {
+        warnings.push({
+          code: "MODEL_CARD_POLICY_VIOLATION",
+          message: "Wearable shadow result card source route must be registered as a wearable shadow increment route.",
+        });
+      }
+      if (sourceRoute.productAuthorized !== false || !isLockedSourceRouteArtifactBoundary(sourceRoute.artifactBoundary)) {
+        warnings.push({
+          code: "MODEL_CARD_POLICY_VIOLATION",
+          message: "Wearable shadow result card source route must stay metadata-only and product-blocked.",
+        });
+      }
+    }
   }
 
   return {
@@ -3056,6 +3078,20 @@ function isLockedWearableShadowOutputBoundary(
     && boundary.predictionsExportAllowed === false
     && boundary.productDisplayExportAllowed === false
     && boundary.rowValuesExportAllowed === false;
+}
+
+function isLockedSourceRouteArtifactBoundary(
+  boundary: MurphAgeSourceRouteArtifactBoundary,
+): boolean {
+  return boundary.aggregateOutputsOnly === true
+    && boundary.localPathStorageAllowed === false
+    && boundary.modelParameterExportAllowed === false
+    && boundary.participantLevelExportAllowed === false
+    && boundary.predictionExportAllowed === false
+    && boundary.productClaimAllowed === false
+    && boundary.rowMaterializationAuthorized === false
+    && boundary.rowValueExportAllowed === false
+    && boundary.sourceTextStorageAllowed === false;
 }
 
 function hasFiniteAggregateMetricDelta(
