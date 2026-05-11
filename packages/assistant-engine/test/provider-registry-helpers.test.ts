@@ -56,6 +56,10 @@ import type {
 } from '../src/assistant/providers/types.ts'
 import type { AssistantProviderTraceEvent } from '../src/assistant/provider-traces.ts'
 
+const TEST_FRESH_THREAD_FALLBACK = {
+  turnContextPrompt: 'Fresh thread runtime context.',
+} as const
+
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
@@ -1279,6 +1283,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
@@ -1409,6 +1414,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
@@ -1514,6 +1520,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       resumeProviderSessionId: 'corrupt-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1609,6 +1616,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       resumeProviderSessionId: 'resume-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1695,6 +1703,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       resumeProviderSessionId: 'resume-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1764,6 +1773,7 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       resumeProviderSessionId: 'corrupt-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -1823,6 +1833,7 @@ describe('Codex assistant registry helpers', () => {
       env: {
         VENICE_API_KEY: sentinel,
       },
+      freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
       resumeProviderSessionId: 'corrupt-venice-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',

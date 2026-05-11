@@ -154,6 +154,12 @@ export async function executeCodexAssistantTurnAttempt(
       'Codex app-server execution requires a Codex provider config.',
     )
   }
+  if (input.resumeProviderSessionId && !input.freshThreadFallback) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
+      'Codex stale-resume fallback requires a prepared fresh-thread fallback plan.',
+    )
+  }
   const modelProviderResolution = resolveStrictAssistantCodexModelProvider(
     providerConfig.target.modelProvider,
   )
