@@ -12,6 +12,7 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
@@ -53,12 +54,14 @@ import {
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeLocalModelCardArtifactPolicy,
   validateMurphAgeRiskModel,
+  validateMurphAgeWearableShadowIncrementResultCard,
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
   type MurphAgeModelCardPolicy,
   type MurphAgeRiskModel,
   type MurphAgeValidationEvidenceTier,
+  type MurphAgeWearableShadowIncrementResultCard,
 } from "../src/index.ts";
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
@@ -2203,6 +2206,205 @@ test("exposes wearable shadow increment policies without score authorization", (
   assert.equal(freshActivity?.allowedMetricKeys.includes("hba1c"), false);
   assert.equal(freshActivity?.outputBoundary.rowValuesExportAllowed, false);
   assert.equal(freshActivity?.signalMetricKeys.includes("sleep-efficiency"), false);
+});
+
+test("validates aggregate wearable shadow result cards as blocked research evidence", () => {
+  const resultCard = {
+    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+    evaluation: {
+      aggregateMetricDeltas: {
+        brierDelta: -0.0012,
+        logLossDelta: -0.0021,
+      },
+      aggregateSample: {
+        evaluatedRowCount: 12_500,
+        eventCount: 620,
+        minimumCellCount: 25,
+        suppressedCellCount: 0,
+      },
+      comparator: "anchor-vs-anchor-plus-wearable-shadow-increment",
+      evidenceTier: "internal-diagnostic",
+      sameDenominator: true,
+    },
+    family: "activity",
+    outputBoundary: {
+      aggregateOnly: true,
+      coefficientsExportAllowed: false,
+      participantLevelExportAllowed: false,
+      predictionsExportAllowed: false,
+      productDisplayExportAllowed: false,
+      rowValuesExportAllowed: false,
+    },
+    productAuthorized: false,
+    riskEffect: "aggregate-estimated",
+    schemaVersion: MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-v0",
+  } satisfies MurphAgeWearableShadowIncrementResultCard;
+
+  const validation = validateMurphAgeWearableShadowIncrementResultCard(resultCard);
+  assert.equal(validation.status, "valid");
+  assert.deepEqual(validation.warnings, []);
+  for (const anchorCardId of ["lab9_bp_body_10y_acm_research", "lab5_bp_bmi_transport_research"]) {
+    const anchorValidation = validateMurphAgeWearableShadowIncrementResultCard({
+      ...resultCard,
+      anchorCardId,
+    });
+    assert.equal(anchorValidation.status, "valid");
+    assert.deepEqual(anchorValidation.warnings, []);
+  }
+
+  const notEstimatedValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    evaluation: {
+      ...resultCard.evaluation,
+      aggregateMetricDeltas: {},
+    },
+    riskEffect: "not-estimated",
+  });
+  assert.equal(notEstimatedValidation.status, "valid");
+
+  const invalidValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    anchorCardId: "wearable_context_no_risk",
+    evaluation: {
+      aggregateMetricDeltas: {},
+      comparator: "wearable-only-model",
+      evidenceTier: "unsupported-tier",
+      sameDenominator: false,
+    },
+    outputBoundary: {
+      ...resultCard.outputBoundary,
+      coefficientsExportAllowed: true,
+      predictionsExportAllowed: true,
+      productDisplayExportAllowed: true,
+    },
+    productAuthorized: true,
+    scoreBearing: true,
+    scoreContributionAuthorized: true,
+    sourceRouteId: "Private Route",
+  });
+  assert.equal(invalidValidation.status, "invalid");
+  assert.equal(invalidValidation.warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+  assert.equal(invalidValidation.warnings.some((warning) => warning.message.includes("non-score-bearing")), true);
+  assert.equal(invalidValidation.warnings.some((warning) => warning.message.includes("aggregate-only")), true);
+  assert.equal(
+    invalidValidation.warnings.some((warning) =>
+      warning.message.includes("at least one finite aggregate metric delta")
+    ),
+    true,
+  );
+  assert.equal(invalidValidation.warnings.some((warning) => warning.message.includes("same denominator")), true);
+  assert.equal(invalidValidation.warnings.some((warning) => warning.message.includes("source route id")), true);
+
+  const leakyResultCard = {
+    ...resultCard,
+    participantIds: ["synthetic-participant"],
+    productClaimText: "synthetic claim",
+    evaluation: {
+      ...resultCard.evaluation,
+      aggregateMetricDeltas: {
+        ...resultCard.evaluation.aggregateMetricDeltas,
+        coefficients: [0.1],
+      },
+      aggregateSample: {
+        ...resultCard.evaluation.aggregateSample,
+        rowValues: [1],
+      },
+      splitMembership: ["synthetic-split"],
+    },
+    outputBoundary: {
+      ...resultCard.outputBoundary,
+      predictions: [0.1],
+    },
+  };
+  const leakyValidation = validateMurphAgeWearableShadowIncrementResultCard(leakyResultCard);
+  assert.equal(leakyValidation.status, "invalid");
+  for (const unsupportedField of [
+    "participantIds",
+    "productClaimText",
+    "splitMembership",
+    "coefficients",
+    "rowValues",
+    "predictions",
+  ]) {
+    assert.equal(
+      leakyValidation.warnings.some((warning) =>
+        warning.message.includes(`unsupported field ${unsupportedField}`)
+      ),
+      true,
+    );
+  }
+
+  const malformedRootValidation = validateMurphAgeWearableShadowIncrementResultCard(null);
+  assert.equal(malformedRootValidation.status, "invalid");
+  assert.equal(
+    malformedRootValidation.warnings.some((warning) =>
+      warning.message.includes("must be an object")
+    ),
+    true,
+  );
+
+  const malformedNestedValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    evaluation: null,
+    outputBoundary: "not-an-object",
+  });
+  assert.equal(malformedNestedValidation.status, "invalid");
+  assert.equal(
+    malformedNestedValidation.warnings.some((warning) =>
+      warning.message.includes("evaluation must be an object")
+    ),
+    true,
+  );
+  assert.equal(
+    malformedNestedValidation.warnings.some((warning) =>
+      warning.message.includes("output boundary must be an object")
+    ),
+    true,
+  );
+
+  const malformedValueValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    evaluation: {
+      ...resultCard.evaluation,
+      aggregateMetricDeltas: {
+        brierDelta: -0.0012,
+        logLossDelta: "bad-delta",
+      },
+      aggregateSample: {
+        evaluatedRowCount: 12.5,
+        eventCount: -1,
+        minimumCellCount: Number.POSITIVE_INFINITY,
+      },
+    },
+  });
+  assert.equal(malformedValueValidation.status, "invalid");
+  assert.equal(
+    malformedValueValidation.warnings.some((warning) =>
+      warning.message.includes("logLossDelta must be a finite number")
+    ),
+    true,
+  );
+  assert.equal(
+    malformedValueValidation.warnings.some((warning) =>
+      warning.message.includes("evaluatedRowCount must be a nonnegative integer")
+    ),
+    true,
+  );
+  assert.equal(
+    malformedValueValidation.warnings.some((warning) =>
+      warning.message.includes("eventCount must be a nonnegative integer")
+    ),
+    true,
+  );
+  assert.equal(
+    malformedValueValidation.warnings.some((warning) =>
+      warning.message.includes("minimumCellCount must be a nonnegative integer")
+    ),
+    true,
+  );
 });
 
 test("assesses wearable shadow increment readiness without exposing values", () => {
