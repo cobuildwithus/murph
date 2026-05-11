@@ -173,7 +173,9 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
   preferredWakeAt?: string | null;
 }): string | null {
   const legacy = record as { preferredWakeAt?: string | null };
-  return legacy.preferredWakeAt ?? record.nextWakeAt ?? null;
+  return normalizePreferredWakeAt(legacy.preferredWakeAt ?? null)
+    ?? record.nextWakeAt
+    ?? null;
 }
 
 export function stringifyRunnerDeferredCheckpointMailboxStatus(

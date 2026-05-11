@@ -134,6 +134,15 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     `);
   }
   if (columns.includes("active_invocation_id")) {
+    const activeInvocationReason = columns.includes("active_invocation_reason")
+      ? "active_invocation_reason"
+      : "NULL";
+    const activeInvocationStartedAt = columns.includes("active_invocation_started_at")
+      ? "active_invocation_started_at"
+      : "NULL";
+    const activeInvocationExpiresAt = columns.includes("active_invocation_expires_at")
+      ? "active_invocation_expires_at"
+      : "NULL";
     // Legacy active/inFlight projections kept for deploy skew only.
     // Delete after 2026-05-25; live state uses the write fence columns.
     sql.exec(`
@@ -142,12 +151,12 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
         active_attempt_id = COALESCE(active_attempt_id, active_invocation_id),
         active_kind = CASE
           WHEN active_kind IS NOT NULL THEN active_kind
-          WHEN active_invocation_reason = 'idle_shutdown_checkpoint' THEN 'idle_checkpoint'
+          WHEN ${activeInvocationReason} = 'idle_shutdown_checkpoint' THEN 'idle_checkpoint'
           WHEN active_invocation_id IS NOT NULL THEN 'runtime'
           ELSE NULL
         END,
-        active_started_at = COALESCE(active_started_at, active_invocation_started_at),
-        active_expires_at = COALESCE(active_expires_at, active_invocation_expires_at)
+        active_started_at = COALESCE(active_started_at, ${activeInvocationStartedAt}),
+        active_expires_at = COALESCE(active_expires_at, ${activeInvocationExpiresAt})
       WHERE singleton = 1
     `);
   }

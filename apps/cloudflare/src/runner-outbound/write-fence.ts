@@ -125,7 +125,9 @@ async function validateRunnerRuntimeWriteFenceWithDeployFallback(
     attemptId: input.attemptId,
     leaseGeneration: input.generation,
     userId: input.userId,
-    workspaceVersion: input.workspaceVersion,
+    ...(input.workspaceVersion === undefined
+      ? {}
+      : { workspaceVersion: input.workspaceVersion }),
   });
 }
 

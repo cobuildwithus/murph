@@ -2758,7 +2758,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       createBrowserVaultReplicaWriteRequest({
         replica: createBrowserVaultReplica(sourceBundleHash),
-        workspaceVersion: "4",
+        workspaceVersion: "5",
       }),
       env,
       "member_123",
@@ -2775,6 +2775,34 @@ describe("handleRunnerOutboundRequest", () => {
     });
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects browser-vault replica writes when the workspace version does not match the write fence", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica("c".repeat(64)),
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
   it.skip("writes detached browser-vault refresh replicas with refresh proxy authority", async () => {
