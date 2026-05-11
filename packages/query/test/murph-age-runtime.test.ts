@@ -25,6 +25,7 @@ import {
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   rebuildQueryProjection,
+  summarizeMurphAgeFromVaultInputBundle,
 } from "../src/index.ts";
 
 test("calculateMurphAgeForVault scores a low-level supplied model from stored MetricPoints", async () => {
@@ -479,6 +480,17 @@ test("calculateMurphAgeFromVaultInputBundle accepts activity and sleep summary w
     assert.equal(publicSummary.wearableContext.readyPointCount, 9);
     assert.equal("contextOnlyPointIds" in publicSummary, false);
     assert.equal("selectedScoreBearingPointIds" in publicSummary, false);
+
+    const queryPublicSummary = await summarizeMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+    assert.deepEqual(queryPublicSummary, publicSummary);
+    assert.equal("contextOnlyPointIds" in queryPublicSummary, false);
+    assert.equal("selectedScoreBearingPointIds" in queryPublicSummary, false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
