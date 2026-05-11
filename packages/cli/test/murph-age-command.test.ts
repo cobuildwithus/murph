@@ -95,6 +95,11 @@ interface MurphAgeModelCardStatusReport {
     blockers: string[]
     cardId: string
     loaded: boolean
+    outcomeContext: {
+      ageEstimateBasis: string
+      horizonYears: number | null
+      riskEndpoint: string
+    }
     productAgeReady: boolean
     productRiskReady: boolean
     researchUsable: boolean
@@ -169,6 +174,11 @@ test('age model-cards reports local research readiness without model internals',
     assert.equal(lab9.productRiskReady, false)
     assert.equal(lab9.productAgeReady, false)
     assert.equal(lab9.scoreBearing, true)
+    assert.deepEqual(lab9.outcomeContext, {
+      ageEstimateBasis: 'risk-age-equivalent',
+      horizonYears: 10,
+      riskEndpoint: 'all-cause-mortality',
+    })
     assert.equal(lab9.validationGate.status, 'blocked')
     assert.equal(lab9.validationGate.evidenceTiers.includes('internal-anchor'), true)
     assert.equal(lab9.validationGate.productPromotionEvidence, false)
@@ -179,6 +189,11 @@ test('age model-cards reports local research readiness without model internals',
     assert.equal(wearableContext.loaded, false)
     assert.equal(wearableContext.researchUsable, false)
     assert.equal(wearableContext.scoreBearing, false)
+    assert.deepEqual(wearableContext.outcomeContext, {
+      ageEstimateBasis: 'none',
+      horizonYears: null,
+      riskEndpoint: 'none',
+    })
     assert.equal(wearableContext.blockers.includes('NOT_SCORE_BEARING'), true)
 
     const encodedStatus = JSON.stringify(status)
@@ -187,6 +202,7 @@ test('age model-cards reports local research readiness without model internals',
       'modelId',
       'coefficient',
       'referenceRiskCurve',
+      'modelEndpoint',
       'metric-point',
       vaultRoot,
     ]) {
@@ -224,6 +240,11 @@ test('age model-cards reports missing local artifacts as policy blockers', async
     assert.equal(lab5.researchUsable, false)
     assert.equal(lab5.productRiskReady, false)
     assert.equal(lab5.productAgeReady, false)
+    assert.deepEqual(lab5.outcomeContext, {
+      ageEstimateBasis: 'risk-age-equivalent',
+      horizonYears: 10,
+      riskEndpoint: 'all-cause-mortality',
+    })
     assert.equal(lab5.blockers.includes('MODEL_CARD_NOT_LOADED'), true)
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
