@@ -12,6 +12,7 @@ import {
   parseMurphAgeLocalModelCardArtifact,
   validateMurphAgeRiskModel,
   type MetricPoint,
+  type MurphAgeIncrementEvaluationCard,
   type MurphAgeRiskModel,
   type MurphAgeSex,
 } from "@murphai/health-metrics";
@@ -24,6 +25,7 @@ import {
 
 export const R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION =
   "murph-age-r399-midus2-biomarker-increment.v1" as const;
+const INCREMENT_EVALUATION_CARD_SCHEMA_VERSION = "murph.age.increment-evaluation-card.v1" as const;
 
 const MIDUS2_SURVEY_ZIP = "ICPSR_04652-V8.zip";
 const MIDUS2_BIOMARKER_ZIP = "ICPSR_29282-V11.zip";
@@ -145,6 +147,7 @@ export interface R399Midus2BiomarkerIncrementOutput {
     splitCounts: Record<"calibration" | "test" | "train", { events: number; n: number }>;
   };
   endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years";
+  incrementEvaluationCard: MurphAgeIncrementEvaluationCard;
   modelScoringPerformed: true;
   models: Record<string, {
     anchorCardId: typeof R399_RESEARCH_CARD_ID | null;
@@ -193,13 +196,21 @@ export async function runR399Midus2BiomarkerIncrement(
   const outputDir = options.outputDir ?? DEFAULT_OUTPUT_DIR;
   const r399Model = await readR399ModelCard(options.r399ModelCardPath ?? DEFAULT_R399_MODEL_CARD_PATH);
   const rows = await buildBenchmarkRows({ downloadsDir, r399Model });
+  const dataShape: R399Midus2BiomarkerIncrementOutput["dataShape"] = {
+    eligibleRows: rows.length,
+    events: rows.reduce((sum, row) => sum + row.y, 0),
+    r399ProxyFeatureObservedCounts: r399ProxyFeatureObservedCounts(rows),
+    splitCounts: splitCounts(rows),
+  };
 
   const models = Object.fromEntries(
     Object.entries(MODEL_CANDIDATE_DEFINITIONS).map(([modelId, candidate]) => {
       const trained = selectModel(rows, [...candidate.featureKeys]);
       return [modelId, summarizeModel(rows, trained, candidate)];
     }),
-  );
+  ) as R399Midus2BiomarkerIncrementOutput["models"];
+  const incrementEvaluationCard = buildIncrementEvaluationCard({ dataShape, models });
+  assertIncrementEvaluationCardBoundary(incrementEvaluationCard);
 
   const output: R399Midus2BiomarkerIncrementOutput = {
     anchor: {
@@ -225,13 +236,9 @@ export async function runR399Midus2BiomarkerIncrement(
     codebookTextStored: false,
     coefficientsStored: false,
     createdAt: options.createdAt ?? new Date().toISOString(),
-    dataShape: {
-      eligibleRows: rows.length,
-      events: rows.reduce((sum, row) => sum + row.y, 0),
-      r399ProxyFeatureObservedCounts: r399ProxyFeatureObservedCounts(rows),
-      splitCounts: splitCounts(rows),
-    },
+    dataShape,
     endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years",
+    incrementEvaluationCard,
     modelScoringPerformed: true,
     models,
     participantIdentifiersStored: false,
@@ -501,6 +508,86 @@ function summarizeModel(
   };
 }
 
+function buildIncrementEvaluationCard(input: {
+  dataShape: R399Midus2BiomarkerIncrementOutput["dataShape"];
+  models: R399Midus2BiomarkerIncrementOutput["models"];
+}): MurphAgeIncrementEvaluationCard {
+  const anchorMetrics = input.models.r399_anchor_recalibrated?.splitMetrics.test;
+  const candidateMetrics = input.models.r399_plus_lab3_bmi_increment?.splitMetrics.test;
+  if (!anchorMetrics || !candidateMetrics) {
+    throw new Error("R399 MIDUS 2 biomarker increment card requires anchor and candidate test metrics.");
+  }
+  const testSplit = input.dataShape.splitCounts.test;
+  return {
+    anchorCardId: R399_RESEARCH_CARD_ID,
+    candidateBatchId: "r399-midus2-first-biomarker-increment-batch",
+    candidateId: "r399-plus-lab3-bmi-increment",
+    evaluation: {
+      aggregateMetricDeltas: {
+        aucDelta: nullableMetricDelta(candidateMetrics.auc, anchorMetrics.auc),
+        brierDelta: roundMetric(candidateMetrics.brier - anchorMetrics.brier),
+        logLossDelta: roundMetric(candidateMetrics.logLoss - anchorMetrics.logLoss),
+      },
+      aggregateSample: {
+        evaluatedRowCount: testSplit.n,
+        eventCount: testSplit.events,
+        minimumCellCount: Math.min(testSplit.events, Math.max(0, testSplit.n - testSplit.events)),
+        suppressedCellCount: 0,
+      },
+      anchorMetrics,
+      candidateMetrics,
+      comparator: "anchor-vs-anchor-plus-increment",
+      evidenceTier: "internal-diagnostic",
+      sameDenominator: true,
+    },
+    flatteningAuthorized: false,
+    layer: "biomarker-increment",
+    outputBoundary: {
+      aggregateOnly: true,
+      coefficientsExportAllowed: false,
+      localArtifactPathExportAllowed: false,
+      modelParametersExportAllowed: false,
+      participantIdentifiersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      predictionsExportAllowed: false,
+      productDisplayExportAllowed: false,
+      rowValuesExportAllowed: false,
+      sourceTextExportAllowed: false,
+      splitMembershipExportAllowed: false,
+    },
+    productAuthorized: false,
+    riskEffect: "aggregate-estimated",
+    schemaVersion: INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: "midus-biomarker-mortality",
+  };
+}
+
+function assertIncrementEvaluationCardBoundary(card: MurphAgeIncrementEvaluationCard): void {
+  const boundary = card.outputBoundary;
+  if (
+    card.productAuthorized !== false
+    || card.scoreBearing !== false
+    || card.scoreContributionAuthorized !== false
+    || card.flatteningAuthorized !== false
+    || card.evaluation.sameDenominator !== true
+    || boundary.aggregateOnly !== true
+    || boundary.coefficientsExportAllowed !== false
+    || boundary.localArtifactPathExportAllowed !== false
+    || boundary.modelParametersExportAllowed !== false
+    || boundary.participantIdentifiersExportAllowed !== false
+    || boundary.participantLevelExportAllowed !== false
+    || boundary.predictionsExportAllowed !== false
+    || boundary.productDisplayExportAllowed !== false
+    || boundary.rowValuesExportAllowed !== false
+    || boundary.sourceTextExportAllowed !== false
+    || boundary.splitMembershipExportAllowed !== false
+  ) {
+    throw new Error("R399 MIDUS 2 biomarker increment card must remain aggregate-only and research-only.");
+  }
+}
+
 function aggregateMetrics(
   rows: readonly ParsedRow[],
   predict: (row: ParsedRow) => number,
@@ -744,6 +831,11 @@ function clampProbability(value: number): number {
 
 function roundMetric(value: number): number {
   return Number(value.toFixed(6));
+}
+
+function nullableMetricDelta(candidate: number | null, anchor: number | null): number | undefined {
+  if (candidate === null || anchor === null) return undefined;
+  return roundMetric(candidate - anchor);
 }
 
 async function main(): Promise<void> {
