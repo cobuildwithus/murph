@@ -44,6 +44,7 @@ import {
 } from "./hosted-crypto/runtime-user-crypto-context.ts";
 import {
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerIdleCheckpointRuntimeConfig,
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
 import {
@@ -1731,17 +1732,21 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
-    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.runnerRuntimeEnvSource,
     );
-    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
-      configSource: this.readRunnerRuntimeConfigSource(),
-      forwardedEnv,
-      rewritePlatformUrlsForContainer: true,
-      runnerSecrets,
-    });
+    const configSource = this.readRunnerRuntimeConfigSource();
+    const runtimeConfig = input.reason === "idle_shutdown_checkpoint"
+      ? buildHostedRunnerIdleCheckpointRuntimeConfig({
+          configSource,
+          forwardedEnv,
+          rewritePlatformUrlsForContainer: true,
+        })
+      : await this.buildForegroundRunnerJobRuntimeConfig({
+          configSource,
+          forwardedEnv,
+          userId: input.userId,
+        });
     const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerName = resolveHostedExecutionRunnerContainerName({
       source: this.runnerRuntimeEnvSource,
@@ -1811,6 +1816,21 @@ export class HostedUserRunner {
     } finally {
       registeredInvocation.release();
     }
+  }
+
+  private async buildForegroundRunnerJobRuntimeConfig(input: {
+    configSource: Readonly<Record<string, string | undefined>>;
+    forwardedEnv: Readonly<Record<string, string>>;
+    userId: string;
+  }): Promise<ReturnType<typeof buildHostedRunnerJobRuntimeConfig>> {
+    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
+    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
+    return buildHostedRunnerJobRuntimeConfig({
+      configSource: input.configSource,
+      forwardedEnv: input.forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    });
   }
 
   private async scheduleNextWorkspaceAlarm(input: {

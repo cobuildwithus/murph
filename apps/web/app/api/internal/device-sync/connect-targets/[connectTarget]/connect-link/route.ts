@@ -2,9 +2,9 @@ import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import {
   configuredDeviceSyncProviderKeys,
   listConfiguredDeviceSyncConnectTargets,
-  readConfiguredDeviceSyncProviderConfigs,
+  readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 
 import {
   createHostedDeviceConnectIntent,
@@ -152,7 +152,7 @@ function resolveHostedDeviceConnectTarget(connectTarget: string) {
   let target: ReturnType<typeof resolveConfiguredDeviceSyncConnectTarget> = null;
   try {
     target = resolveConfiguredDeviceSyncConnectTarget(
-      readConfiguredDeviceSyncProviderConfigs(process.env),
+      readConfiguredDeviceSyncConnectTargetConfigs(process.env),
       connectTarget,
     );
   } catch (error) {
@@ -329,7 +329,7 @@ function readHostedDeviceConnectDiagnosticProviderIds(): Set<string> {
 
   try {
     for (const target of listConfiguredDeviceSyncConnectTargets(
-      readConfiguredDeviceSyncProviderConfigs(process.env),
+      readConfiguredDeviceSyncConnectTargetConfigs(process.env),
     )) {
       providerIds.add(target.connectTarget);
     }

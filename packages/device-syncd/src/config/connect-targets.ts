@@ -5,7 +5,7 @@ import {
   resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
 } from "./connect-routes.ts";
-import { listConfiguredDeviceSyncProviderNames } from "./provider-configs.ts";
+import { listConfiguredDeviceSyncProviderNames } from "./provider-keys.ts";
 
 import type {
   ConfiguredDeviceSyncProviderKey,

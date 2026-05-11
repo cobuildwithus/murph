@@ -34,6 +34,10 @@
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
     },
+    "./connect-config": {
+      "types": "./dist/connect-config.d.ts",
+      "default": "./dist/connect-config.js"
+    },
     "./local-secret-codec": {
       "types": "./dist/local-secret-codec.d.ts",
       "default": "./dist/local-secret-codec.js"

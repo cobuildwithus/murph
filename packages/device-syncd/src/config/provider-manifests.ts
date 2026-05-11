@@ -31,6 +31,10 @@ import {
   readOptionalCredentialPair,
 } from "./provider-config-helpers.ts";
 import {
+  configuredDeviceSyncProviderKeys,
+  listConfiguredDeviceSyncProviderNames,
+} from "./provider-keys.ts";
+import {
   JUNCTION_API_KEY_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
@@ -580,9 +584,7 @@ export const deviceSyncProviderManifestByKey = Object.freeze({
   strava: STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST,
 } as const satisfies DeviceSyncConfiguredProviderManifestByKey);
 
-export const configuredDeviceSyncProviderKeys = Object.freeze(
-  Object.keys(deviceSyncProviderManifestByKey) as ConfiguredDeviceSyncProviderKey[],
-);
+export { configuredDeviceSyncProviderKeys };
 
 export const deviceSyncProviderManifests = Object.freeze(
   configuredDeviceSyncProviderKeys.map((provider) => deviceSyncProviderManifestByKey[provider]),
@@ -647,11 +649,7 @@ export function requireConfiguredDeviceSyncProviderManifest(
   return manifest;
 }
 
-export function listConfiguredDeviceSyncProviderNames(
-  configs: ConfiguredDeviceSyncProviderPresence,
-): ConfiguredDeviceSyncProviderKey[] {
-  return configuredDeviceSyncProviderKeys.filter((provider) => configs[provider] !== undefined);
-}
+export { listConfiguredDeviceSyncProviderNames };
 
 export function listConfiguredDeviceSyncProviderManifests(
   configs: ConfiguredDeviceSyncProviderPresence,
