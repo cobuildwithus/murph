@@ -682,6 +682,44 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
+  it("does not schedule idle checkpoint when legacy pending_nudge mirror drift exists", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    db.prepare(`
+      UPDATE runner_meta
+      SET pending_nudge = 1,
+          pending_work = 0
+      WHERE singleton = 1
+    `).run();
+
+    await expect(store.scheduleIdleShutdownCheckpointIfStillQuiet({
+      dueAt: "2026-04-27T00:01:00.000Z",
+      workspaceVersion: "4",
+    })).resolves.toMatchObject({
+      record: {
+        alarm: null,
+        pendingNudge: true,
+        pendingWork: true,
+      },
+      scheduled: false,
+    });
+    expect(db.prepare(`
+      SELECT alarm_kind,
+             idle_shutdown_checkpoint_due_at,
+             idle_shutdown_checkpoint_workspace_version,
+             pending_nudge,
+             pending_work
+      FROM runner_meta
+      WHERE singleton = 1
+    `).get()).toEqual({
+      alarm_kind: null,
+      idle_shutdown_checkpoint_due_at: null,
+      idle_shutdown_checkpoint_workspace_version: null,
+      pending_nudge: 1,
+      pending_work: 0,
+    });
+  });
+
   it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.bindUser("user-existing");

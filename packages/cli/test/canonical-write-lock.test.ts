@@ -11,7 +11,6 @@ import {
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
-  ensureJournalDay,
   initializeVault,
   validateVault,
   VaultError,
@@ -90,6 +89,57 @@ async function holdCanonicalWriteLock(vaultRoot: string) {
       const [code] = (await once(child, "exit")) as [number | null];
       assert.equal(code, 0);
     },
+  };
+}
+
+async function runPublicMutatorWithExpiredLockDeadline(vaultRoot: string): Promise<{
+  code?: string;
+  ok: boolean;
+}> {
+  await ensureCliRuntimeArtifacts();
+  const coreModuleUrl = pathToFileURL(path.join(repoRoot, "packages/core/dist/index.js")).href;
+  const script = `
+    const { ensureJournalDay, VaultError } = await import(${JSON.stringify(coreModuleUrl)});
+    const originalNow = Date.now;
+    let nowCalls = 0;
+    Date.now = () => {
+      nowCalls += 1;
+      return originalNow() + (nowCalls > 1 ? 31_000 : 0);
+    };
+    try {
+      await ensureJournalDay({
+        vaultRoot: process.argv[1],
+        date: "2026-03-13",
+      });
+      process.stdout.write(JSON.stringify({ ok: true }));
+    } catch (error) {
+      if (error instanceof VaultError) {
+        process.stdout.write(JSON.stringify({ ok: false, code: error.code }));
+      } else {
+        throw error;
+      }
+    } finally {
+      Date.now = originalNow;
+    }
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", script, vaultRoot], {
+    cwd: repoRoot,
+    env: withoutNodeV8Coverage(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout.push(chunk);
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr.push(chunk);
+  });
+  const [code] = (await once(child, "exit")) as [number | null];
+  assert.equal(code, 0, Buffer.concat(stderr).toString("utf8"));
+  return JSON.parse(Buffer.concat(stdout).toString("utf8")) as {
+    code?: string;
+    ok: boolean;
   };
 }
 
@@ -256,19 +306,11 @@ test.sequential("public core mutators reject concurrent writers while another pr
     const heldLock = await holdCanonicalWriteLock(vaultRoot);
 
     try {
-      vi.useFakeTimers();
-      const rejection = assert.rejects(
-        async () =>
-          ensureJournalDay({
-            vaultRoot,
-            date: "2026-03-13",
-          }),
-        (error: unknown) => error instanceof VaultError && error.code === "CANONICAL_WRITE_LOCKED",
-      );
-      await vi.advanceTimersByTimeAsync(31_000);
-      await rejection;
+      assert.deepEqual(await runPublicMutatorWithExpiredLockDeadline(vaultRoot), {
+        code: "CANONICAL_WRITE_LOCKED",
+        ok: false,
+      });
     } finally {
-      vi.useRealTimers();
       await heldLock.release();
     }
   } finally {

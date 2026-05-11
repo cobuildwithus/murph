@@ -2626,12 +2626,44 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: input.preferredWakeAt,
     });
+    const destroyAttempted = await this.destroyRunnerContainerAfterIdleCheckpointBestEffort({
+      userId: input.userId,
+    });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
+      details: {
+        destroyAttempted,
+      },
+      message: "Hosted runner completed idle-shutdown checkpoint cleanup.",
       phase: "checkpoint",
       userId: input.userId,
     });
+  }
+
+  private async destroyRunnerContainerAfterIdleCheckpointBestEffort(input: {
+    userId: string;
+  }): Promise<boolean> {
+    if (!this.runnerContainerNamespace) {
+      return false;
+    }
+
+    try {
+      await this.runnerContainerNamespace.getByName(resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.userId,
+      })).destroyInstance();
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner could not destroy idle-shutdown checkpoint container after cleanup.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+      return true;
+    }
   }
 
   private async scheduleHostedWakeRetryAlarm(input: {

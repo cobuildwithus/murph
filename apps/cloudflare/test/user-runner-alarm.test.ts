@@ -5308,7 +5308,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBeNull();
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(
       sql.exec(
         `SELECT idle_shutdown_checkpoint_due_at,
@@ -5486,7 +5486,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.workspaceVersion).toBe("0");
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5727,7 +5727,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
     expect(invoke.mock.calls[1]?.[0].job.request.checkpointNextWakeAt).toBe("2026-04-27T00:10:00.000Z");
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(
       sql.exec(
         `SELECT deferred_checkpoint_required,
@@ -5881,7 +5881,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(idleInvoke).toHaveBeenCalledOnce();
     expect(idleInvoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms).toContain("deleted");
     expect(
       sql.exec(
@@ -5941,7 +5941,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await runner.alarm();
 
     expect(idleInvoke).toHaveBeenCalledOnce();
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("2026-04-27T00:10:00.000Z");
     expect(
       sql.exec(
@@ -6298,7 +6298,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("does not destroy the container during idle-checkpoint cleanup", async () => {
+  it("destroys the warm container after quiet idle-checkpoint cleanup", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -6327,7 +6327,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(alarms.at(-1)).toBe("deleted");
     expect(
       sql.exec(
@@ -6350,7 +6350,10 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
+        details: {
+          destroyAttempted: true,
+        },
+        message: "Hosted runner completed idle-shutdown checkpoint cleanup.",
       }),
     );
   });
@@ -7380,7 +7383,7 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
-    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
     expect(waitUntil).toHaveBeenCalledOnce();
     await Promise.all(waitUntilPromises);
     expect(refreshBrowserVaultReplica).toHaveBeenCalledOnce();
