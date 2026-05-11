@@ -490,3 +490,6 @@ No heartbeat, no foreground/background Cloudflare priority, no container lifecyc
 ```
 
 That is the absolute simplest shape I would aim for.
+Status: completed
+Updated: 2026-05-11
+Completed: 2026-05-11
