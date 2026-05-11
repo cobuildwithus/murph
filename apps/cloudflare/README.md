@@ -90,8 +90,8 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS=60000`
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the Durable
-  Object-owned idle checkpoint/shutdown window; the native container shell uses
-  the same idle lifecycle for its own activity expiry
+  Object-owned idle checkpoint window; the native container shell uses the same
+  idle lifecycle for its own activity expiry and normal teardown
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
@@ -124,19 +124,19 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 The native Cloudflare container is a warm per-user shell. Successful workspace
 invocations that finish idle schedule one lease-scoped idle-shutdown base
 checkpoint at T-minus 60 seconds before the configured idle window by default.
-That Durable Object alarm owns the checkpoint-before-shutdown sequence. The
-container's own `sleepAfter` lifecycle uses the same configured idle window, so
-the checkpoint remains a near-shutdown maintenance path rather than a separate
-foreground checkpoint. New user activity clears or aborts that checkpoint and
-pushes the idle window forward; foreground input always outranks idle checkpoint
-maintenance.
+That Durable Object alarm owns checkpoint ordering, while normal warm-shell
+teardown is left to the Cloudflare/container lifecycle. The container's own
+`sleepAfter` lifecycle uses the same configured idle window, so the checkpoint
+remains lifecycle-end maintenance rather than a separate foreground checkpoint.
+New user activity clears or aborts that checkpoint and pushes the idle window
+forward; foreground input always outranks idle checkpoint maintenance.
 Each invocation still runs through an isolated child process with fresh
 invocation-local cache/temp roots and a fresh outbound worker-proxy token.
 
 The warm shell is destroyed when an invocation fails, outbound proxy cleanup
 fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
-Cloudflare reports idle activity expiry, or the idle-shutdown base checkpoint
-completes with no pending work.
+or Cloudflare reports idle activity expiry. A successful idle-shutdown base
+checkpoint does not force container teardown.
 
 ## Deploy Artifacts
 
