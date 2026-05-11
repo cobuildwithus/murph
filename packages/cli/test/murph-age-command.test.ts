@@ -101,6 +101,7 @@ interface MurphAgeModelCardStatusReport {
       riskEndpoint: string
     }
     productAgeReady: boolean
+    productPromotionBlockers: string[]
     productRiskReady: boolean
     researchUsable: boolean
     scoreBearing: boolean
@@ -182,6 +183,13 @@ test('age model-cards reports local research readiness without model internals',
     assert.equal(lab9.validationGate.status, 'blocked')
     assert.equal(lab9.validationGate.evidenceTiers.includes('internal-anchor'), true)
     assert.equal(lab9.validationGate.productPromotionEvidence, false)
+    assert.deepEqual(lab9.productPromotionBlockers, [
+      'PRODUCT_POLICY_NOT_AUTHORIZED',
+      'VALIDATION_GATE_BLOCKED',
+      'PRODUCT_PROMOTION_EVIDENCE_MISSING',
+      'PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING',
+      'RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED',
+    ])
     assert.equal(lab9.blockers.includes('PRODUCT_NOT_AUTHORIZED'), true)
     assert.equal(lab9.blockers.includes('RISK_TO_AGE_NOT_AUTHORIZED'), true)
 
@@ -240,6 +248,13 @@ test('age model-cards reports missing local artifacts as policy blockers', async
     assert.equal(lab5.researchUsable, false)
     assert.equal(lab5.productRiskReady, false)
     assert.equal(lab5.productAgeReady, false)
+    assert.deepEqual(lab5.productPromotionBlockers, [
+      'PRODUCT_POLICY_NOT_AUTHORIZED',
+      'VALIDATION_GATE_BLOCKED',
+      'PRODUCT_PROMOTION_EVIDENCE_MISSING',
+      'PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING',
+      'RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED',
+    ])
     assert.deepEqual(lab5.outcomeContext, {
       ageEstimateBasis: 'risk-age-equivalent',
       horizonYears: 10,

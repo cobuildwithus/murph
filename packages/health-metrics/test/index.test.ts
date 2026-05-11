@@ -25,6 +25,7 @@ import {
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
+  listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
@@ -1906,6 +1907,7 @@ test("requires explicit validation-gate evidence before product-authorizing Murp
     assert.equal(policy.validationGate.productPromotionEvidence, false);
     assert.equal(isMurphAgeModelCardProductAuthorized(policy), false);
     assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy), false);
+    assert.equal(listMurphAgeModelCardProductPromotionBlockers(policy).length > 0, true);
   }
 
   const lab9Policy = assertDefined(
@@ -1924,6 +1926,11 @@ test("requires explicit validation-gate evidence before product-authorizing Murp
   };
   assert.equal(isMurphAgeModelCardProductAuthorized(rawProductFlagOnly), false);
   assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(rawProductFlagOnly), false);
+  assert.deepEqual(listMurphAgeModelCardProductPromotionBlockers(rawProductFlagOnly), [
+    "VALIDATION_GATE_BLOCKED",
+    "PRODUCT_PROMOTION_EVIDENCE_MISSING",
+    "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING",
+  ]);
 
   const internalOnlyPassedPolicy: MurphAgeModelCardPolicy = {
     ...lab9Policy,
@@ -1960,6 +1967,7 @@ test("requires explicit validation-gate evidence before product-authorizing Murp
     assert.equal(hasMurphAgeProductPromotionEvidenceTier(productValidatedPolicy.validationGate), true);
     assert.equal(isMurphAgeModelCardProductAuthorized(productValidatedPolicy), true);
     assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(productValidatedPolicy), true);
+    assert.deepEqual(listMurphAgeModelCardProductPromotionBlockers(productValidatedPolicy), []);
   }
 
   const otherwisePromotionValidatedPolicies: MurphAgeModelCardPolicy[] = [
@@ -2016,6 +2024,9 @@ test("requires explicit validation-gate evidence before product-authorizing Murp
   };
   assert.equal(isMurphAgeModelCardProductAuthorized(riskToAgeHeldPolicy), true);
   assert.equal(isMurphAgeModelCardRiskToAgeDisplayAuthorized(riskToAgeHeldPolicy), false);
+  assert.deepEqual(listMurphAgeModelCardProductPromotionBlockers(riskToAgeHeldPolicy), [
+    "RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED",
+  ]);
 
   if (lab9Policy.validationGate) {
     (lab9Policy.validationGate.evidenceTiers as string[]).push("true-external-validation");

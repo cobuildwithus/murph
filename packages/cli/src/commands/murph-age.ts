@@ -13,6 +13,7 @@ import {
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardPolicies,
+  listMurphAgeModelCardProductPromotionBlockers,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
@@ -71,6 +72,13 @@ const murphAgeModelCardBlockerSchema = z.enum([
   'RISK_TO_AGE_NOT_AUTHORIZED',
   'WEARABLE_NOT_SCORE_BEARING',
 ])
+const murphAgeProductPromotionBlockerSchema = z.enum([
+  'PRODUCT_POLICY_NOT_AUTHORIZED',
+  'PRODUCT_PROMOTION_EVIDENCE_MISSING',
+  'PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING',
+  'RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED',
+  'VALIDATION_GATE_BLOCKED',
+])
 
 const murphAgeOutcomeContextSchema = z.object({
   ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
@@ -86,6 +94,7 @@ const murphAgeModelCardStatusPolicySchema = z.object({
   loaded: z.boolean(),
   outcomeContext: murphAgeOutcomeContextSchema,
   productAgeReady: z.boolean(),
+  productPromotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
   productRiskReady: z.boolean(),
   researchUsable: z.boolean(),
   scoreBearing: z.boolean(),
@@ -476,6 +485,7 @@ function summarizeMurphAgeModelCardPolicy(
       riskEndpoint: policy.outcome.riskEndpoint,
     },
     productAgeReady,
+    productPromotionBlockers: listMurphAgeModelCardProductPromotionBlockers(policy),
     productRiskReady,
     researchUsable: policy.scoreBearing && loaded,
     scoreBearing: policy.scoreBearing,
