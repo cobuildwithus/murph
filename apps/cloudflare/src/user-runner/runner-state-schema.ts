@@ -1,6 +1,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 8;
+const RUNNER_STATE_SCHEMA_VERSION = 9;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -13,46 +13,32 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
-      wake_pending INTEGER NOT NULL DEFAULT 0,
-      next_wake_at TEXT,
+      wake_at TEXT,
       active_attempt_id TEXT,
       active_generation INTEGER NOT NULL DEFAULT 0,
       active_kind TEXT,
       active_started_at TEXT,
       active_expires_at TEXT,
       active_workspace_version TEXT,
-      idle_checkpoint_due_at TEXT,
-      idle_checkpoint_workspace_version TEXT,
-      idle_checkpoint_next_wake_at TEXT,
-      retry_at TEXT,
-      retry_count INTEGER NOT NULL DEFAULT 0,
-      retry_last_error_code TEXT,
+      backoff_until TEXT,
+      failure_count INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
-      last_invocation_at TEXT,
-      deferred_checkpoint_required INTEGER NOT NULL DEFAULT 0,
-      deferred_checkpoint_mailbox_status_json TEXT
+      last_invocation_at TEXT
     )
   `);
 
   assertRunnerStateSchemaVersionSupported(sql);
   for (const [columnName, definition] of Object.entries({
-    wake_pending: "INTEGER NOT NULL DEFAULT 0",
-    next_wake_at: "TEXT",
+    wake_at: "TEXT",
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
     active_kind: "TEXT",
     active_started_at: "TEXT",
     active_expires_at: "TEXT",
     active_workspace_version: "TEXT",
-    idle_checkpoint_due_at: "TEXT",
-    idle_checkpoint_workspace_version: "TEXT",
-    idle_checkpoint_next_wake_at: "TEXT",
-    retry_at: "TEXT",
-    retry_count: "INTEGER NOT NULL DEFAULT 0",
-    retry_last_error_code: "TEXT",
-    deferred_checkpoint_required: "INTEGER NOT NULL DEFAULT 0",
-    deferred_checkpoint_mailbox_status_json: "TEXT",
+    backoff_until: "TEXT",
+    failure_count: "INTEGER NOT NULL DEFAULT 0",
     last_error_at: "TEXT",
     last_error_code: "TEXT",
     last_invocation_at: "TEXT",
@@ -67,25 +53,18 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     requiredColumns: [
       "singleton",
       "user_id",
-      "wake_pending",
-      "next_wake_at",
+      "wake_at",
       "active_attempt_id",
       "active_generation",
       "active_kind",
       "active_started_at",
       "active_expires_at",
       "active_workspace_version",
-      "idle_checkpoint_due_at",
-      "idle_checkpoint_workspace_version",
-      "idle_checkpoint_next_wake_at",
-      "retry_at",
-      "retry_count",
-      "retry_last_error_code",
+      "backoff_until",
+      "failure_count",
       "last_error_at",
       "last_error_code",
       "last_invocation_at",
-      "deferred_checkpoint_required",
-      "deferred_checkpoint_mailbox_status_json",
     ],
   });
 }
@@ -124,15 +103,28 @@ function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number 
 
 function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   const columns = readRunnerStateTableColumns(sql, "runner_meta");
-  if (columns.includes("pending_work")) {
-    // Legacy pending-nudge/work projections kept for deploy skew only.
-    // Delete after 2026-05-25; live state uses wake_pending.
+  if (columns.includes("wake_pending") || columns.includes("next_wake_at") || columns.includes("pending_work")) {
+    const wakeSources: string[] = [];
+    if (columns.includes("wake_pending")) {
+      wakeSources.push("wake_pending = 1");
+    }
+    if (columns.includes("pending_work")) {
+      wakeSources.push("pending_work = 1");
+    }
+    if (columns.includes("pending_nudge")) {
+      wakeSources.push("pending_nudge = 1");
+    }
+    const wakeExists = wakeSources.length > 0 ? wakeSources.join(" OR ") : "0";
+    const nextWakeAt = columns.includes("next_wake_at") ? "next_wake_at" : "NULL";
     sql.exec(`
       UPDATE runner_meta
-      SET wake_pending = CASE
-        WHEN wake_pending = 1 OR pending_work = 1 OR pending_nudge = 1 THEN 1
-        ELSE 0
-      END
+      SET wake_at = COALESCE(
+        wake_at,
+        CASE
+          WHEN ${wakeExists} THEN COALESCE(${nextWakeAt}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          ELSE ${nextWakeAt}
+        END
+      )
       WHERE singleton = 1
     `);
   }
@@ -166,21 +158,37 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     `);
   }
   if (columns.includes("idle_shutdown_checkpoint_due_at")) {
+    const nextWakeAt = columns.includes("next_wake_at") ? "next_wake_at" : "NULL";
     sql.exec(`
       UPDATE runner_meta
       SET
-        idle_checkpoint_due_at = COALESCE(idle_checkpoint_due_at, idle_shutdown_checkpoint_due_at),
-        idle_checkpoint_workspace_version = COALESCE(idle_checkpoint_workspace_version, idle_shutdown_checkpoint_workspace_version),
-        idle_checkpoint_next_wake_at = COALESCE(idle_checkpoint_next_wake_at, next_wake_at)
+        wake_at = COALESCE(wake_at, ${nextWakeAt})
+      WHERE singleton = 1
+    `);
+  }
+  if (columns.includes("retry_at")) {
+    sql.exec(`
+      UPDATE runner_meta
+      SET backoff_until = COALESCE(backoff_until, retry_at)
       WHERE singleton = 1
     `);
   }
   if (columns.includes("retry_failure_count")) {
     sql.exec(`
       UPDATE runner_meta
-      SET retry_count = CASE
-        WHEN retry_count > 0 THEN retry_count
+      SET failure_count = CASE
+        WHEN failure_count > 0 THEN failure_count
         ELSE retry_failure_count
+      END
+      WHERE singleton = 1
+    `);
+  }
+  if (columns.includes("retry_count")) {
+    sql.exec(`
+      UPDATE runner_meta
+      SET failure_count = CASE
+        WHEN failure_count > 0 THEN failure_count
+        ELSE retry_count
       END
       WHERE singleton = 1
     `);

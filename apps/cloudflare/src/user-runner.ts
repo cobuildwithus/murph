@@ -1,11 +1,7 @@
 import {
-  HOSTED_MAILBOX_LANES,
   type HostedAiUsageAllowDecision,
-  type HostedMailboxLane,
-  type HostedMailboxLaneLag,
   type HostedRunnerNudgeResult,
   type HostedRunnerNudgeRequest,
-  type HostedRuntimeRedactedJson,
   type HostedRunnerStatusResponse,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceReadResponse,
@@ -45,7 +41,6 @@ import {
 } from "./hosted-crypto/runtime-user-crypto-context.ts";
 import {
   buildHostedRunnerContainerEnv,
-  buildHostedRunnerIdleCheckpointRuntimeConfig,
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
 import {
@@ -55,7 +50,6 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
-  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -200,17 +194,6 @@ export class HostedUserRunner {
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId, {
       logLimit: input.logLimit,
     });
-    const deferredCheckpointMailboxStatus = record.deferredCheckpointRequired
-      ? record.deferredCheckpointMailboxStatus
-      : null;
-    const mailboxLag = mergeHostedRunnerDeferredCheckpointMailboxLag({
-      mailboxLag: webStatus.mailboxLag,
-      redactedStatus: deferredCheckpointMailboxStatus,
-    });
-    const workspace = mergeHostedRunnerDeferredCheckpointWorkspaceStatus({
-      redactedStatus: deferredCheckpointMailboxStatus,
-      workspace: webStatus.workspace,
-    });
 
     return {
       ...webStatus,
@@ -222,9 +205,9 @@ export class HostedUserRunner {
         readRunnerStateAlarmAt(record),
         webStatus.workspace?.nextWakeAt ?? null,
       ),
-      mailboxLag,
+      mailboxLag: webStatus.mailboxLag,
       userId: record.userId,
-      workspace,
+      workspace: webStatus.workspace,
     };
   }
 
@@ -276,7 +259,6 @@ export class HostedUserRunner {
     const record = await this.stateStore.markWakePending({
       clearIdleCheckpoint: true,
       preferredWakeAt: new Date().toISOString(),
-      resetRetry: before.retryFailureCount >= this.env.maxEventAttempts,
     });
     await this.syncAlarm(record);
     const immediateDriveStarted = this.kickDrain({
@@ -353,6 +335,45 @@ export class HostedUserRunner {
     workspaceVersion?: string | null;
   }): Promise<boolean> {
     return (await this.stateStore.validateWriteFenceToken(input)).owns;
+  }
+
+  async beginIdleCheckpointLease(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<RunnerWriteFenceToken> {
+    await this.stateStore.bindUser(input.userId);
+    let token = await this.stateStore.beginWriteFence({
+      expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+      kind: "idle_checkpoint",
+      reason: "idle_shutdown_checkpoint",
+      userId: input.userId,
+    });
+    token = await this.stateStore.bindWriteFenceWorkspaceVersion({
+      token,
+      workspaceVersion: input.workspaceVersion,
+    });
+    return token;
+  }
+
+  async finishIdleCheckpointLease(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt?: string | null;
+    userId: string;
+  }): Promise<{ completed: boolean }> {
+    const result = await this.stateStore.clearWriteFenceIdentityAfterCompletion({
+      attemptId: input.attemptId,
+      finishedAt: new Date().toISOString(),
+      generation: input.generation,
+      userId: input.userId,
+    });
+    if (result.completed) {
+      await this.stateStore.scheduleNextWake({
+        nextWakeAt: input.nextWakeAt ?? null,
+      });
+      await this.syncAlarm(await this.stateStore.readState());
+    }
+    return { completed: result.completed };
   }
 
   /**
@@ -523,15 +544,6 @@ export class HostedUserRunner {
         continue;
       }
 
-      if (due.kind === "idle_checkpoint") {
-        lastResult = await this.runIdleCheckpointIfWarm({
-          checkpointNextWakeAt: due.checkpointNextWakeAt,
-          userId: due.record.userId,
-          workspaceVersion: due.workspaceVersion,
-        });
-        continue;
-      }
-
       await this.syncAlarm(due.record);
       return lastResult;
     }
@@ -569,7 +581,6 @@ export class HostedUserRunner {
       });
 
       const result = await this.invokeWorkspaceRunner({
-        checkpointNextWakeAt: null,
         token,
         reason: input.reason,
         userId: initialRecord.userId,
@@ -636,150 +647,15 @@ export class HostedUserRunner {
     }
   }
 
-  private async runIdleCheckpointIfWarm(input: {
-    checkpointNextWakeAt: string | null;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    let current = await this.stateStore.readState();
-    if (current.wakePending) {
-      await this.stateStore.clearIdleCheckpoint();
-      return {
-        nextWakeAt: current.nextWakeAt,
-        status: "scheduled",
-      };
-    }
-
-    let token: RunnerWriteFenceToken;
-    try {
-      token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "idle_checkpoint",
-        reason: "idle_shutdown_checkpoint",
-        userId: input.userId,
-      });
-    } catch (error) {
-      if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
-        throw error;
-      }
-      await this.syncAlarm(error.record);
-      return {
-        nextWakeAt: readRunnerStateAlarmAt(error.record),
-        status: "scheduled",
-      };
-    }
-
-    token = await this.stateStore.bindWriteFenceWorkspaceVersion({
-      token,
-      workspaceVersion: input.workspaceVersion,
-    });
-
-    try {
-      const result = await this.invokeWorkspaceRunner({
-        checkpointNextWakeAt: input.checkpointNextWakeAt,
-        token,
-        reason: "idle_shutdown_checkpoint",
-        userId: input.userId,
-        workspaceVersion: input.workspaceVersion,
-      });
-      await this.stateStore.clearWriteFenceAfterCompletion({
-        finishedAt: new Date().toISOString(),
-        token,
-      });
-      await this.finishIdleCheckpoint({
-        nextWakeAt: result.nextWakeAt ?? input.checkpointNextWakeAt,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          idleShutdownCheckpointed: Boolean(result.idleShutdownCheckpointed),
-          idleShutdownCheckpointSkipped: result.idleShutdownCheckpointSkipped ?? null,
-          workspaceAttemptId: token.attemptId,
-        },
-        message: "Hosted runner idle-shutdown checkpoint finished.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return result;
-    } catch (error) {
-      await this.stateStore.clearWriteFenceAfterCompletion({
-        finishedAt: new Date().toISOString(),
-        token,
-      });
-      current = await this.stateStore.clearIdleCheckpoint();
-      await this.syncAlarm(current);
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          workspaceAttemptId: token.attemptId,
-        },
-        level: "warn",
-        message: "Hosted runner idle-shutdown checkpoint failed best-effort.",
-        phase: "failed",
-        userId: input.userId,
-      });
-      return {
-        nextWakeAt: current.nextWakeAt,
-        status: "scheduled",
-      };
-    }
-  }
-
   private async scheduleAfterRuntimeWake(input: {
     result: HostedWorkspaceInvocationResult;
     userId: string;
     workspaceVersion: string;
   }): Promise<void> {
-    const record = await this.syncDeferredCheckpointStateAfterInvocation({
-      result: input.result,
-    });
+    void input.userId;
+    void input.workspaceVersion;
     await this.stateStore.scheduleNextWake({
       nextWakeAt: input.result.nextWakeAt ?? null,
-    });
-
-    if (
-      this.env.idleShutdownCheckpointsEnabled
-      && input.result.deferredCheckpointRequired === true
-      && input.result.status !== "failed"
-    ) {
-      const dueAt = new Date(
-        Date.now() + resolveIdleShutdownCheckpointDelayMs({
-          idleTtlMs: this.env.runnerIdleTtlMs,
-          safetyMarginMs: this.env.idleShutdownCheckpointSafetyMarginMs,
-        }),
-      ).toISOString();
-      await this.stateStore.scheduleIdleCheckpoint({
-        checkpointNextWakeAt: input.result.nextWakeAt ?? null,
-        dueAt,
-        workspaceVersion: input.workspaceVersion,
-      });
-      await this.syncAlarm(await this.stateStore.readState());
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          idleShutdownCheckpointDueAt: dueAt,
-        },
-        message: "Hosted runner scheduled idle-shutdown checkpoint.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return;
-    }
-
-    if (record.idleCheckpoint) {
-      await this.stateStore.clearIdleCheckpoint();
-    }
-    await this.syncAlarm(await this.stateStore.readState());
-  }
-
-  private async finishIdleCheckpoint(input: {
-    nextWakeAt: string | null;
-  }): Promise<void> {
-    await this.stateStore.clearIdleCheckpoint();
-    await this.stateStore.clearDeferredCheckpointRequired();
-    await this.stateStore.scheduleNextWake({
-      nextWakeAt: input.nextWakeAt,
     });
     await this.syncAlarm(await this.stateStore.readState());
   }
@@ -789,35 +665,13 @@ export class HostedUserRunner {
     preferredWakeAt?: string | null;
     userId?: string | null;
   }): Promise<void> {
-    await this.finishIdleCheckpoint({
+    await this.stateStore.scheduleNextWake({
       nextWakeAt: input.preferredWakeAt ?? input.nextWakeAt ?? null,
     });
-  }
-
-  private async syncDeferredCheckpointStateAfterInvocation(input: {
-    result: HostedWorkspaceInvocationResult;
-  }): Promise<RunnerStateRecord> {
-    const record = await this.stateStore.readState();
-    const nextDeferredStatus = input.result.redactedStatus
-      ? mergeHostedRunnerDeferredCheckpointRedactedStatus({
-          base: record.deferredCheckpointRequired
-            ? record.deferredCheckpointMailboxStatus
-            : null,
-          deferred: input.result.redactedStatus,
-        })
-      : null;
-
-    if (input.result.deferredCheckpointRequired === true && nextDeferredStatus) {
-      return await this.stateStore.markDeferredCheckpointRequired({
-        redactedStatus: nextDeferredStatus,
-      });
-    }
-
-    return await this.stateStore.clearDeferredCheckpointRequired();
+    await this.syncAlarm(await this.stateStore.readState());
   }
 
   private async invokeWorkspaceRunner(input: {
-    checkpointNextWakeAt?: string | null;
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -831,17 +685,11 @@ export class HostedUserRunner {
       this.runnerRuntimeEnvSource,
     );
     const configSource = this.readRunnerRuntimeConfigSource();
-    const runtimeConfig = input.reason === "idle_shutdown_checkpoint"
-      ? buildHostedRunnerIdleCheckpointRuntimeConfig({
-          configSource,
-          forwardedEnv,
-          rewritePlatformUrlsForContainer: true,
-        })
-      : await this.buildForegroundRunnerJobRuntimeConfig({
-          configSource,
-          forwardedEnv,
-          userId: input.userId,
-        });
+    const runtimeConfig = await this.buildForegroundRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv,
+      userId: input.userId,
+    });
     const userEnv = runtimeConfig.userEnv ?? {};
     const runnerContainerName = resolveHostedExecutionRunnerContainerName({
       source: this.runnerRuntimeEnvSource,
@@ -851,9 +699,6 @@ export class HostedUserRunner {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.token.attemptId,
-        ...(input.reason === "idle_shutdown_checkpoint"
-          ? { checkpointNextWakeAt: input.checkpointNextWakeAt ?? null }
-          : {}),
         leaseGeneration: input.token.generation,
         reason: input.reason,
         userId: input.userId,
@@ -887,10 +732,7 @@ export class HostedUserRunner {
       userId: input.userId,
     });
 
-    const invokeRunner = input.reason === "idle_shutdown_checkpoint"
-      ? invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm
-      : invokeHostedExecutionContainerRunner;
-    return await invokeRunner({
+    return await invokeHostedExecutionContainerRunner({
       job,
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,
@@ -1291,20 +1133,14 @@ async function deleteR2ObjectsWithPrefix(
 }
 
 function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
-  const immediate = record.wakePending ? new Date().toISOString() : null;
-  return earliestIsoDate(
-    earliestIsoDate(immediate, record.retry.at),
-    earliestIsoDate(record.nextWakeAt, record.idleCheckpoint?.dueAt ?? null),
-  );
+  return readRunnerRuntimeDueAt(record);
 }
 
-function resolveIdleShutdownCheckpointDelayMs(input: {
-  idleTtlMs: number;
-  safetyMarginMs: number;
-}): number {
-  const idleTtlMs = Math.max(0, Math.floor(input.idleTtlMs));
-  const safetyMarginMs = Math.max(0, Math.floor(input.safetyMarginMs));
-  return Math.max(1_000, idleTtlMs - safetyMarginMs);
+function readRunnerRuntimeDueAt(record: RunnerStateRecord): string | null {
+  if (!record.wakeAt) {
+    return null;
+  }
+  return latestIsoDate(record.wakeAt, record.backoffUntil);
 }
 
 function earliestIsoDate(left: string | null, right: string | null): string | null {
@@ -1326,97 +1162,23 @@ function earliestIsoDate(left: string | null, right: string | null): string | nu
   return rightMs < leftMs ? right : left;
 }
 
-function mergeHostedRunnerDeferredCheckpointWorkspaceStatus(input: {
-  redactedStatus: HostedRuntimeRedactedJson | null;
-  workspace: HostedWorkspaceState | null;
-}): HostedWorkspaceState | null {
-  if (!input.workspace || !input.redactedStatus) {
-    return input.workspace;
+function latestIsoDate(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
   }
 
-  return {
-    ...input.workspace,
-    redactedStatus: mergeHostedRunnerDeferredCheckpointRedactedStatus({
-      base: input.workspace.redactedStatus ?? null,
-      deferred: input.redactedStatus,
-    }),
-  };
-}
-
-function mergeHostedRunnerDeferredCheckpointRedactedStatus(input: {
-  base: HostedRuntimeRedactedJson | null;
-  deferred: HostedRuntimeRedactedJson;
-}): HostedRuntimeRedactedJson {
-  const merged: HostedRuntimeRedactedJson = {
-    ...(input.base ?? {}),
-  };
-
-  for (const [key, value] of Object.entries(input.deferred)) {
-    const deferredSeq = readNonNegativeBigInt(value);
-    if (deferredSeq === null) {
-      continue;
-    }
-
-    const baseSeq = readNonNegativeBigInt(merged[key]);
-    if (baseSeq === null || deferredSeq > baseSeq) {
-      merged[key] = deferredSeq.toString();
-    }
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs)) {
+    return right;
   }
-
-  return merged;
-}
-
-function mergeHostedRunnerDeferredCheckpointMailboxLag(input: {
-  mailboxLag: readonly HostedMailboxLaneLag[];
-  redactedStatus: HostedRuntimeRedactedJson | null;
-}): HostedMailboxLaneLag[] {
-  const redactedStatus = input.redactedStatus;
-  if (!redactedStatus) {
-    return [...input.mailboxLag];
+  if (!Number.isFinite(rightMs)) {
+    return left;
   }
-
-  return input.mailboxLag.map((lag) => {
-    const webImportedSeq = readNonNegativeBigInt(lag.importedSeq) ?? 0n;
-    const deferredImportedSeq = readHostedMailboxImportedSeqForLane(
-      redactedStatus,
-      lag.lane,
-    );
-    const importedSeq = deferredImportedSeq > webImportedSeq
-      ? deferredImportedSeq
-      : webImportedSeq;
-    const maxSeq = readNonNegativeBigInt(lag.maxSeq) ?? 0n;
-
-    return {
-      ...lag,
-      importedSeq: importedSeq.toString(),
-      lag: (maxSeq > importedSeq ? maxSeq - importedSeq : 0n).toString(),
-      maxSeq: maxSeq.toString(),
-    };
-  });
-}
-
-function readHostedMailboxImportedSeqForLane(
-  redactedStatus: HostedRuntimeRedactedJson,
-  lane: HostedMailboxLane,
-): bigint {
-  const key = `hostedMailbox${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}ImportedSeq`;
-  return readNonNegativeBigInt(redactedStatus[key]) ?? 0n;
-}
-
-function readNonNegativeBigInt(value: unknown): bigint | null {
-  if (typeof value === "bigint" && value >= 0n) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
-    return BigInt(value);
-  }
-
-  if (typeof value === "string" && /^[0-9]+$/u.test(value)) {
-    return BigInt(value);
-  }
-
-  return null;
+  return rightMs > leftMs ? right : left;
 }
 
 function safeCleanupErrorCode(error: unknown): string {

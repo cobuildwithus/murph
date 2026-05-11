@@ -22,20 +22,13 @@ export interface RunnerMetaRow {
   active_kind: string | null;
   active_started_at: string | null;
   active_workspace_version: string | null;
-  deferred_checkpoint_mailbox_status_json: string | null;
-  deferred_checkpoint_required: number;
-  idle_checkpoint_due_at: string | null;
-  idle_checkpoint_next_wake_at: string | null;
-  idle_checkpoint_workspace_version: string | null;
+  backoff_until: string | null;
+  failure_count: number;
   last_error_at: string | null;
   last_error_code: string | null;
   last_invocation_at: string | null;
-  next_wake_at: string | null;
-  retry_at: string | null;
-  retry_count: number;
-  retry_last_error_code: string | null;
   user_id: string;
-  wake_pending: number;
+  wake_at: string | null;
 }
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
@@ -46,20 +39,13 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_kind: null,
     active_started_at: null,
     active_workspace_version: null,
-    deferred_checkpoint_mailbox_status_json: null,
-    deferred_checkpoint_required: 0,
-    idle_checkpoint_due_at: null,
-    idle_checkpoint_next_wake_at: null,
-    idle_checkpoint_workspace_version: null,
+    backoff_until: null,
+    failure_count: 0,
     last_error_at: null,
     last_error_code: null,
     last_invocation_at: null,
-    next_wake_at: null,
-    retry_at: null,
-    retry_count: 0,
-    retry_last_error_code: null,
     user_id: userId,
-    wake_pending: 0,
+    wake_at: null,
   };
 }
 
@@ -85,18 +71,13 @@ export function projectRunnerStateRecord(input: {
     : writeFence
     ? "runtime"
     : null;
-  const idleCheckpoint =
-    input.meta.idle_checkpoint_due_at
-    && input.meta.idle_checkpoint_workspace_version
-      ? {
-          checkpointNextWakeAt: normalizeIsoDateOrNull(input.meta.idle_checkpoint_next_wake_at),
-          dueAt: normalizeIsoDate(input.meta.idle_checkpoint_due_at),
-          workspaceVersion: input.meta.idle_checkpoint_workspace_version,
-        }
-      : null;
+  const wakeAt = normalizeIsoDateOrNull(input.meta.wake_at);
+  const backoffUntil = normalizeIsoDateOrNull(input.meta.backoff_until);
+  const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
   const lastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
 
   return {
+    backoffUntil,
     writeFence,
     // Legacy active projection around the write fence. Delete after 2026-05-25.
     activeRun: writeFence,
@@ -112,12 +93,9 @@ export function projectRunnerStateRecord(input: {
         }
       : null,
     bundleRef: input.bundleRef,
-    deferredCheckpointRequired: input.meta.deferred_checkpoint_required === 1,
-    deferredCheckpointMailboxStatus:
-      parseRunnerDeferredCheckpointMailboxStatus(
-        input.meta.deferred_checkpoint_mailbox_status_json,
-      ),
-    idleCheckpoint,
+    deferredCheckpointRequired: false,
+    deferredCheckpointMailboxStatus: null,
+    idleCheckpoint: null,
     // Legacy inFlight projection around the write fence. Delete after 2026-05-25.
     inFlight: writeFence !== null,
     lastError,
@@ -125,22 +103,24 @@ export function projectRunnerStateRecord(input: {
     lastErrorCode: input.meta.last_error_code,
     lastInvocationAt: input.meta.last_invocation_at,
     leaseGeneration: writeFenceGeneration,
-    nextWakeAt: normalizeIsoDateOrNull(input.meta.next_wake_at),
-    // Legacy pendingNudge projection around wake_pending. Delete after 2026-05-25.
-    pendingNudge: input.meta.wake_pending === 1,
-    // Legacy pendingNudge projection around wake_pending. Delete after 2026-05-25.
-    pendingNudgeGeneration: input.meta.wake_pending === 1 ? writeFenceGeneration : 0,
-    // Legacy pendingWork projection around wake_pending. Delete after 2026-05-25.
-    pendingWork: input.meta.wake_pending === 1,
+    failureCount,
+    nextWakeAt: wakeAt,
+    // Legacy pendingNudge projection around wake_at. Delete after 2026-05-25.
+    pendingNudge: wakeAt !== null,
+    // Legacy pendingNudge projection around wake_at. Delete after 2026-05-25.
+    pendingNudgeGeneration: wakeAt !== null ? writeFenceGeneration : 0,
+    // Legacy pendingWork projection around wake_at. Delete after 2026-05-25.
+    pendingWork: wakeAt !== null,
     retry: {
-      at: normalizeIsoDateOrNull(input.meta.retry_at),
-      count: normalizeNonNegativeInteger(input.meta.retry_count),
-      lastErrorCode: input.meta.retry_last_error_code,
+      at: backoffUntil,
+      count: failureCount,
+      lastErrorCode: input.meta.last_error_code,
     },
-    retryFailureCount: normalizeNonNegativeInteger(input.meta.retry_count),
+    retryFailureCount: failureCount,
     schema: "murph.hosted-runner.v3",
     userId: input.meta.user_id,
-    wakePending: input.meta.wake_pending === 1,
+    wakeAt,
+    wakePending: wakeAt !== null,
     workspaceInvocation: writeFence
       ? {
           attemptId: writeFence.attemptId,

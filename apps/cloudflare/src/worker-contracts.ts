@@ -8,8 +8,24 @@ export interface WorkerSendEmailBindingLike {
 }
 
 export interface WorkerUserRunnerStubLike {
+  beginIdleCheckpointLease?(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{
+    attemptId: string;
+    generation: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string | null;
+  }>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  finishIdleCheckpointLease?(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt?: string | null;
+    userId: string;
+  }): Promise<{ completed: boolean }>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
@@ -91,6 +107,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?: string;
+  HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL?: string;
   MURPH_HOSTED_LOCAL_TEST_ROUTES?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME?: string;

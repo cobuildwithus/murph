@@ -61,6 +61,7 @@ export interface RunnerRetryRecord {
 }
 
 export interface RunnerStateRecord {
+  backoffUntil: string | null;
   writeFence: RunnerWriteFenceRecord | null;
   activeRun: RunnerWriteFenceRecord | null;
   /**
@@ -87,6 +88,7 @@ export interface RunnerStateRecord {
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
   leaseGeneration: number;
+  failureCount: number;
   nextWakeAt: string | null;
   /** Legacy wake-pending projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingNudge: boolean;
@@ -98,6 +100,7 @@ export interface RunnerStateRecord {
   retryFailureCount: number;
   schema: "murph.hosted-runner.v3";
   userId: string;
+  wakeAt: string | null;
   wakePending: boolean;
   workspaceInvocation: {
     attemptId: string;
