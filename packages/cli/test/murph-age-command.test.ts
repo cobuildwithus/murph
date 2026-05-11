@@ -938,6 +938,139 @@ test('age report resolves common analyte-only lab names from JSON imports', asyn
   }
 })
 
+test('age report falls back to the Lab5 transport bundle from analyte-only imports', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-lab5-fallback-')
+  const payloadPath = path.join(parentRoot, 'partial-blood-panel.json')
+  try {
+    const cli = createCanonicalInputCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'UTC',
+    ])
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: '2026-05-01T08:00:00.000Z',
+        title: 'Partial clinical panel',
+        testName: 'partial_clinical_panel',
+        labName: 'Local lab',
+        fastingStatus: 'fasting',
+        results: [
+          { analyte: 'HbA1c', value: 5.2, unit: 'percent' },
+          { analyte: 'HDL-C', value: 58, unit: 'mg/dL' },
+          { analyte: 'Triglycerides', value: 105, unit: 'mg/dL' },
+          { analyte: 'Creatinine', value: 0.92, unit: 'mg/dL' },
+        ],
+      }),
+      'utf8',
+    )
+
+    const bloodTestResult = await runInProcessJsonCli(cli, [
+      'blood-test',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    requireData(bloodTestResult.envelope)
+
+    const measurementResult = await runInProcessJsonCli(cli, [
+      'measurement',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--occurred-at',
+      '2026-05-08T08:00:00.000Z',
+      '--source',
+      'manual',
+      '--metric',
+      'systolic-blood-pressure',
+      '--value',
+      '119',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'diastolic-blood-pressure',
+      '--value',
+      '76',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'bmi',
+      '--value',
+      '24.2',
+      '--unit',
+      'kg/m2',
+    ])
+    requireData(measurementResult.envelope)
+
+    await rebuildQueryProjection(vaultRoot)
+    await writeLocalModelCardArtifact(vaultRoot, 'lab5.json', {
+      cardId: 'lab5_bp_bmi_transport_research',
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+
+    const report = requireData(
+      (
+        await runInProcessJsonCli<MurphAgePublicCalculatorReport>(cli, [
+          'age',
+          'report',
+          '--vault',
+          vaultRoot,
+          '--as-of',
+          '2026-05-10T00:00:00.000Z',
+          '--chronological-age-years',
+          '45',
+          '--sex',
+          'female',
+          '--mode',
+          'research',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(report.status, 'ready')
+    assert.equal(report.inputReadiness.bundle.bundleId, 'lab5-bp-bmi')
+    assert.equal(report.inputReadiness.bundle.recommendedCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    assert.equal(report.result?.authorization.evidenceClass, 'research-transport')
+    assert.equal(report.result?.authorization.cardId, 'lab5_bp_bmi_transport_research')
+    for (const metricKey of [
+      'hba1c',
+      'hdl-c',
+      'triglycerides',
+      'creatinine',
+      'systolic-blood-pressure',
+      'diastolic-blood-pressure',
+      'bmi',
+    ]) {
+      assert.equal(
+        report.displaySummary.selectedScoreBearingMetricKeys.includes(metricKey),
+        true,
+        metricKey,
+      )
+    }
+    assert.equal(report.displaySummary.selectedScoreBearingMetricKeys.includes('albumin'), false)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'hba1c'), true)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'albumin'), false)
+    for (const attribution of report.result?.featureAttributions ?? []) {
+      assert.equal(hasOwnKey(attribution, 'selectedPointIds'), false, attribution.featureKey)
+      assert.equal(hasOwnKey(attribution, 'value'), false, attribution.featureKey)
+      assert.equal(hasOwnKey(attribution, 'canonicalValue'), false, attribution.featureKey)
+    }
+    assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report consumes canonical wearable observations as context-only bridge data', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-wearable-')
   try {
@@ -1510,6 +1643,24 @@ function fixtureLab9ResearchModel(): MurphAgeRiskModel {
       baseYears: 2,
       perMissingOptionalFeatureYears: 2,
     },
+  }
+}
+
+function fixtureLab5ResearchModel(): MurphAgeRiskModel {
+  return {
+    ...fixtureLab9ResearchModel(),
+    features: [
+      { coefficient: 0.055, key: 'age', kind: 'chronological-age', label: 'Age' },
+      { coefficient: 0.12, key: 'male', kind: 'sex', label: 'Male', sex: 'male' },
+      labFeature('creatinine', 'Creatinine', 'creatinine', 0.08, 0.9, 0.2, 'mg/dL'),
+      labFeature('hba1c', 'HbA1c', 'hba1c', 0.12, 5.4, 0.5, 'percent'),
+      labFeature('hdl-c', 'HDL-C', 'hdl-c', -0.08, 55, 15, 'mg/dL'),
+      labFeature('triglycerides', 'Triglycerides', 'triglycerides', 0.08, 120, 50, 'mg/dL'),
+      labFeature('systolic-blood-pressure', 'Systolic blood pressure', 'systolic-blood-pressure', 0.1, 120, 15, 'mmHg'),
+      labFeature('diastolic-blood-pressure', 'Diastolic blood pressure', 'diastolic-blood-pressure', 0.04, 75, 10, 'mmHg'),
+      labFeature('bmi', 'BMI', 'bmi', 0.08, 25, 4, 'kg/m^2'),
+    ],
+    modelId: 'fixture-lab5-research-model',
   }
 }
 
