@@ -117,7 +117,6 @@ describe("cloudflare worker queue backpressure routes", () => {
       expiresAt: "2999-01-01T00:00:00.000Z",
       reason: "manual",
       userId: "member_123",
-      workerVersionId: "worker_version_previous",
     });
 
     const nudge = await harness.durableObject.nudgeHostedRunnerForUser("member_123");

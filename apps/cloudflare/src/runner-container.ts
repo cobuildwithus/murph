@@ -428,7 +428,7 @@ export class RunnerContainer extends Container {
     options: { warmOnly?: boolean } = {},
   ): Promise<HostedExecutionRunnerJobResult> {
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
-    const runtimeCallbackBaseUrl = readRunnerRuntimeCallbackBaseUrl(
+    const runtimeCallbackBaseUrl = requireRunnerRuntimeCallbackBaseUrl(
       this.environment,
       routeUserId,
     );
@@ -728,7 +728,7 @@ export class RunnerContainer extends Container {
     timeoutMs: number;
     userId: string;
   }): Promise<HostedExecutionRunnerJobResult> {
-    const runtimeCallbackBaseUrl = readRunnerRuntimeCallbackBaseUrl(
+    const runtimeCallbackBaseUrl = requireRunnerRuntimeCallbackBaseUrl(
       this.environment,
       input.userId,
     );
@@ -1695,11 +1695,26 @@ function readRunnerRuntimeCallbackBaseUrl(
     env,
     HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV,
   );
-  if (!configured) {
-    return null;
+  if (configured) {
+    return ensureTrailingSlash(new URL(configured)).toString();
   }
 
-  return ensureTrailingSlash(new URL(configured)).toString();
+  return null;
+}
+
+function requireRunnerRuntimeCallbackBaseUrl(
+  env: RunnerContainerEnvironmentSource,
+  userId: string,
+): string {
+  const configured = readRunnerRuntimeCallbackBaseUrl(env, userId);
+  if (configured) {
+    return configured;
+  }
+
+  throw new HostedExecutionConfigurationError(
+    `${HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV} must be configured for hosted runner callback transport.`,
+    "missing_runner_callback_base_url",
+  );
 }
 
 function readRunnerContainerUserRunnerStub(

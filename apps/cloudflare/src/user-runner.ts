@@ -108,8 +108,6 @@ interface RunnerUserStores {
 
 interface RunnerDrainInput {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-  dueWake?: unknown;
-  idleCheckpointWorkspaceVersion?: string | null;
   reason: HostedWorkspaceInvocationReason;
 }
 
@@ -257,7 +255,6 @@ export class HostedUserRunner {
     const before = await this.stateStore.readState();
     const alreadyRunning = this.drainPromise !== null || before.writeFence !== null;
     const record = await this.stateStore.markWakePending({
-      clearIdleCheckpoint: true,
       preferredWakeAt: new Date().toISOString(),
     });
     await this.syncAlarm(record);
@@ -306,15 +303,7 @@ export class HostedUserRunner {
    */
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
-    await this.stateStore.markWakePending({
-      clearIdleCheckpoint: true,
-      preferredWakeAt: new Date().toISOString(),
-    });
-    await this.syncAlarm(await this.stateStore.readState());
-    this.kickDrain({
-      reason: "nudge",
-      wait: false,
-    });
+    await this.nudgeHostedRunner();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -1136,6 +1125,9 @@ async function deleteR2ObjectsWithPrefix(
 }
 
 function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
+  if (record.writeFence) {
+    return record.writeFence.expiresAt;
+  }
   return readRunnerRuntimeDueAt(record);
 }
 

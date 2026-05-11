@@ -1,11 +1,6 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_MAILBOX_LANES,
-  type HostedMailboxLane,
-  type HostedRuntimeRedactedJson,
-} from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -178,63 +173,6 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
     ?? null;
 }
 
-export function stringifyRunnerDeferredCheckpointMailboxStatus(
-  value: HostedRuntimeRedactedJson | null | undefined,
-): string | null {
-  const normalized = normalizeRunnerDeferredCheckpointMailboxStatus(value);
-  return normalized ? JSON.stringify(normalized) : null;
-}
-
 function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
   return value === "runtime" || value === "idle_checkpoint" ? value : null;
-}
-
-function parseRunnerDeferredCheckpointMailboxStatus(
-  value: string | null,
-): HostedRuntimeRedactedJson | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return normalizeRunnerDeferredCheckpointMailboxStatus(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
-function normalizeRunnerDeferredCheckpointMailboxStatus(
-  value: unknown,
-): HostedRuntimeRedactedJson | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const parsed: HostedRuntimeRedactedJson = {};
-  const record = Object.fromEntries(Object.entries(value));
-  for (const lane of HOSTED_MAILBOX_LANES) {
-    const key = buildHostedMailboxImportedSeqKey(lane);
-    const normalized = normalizeNonNegativeIntegerString(record[key]);
-    if (normalized !== null) {
-      parsed[key] = normalized;
-    }
-  }
-
-  return Object.keys(parsed).length > 0 ? parsed : null;
-}
-
-function buildHostedMailboxImportedSeqKey(lane: HostedMailboxLane): string {
-  return `hostedMailbox${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}ImportedSeq`;
-}
-
-function normalizeNonNegativeIntegerString(value: unknown): string | null {
-  if (typeof value === "string" && /^[0-9]+$/u.test(value)) {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
-    return String(value);
-  }
-
-  return null;
 }

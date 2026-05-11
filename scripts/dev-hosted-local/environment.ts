@@ -312,6 +312,10 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
       normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
       ?? workerOrigin,
+    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
+      normalizedOverrides.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL?.trim()
+      ?? normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
+      ?? workerOrigin,
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,
     HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: callbackSigningPublicKeyringJson,

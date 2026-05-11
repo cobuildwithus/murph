@@ -259,6 +259,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBe("murph-web");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("development");
     expect(merged.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBe("http://127.0.0.1:8787");
+    expect(merged.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL).toBe("http://127.0.0.1:8787");
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
@@ -997,6 +998,7 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
         ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -1011,6 +1013,8 @@ describe("buildWranglerVarArgs", () => {
         IGNORED_SECRET: "secret",
       }),
     ).toEqual([
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:http://127.0.0.1:8787",
       "--var",
       "HOSTED_WEB_BASE_URL:http://localhost:3000",
       "--var",
