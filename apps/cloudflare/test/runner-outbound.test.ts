@@ -942,6 +942,7 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
+      workspaceVersion: "4",
     });
     expect(recordActiveInvocationWorkspaceCheckpoint).not.toHaveBeenCalled();
   });
@@ -1001,6 +1002,7 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       generation: "9",
       userId: "member_123",
+      workspaceVersion: "4",
     });
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
@@ -1497,11 +1499,12 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
+      workspaceVersion: "4",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("authorizes provider effects from active invocation headers without workspace checks", async () => {
+  it("rejects provider effects when the workspace version does not match the write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
     });
@@ -1530,9 +1533,9 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("authorizes email sends after live lease validation", async () => {
@@ -2476,6 +2479,7 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
+      workspaceVersion: "4",
     });
     expect(getByName).toHaveBeenCalledTimes(2);
     expect(bindUser).not.toHaveBeenCalled();
@@ -2531,7 +2535,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("authorizes artifact PUTs by active invocation identity instead of workspace version", async () => {
+  it("rejects artifact PUTs when the workspace version does not match the write fence", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
@@ -2567,9 +2571,10 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(firstResponse.status).toBe(200);
+    expect(firstResponse.status).toBe(401);
     expect(secondResponse.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
   it("live-validates repeated artifact writes with the same workspace version", async () => {

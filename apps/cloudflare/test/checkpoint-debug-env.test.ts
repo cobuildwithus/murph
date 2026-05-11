@@ -22,6 +22,7 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
 } as const;
 
 describe("hosted checkpoint debug deploy env", () => {

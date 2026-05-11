@@ -43,12 +43,13 @@ Set these in the selected GitHub environment as vars:
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
 - `CF_PUBLIC_BASE_URL`
+- `HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL`
 - `HOSTED_WEB_BASE_URL`
 - `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
-`CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy.
+`CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy. `HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL` is rendered into the Worker so warm runner containers can call the stable runtime callback route; in production it must exactly match `CF_PUBLIC_BASE_URL`.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and

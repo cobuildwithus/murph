@@ -300,20 +300,32 @@ export class RunnerContainer extends Container {
       }
 
       const pendingIdleCheckpoint = this.pendingIdleCheckpoint;
-      if (pendingIdleCheckpoint) {
-        await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+      try {
+        if (pendingIdleCheckpoint) {
+          await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+        }
+      } catch (error) {
+        this.pendingIdleCheckpoint = null;
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+          level: "warn",
+          message: "Hosted execution container skipped idle-shutdown checkpoint during activity expiry.",
+          phase: "failed",
+          userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
+        });
+      } finally {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            lifecycleStage: "activity-expired-fallback-cleanup",
+          },
+          message: "Hosted execution container activity expired; running fallback cleanup.",
+          phase: "container.ready",
+          userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
+        });
+        await this.stopWarmContainer({ failClosed: false });
       }
-
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          lifecycleStage: "activity-expired-fallback-cleanup",
-        },
-        message: "Hosted execution container activity expired; running fallback cleanup.",
-        phase: "container.ready",
-        userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
-      });
-      await this.stopWarmContainer({ failClosed: false });
     });
   }
 
@@ -628,7 +640,24 @@ export class RunnerContainer extends Container {
       return;
     }
 
-    const lease = await this.beginIdleCheckpointLease(pending);
+    let lease: {
+      attemptId: string;
+      generation: string;
+    } | null = null;
+    try {
+      lease = await this.beginIdleCheckpointLease(pending);
+    } catch (error) {
+      this.pendingIdleCheckpoint = null;
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted execution container could not begin idle-shutdown checkpoint lease.",
+        phase: "failed",
+        userId: pending.userId,
+      });
+      return;
+    }
     if (!lease) {
       this.pendingIdleCheckpoint = null;
       return;
@@ -680,6 +709,15 @@ export class RunnerContainer extends Container {
         generation: lease.generation,
         nextWakeAt,
         userId: pending.userId,
+      }).catch((error) => {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+          level: "warn",
+          message: "Hosted execution container could not finish idle-shutdown checkpoint lease.",
+          phase: "failed",
+          userId: pending.userId,
+        });
       });
     }
   }

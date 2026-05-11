@@ -103,7 +103,12 @@ function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number 
 
 function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   const columns = readRunnerStateTableColumns(sql, "runner_meta");
-  if (columns.includes("wake_pending") || columns.includes("next_wake_at") || columns.includes("pending_work")) {
+  if (
+    columns.includes("wake_pending")
+    || columns.includes("next_wake_at")
+    || columns.includes("pending_work")
+    || columns.includes("pending_nudge")
+  ) {
     const wakeSources: string[] = [];
     if (columns.includes("wake_pending")) {
       wakeSources.push("wake_pending = 1");
@@ -142,8 +147,7 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
           ELSE NULL
         END,
         active_started_at = COALESCE(active_started_at, active_invocation_started_at),
-        active_expires_at = COALESCE(active_expires_at, active_invocation_expires_at),
-        active_workspace_version = COALESCE(active_workspace_version, active_workspace_version)
+        active_expires_at = COALESCE(active_expires_at, active_invocation_expires_at)
       WHERE singleton = 1
     `);
   }
