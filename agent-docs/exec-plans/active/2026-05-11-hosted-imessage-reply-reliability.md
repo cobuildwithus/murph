@@ -73,6 +73,7 @@ Updated: 2026-05-11
 - Keep the fix in the Cloudflare runner scheduling layer: foreground nudges now abort idle-shutdown checkpoint work instead of waiting behind it, while normal hosted reply handling still flows through the existing mailbox/runtime/outbox path.
 - Align the native container `sleepAfter` with `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` so the existing `runnerIdleTtlMs - safetyMarginMs` checkpoint schedule is the actual default T-minus-60 lifecycle point.
 - Keep hosted-local E2E Docker auth isolated from the operator's normal Docker credential config, while symlinking only Docker CLI plugins into the temporary config so Wrangler retains `buildx`.
+- Runtime liveness is the foreground priority boundary: when it reports fresh user input during normal foreground work, the active job yields as `scheduled` so the queued nudge drives from latest mailbox state instead of waiting behind unrelated active work.
 
 ## Verification
 
@@ -100,3 +101,13 @@ Updated: 2026-05-11
 - `pnpm typecheck` passed.
 - `pnpm test:diff` passed the affected `apps/cloudflare` verify lane: 71 test files and 1015 tests.
 - `git diff --check` passed.
+- Follow-up production tail after the user reported no visible reply showed healthy nudge/container invocations and active liveness heartbeats rather than a simple ingress outage. This points at a live-but-unproductive foreground invocation control path.
+- Code inspection found that liveness `inputAvailable` aborts idle-shutdown checkpoints, but foreground invocations only notify active-turn input controllers and keep running. That can delay a new iMessage behind unrelated active work even though the Durable Object has already marked a pending foreground nudge.
+- Added a focused runtime regression: a foreground `nudge` starts active assistant work, liveness reports fresh input, and the job must return `scheduled` without checkpointing stale work.
+- Focused regression passed after the fix; it timed out before the fix.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-workspace-entrypoint.test.ts --no-coverage` passed 47 tests.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts --no-coverage` passed 143 tests.
+- `pnpm typecheck` passed.
+- `pnpm test:diff` passed the affected `packages/assistant-runtime` and `apps/cloudflare` verification lanes, including the hosted-local E2E stub-all scenario: 71 test files and 1018 tests.
+- `git diff --check` passed.
+- `review:gpt simplify` was launched with the current diff and invariants; response capture timed out with only a partial/no-finding response before completion.
