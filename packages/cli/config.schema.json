@@ -3274,6 +3274,70 @@
             }
           }
         },
+        "age": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "report": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "asOf": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "description": "UTC timestamp for the calculation cutoff, such as 2026-05-10T00:00:00.000Z."
+                        },
+                        "chronologicalAgeYears": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 130,
+                          "description": "Current chronological age in years."
+                        },
+                        "sex": {
+                          "type": "string",
+                          "enum": [
+                            "female",
+                            "male"
+                          ],
+                          "description": "Sex value used by the current mortality-risk model."
+                        },
+                        "mode": {
+                          "default": "product",
+                          "description": "Use product for normal safe display, or explicit research for local research-only model-card artifacts.",
+                          "type": "string",
+                          "enum": [
+                            "product",
+                            "research"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "route": {
           "type": "object",
           "additionalProperties": false,
