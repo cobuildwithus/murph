@@ -6,6 +6,8 @@ import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   METRIC_POINT_SCHEMA_VERSION,
+  assessMurphAgeInputBundle,
+  assessMurphAgeSecondaryContextBundles,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   createMurphAgeAbstainedAuthorization,
@@ -24,6 +26,10 @@ import {
   type MurphAgeCalculatorInput,
   type MurphAgeCalculatorMode,
   type MurphAgeCalculatorOutput,
+  type MurphAgeContextBundleAssessment,
+  type MurphAgeContextBundleFeatureStatus,
+  type MurphAgeInputBundleAssessment,
+  type MurphAgeInputBundleFeatureStatus,
   type MurphAgeLocalModelCardArtifact,
   type MurphAgePublicCalculatorReport,
   type MurphAgePublicDisplaySummary,
@@ -50,6 +56,31 @@ export interface CalculateMurphAgeFromVaultInputBundleInput extends Omit<MurphAg
 }
 
 export { MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION, type MurphAgeLocalModelCardArtifact };
+
+export interface AssessMurphAgeInputReadinessFromVaultInput {
+  asOf: string;
+  vaultRoot: string;
+}
+
+export type MurphAgeInputFeatureReadiness =
+  | Omit<MurphAgeContextBundleFeatureStatus, "selectedPointIds">
+  | Omit<MurphAgeInputBundleFeatureStatus, "selectedPointIds" | "unit" | "value">;
+
+export type MurphAgeInputReadinessWarning = Pick<MurphAgeWarning, "code" | "featureKey" | "metricKey">;
+
+export type MurphAgeInputBundleReadiness = Omit<
+  MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+  "featureStatuses" | "selectedPointIds" | "warnings"
+> & {
+  featureStatuses: MurphAgeInputFeatureReadiness[];
+  warnings: MurphAgeInputReadinessWarning[];
+};
+
+export interface MurphAgeInputReadinessForVault {
+  bundle: MurphAgeInputBundleReadiness;
+  contextBundles: MurphAgeInputBundleReadiness[];
+  schemaVersion: "murph.age.input-readiness.v1";
+}
 
 export interface MurphAgeLocalModelCardLoadResult {
   models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
@@ -159,6 +190,78 @@ export async function calculateMurphAgePublicReportFromVaultInputBundle(
 ): Promise<MurphAgePublicCalculatorReport> {
   const output = await calculateMurphAgeFromVaultInputBundle(input);
   return toPublicMurphAgeCalculatorReport(output);
+}
+
+export async function assessMurphAgeInputReadinessFromVault(
+  input: AssessMurphAgeInputReadinessFromVaultInput,
+): Promise<MurphAgeInputReadinessForVault> {
+  const asOf = parseStrictUtcAsOf(input.asOf);
+  if (!asOf) {
+    return {
+      bundle: {
+        availableFeatureKeys: [],
+        bundleId: "insufficient",
+        featureStatuses: [],
+        missingFeatureKeys: [],
+        recommendedCardId: "none",
+        schemaVersion: MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
+        selectedMetricKeys: [],
+        status: "abstain",
+        warnings: [{
+          code: "INVALID_INPUT",
+        }],
+      },
+      contextBundles: [],
+      schemaVersion: "murph.age.input-readiness.v1",
+    };
+  }
+
+  const points = await loadMurphAgeInputBundleMetricPoints({
+    asOf,
+    vaultRoot: input.vaultRoot,
+  });
+  const bundleAssessment = assessMurphAgeInputBundle({
+    asOf,
+    points,
+  });
+  const contextAssessments = assessMurphAgeSecondaryContextBundles({
+    asOf,
+    points,
+    primaryBundleId: bundleAssessment.bundleId,
+  });
+
+  return {
+    bundle: sanitizeMurphAgeInputBundleAssessment(bundleAssessment),
+    contextBundles: contextAssessments.map(sanitizeMurphAgeInputBundleAssessment),
+    schemaVersion: "murph.age.input-readiness.v1",
+  };
+}
+
+function sanitizeMurphAgeInputBundleAssessment(
+  assessment: MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+): MurphAgeInputBundleReadiness {
+  return {
+    availableFeatureKeys: [...assessment.availableFeatureKeys],
+    bundleId: assessment.bundleId,
+    featureStatuses: assessment.featureStatuses.map((feature) => ({
+      featureKey: feature.featureKey,
+      label: feature.label,
+      metricKeys: [...feature.metricKeys],
+      requiredFor: feature.requiredFor,
+      selectedMetricKey: feature.selectedMetricKey,
+      status: feature.status,
+    })),
+    missingFeatureKeys: [...assessment.missingFeatureKeys],
+    recommendedCardId: assessment.recommendedCardId,
+    schemaVersion: assessment.schemaVersion,
+    selectedMetricKeys: [...assessment.selectedMetricKeys],
+    status: assessment.status,
+    warnings: assessment.warnings.map((warning) => ({
+      code: warning.code,
+      ...(warning.featureKey ? { featureKey: warning.featureKey } : {}),
+      ...(warning.metricKey ? { metricKey: warning.metricKey } : {}),
+    })),
+  };
 }
 
 export function metricPointFiltersForMurphAgeModel(

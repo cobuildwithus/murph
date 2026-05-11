@@ -112,6 +112,35 @@ interface MurphAgeModelCardStatusReport {
   warnings: Array<{ code: string }>
 }
 
+interface MurphAgeInputReadinessReport {
+  bundle: {
+    availableFeatureKeys: string[]
+    bundleId: string
+    featureStatuses: Array<{
+      featureKey: string
+      metricKeys: string[]
+      selectedMetricKey: string | null
+      status: string
+    }>
+    missingFeatureKeys: string[]
+    recommendedCardId: string
+    selectedMetricKeys: string[]
+    status: string
+    warnings: Array<{ code: string }>
+  }
+  contextBundles: Array<{
+    bundleId: string
+    featureStatuses: Array<{
+      featureKey: string
+      selectedMetricKey: string | null
+      status: string
+    }>
+    selectedMetricKeys: string[]
+    status: string
+  }>
+  schemaVersion: string
+}
+
 test('age model-cards reports local research readiness without model internals', async () => {
   const vaultRoot = await createProjectionVault()
   try {
@@ -196,6 +225,96 @@ test('age model-cards reports missing local artifacts as policy blockers', async
     assert.equal(lab5.productRiskReady, false)
     assert.equal(lab5.productAgeReady, false)
     assert.equal(lab5.blockers.includes('MODEL_CARD_NOT_LOADED'), true)
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('age inputs reports feature readiness without metric values or point ids', async () => {
+  const vaultRoot = await createProjectionVault()
+  try {
+    await rebuildQueryProjection(vaultRoot)
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ])
+
+    const readiness = requireData(await runSliceCli<MurphAgeInputReadinessReport>([
+      'age',
+      'inputs',
+      '--vault',
+      vaultRoot,
+      '--as-of',
+      '2026-05-10T00:00:00.000Z',
+    ]))
+
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v1')
+    assert.equal(readiness.bundle.bundleId, 'lab9-bp-body')
+    assert.equal(readiness.bundle.status, 'ready')
+    assert.equal(readiness.bundle.recommendedCardId, 'lab9_bp_body_10y_acm_research')
+    assert.equal(readiness.bundle.availableFeatureKeys.includes('albumin'), true)
+    assert.equal(readiness.bundle.selectedMetricKeys.includes('albumin'), true)
+    assert.equal(readiness.bundle.featureStatuses.some((feature) =>
+      feature.featureKey === 'albumin'
+        && feature.selectedMetricKey === 'albumin'
+        && feature.status === 'ready'
+    ), true)
+    assert.equal(readiness.contextBundles[0]?.bundleId, 'wearable-context')
+    assert.equal(readiness.contextBundles[0]?.selectedMetricKeys.includes('steps'), true)
+    assert.equal(readiness.contextBundles[0]?.featureStatuses.some((feature) =>
+      feature.featureKey === 'steps'
+        && feature.selectedMetricKey === 'steps'
+        && feature.status === 'ready'
+    ), true)
+
+    const encodedReadiness = JSON.stringify(readiness)
+    for (const forbidden of [
+      'selectedPointIds',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      vaultRoot,
+    ]) {
+      assert.equal(encodedReadiness.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('age inputs reports an empty vault as metadata-only abstain readiness', async () => {
+  const vaultRoot = await createProjectionVault()
+  try {
+    await rebuildQueryProjection(vaultRoot)
+
+    const readiness = requireData(await runSliceCli<MurphAgeInputReadinessReport>([
+      'age',
+      'inputs',
+      '--vault',
+      vaultRoot,
+      '--as-of',
+      '2026-05-10T00:00:00.000Z',
+    ]))
+
+    assert.equal(readiness.schemaVersion, 'murph.age.input-readiness.v1')
+    assert.equal(readiness.bundle.bundleId, 'insufficient')
+    assert.equal(readiness.bundle.status, 'abstain')
+    assert.equal(readiness.bundle.recommendedCardId, 'none')
+    assert.deepEqual(readiness.bundle.availableFeatureKeys, [])
+    assert.deepEqual(readiness.bundle.selectedMetricKeys, [])
+    assert.equal(readiness.contextBundles.length, 0)
+
+    const encodedReadiness = JSON.stringify(readiness)
+    for (const forbidden of [
+      'selectedPointIds',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      vaultRoot,
+      'ledger/events',
+    ]) {
+      assert.equal(encodedReadiness.includes(forbidden), false, forbidden)
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }

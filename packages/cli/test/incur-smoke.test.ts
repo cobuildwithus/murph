@@ -459,6 +459,28 @@ test('experiment descriptor describes the explicit start source choice', () => {
   assert.doesNotMatch(startCommand?.description ?? '', /protocol key is supplied/u)
 })
 
+test('murph age descriptor exposes metadata-only input readiness', () => {
+  const descriptor = vaultCliCommandDescriptors.find(
+    (candidate) => candidate.id === 'murph-age',
+  )
+
+  if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
+    throw new Error('The Murph Age descriptor is missing leaf commands.')
+  }
+
+  const inputsCommand = descriptor.leafCommands.find(
+    (leafCommand) => leafCommand.path.join(' ') === 'age inputs',
+  )
+
+  if (!inputsCommand) {
+    throw new Error('expected age inputs descriptor')
+  }
+  assert.match(inputsCommand.description, /metadata-only/u)
+  assert.equal('hint' in inputsCommand, true)
+  assert.match(String(('hint' in inputsCommand ? inputsCommand.hint : '') ?? ''), /does not calculate an age/u)
+  assert.equal('output' in inputsCommand, true)
+})
+
 test('workout descriptor does not expose the removed workout measurement alias', () => {
   const workoutDescriptor = vaultCliCommandDescriptors.find(
     (descriptor) => descriptor.id === 'workout',
@@ -1803,6 +1825,14 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.equal(
     manifest.commands.some((command) => command.name === 'search query'),
     true,
+  )
+  const ageInputsCommand = manifest.commands.find(
+    (command) => command.name === 'age inputs',
+  )
+  assert.notEqual(ageInputsCommand, undefined)
+  assert.match(
+    String(ageInputsCommand?.description ?? ''),
+    /metadata-only/u,
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'commons source list'),
