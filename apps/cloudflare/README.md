@@ -138,6 +138,14 @@ fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
 or Cloudflare reports idle activity expiry. A successful idle-shutdown base
 checkpoint does not force container teardown.
 
+Foreground liveness recovery is lease-fenced instead of container-destroy
+driven. If the Durable Object still owns the local active invocation and a
+heartbeat goes stale, it keeps the container request alive and schedules another
+recovery alarm; pending nudges wait for the active request to finish. Stale
+heartbeat recovery clears the durable active lease only for orphaned/persisted
+invocations that no longer have a local request owner, while hard timeouts and
+container-stopped signals remain terminal.
+
 ## Deploy Artifacts
 
 `pnpm --dir apps/cloudflare deploy:artifacts` prepares:
