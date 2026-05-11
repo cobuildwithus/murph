@@ -78,6 +78,8 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
+  assert.equal(resolveMetricDefinition("adl-count")?.key, "adl-limitation-count");
+  assert.equal(resolveMetricDefinition("mobility-count")?.key, "mobility-limitation-count");
   assert.equal(resolveMetricDefinition("wearable_valid_day_count_28d")?.key, "wearable-valid-day-count-28d");
   assert.equal(resolveMetricDefinition("wearable_valid_night_count_28d")?.key, "wearable-valid-night-count-28d");
   assert.equal(resolveMetricDefinition("wearable_coverage_index_28d")?.key, "wearable-coverage-index");
@@ -1792,6 +1794,10 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("wearable-coverage-index"), true);
   assert.equal(keys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(keys.includes("wearable-valid-night-count-28d"), true);
+  assert.equal(keys.includes("adl-limitation-count"), true);
+  assert.equal(keys.includes("iadl-limitation-count"), true);
+  assert.equal(keys.includes("mobility-limitation-count"), true);
+  assert.equal(keys.includes("frailty-symptom-count"), true);
   assert.equal(keys.includes("crp"), false);
   assert.equal(keys.includes("hs-crp"), false);
   assert.equal(
@@ -1819,6 +1825,14 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
     false,
   );
   assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("adl-limitation-count", "measurement")),
+    true,
+  );
+  assert.equal(
+    isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("adl-limitation-count", "test-result")),
+    false,
+  );
+  assert.equal(
     isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("apob", "test-result")),
     false,
   );
@@ -1829,6 +1843,7 @@ test("keeps Murph Age card metrics reachable while wearable research signals sta
   const bundleMetricKeysById = new Map<string, Set<string>>([
     ["lab9-bp-body", assessedBundleMetricKeys("lab9-bp-body", completeLab9BpBodyPolicyPoints())],
     ["lab5-bp-bmi", assessedBundleMetricKeys("lab5-bp-bmi", completeLab5BpBmiPolicyPoints())],
+    ["function-context", assessedBundleMetricKeys("function-context", completeFunctionContextPoints())],
     ["wearable-context", bundleMetricKeys],
   ]);
   const bridgeSpecs = listMurphAgeWearableBridgeFeatureSpecs();
@@ -2453,6 +2468,11 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     }),
   ];
   const lab9WithWearableContextPoints = [...lab9Points, ...wearableContextPoints];
+  const functionContextPoints = completeFunctionContextPoints();
+  const lab9WithAllContextPoints = [
+    ...lab9WithWearableContextPoints,
+    ...functionContextPoints,
+  ];
   const researchModel = fixtureLab9ResearchModel();
 
   const lab9Policy = listMurphAgeModelCardPolicies().find((policy) =>
@@ -2529,6 +2549,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     points: lab9Points,
     sex: "female",
   });
+  const researchWithFunctionContext = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithAllContextPoints,
+    sex: "female",
+  });
 
   assert.equal(research.status, "ready");
   assert.equal(research.result?.status, "ready");
@@ -2571,6 +2599,26 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(research.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(research.contextAssessments[0]?.status, "context-only");
   assert.equal(research.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), true);
+  assert.equal(researchWithFunctionContext.contextAssessments.length, 2);
+  assert.deepEqual(
+    researchWithFunctionContext.contextAssessments.map((assessment) => assessment.bundleId).sort(),
+    ["function-context", "wearable-context"],
+  );
+  assert.equal(
+    researchWithFunctionContext.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"),
+    true,
+  );
+  assert.equal(
+    researchWithFunctionContext.result?.featureAttributions.some((feature) =>
+      feature.metricKey === "adl-limitation-count"
+    ),
+    false,
+  );
+  const researchWithFunctionSummary = summarizeMurphAgeCalculatorOutput(researchWithFunctionContext);
+  assert.equal(researchWithFunctionSummary.contextOnlyMetricKeys.includes("mobility-limitation-count"), true);
+  assert.equal(researchWithFunctionSummary.contextOnlyFeatureKeys.includes("mobility-limitations"), true);
+  assert.equal(researchWithFunctionSummary.wearableContext.readyFeatureCount, 7);
+  assert.equal(researchWithFunctionSummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
   const contextStepStatus = research.contextAssessments[0]?.featureStatuses.find((status) => status.featureKey === "steps");
   assert.equal(contextStepStatus ? "value" in contextStepStatus : true, false);
   assert.equal(contextStepStatus ? "unit" in contextStepStatus : true, false);
@@ -3205,6 +3253,72 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
   assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
   assert.equal(wearableOnlySummary.wearableBridge.missingFeatureKeys.includes("hrv-rmssd"), true);
+
+  const functionOnly = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: functionContextPoints,
+    sex: "female",
+  });
+  assert.equal(functionOnly.status, "context-only");
+  assert.equal(functionOnly.bundleAssessment.bundleId, "function-context");
+  assert.equal(functionOnly.result, null);
+  assert.equal(functionOnly.cardPolicy?.cardId, "function_context_no_risk");
+  assert.equal(functionOnly.authorization.scoreBearing, false);
+  assert.equal(functionOnly.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"), true);
+  assert.equal(functionOnly.contextAssessments.length, 0);
+  const functionOnlySummary = summarizeMurphAgeCalculatorOutput(functionOnly);
+  assert.equal(functionOnlySummary.displayStatus, "context-only");
+  assert.equal(functionOnlySummary.contextOnlyFeatureKeys.includes("adl-limitations"), true);
+  assert.equal(functionOnlySummary.contextOnlyMetricKeys.includes("frailty-symptom-count"), true);
+  assert.equal(functionOnlySummary.wearableContext.quality, "none");
+  assert.equal(functionOnlySummary.wearableContext.readyFeatureCount, 0);
+  const publicFunctionOnlyReport = toPublicMurphAgeCalculatorReport(functionOnly);
+  assert.equal(publicFunctionOnlyReport.inputReadiness.bundle.bundleId, "function-context");
+  assert.equal(publicFunctionOnlyReport.inputReadiness.bundle.selectedMetricKeys.includes("adl-limitation-count"), true);
+  assert.equal(publicFunctionOnlyReport.inputReadiness.bundle.featureStatuses.some((feature) => "label" in feature), false);
+  assert.equal(publicFunctionOnlyReport.authorization.scoreBearing, false);
+  assert.equal(publicFunctionOnlyReport.authorization.scoreBearingMetricKeys.length, 0);
+  assert.equal(publicFunctionOnlyReport.displaySummary.selectedScoreBearingMetricKeys.length, 0);
+  const publicFunctionReadinessJson = JSON.stringify(publicFunctionOnlyReport.inputReadiness);
+  for (const forbidden of [
+    "selectedPointIds",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"label\"",
+    "\"message\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "contributionYears",
+    "prediction",
+  ]) {
+    assert.equal(publicFunctionReadinessJson.includes(forbidden), false, forbidden);
+  }
+
+  const functionOnlyFromTestResults = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    points: functionContextPoints.map((point) =>
+      metricPoint({
+        effectiveDate: point.effectiveDate,
+        id: point.id.replace(":measurement:", ":test-result:"),
+        metricKey: point.metricKey,
+        observedAt: point.observedAt,
+        recordId: `lab_${point.metricKey.replaceAll("-", "_")}`,
+        sourceKind: "test-result",
+        unit: point.unit,
+        value: point.value ?? 0,
+      })
+    ),
+    sex: "female",
+  });
+  assert.equal(functionOnlyFromTestResults.status, "abstain");
+  assert.equal(functionOnlyFromTestResults.bundleAssessment.bundleId, "insufficient");
+  assert.equal(functionOnlyFromTestResults.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"), false);
 
   const thinWearableOnly = calculateMurphAgeFromInputBundle({
     asOf,
@@ -3972,6 +4086,15 @@ function completeLab5BpBmiPolicyPoints(): MetricPoint[] {
     measurementMetricPoint("diastolic-blood-pressure", "mmHg", 72),
     measurementMetricPoint("bmi", "kg/m^2", 23.2),
     measurementMetricPoint("waist-circumference", "cm", 82),
+  ];
+}
+
+function completeFunctionContextPoints(): MetricPoint[] {
+  return [
+    measurementMetricPoint("adl-limitation-count", "count", 0),
+    measurementMetricPoint("iadl-limitation-count", "count", 1),
+    measurementMetricPoint("mobility-limitation-count", "count", 1),
+    measurementMetricPoint("frailty-symptom-count", "count", 0),
   ];
 }
 

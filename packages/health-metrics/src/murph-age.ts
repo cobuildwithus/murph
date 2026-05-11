@@ -25,6 +25,7 @@ export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
 export type MurphAgeInputBundleStatus = "abstain" | "context-only" | "ready";
 export type MurphAgeInputBundleId =
+  | "function-context"
   | "insufficient"
   | "lab5-bp-bmi"
   | "lab9-bp-body"
@@ -116,11 +117,15 @@ export interface MurphAgeCalculationInput {
 }
 
 export type MurphAgeModelCardId =
+  | "function_context_no_risk"
   | "lab5_bp_bmi_transport_research"
   | "lab9_bp_body_10y_acm_research"
   | "wearable_context_no_risk";
 
-export type MurphAgeScoreBearingCardId = Exclude<MurphAgeModelCardId, "wearable_context_no_risk">;
+export type MurphAgeScoreBearingCardId = Exclude<
+  MurphAgeModelCardId,
+  "function_context_no_risk" | "wearable_context_no_risk"
+>;
 export type MurphAgeCalculatorMode = "product" | "research";
 export type MurphAgeValidationGateStatus = "blocked" | "passed";
 export type MurphAgeValidationEvidenceTier =
@@ -237,7 +242,7 @@ export interface MurphAgeInputBundleFeatureStatus {
   featureKey: string;
   label: string;
   metricKeys: string[];
-  requiredFor: "lab5-fallback" | "lab9-mainline" | "optional-context" | "wearable-context";
+  requiredFor: "function-context" | "lab5-fallback" | "lab9-mainline" | "optional-context" | "wearable-context";
   selectedMetricKey: string | null;
   selectedPointIds: string[];
   status: "missing" | "ready";
@@ -251,6 +256,7 @@ export interface MurphAgeInputBundleAssessment {
   featureStatuses: MurphAgeInputBundleFeatureStatus[];
   missingFeatureKeys: string[];
   recommendedCardId:
+    | "function_context_no_risk"
     | "lab5_bp_bmi_transport_research"
     | "lab9_bp_body_10y_acm_research"
     | "none"
@@ -266,14 +272,14 @@ export interface MurphAgeContextBundleFeatureStatus {
   featureKey: string;
   label: string;
   metricKeys: string[];
-  requiredFor: "wearable-context";
+  requiredFor: "function-context" | "wearable-context";
   selectedMetricKey: string | null;
   selectedPointIds: string[];
   status: "missing" | "ready";
 }
 
 export interface MurphAgeContextBundleAssessment extends Omit<MurphAgeInputBundleAssessment, "bundleId" | "featureStatuses"> {
-  bundleId: "wearable-context";
+  bundleId: "function-context" | "wearable-context";
   featureStatuses: MurphAgeContextBundleFeatureStatus[];
 }
 
@@ -855,6 +861,33 @@ const MURPH_AGE_WEARABLE_CONTEXT_FEATURES = [
   },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
 
+const MURPH_AGE_FUNCTION_CONTEXT_FEATURES = [
+  {
+    featureKey: "adl-limitations",
+    label: "ADL limitations",
+    metricKeys: ["adl-limitation-count"],
+    requiredFor: "function-context",
+  },
+  {
+    featureKey: "iadl-limitations",
+    label: "IADL limitations",
+    metricKeys: ["iadl-limitation-count"],
+    requiredFor: "function-context",
+  },
+  {
+    featureKey: "mobility-limitations",
+    label: "Mobility limitations",
+    metricKeys: ["mobility-limitation-count"],
+    requiredFor: "function-context",
+  },
+  {
+    featureKey: "frailty-symptoms",
+    label: "Frailty symptoms",
+    metricKeys: ["frailty-symptom-count"],
+    requiredFor: "function-context",
+  },
+] satisfies readonly MurphAgeInputFeatureRequirement[];
+
 const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
   activity: [
     "activity-minutes",
@@ -1029,6 +1062,30 @@ const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS =
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS.map(completeWearableBridgeFeatureSpec);
 
 const MURPH_AGE_MODEL_CARD_POLICIES = [
+  {
+    acceptedBundleIds: ["function-context"],
+    cardId: "function_context_no_risk",
+    evidenceClass: "context-only",
+    evidenceSummary: "Function limitation and disability inputs may be shown as context, but they are not yet product-authorized as a Murph Age score-bearing sidecar.",
+    outcome: {
+      ageEstimateBasis: "none",
+      horizonYears: null,
+      modelEndpoint: null,
+      riskEndpoint: "none",
+    },
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: false,
+    scoreBearingMetricKeys: [],
+    scoreBearingSourceKinds: [],
+    validationGate: {
+      evidenceTiers: [],
+      productPromotionEvidence: false,
+      status: "blocked",
+      summary: "Function context card is not a score-bearing Murph Age product model.",
+    },
+    wearableScoreBearingAuthorized: false,
+  },
   {
     acceptedBundleIds: ["lab9-bp-body"],
     cardId: "lab9_bp_body_10y_acm_research",
@@ -1208,11 +1265,16 @@ const MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS = new Set(
   MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 );
 
+const MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS = new Set(
+  MURPH_AGE_FUNCTION_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
+);
+
 const MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS,
+  ...MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS,
 ]);
 
 const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
@@ -1220,6 +1282,7 @@ const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
   ...MURPH_AGE_BP_BODY_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_LAB5_FEATURES.map((feature) => feature.featureKey),
   ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.map((feature) => feature.featureKey),
+  ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES.map((feature) => feature.featureKey),
   "chronological-age",
   "sex",
 ]);
@@ -1238,6 +1301,7 @@ const MURPH_AGE_PUBLIC_METRIC_KEYS = new Set([
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
+  ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 ]);
 
 export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
@@ -1276,6 +1340,9 @@ export function isMurphAgeInputBundleMetricPointAllowed(
     return point.source.kind === "activity-summary"
       || point.source.kind === "sleep-summary"
       || point.source.kind === "wearable-summary";
+  }
+  if (MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS.has(metricKey)) {
+    return point.source.kind === "measurement";
   }
   return point.source.kind === "measurement" || point.source.kind === "test-result";
 }
@@ -1623,8 +1690,9 @@ export function summarizeMurphAgeCalculatorOutput(
     feature.status === "blocked"
   ) ?? [];
   const contextFeatures = listContextOnlyFeatureStatuses(output);
-  const wearableContext = summarizeWearableContext(contextFeatures);
-  const wearableBridge = summarizeWearableBridge(contextFeatures);
+  const wearableFeatures = contextFeatures.filter(isWearableContextFeatureStatus);
+  const wearableContext = summarizeWearableContext(wearableFeatures);
+  const wearableBridge = summarizeWearableBridge(wearableFeatures);
   const ageEstimateAvailable = output.result?.status === "ready" && output.result.biologicalAgeYears !== null;
   const riskEstimateAvailable = output.result?.risk !== null && output.result?.risk !== undefined;
   const productRiskDisplayReady = riskEstimateAvailable && output.authorization.productAuthorized;
@@ -1920,6 +1988,7 @@ function toPublicModuleId(moduleId: string): string {
     "body",
     "cardiovascular",
     "demographics",
+    "function",
     "hematologic",
     "immune",
     "inflammatory",
@@ -2023,12 +2092,16 @@ export function assessMurphAgeInputBundle(
   const wearableAssessment = assessMurphAgeWearableContext(input);
   if (wearableAssessment.status === "context-only") return wearableAssessment;
 
+  const functionAssessment = assessMurphAgeFunctionContext(input);
+  if (functionAssessment.status === "context-only") return functionAssessment;
+
   return buildInputBundleAssessment({
     bundleId: "insufficient",
     featureStatuses: [
       ...lab5Statuses,
       ...bpBodyStatuses,
       ...wearableAssessment.featureStatuses,
+      ...functionAssessment.featureStatuses,
     ],
     recommendedCardId: "none",
     status: "abstain",
@@ -2042,9 +2115,14 @@ export function assessMurphAgeInputBundle(
 export function assessMurphAgeSecondaryContextBundles(input: MurphAgeInputBundleAssessmentInput & {
   primaryBundleId: MurphAgeInputBundleId;
 }): MurphAgeContextBundleAssessment[] {
-  if (input.primaryBundleId === "wearable-context") return [];
-  const wearableAssessment = assessMurphAgeWearableContext(input);
-  return wearableAssessment.status === "context-only" ? [toContextBundleAssessment(wearableAssessment)] : [];
+  return [
+    assessMurphAgeWearableContext(input),
+    assessMurphAgeFunctionContext(input),
+  ]
+    .filter((assessment) =>
+      assessment.status === "context-only" && assessment.bundleId !== input.primaryBundleId
+    )
+    .map(toContextBundleAssessment);
 }
 
 export function mapRiskToReferenceAge(
@@ -2098,13 +2176,17 @@ export function mapRiskToReferenceAge(
 function assessInputFeatureRequirements(
   input: MurphAgeInputBundleAssessmentInput,
   requirements: readonly MurphAgeInputFeatureRequirement[],
+  options: {
+    isPointAllowed?: (point: MetricPoint) => boolean;
+  } = {},
 ): MurphAgeInputBundleFeatureStatus[] {
+  const points = options.isPointAllowed ? input.points.filter(options.isPointAllowed) : input.points;
   return requirements.map((requirement) => {
     const selections = requirement.metricKeys.map((metricKey) =>
       selectMetricValue({
         metricKey,
         now: input.asOf,
-        points: input.points,
+        points,
       })
     );
     const selected = selections.find((selection) =>
@@ -2186,7 +2268,9 @@ function buildCalculatorOutput(input: {
 function assessMurphAgeWearableContext(
   input: MurphAgeInputBundleAssessmentInput,
 ): MurphAgeInputBundleAssessment {
-  const wearableStatuses = assessInputFeatureRequirements(input, MURPH_AGE_WEARABLE_CONTEXT_FEATURES);
+  const wearableStatuses = assessInputFeatureRequirements(input, MURPH_AGE_WEARABLE_CONTEXT_FEATURES, {
+    isPointAllowed: isMurphAgeInputBundleMetricPointAllowed,
+  });
   if (wearableStatuses.some((status) => status.status === "ready")) {
     return buildInputBundleAssessment({
       bundleId: "wearable-context",
@@ -2203,6 +2287,34 @@ function assessMurphAgeWearableContext(
   return buildInputBundleAssessment({
     bundleId: "wearable-context",
     featureStatuses: wearableStatuses,
+    recommendedCardId: "none",
+    status: "abstain",
+    warnings: [],
+  });
+}
+
+function assessMurphAgeFunctionContext(
+  input: MurphAgeInputBundleAssessmentInput,
+): MurphAgeInputBundleAssessment {
+  const functionStatuses = assessInputFeatureRequirements(input, MURPH_AGE_FUNCTION_CONTEXT_FEATURES, {
+    isPointAllowed: isMurphAgeInputBundleMetricPointAllowed,
+  });
+  if (functionStatuses.some((status) => status.status === "ready")) {
+    return buildInputBundleAssessment({
+      bundleId: "function-context",
+      featureStatuses: functionStatuses,
+      recommendedCardId: "function_context_no_risk",
+      status: "context-only",
+      warnings: [{
+        code: "CONTEXT_NOT_SCORE_BEARING",
+        message: "Function limitation inputs are available as context, but current Murph Age product cards do not score them.",
+      }],
+    });
+  }
+
+  return buildInputBundleAssessment({
+    bundleId: "function-context",
+    featureStatuses: functionStatuses,
     recommendedCardId: "none",
     status: "abstain",
     warnings: [],
@@ -2325,14 +2437,15 @@ function cloneInputBundleAssessment(assessment: MurphAgeInputBundleAssessment): 
 }
 
 function toContextBundleAssessment(assessment: MurphAgeInputBundleAssessment): MurphAgeContextBundleAssessment {
+  const bundleId = toContextBundleId(assessment.bundleId);
   return {
     ...assessment,
-    bundleId: "wearable-context",
+    bundleId,
     featureStatuses: assessment.featureStatuses.map((feature) => ({
       featureKey: feature.featureKey,
       label: feature.label,
       metricKeys: [...feature.metricKeys],
-      requiredFor: "wearable-context",
+      requiredFor: bundleId,
       selectedMetricKey: feature.selectedMetricKey,
       selectedPointIds: [...feature.selectedPointIds],
       status: feature.status,
@@ -2340,12 +2453,23 @@ function toContextBundleAssessment(assessment: MurphAgeInputBundleAssessment): M
   };
 }
 
+function toContextBundleId(bundleId: MurphAgeInputBundleId): MurphAgeContextBundleAssessment["bundleId"] {
+  if (bundleId === "function-context" || bundleId === "wearable-context") return bundleId;
+  throw new TypeError(`Murph Age input bundle ${bundleId} is not a context bundle.`);
+}
+
 function listContextOnlyFeatureStatuses(output: MurphAgeCalculatorOutput): MurphAgeContextBundleFeatureStatus[] {
-  const primaryContext = output.bundleAssessment.bundleId === "wearable-context"
+  const primaryContext = output.bundleAssessment.status === "context-only"
     ? toContextBundleAssessment(output.bundleAssessment).featureStatuses
     : [];
   return [...primaryContext, ...output.contextAssessments.flatMap((assessment) => assessment.featureStatuses)]
     .filter((feature) => feature.status === "ready");
+}
+
+function isWearableContextFeatureStatus(
+  feature: MurphAgeContextBundleFeatureStatus,
+): boolean {
+  return feature.requiredFor === "wearable-context";
 }
 
 function summarizeWearableContext(
@@ -2707,7 +2831,7 @@ function createMurphAgeCardPolicyAuthorization(input: {
   const contextOnlyMetricKeys = uniqueStrings(
     [
       ...input.contextAssessments.flatMap((assessment) => assessment.selectedMetricKeys),
-      ...(input.bundleAssessment.bundleId === "wearable-context" ? input.bundleAssessment.selectedMetricKeys : []),
+      ...(input.bundleAssessment.status === "context-only" ? input.bundleAssessment.selectedMetricKeys : []),
     ],
   );
   if (!input.cardPolicy) {
@@ -2820,7 +2944,7 @@ function scoreBearingSelectionSourceKinds(selection: MetricSelection): string[] 
 }
 
 function isScoreBearingCardId(cardId: MurphAgeModelCardId): cardId is MurphAgeScoreBearingCardId {
-  return cardId !== "wearable_context_no_risk";
+  return cardId !== "function_context_no_risk" && cardId !== "wearable_context_no_risk";
 }
 
 function evaluateFeature(input: {

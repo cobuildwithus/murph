@@ -34,6 +34,7 @@ const murphAgeEvidenceClassSchema = z.enum([
   'research-transport',
 ])
 const murphAgeModelCardIdSchema = z.enum([
+  'function_context_no_risk',
   'lab5_bp_bmi_transport_research',
   'lab9_bp_body_10y_acm_research',
   'wearable_context_no_risk',
@@ -147,6 +148,7 @@ export const murphAgeModelCardStatusResultSchema = z.object({
 })
 
 const murphAgeInputBundleIdSchema = z.enum([
+  'function-context',
   'insufficient',
   'lab5-bp-bmi',
   'lab9-bp-body',
@@ -157,6 +159,7 @@ const murphAgeInputFeatureReadinessSchema = z.object({
   label: z.string().min(1),
   metricKeys: z.array(z.string().min(1)),
   requiredFor: z.enum([
+    'function-context',
     'lab5-fallback',
     'lab9-mainline',
     'optional-context',
