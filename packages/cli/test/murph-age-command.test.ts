@@ -23,6 +23,7 @@ import {
   createUnwiredVaultServices,
 } from '@murphai/vault-usecases'
 import { registerBloodTestCommands } from '../src/commands/health-blood-test-save.js'
+import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerMurphAgeCommands } from '../src/commands/murph-age.js'
@@ -54,6 +55,7 @@ function createCanonicalInputCli() {
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
   registerBloodTestCommands(cli, services)
+  registerEventCommands(cli, services)
   registerMeasurementCommands(cli, services)
   registerMurphAgeCommands(cli, services)
   return cli
@@ -324,6 +326,122 @@ test('age report consumes saved canonical blood tests and measurements through p
   }
 })
 
+test('age report consumes canonical wearable observations as context-only bridge data', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-wearable-')
+  try {
+    const cli = createCanonicalInputCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'UTC',
+    ])
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const wearableObservationPayloads = [
+      wearableObservationPayload({
+        facet: 'steps',
+        metric: 'daily-steps',
+        resourceId: 'oura-activity-2026-05-08',
+        resourceType: 'daily-activity',
+        title: 'Oura daily steps',
+        unit: 'count',
+        value: 10_000,
+      }),
+      wearableObservationPayload({
+        facet: 'resting-heart-rate',
+        metric: 'resting-heart-rate',
+        resourceId: 'oura-readiness-2026-05-08',
+        resourceType: 'daily-readiness',
+        title: 'Oura resting heart rate',
+        unit: 'bpm',
+        value: 62,
+      }),
+      wearableObservationPayload({
+        facet: 'hrv-rmssd',
+        metric: 'hrv-rmssd',
+        resourceId: 'oura-readiness-2026-05-08',
+        resourceType: 'daily-readiness',
+        title: 'Oura HRV',
+        unit: 'ms',
+        value: 48,
+      }),
+      wearableObservationPayload({
+        facet: 'total-sleep-minutes',
+        metric: 'total-sleep-minutes',
+        resourceId: 'oura-sleep-2026-05-08',
+        resourceType: 'sleep',
+        title: 'Oura total sleep',
+        unit: 'minutes',
+        value: 450,
+      }),
+    ]
+
+    for (const [index, payload] of wearableObservationPayloads.entries()) {
+      const payloadPath = path.join(parentRoot, `wearable-observation-${index}.json`)
+      await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+      const result = await runInProcessJsonCli(cli, [
+        'event',
+        'import-json',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      requireData(result.envelope)
+    }
+
+    await rebuildQueryProjection(vaultRoot)
+
+    const report = requireData(
+      (
+        await runInProcessJsonCli<MurphAgePublicCalculatorReport>(cli, [
+          'age',
+          'report',
+          '--vault',
+          vaultRoot,
+          '--as-of',
+          '2026-05-10T00:00:00.000Z',
+          '--chronological-age-years',
+          '45',
+          '--sex',
+          'female',
+          '--mode',
+          'research',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(report.mode, 'research')
+    assert.equal(report.status, 'context-only')
+    assert.equal(report.result, null)
+    assert.equal(report.displaySummary.displayStatus, 'context-only')
+    assert.equal(report.displaySummary.wearableContext.scoreBearing, false)
+    assert.equal(report.displaySummary.wearableContext.scoreContributionAuthorized, false)
+    assert.equal(report.displaySummary.wearableBridge.scoreBearing, false)
+    assert.equal(report.displaySummary.wearableBridge.scoreContributionAuthorized, false)
+    assert.equal(report.displaySummary.wearableBridge.productAuthorized, false)
+    assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.length, 0)
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('activity-volume'), true)
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('sleep-duration-regularity'), true)
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('resting-heart-rate'), true)
+    assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('hrv-rmssd'), true)
+    assert.equal(report.displaySummary.wearableBridge.deferredFeatureKeys.includes('hrv-rmssd'), true)
+    assert.equal(report.displaySummary.contextOnlyMetricKeys.includes('steps'), true)
+    assert.equal(report.displaySummary.contextOnlyMetricKeys.includes('resting-heart-rate'), true)
+    assert.equal(report.displaySummary.contextOnlyMetricKeys.includes('hrv-rmssd'), true)
+    assert.equal(report.displaySummary.contextOnlyMetricKeys.includes('total-sleep-minutes'), true)
+    assert.equal(report.displaySummary.wearableBridge.features.some((feature) => hasOwnKey(feature, 'selectedPointIds')), false)
+    assert.equal(report.displaySummary.wearableBridge.features.every((feature) => feature.productAuthorized === false), true)
+    assert.equal(hasOwnKey(report, 'contextAssessments'), false)
+    assert.equal(hasOwnKey(report.displaySummary, 'contextOnlyPointIds'), false)
+    assert.equal(hasOwnKey(report.displaySummary, 'selectedScoreBearingPointIds'), false)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report rejects uninitialized vault roots before calculating a report', async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-uninitialized-'))
   try {
@@ -351,6 +469,32 @@ test('age report rejects uninitialized vault roots before calculating a report',
     await rm(vaultRoot, { force: true, recursive: true })
   }
 })
+
+function wearableObservationPayload(input: {
+  facet: string
+  metric: string
+  resourceId: string
+  resourceType: string
+  title: string
+  unit: string
+  value: number
+}) {
+  return {
+    externalRef: {
+      facet: input.facet,
+      resourceId: input.resourceId,
+      resourceType: input.resourceType,
+      system: 'oura',
+    },
+    kind: 'observation',
+    metric: input.metric,
+    occurredAt: '2026-05-08T08:00:00.000Z',
+    source: 'device',
+    title: input.title,
+    unit: input.unit,
+    value: input.value,
+  }
+}
 
 async function createProjectionVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-'))
