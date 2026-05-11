@@ -282,17 +282,9 @@ export async function assessMurphAgeInputReadinessFromVault(
       runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
       schemaVersion: "murph.age.input-readiness.v4",
       scoreReadiness: buildMurphAgeInputScoreReadiness({
-        availableFeatureKeys: [],
         bundleId: "insufficient",
-        featureStatuses: [],
-        missingFeatureKeys: [],
         recommendedCardId: "none",
-        schemaVersion: MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
-        selectedMetricKeys: [],
         status: "abstain",
-        warnings: [{
-          code: "INVALID_INPUT",
-        }],
       }),
       wearableBridge: buildMurphAgeWearableBridgeReadiness({
         asOf: "1970-01-01T00:00:00.000Z",
@@ -332,10 +324,15 @@ function buildMurphAgeRuntimeInputReadiness(): MurphAgeRuntimeInputReadiness[] {
   return MURPH_AGE_RUNTIME_INPUT_READINESS.map((input) => ({ ...input }));
 }
 
-function buildMurphAgeInputScoreReadiness(assessment: Pick<
-  MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
-  "bundleId" | "recommendedCardId" | "status"
->): MurphAgeInputScoreReadiness {
+function buildMurphAgeInputScoreReadiness(
+  assessment:
+    | MurphAgeContextBundleAssessment
+    | MurphAgeInputBundleAssessment
+    | Pick<
+      MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+      "bundleId" | "recommendedCardId" | "status"
+    >,
+): MurphAgeInputScoreReadiness {
   const policy = resolveMurphAgeModelCardPolicy(assessment.recommendedCardId);
   const inputReady = assessment.status === "ready" || assessment.status === "context-only";
   const scoreBearingInput = inputReady && Boolean(policy?.scoreBearing);
