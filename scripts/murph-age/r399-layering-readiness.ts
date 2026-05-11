@@ -5,50 +5,35 @@ import { pathToFileURL } from "node:url";
 import {
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  parseMurphAgeLocalModelCardArtifact,
   resolveMurphAgeModelCardPolicy,
+  validateMurphAgeLocalModelCardArtifactPolicy,
 } from "@murphai/health-metrics";
 
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
+import {
+  assertAllowedR399LocalModelCardArtifactPath,
+  assertAllowedR399ReadinessOutputDir,
+  assertR399LocalModelCardMatchesParams,
+  DEFAULT_R399_MODEL_CARD_OUTPUT_DIR,
+  DEFAULT_R399_PARAMS_PATH,
+  FROZEN_R399_FEATURE_KEYS,
+  FROZEN_R399_MODEL_ID,
+  R399_LOCAL_MODEL_CARD_FILENAME,
+  R399_RESEARCH_CARD_ID,
+  resolveR399RepoPath,
+  validateFrozenR399FeatureKeys,
+} from "./r399-local-model-card.ts";
 
 export const R399_LAYERING_READINESS_SCHEMA_VERSION =
   "murph-age-r399-layering-readiness.v1" as const;
 
-const DEFAULT_R399_PARAMS_PATH = path.join(
-  ".runtime",
-  "cache",
-  "murph-age",
-  "external-sources",
-  "nhis-public-lmf",
-  "ml-loop",
-  "runs",
-  "session_murph_age_r399_nhis_compact_ultralow_l2_loop",
-  "local-model-params-r399.json",
-);
 const DEFAULT_MODEL_RUNS_DIR = path.join(".runtime", "operations", "research", "murph-age", "model-runs");
 const DEFAULT_MIDUS2_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "midus2-local-benchmark.latest.json");
 const DEFAULT_CRELES_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "creles-local-benchmark.latest.json");
 const DEFAULT_TRANSPORT_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "midus2-creles-transport-benchmark.latest.json");
+const DEFAULT_R399_MODEL_CARD_PATH = path.join(DEFAULT_R399_MODEL_CARD_OUTPUT_DIR, R399_LOCAL_MODEL_CARD_FILENAME);
 
-const FROZEN_R399_MODEL_ID = "r399_compact_age_nonlinear_l2_0p000";
-const R399_RESEARCH_CARD_ID = "r399_nhis_proxy_10y_acm_research";
-const FROZEN_R399_FEATURE_KEY_ALLOWLIST = new Set<string>([
-  "age_years",
-  "sex_female",
-  "body_mass_index",
-  "self_rated_health",
-  "hypertension_history_proxy_yes",
-  "diabetes_history_proxy_yes",
-  "smoking_status_proxy",
-  "physical_activity_proxy",
-  "body_mass_index_missing",
-  "self_rated_health_missing",
-  "hypertension_history_proxy_missing",
-  "diabetes_history_proxy_missing",
-  "smoking_status_proxy_missing",
-  "physical_activity_proxy_missing",
-  "age_years_squared",
-  "age_x_sex_female",
-] as const);
 const FROZEN_R399_FEATURE_FAMILIES = [
   "chronological-age",
   "sex",
@@ -61,7 +46,7 @@ const FROZEN_R399_FEATURE_FAMILIES = [
   "age-nonlinearity",
 ] as const;
 const PRODUCT_BLOCKER_REASONS = [
-  "R399 remains research-only and requires an ignored local model-card artifact before scoring.",
+  "R399 remains research-only; product promotion requires external validation and locked user-input mapping.",
   "R399 uses NHIS proxy features; user-input mapping for self-rated health, smoking, diagnoses, and activity proxy is not locked.",
   "The MIDUS-to-CRELES biomarker transport diagnostic has not confirmed a stable additive biomarker increment over the target age/sex reference.",
   "Wearable features remain shadow/context-only and have no score-bearing residual-increment estimate.",
@@ -81,6 +66,7 @@ export interface R399LayeringReadinessOptions {
   crelesOutputPath?: string;
   midus2OutputPath?: string;
   outputDir?: string;
+  r399ModelCardPath?: string;
   r399ParamsPath?: string;
   transportOutputPath?: string;
 }
@@ -109,6 +95,7 @@ export interface R399LayeringReadinessOutput {
     featureFamilies: string[];
     featureCount: number | null;
     modelId: typeof FROZEN_R399_MODEL_ID;
+    localModelCardPresent: boolean;
     modelParametersStored: false;
     present: boolean;
     privateRuntimeParamsRequired: true;
@@ -154,12 +141,20 @@ interface R399ModelMetadata {
   present: boolean;
 }
 
+interface R399LocalModelCardMetadata {
+  featureCount: number | null;
+  present: boolean;
+}
+
 export async function runR399LayeringReadiness(
   options: R399LayeringReadinessOptions = {},
 ): Promise<{ output: R399LayeringReadinessOutput; outputPath: string }> {
-  const outputDir = options.outputDir ?? DEFAULT_MODEL_RUNS_DIR;
-  const [r399Metadata, midus2, creles, transport] = await Promise.all([
-    readR399ModelMetadata(options.r399ParamsPath ?? DEFAULT_R399_PARAMS_PATH),
+  const outputDir = resolveR399RepoPath(options.outputDir ?? DEFAULT_MODEL_RUNS_DIR);
+  const r399ParamsPath = resolveR399RepoPath(options.r399ParamsPath ?? DEFAULT_R399_PARAMS_PATH);
+  const r399ModelCardPath = resolveR399RepoPath(options.r399ModelCardPath ?? DEFAULT_R399_MODEL_CARD_PATH);
+  const [r399Metadata, r399ModelCardMetadata, midus2, creles, transport] = await Promise.all([
+    readR399ModelMetadata(r399ParamsPath),
+    readR399LocalModelCardMetadata(r399ModelCardPath, r399ParamsPath),
     readOptionalJson(options.midus2OutputPath ?? DEFAULT_MIDUS2_OUTPUT_PATH),
     readOptionalJson(options.crelesOutputPath ?? DEFAULT_CRELES_OUTPUT_PATH),
     readOptionalJson(options.transportOutputPath ?? DEFAULT_TRANSPORT_OUTPUT_PATH),
@@ -167,6 +162,7 @@ export async function runR399LayeringReadiness(
 
   const r399Policy = resolveMurphAgeModelCardPolicy(R399_RESEARCH_CARD_ID);
   const committedCalculatorCardPresent = isResearchOnlyR399PolicyPresent(r399Policy);
+  const calculatorScorePathReady = committedCalculatorCardPresent && r399ModelCardMetadata.present;
   const biomarkerIncrement = [
     summarizeMidus2Increment(midus2),
     summarizeCrelesIncrement(creles),
@@ -191,10 +187,12 @@ export async function runR399LayeringReadiness(
       status: r399Metadata.present ? "passed" : "blocked",
     },
     calculatorScorePathReady: {
-      reason: committedCalculatorCardPresent
-        ? "Committed R399 research model-card policy is present; scoring still requires an ignored local model-card artifact and explicit research mode."
-        : `No committed ${R399_RESEARCH_CARD_ID} research model-card policy is present.`,
-      status: "blocked",
+      reason: calculatorScorePathReady
+        ? "Committed R399 research policy and ignored local R399 model-card artifact are present; scoring still requires explicit research mode."
+        : committedCalculatorCardPresent
+          ? "Committed R399 research policy is present; scoring still requires an ignored local R399 model-card artifact."
+          : `No committed ${R399_RESEARCH_CARD_ID} research model-card policy is present.`,
+      status: calculatorScorePathReady ? "passed" : "blocked",
     },
     biomarkerTransportConfirmed: {
       reason: transportConfirmed
@@ -226,6 +224,7 @@ export async function runR399LayeringReadiness(
       featureFamilies: r399Metadata.present ? [...FROZEN_R399_FEATURE_FAMILIES] : [],
       featureCount: r399Metadata.present ? r399Metadata.featureKeys.length : null,
       modelId: FROZEN_R399_MODEL_ID,
+      localModelCardPresent: r399ModelCardMetadata.present,
       modelParametersStored: false,
       present: r399Metadata.present,
       privateRuntimeParamsRequired: true,
@@ -245,7 +244,12 @@ export async function runR399LayeringReadiness(
     participantIdentifiersStored: false,
     predictionsStored: false,
     productPromotionAuthorized: false,
-    recommendations: buildRecommendations({ committedCalculatorCardPresent, r399Present: r399Metadata.present, transportConfirmed }),
+    recommendations: buildRecommendations({
+      committedCalculatorCardPresent,
+      localModelCardPresent: r399ModelCardMetadata.present,
+      r399Present: r399Metadata.present,
+      transportConfirmed,
+    }),
     rowValuesStored: false,
     schemaVersion: R399_LAYERING_READINESS_SCHEMA_VERSION,
     sourceBodiesStored: false,
@@ -337,6 +341,7 @@ function summarizeMidus2ToCrelesTransport(value: unknown): R399LayeringEvidenceS
 
 function buildRecommendations(input: {
   committedCalculatorCardPresent: boolean;
+  localModelCardPresent: boolean;
   r399Present: boolean;
   transportConfirmed: boolean;
 }): string[] {
@@ -345,6 +350,8 @@ function buildRecommendations(input: {
   ];
   if (input.r399Present && !input.committedCalculatorCardPresent) {
     recommendations.push("Before layering R399 into the calculator, define a research-only R399 model-card/input bundle for NHIS proxy features without committing private coefficients.");
+  } else if (input.r399Present && !input.localModelCardPresent) {
+    recommendations.push("Export the ignored R399 local model-card artifact before running the calculator against the frozen anchor.");
   } else if (input.r399Present) {
     recommendations.push("Keep the committed R399 card research-only; load private coefficients only through ignored local model-card artifacts in explicit research mode.");
   }
@@ -389,11 +396,47 @@ async function readR399ModelMetadata(filePath: string): Promise<R399ModelMetadat
   };
 }
 
+async function readR399LocalModelCardMetadata(
+  filePath: string,
+  r399ParamsPath: string,
+): Promise<R399LocalModelCardMetadata> {
+  await assertAllowedR399LocalModelCardArtifactPath(filePath);
+  const raw = await readOptionalText(filePath);
+  if (raw === null) {
+    return { featureCount: null, present: false };
+  }
+  const value = parseJson(raw, "R399 local model-card artifact");
+  const artifact = parseMurphAgeLocalModelCardArtifact(value);
+  if (!artifact.value || artifact.warnings.length > 0) {
+    throw new Error("R399 local model-card artifact does not match the expected schema.");
+  }
+  const policyWarnings = validateMurphAgeLocalModelCardArtifactPolicy(artifact.value);
+  if (policyWarnings.length > 0) {
+    throw new Error("R399 local model-card artifact does not match the committed R399 policy.");
+  }
+  if (
+    artifact.value.cardId !== R399_RESEARCH_CARD_ID
+    || artifact.value.model.modelId !== FROZEN_R399_MODEL_ID
+    || artifact.value.model.features.length !== FROZEN_R399_FEATURE_KEYS.length
+  ) {
+    throw new Error("R399 local model-card artifact does not match the frozen R399 anchor.");
+  }
+  await assertR399LocalModelCardMatchesParams({
+    artifact: artifact.value,
+    paramsPath: r399ParamsPath,
+  });
+  return {
+    featureCount: artifact.value.model.features.length,
+    present: true,
+  };
+}
+
 async function writeReadinessOutput(
   outputDir: string,
   output: R399LayeringReadinessOutput,
 ): Promise<string> {
   try {
+    await assertAllowedR399ReadinessOutputDir(outputDir);
     await mkdir(outputDir, { recursive: true });
     const outputPath = path.join(outputDir, "r399-layering-readiness.latest.json");
     await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
@@ -493,17 +536,6 @@ function requiredStringArray(value: unknown, label: string): string[] {
   return [...value];
 }
 
-function validateFrozenR399FeatureKeys(features: readonly string[]): void {
-  const allowedCount = FROZEN_R399_FEATURE_KEY_ALLOWLIST.size;
-  if (
-    features.length !== allowedCount
-    || new Set(features).size !== allowedCount
-    || features.some((feature) => !FROZEN_R399_FEATURE_KEY_ALLOWLIST.has(feature))
-  ) {
-    throw new Error("Frozen R399 feature set does not match the expected allowlist.");
-  }
-}
-
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -523,12 +555,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     crelesOutputPath: process.env.MURPH_AGE_CRELES_OUTPUT_PATH,
     midus2OutputPath: process.env.MURPH_AGE_MIDUS2_OUTPUT_PATH,
     outputDir: process.env.MURPH_AGE_RESEARCH_OUTPUT_DIR,
+    r399ModelCardPath: process.env.MURPH_AGE_R399_MODEL_CARD_PATH,
     r399ParamsPath: process.env.MURPH_AGE_R399_PARAMS_PATH,
     transportOutputPath: process.env.MURPH_AGE_TRANSPORT_OUTPUT_PATH,
   }).then(({ output: readiness }) => {
     const cliSummary = {
       anchorPresent: readiness.anchor.present,
       biomarkerTransportConfirmed: readiness.gates.biomarkerTransportConfirmed.status === "passed",
+      calculatorScorePathReady: readiness.gates.calculatorScorePathReady.status === "passed",
+      localModelCardPresent: readiness.anchor.localModelCardPresent,
       productPromotionAuthorized: readiness.productPromotionAuthorized,
       r399CardPresent: readiness.anchor.committedCalculatorCardPresent,
       schemaVersion: readiness.schemaVersion,

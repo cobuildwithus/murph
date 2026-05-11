@@ -10,25 +10,14 @@ import {
   R399_LAYERING_READINESS_SCHEMA_VERSION,
   runR399LayeringReadiness,
 } from "./r399-layering-readiness.ts";
+import {
+  FROZEN_R399_FEATURE_KEYS,
+  R399_LOCAL_MODEL_CARD_FILENAME,
+  runR399LocalModelCardExport,
+  type FrozenR399FeatureKey,
+} from "./r399-local-model-card.ts";
 
-const R399_FEATURES = [
-  "age_years",
-  "sex_female",
-  "body_mass_index",
-  "self_rated_health",
-  "hypertension_history_proxy_yes",
-  "diabetes_history_proxy_yes",
-  "smoking_status_proxy",
-  "physical_activity_proxy",
-  "body_mass_index_missing",
-  "self_rated_health_missing",
-  "hypertension_history_proxy_missing",
-  "diabetes_history_proxy_missing",
-  "smoking_status_proxy_missing",
-  "physical_activity_proxy_missing",
-  "age_years_squared",
-  "age_x_sex_female",
-] as const;
+const R399_FEATURES = FROZEN_R399_FEATURE_KEYS;
 
 describe("R399 layering readiness runner", () => {
   it("summarizes the frozen anchor and blocks product layering when transport is not confirmed", async () => {
@@ -38,6 +27,7 @@ describe("R399 layering readiness runner", () => {
       const { output, outputPath } = await runR399LayeringReadiness({
         createdAt: "2026-05-12T00:00:00.000Z",
         outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: path.join(tmp, "missing-model-card.json"),
         ...paths,
       });
 
@@ -59,6 +49,7 @@ describe("R399 layering readiness runner", () => {
           "age-nonlinearity",
         ],
         featureCount: R399_FEATURES.length,
+        localModelCardPresent: false,
         modelId: "r399_compact_age_nonlinear_l2_0p000",
         modelParametersStored: false,
         present: true,
@@ -66,7 +57,7 @@ describe("R399 layering readiness runner", () => {
       });
       expect(output.gates.r399AnchorPresent.status).toBe("passed");
       expect(output.gates.calculatorScorePathReady.status).toBe("blocked");
-      expect(output.gates.calculatorScorePathReady.reason).toContain("research model-card policy");
+      expect(output.gates.calculatorScorePathReady.reason).toContain("ignored local R399 model-card artifact");
       expect(output.gates.biomarkerTransportConfirmed.status).toBe("blocked");
       expect(output.gates.wearableIncrementValidated.status).toBe("blocked");
       expect(output.productPromotionAuthorized).toBe(false);
@@ -104,6 +95,111 @@ describe("R399 layering readiness runner", () => {
     }
   });
 
+  it("passes the calculator score-path gate when the ignored local R399 model card is present", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-layering-"));
+    try {
+      const paths = await writeFixtureArtifacts(tmp, { transportConfirmed: false });
+      const modelCardOutputDir = path.join(tmp, "model-cards");
+      const { artifactPath } = await runR399LocalModelCardExport({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        modelCardOutputDir,
+        paramsPath: paths.r399ParamsPath,
+      });
+      expect(path.basename(artifactPath)).toBe(R399_LOCAL_MODEL_CARD_FILENAME);
+
+      const { output, outputPath } = await runR399LayeringReadiness({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: artifactPath,
+        ...paths,
+      });
+
+      expect(output.anchor.localModelCardPresent).toBe(true);
+      expect(output.gates.calculatorScorePathReady.status).toBe("passed");
+      expect(output.gates.productPromotionReady.status).toBe("blocked");
+      expect(output.productPromotionAuthorized).toBe(false);
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+
+      const persisted = await readFile(outputPath, "utf8");
+      expect(persisted).not.toContain(artifactPath);
+      expect(persisted).not.toContain(modelCardOutputDir);
+      expect(persisted).not.toContain("coefficients\":");
+      expect(persisted).not.toContain("referenceRiskCurve");
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a stale local R399 model-card artifact that does not match the frozen params", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-layering-"));
+    try {
+      const paths = await writeFixtureArtifacts(tmp, { transportConfirmed: false });
+      const { artifactPath } = await runR399LocalModelCardExport({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        modelCardOutputDir: path.join(tmp, "model-cards"),
+        paramsPath: paths.r399ParamsPath,
+      });
+      const artifact = JSON.parse(await readFile(artifactPath, "utf8"));
+      artifact.model.features[0].coefficient = artifact.model.features[0].coefficient + 0.01;
+      await writeJson(artifactPath, artifact);
+
+      await expect(runR399LayeringReadiness({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: artifactPath,
+        ...paths,
+      })).rejects.toThrow("R399 local model-card artifact does not match the frozen R399 parameter artifact.");
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects schema-invalid, policy-invalid, and anchor-invalid local R399 model cards", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-layering-"));
+    try {
+      const paths = await writeFixtureArtifacts(tmp, { transportConfirmed: false });
+      const modelCardOutputDir = path.join(tmp, "model-cards");
+      const { artifactPath } = await runR399LocalModelCardExport({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        modelCardOutputDir,
+        paramsPath: paths.r399ParamsPath,
+      });
+
+      const schemaInvalidPath = path.join(modelCardOutputDir, "schema-invalid.json");
+      await writeJson(schemaInvalidPath, { schemaVersion: "bad" });
+      await expect(runR399LayeringReadiness({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        outputDir: path.join(tmp, "out-schema"),
+        r399ModelCardPath: schemaInvalidPath,
+        ...paths,
+      })).rejects.toThrow("R399 local model-card artifact does not match the expected schema.");
+
+      const policyInvalidPath = path.join(modelCardOutputDir, "policy-invalid.json");
+      const policyInvalid = JSON.parse(await readFile(artifactPath, "utf8"));
+      policyInvalid.cardId = "lab5_bp_bmi_transport_research";
+      await writeJson(policyInvalidPath, policyInvalid);
+      await expect(runR399LayeringReadiness({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        outputDir: path.join(tmp, "out-policy"),
+        r399ModelCardPath: policyInvalidPath,
+        ...paths,
+      })).rejects.toThrow("R399 local model-card artifact does not match the committed R399 policy.");
+
+      const anchorInvalidPath = path.join(modelCardOutputDir, "anchor-invalid.json");
+      const anchorInvalid = JSON.parse(await readFile(artifactPath, "utf8"));
+      anchorInvalid.model.modelId = "not-r399";
+      await writeJson(anchorInvalidPath, anchorInvalid);
+      await expect(runR399LayeringReadiness({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        outputDir: path.join(tmp, "out-anchor"),
+        r399ModelCardPath: anchorInvalidPath,
+        ...paths,
+      })).rejects.toThrow("R399 local model-card artifact does not match the frozen R399 anchor.");
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
   it("passes the biomarker transport gate only when transport beats the target reference on conservative aggregate metrics", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-layering-"));
     try {
@@ -111,6 +207,7 @@ describe("R399 layering readiness runner", () => {
       const { output } = await runR399LayeringReadiness({
         createdAt: "2026-05-12T00:00:00.000Z",
         outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: path.join(tmp, "missing-model-card.json"),
         ...paths,
       });
 
@@ -131,6 +228,7 @@ describe("R399 layering readiness runner", () => {
       const { output } = await runR399LayeringReadiness({
         createdAt: "2026-05-12T00:00:00.000Z",
         outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: path.join(tmp, "missing-model-card.json"),
         ...paths,
         r399ParamsPath: path.join(tmp, "missing-r399.json"),
       });
@@ -154,6 +252,7 @@ describe("R399 layering readiness runner", () => {
       const { output, outputPath } = await runR399LayeringReadiness({
         createdAt: "2026-05-12T00:00:00.000Z",
         outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: path.join(tmp, "missing-model-card.json"),
         ...paths,
       });
 
@@ -195,6 +294,7 @@ describe("R399 layering readiness runner", () => {
       await expect(runR399LayeringReadiness({
         createdAt: "2026-05-12T00:00:00.000Z",
         outputDir: path.join(tmp, "out"),
+        r399ModelCardPath: path.join(tmp, "missing-model-card.json"),
         ...paths,
       })).rejects.toThrow("Frozen R399 feature set does not match the expected allowlist.");
     } finally {
@@ -217,6 +317,7 @@ describe("R399 layering readiness runner", () => {
           ...process.env,
           MURPH_AGE_CRELES_OUTPUT_PATH: paths.crelesOutputPath,
           MURPH_AGE_MIDUS2_OUTPUT_PATH: paths.midus2OutputPath,
+          MURPH_AGE_R399_MODEL_CARD_PATH: path.join(tmp, "missing-model-card.json"),
           MURPH_AGE_R399_PARAMS_PATH: paths.r399ParamsPath,
           MURPH_AGE_RESEARCH_OUTPUT_DIR: path.join(tmp, "out"),
           MURPH_AGE_TRANSPORT_OUTPUT_PATH: paths.transportOutputPath,
@@ -227,6 +328,8 @@ describe("R399 layering readiness runner", () => {
       expect(parsed).toEqual({
         anchorPresent: true,
         biomarkerTransportConfirmed: false,
+        calculatorScorePathReady: false,
+        localModelCardPresent: false,
         productPromotionAuthorized: false,
         r399CardPresent: true,
         schemaVersion: R399_LAYERING_READINESS_SCHEMA_VERSION,
@@ -258,6 +361,7 @@ describe("R399 layering readiness runner", () => {
           ...process.env,
           MURPH_AGE_CRELES_OUTPUT_PATH: paths.crelesOutputPath,
           MURPH_AGE_MIDUS2_OUTPUT_PATH: paths.midus2OutputPath,
+          MURPH_AGE_R399_MODEL_CARD_PATH: path.join(tmp, "missing-model-card.json"),
           MURPH_AGE_R399_PARAMS_PATH: paths.r399ParamsPath,
           MURPH_AGE_RESEARCH_OUTPUT_DIR: blockedOutputDir,
           MURPH_AGE_TRANSPORT_OUTPUT_PATH: paths.transportOutputPath,
@@ -293,12 +397,15 @@ async function writeFixtureArtifacts(
       model_params_in_output_package: false,
       models: {
         r399_compact_age_nonlinear_l2_0p000: {
-          coefficients: R399_FEATURES.map(() => 0.1),
+          coefficients: R399_FEATURES.map((feature) => SYNTHETIC_R399_WEIGHTS[feature]),
           features: R399_FEATURES,
+          imputation_medians: SYNTHETIC_R399_MEDIANS,
           intercept: -1,
           model_id: "r399_compact_age_nonlinear_l2_0p000",
           posthoc_calibration: { intercept: 0, mode: "intercept_slope", slope: 1 },
           role: "compact_ultralow_l2_candidate",
+          standardization_means: SYNTHETIC_R399_MEANS,
+          standardization_stds: SYNTHETIC_R399_STDS,
         },
       },
       predictions_in_this_artifact: false,
@@ -395,3 +502,80 @@ function metrics(input: { auc: number; brier: number; logLoss: number }) {
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
+
+// Synthetic, hand-authored fixture values. These are not copied from the private R399 artifact.
+const SYNTHETIC_R399_MEANS = {
+  age_x_sex_female: 30,
+  age_years: 55,
+  age_years_squared: 3250,
+  body_mass_index: 27,
+  body_mass_index_missing: 0.04,
+  diabetes_history_proxy_missing: 0.03,
+  diabetes_history_proxy_yes: 0.12,
+  hypertension_history_proxy_missing: 0.03,
+  hypertension_history_proxy_yes: 0.28,
+  physical_activity_proxy: 2,
+  physical_activity_proxy_missing: 0.06,
+  self_rated_health: 3,
+  self_rated_health_missing: 0.05,
+  sex_female: 0.52,
+  smoking_status_proxy: 1,
+  smoking_status_proxy_missing: 0.04,
+} satisfies Record<FrozenR399FeatureKey, number>;
+
+const SYNTHETIC_R399_STDS = {
+  age_x_sex_female: 28,
+  age_years: 14,
+  age_years_squared: 1600,
+  body_mass_index: 5,
+  body_mass_index_missing: 0.2,
+  diabetes_history_proxy_missing: 0.17,
+  diabetes_history_proxy_yes: 0.32,
+  hypertension_history_proxy_missing: 0.17,
+  hypertension_history_proxy_yes: 0.45,
+  physical_activity_proxy: 1,
+  physical_activity_proxy_missing: 0.24,
+  self_rated_health: 1,
+  self_rated_health_missing: 0.22,
+  sex_female: 0.5,
+  smoking_status_proxy: 0.8,
+  smoking_status_proxy_missing: 0.2,
+} satisfies Record<FrozenR399FeatureKey, number>;
+
+const SYNTHETIC_R399_MEDIANS = {
+  age_x_sex_female: 0,
+  age_years: 55,
+  age_years_squared: 3025,
+  body_mass_index: 27,
+  body_mass_index_missing: 0,
+  diabetes_history_proxy_missing: 0,
+  diabetes_history_proxy_yes: 0,
+  hypertension_history_proxy_missing: 0,
+  hypertension_history_proxy_yes: 0,
+  physical_activity_proxy: 2,
+  physical_activity_proxy_missing: 0,
+  self_rated_health: 3,
+  self_rated_health_missing: 0,
+  sex_female: 1,
+  smoking_status_proxy: 1,
+  smoking_status_proxy_missing: 0,
+} satisfies Record<FrozenR399FeatureKey, number>;
+
+const SYNTHETIC_R399_WEIGHTS = {
+  age_x_sex_female: -0.03,
+  age_years: 0.9,
+  age_years_squared: 0.08,
+  body_mass_index: 0.04,
+  body_mass_index_missing: 0.01,
+  diabetes_history_proxy_missing: 0.01,
+  diabetes_history_proxy_yes: 0.16,
+  hypertension_history_proxy_missing: 0.01,
+  hypertension_history_proxy_yes: 0.12,
+  physical_activity_proxy: -0.08,
+  physical_activity_proxy_missing: 0.01,
+  self_rated_health: 0.14,
+  self_rated_health_missing: 0.01,
+  sex_female: -0.11,
+  smoking_status_proxy: 0.13,
+  smoking_status_proxy_missing: 0.01,
+} satisfies Record<FrozenR399FeatureKey, number>;
