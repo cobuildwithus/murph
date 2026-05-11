@@ -17,7 +17,7 @@ export interface WorkerUserRunnerStubLike {
     workspaceVersion?: string | null;
   }): Promise<boolean>;
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
    */
   ownsActiveInvocationLease?(input: {
@@ -27,7 +27,7 @@ export interface WorkerUserRunnerStubLike {
     workspaceVersion?: string | null;
   }): Promise<boolean>;
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; this path is intentionally inert.
    */
   recordActiveInvocationHeartbeat?(input: {
@@ -42,7 +42,7 @@ export interface WorkerUserRunnerStubLike {
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use
    * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
    */

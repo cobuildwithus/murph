@@ -125,6 +125,8 @@ function readRunnerStateSchemaVersion(sql: DurableObjectSqlStorageLike): number 
 function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
   const columns = readRunnerStateTableColumns(sql, "runner_meta");
   if (columns.includes("pending_work")) {
+    // Legacy pending-nudge/work projections kept for deploy skew only.
+    // Delete after 2026-05-25; live state uses wake_pending.
     sql.exec(`
       UPDATE runner_meta
       SET wake_pending = CASE
@@ -135,6 +137,8 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     `);
   }
   if (columns.includes("active_invocation_id")) {
+    // Legacy active/inFlight projections kept for deploy skew only.
+    // Delete after 2026-05-25; live state uses the write fence columns.
     sql.exec(`
       UPDATE runner_meta
       SET

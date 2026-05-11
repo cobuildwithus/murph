@@ -80,7 +80,7 @@ export interface RunnerStateRecord {
   deferredCheckpointRequired: boolean;
   deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
   idleCheckpoint: RunnerIdleCheckpointRecord | null;
-  /** Legacy projection. Delete after 2026-05-25; live code uses `writeFence`. */
+  /** Legacy write-fence projection. Delete after 2026-05-25; live code uses `writeFence`. */
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
@@ -88,11 +88,11 @@ export interface RunnerStateRecord {
   lastInvocationAt: string | null;
   leaseGeneration: number;
   nextWakeAt: string | null;
-  /** Legacy projection. Delete after 2026-05-25; live code uses `wakePending`. */
+  /** Legacy wake-pending projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingNudge: boolean;
-  /** Legacy projection. Delete after 2026-05-25; live code uses `writeFence`. */
+  /** Legacy wake-pending generation projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingNudgeGeneration: number;
-  /** Legacy projection. Delete after 2026-05-25; live code uses `wakePending`. */
+  /** Legacy wake-pending projection. Delete after 2026-05-25; live code uses `wakePending`. */
   pendingWork: boolean;
   retry: RunnerRetryRecord;
   retryFailureCount: number;

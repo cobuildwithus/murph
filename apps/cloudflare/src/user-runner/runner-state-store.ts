@@ -398,7 +398,7 @@ export class RunnerStateStore {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; this path is intentionally inert.
    */
   async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false; record: RunnerStateRecord }> {
@@ -433,7 +433,7 @@ export class RunnerStateStore {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; this path is intentionally inert.
    */
   async recordActiveInvocationHeartbeatInstruction(_input?: unknown): Promise<{
@@ -576,7 +576,7 @@ export class RunnerStateStore {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use `validateWriteFenceToken`.
    */
   async ownsActiveInvocationLease(input: {
@@ -626,7 +626,7 @@ export class RunnerStateStore {
   }
 
   /**
-   * Legacy deployed-caller compatibility only.
+   * Legacy active-invocation compatibility around the write fence.
    * Delete after 2026-05-25; live code must use
    * `recordWriteFenceWorkspaceCheckpoint`.
    */

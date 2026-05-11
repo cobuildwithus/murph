@@ -25,14 +25,6 @@ import {
   createHostedBrowserVaultReplicaWriteHeaders,
   isHostedRuntimeInternalAuthorityRejectedError,
 } from "../src/runtime-platform.ts";
-import {
-  ACTIVE_INVOCATION_HEARTBEAT_STALE_MIN_MS,
-  ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
-  CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
-} from "../src/runner-liveness.ts";
-import {
-  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -122,50 +114,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
-  it("keeps the stale window above the heartbeat interval and touch timeout budget", () => {
-    expect(CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS).toBe(5_000);
-    expect(RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS).toBe(5_000);
-    expect(ACTIVE_INVOCATION_HEARTBEAT_STALE_MS).toBeGreaterThanOrEqual(
-      ACTIVE_INVOCATION_HEARTBEAT_STALE_MIN_MS,
-    );
-  });
-
-  it("fails fast when required runtime liveness wiring is missing", () => {
-    expect(() =>
-      buildHostedExecutionRuntimePlatform({
-        boundUserId: "member_123",
-        requireRuntimeLivenessPort: true,
-        workspaceCheckpointBridge: {
-          readCurrentLease: () => ({
-            attemptId: "attempt_1",
-            leaseGeneration: "9",
-            userId: "member_123",
-            workspaceVersion: "5",
-          }),
-        },
-      })
-    ).toThrow(/requires runtime liveness/u);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "runner",
-        details: expect.objectContaining({
-          internalWorkerProxyTokenPresent: false,
-          runtimeLivenessPortPresent: false,
-          runtimeLivenessRequired: true,
-          workspaceCheckpointBridgePresent: true,
-        }),
-        message: "Hosted runner resolved runtime liveness configuration.",
-        userId: "member_123",
-      }),
-    );
-  });
-
-  it("builds required runtime liveness with metadata-only timing logs", () => {
+  it("does not attach stale runtime liveness controls to the Cloudflare platform", () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
-      fetchImpl: vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch,
       internalWorkerProxyToken: "runner-proxy-token",
-      requireRuntimeLivenessPort: true,
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -176,25 +128,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    expect(platform.runtimeLivenessRequired).toBe(true);
-    expect(platform.runtimeLivenessIntervalMs).toBe(CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS);
-    expect(platform.runtimeLivenessPort).toBeDefined();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "runner",
-        details: expect.objectContaining({
-          heartbeatIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
-          heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
-          heartbeatTouchTimeoutMs: RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-          internalWorkerProxyTokenPresent: true,
-          runtimeLivenessPortPresent: true,
-          runtimeLivenessRequired: true,
-          workspaceCheckpointBridgePresent: true,
-        }),
-        message: "Hosted runner resolved runtime liveness configuration.",
-        userId: "member_123",
-      }),
-    );
+    expect(platform.runtimeLivenessIntervalMs).toBeUndefined();
+    expect(platform.runtimeLivenessPort).toBeUndefined();
+    expect(platform.runtimeLivenessRequired).toBeUndefined();
   });
 
   it("logs upstream request failures with safe request metadata", async () => {
@@ -1651,198 +1587,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("advances heartbeat lease payloads after a successful workspace checkpoint", async () => {
-    let currentLease = {
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      userId: "member_123",
-      workspaceVersion: "4",
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
-        return new Response(JSON.stringify({
-          checkpointed: true,
-          workspace: {
-            checkpointedAt: "2026-04-26T00:00:04.000Z",
-            createdAt: "2026-04-26T00:00:00.000Z",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            redactedStatus: {},
-            snapshotRef: null,
-            updatedAt: "2026-04-26T00:00:04.000Z",
-            userId: "member_123",
-            version: "5",
-          },
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify({
-        inputAvailable: true,
-        nextAlarmAt: "2026-04-27T00:00:45.000Z",
-        ok: true,
-        pendingNudge: true,
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => currentLease,
-        recordCheckpoint: ({ workspaceVersion }) => {
-          currentLease = {
-            ...currentLease,
-            workspaceVersion,
-          };
-        },
-      },
-    });
-
-    await platform.workspacePort!.checkpoint({
-      attemptId: "attempt_1",
-      expectedWorkspaceVersion: "4",
-      leaseGeneration: "9",
-      nextWakeAt: null,
-      nextWakeReason: null,
-      reason: "import",
-      redactedStatus: {},
-      snapshotRef: null,
-    });
-    await expect(platform.runtimeLivenessPort?.touch({
-      requestId: "hosted-workspace-invocation:attempt_1",
-    })).resolves.toEqual({
-      instruction: {
-        kind: "yield",
-        nextWakeAt: "2026-04-27T00:00:45.000Z",
-        status: "scheduled",
-      },
-      inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
-      ok: true,
-      pendingNudge: true,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const heartbeatRequest = requireFetchRequest(fetchMock.mock.calls[1], "heartbeat");
-    expect(heartbeatRequest.url).toBe(
-      "http://runner-control.worker/internal/active-invocation/heartbeat",
-    );
-    expect(heartbeatRequest.method).toBe("POST");
-    expect(heartbeatRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    await expect(heartbeatRequest.json()).resolves.toMatchObject({
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      requestId: "hosted-workspace-invocation:attempt_1",
-    });
-  });
-
-  it("preserves liveness heartbeat JSON bodies through the local worker bridge", async () => {
-    let currentLease = {
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      userId: "member_123",
-      workspaceVersion: "4",
-    };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      inputAvailable: false,
-      nextAlarmAt: null,
-      ok: true,
-      pendingNudge: false,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => currentLease,
-        recordCheckpoint: ({ workspaceVersion }) => {
-          currentLease = {
-            ...currentLease,
-            workspaceVersion,
-          };
-        },
-      },
-    });
-
-    await expect(platform.runtimeLivenessPort?.touch({
-      requestId: "hosted-workspace-invocation:attempt_1",
-    })).resolves.toEqual({
-      instruction: {
-        kind: "continue",
-      },
-      inputAvailable: false,
-      nextAlarmAt: null,
-      ok: true,
-      pendingNudge: false,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const heartbeatRequest = requireFetchRequest(fetchMock.mock.calls[0], "heartbeat");
-    expect(heartbeatRequest.url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/runner-control.worker/internal/active-invocation/heartbeat",
-    );
-    expect(heartbeatRequest.method).toBe("POST");
-    expect(heartbeatRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    await expect(heartbeatRequest.json()).resolves.toEqual({
-      attemptId: "attempt_1",
-      leaseGeneration: "9",
-      requestId: "hosted-workspace-invocation:attempt_1",
-    });
-  });
-
-  it("maps internal heartbeat authority rejection to a liveness rejection", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      error: "Unauthorized",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 401,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "attempt_1",
-          leaseGeneration: "9",
-          userId: "member_123",
-          workspaceVersion: "4",
-        }),
-      },
-    });
-
-    await expect(platform.runtimeLivenessPort?.touch({
-      requestId: "hosted-workspace-invocation:attempt_1",
-    })).resolves.toEqual({
-      ok: false,
-      reason: "unauthorized",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {

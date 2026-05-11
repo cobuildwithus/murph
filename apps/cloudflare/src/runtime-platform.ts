@@ -174,7 +174,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
   fetchImpl?: typeof fetch;
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  requireRuntimeLivenessPort?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;

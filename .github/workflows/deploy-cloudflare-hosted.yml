@@ -605,7 +605,10 @@ jobs:
       - name: Verify checked-out deploy commit
         run: |
           set -euo pipefail
-          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
+          checked_out_sha="$(git rev-parse HEAD)"
+          echo "Deploy commit SHA: ${checked_out_sha}"
+          echo "Expected GitHub SHA: ${GITHUB_SHA}"
+          if [[ "${checked_out_sha}" != "${GITHUB_SHA}" ]]; then
             echo "Checked-out commit does not match the validated deploy commit." >&2
             exit 1
           fi

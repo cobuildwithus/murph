@@ -98,7 +98,9 @@ export function projectRunnerStateRecord(input: {
 
   return {
     writeFence,
+    // Legacy active projection around the write fence. Delete after 2026-05-25.
     activeRun: writeFence,
+    // Legacy active projection around the write fence. Delete after 2026-05-25.
     active: writeFence
       ? {
           attemptId: writeFence.attemptId,
@@ -116,6 +118,7 @@ export function projectRunnerStateRecord(input: {
         input.meta.deferred_checkpoint_mailbox_status_json,
       ),
     idleCheckpoint,
+    // Legacy inFlight projection around the write fence. Delete after 2026-05-25.
     inFlight: writeFence !== null,
     lastError,
     lastErrorAt: input.meta.last_error_at,
@@ -123,8 +126,11 @@ export function projectRunnerStateRecord(input: {
     lastInvocationAt: input.meta.last_invocation_at,
     leaseGeneration: writeFenceGeneration,
     nextWakeAt: normalizeIsoDateOrNull(input.meta.next_wake_at),
+    // Legacy pendingNudge projection around wake_pending. Delete after 2026-05-25.
     pendingNudge: input.meta.wake_pending === 1,
+    // Legacy pendingNudge projection around wake_pending. Delete after 2026-05-25.
     pendingNudgeGeneration: input.meta.wake_pending === 1 ? writeFenceGeneration : 0,
+    // Legacy pendingWork projection around wake_pending. Delete after 2026-05-25.
     pendingWork: input.meta.wake_pending === 1,
     retry: {
       at: normalizeIsoDateOrNull(input.meta.retry_at),
