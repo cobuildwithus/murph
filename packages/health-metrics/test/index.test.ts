@@ -69,9 +69,15 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("LDL_C")?.key, "ldl-c");
   assert.equal(resolveMetricDefinition("serum_albumin")?.key, "albumin");
   assert.equal(resolveMetricDefinition("eGFR")?.key, "egfr");
+  assert.equal(resolveMetricDefinition("HbA1c")?.key, "hba1c");
+  assert.equal(resolveMetricDefinition("Hemoglobin A1c")?.key, "hba1c");
   assert.equal(resolveMetricDefinition("alk-phos")?.key, "alkaline-phosphatase");
+  assert.equal(resolveMetricDefinition("Alkaline phosphatase")?.key, "alkaline-phosphatase");
   assert.equal(resolveMetricDefinition("WBC")?.key, "white-blood-cell-count");
+  assert.equal(resolveMetricDefinition("White blood cell count (WBC)")?.key, "white-blood-cell-count");
+  assert.equal(resolveMetricDefinition("Lymphocyte pct")?.key, "lymphocyte-percentage");
   assert.equal(resolveMetricDefinition("RDW")?.key, "red-cell-distribution-width");
+  assert.equal(resolveMetricDefinition("Red cell distribution width (RDW)")?.key, "red-cell-distribution-width");
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
