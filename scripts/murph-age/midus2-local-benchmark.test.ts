@@ -29,6 +29,18 @@ describe("MIDUS 2 local benchmark runner", () => {
 
       expect(output.schemaVersion).toBe(MIDUS2_LOCAL_BENCHMARK_SCHEMA_VERSION);
       expect(output.status).toBe("research-local-aggregate-only");
+      expect(output.candidateBatch).toEqual({
+        batchId: "midus2-first-no-crp-candidate-batch",
+        candidateCount: 5,
+        exposureLabel: "diagnostic-only",
+        hypothesisSources: [
+          "literature or mechanistic rationale",
+          "robustness stress test",
+          "train/calibration diagnostic",
+        ],
+        promotionAuthorized: false,
+        testSelectionAuthorized: false,
+      });
       expect(output.dataShape.eligibleRows).toBe(180);
       expect(output.dataShape.events).toBeGreaterThan(0);
       expect(output.dataShape.splitCounts.train.n).toBeGreaterThan(0);
@@ -51,10 +63,47 @@ describe("MIDUS 2 local benchmark runner", () => {
       expect(serialized).not.toContain("coefficients\":");
       expect(serialized).not.toContain("predictions\":");
 
+      const reference = output.models.age_sex_reference;
+      expect(reference?.candidateRole).toBe("reference");
+      expect(reference?.featureKeys).toEqual(["age", "male"]);
+      expect(reference?.hypothesis).toContain("reference");
+      expect(reference?.hypothesisSource).toBe("literature or mechanistic rationale");
+
+      const glycemiaBody = output.models.glycemia_body_no_crp;
+      expect(glycemiaBody?.candidateRole).toBe("proposal");
+      expect(glycemiaBody?.featureKeys).toEqual(["age", "male", "bmi", "hba1c"]);
+      expect(glycemiaBody?.coefficientsStored).toBe(false);
+      expect(glycemiaBody?.predictionsStored).toBe(false);
+
+      expect(output.models.lab5_lipid_body_no_crp?.featureKeys).toEqual([
+        "age",
+        "male",
+        "bmi",
+        "hba1c",
+        "log-triglycerides",
+        "hdl-c",
+      ]);
+      expect(output.models.extended_lipids_body_no_crp?.featureKeys).toEqual([
+        "age",
+        "male",
+        "bmi",
+        "total-cholesterol",
+        "log-triglycerides",
+        "hdl-c",
+        "ldl-c",
+      ]);
+
       const clinical = output.models.clinical_core_labs_no_albumin_no_crp;
+      expect(Object.keys(output.models)).toHaveLength(output.candidateBatch.candidateCount);
+      expect(clinical?.candidateRole).toBe("proposal");
+      expect(clinical?.coefficientsStored).toBe(false);
+      expect(clinical?.predictionsStored).toBe(false);
       expect(clinical?.featureKeys).not.toContain("albumin");
       expect(clinical?.featureKeys).not.toContain("log-crp");
       expect(JSON.stringify(output)).not.toContain("log-crp");
+      expect(JSON.stringify(output)).not.toContain("B4BCRP");
+      expect(JSON.stringify(output)).not.toContain("hscrp");
+      expect(JSON.stringify(output)).not.toContain("c_reactive");
       expect(Number.isFinite(clinical?.splitMetrics.test.logLoss)).toBe(true);
       expect(Number.isFinite(clinical?.splitMetrics.test.brier)).toBe(true);
 
@@ -87,6 +136,19 @@ describe("MIDUS 2 local benchmark runner", () => {
       });
 
       const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe("research-local-aggregate-only");
+      expect(parsed.candidateBatch).toEqual({
+        batchId: "midus2-first-no-crp-candidate-batch",
+        candidateCount: 5,
+        exposureLabel: "diagnostic-only",
+        hypothesisSources: [
+          "literature or mechanistic rationale",
+          "robustness stress test",
+          "train/calibration diagnostic",
+        ],
+        promotionAuthorized: false,
+        testSelectionAuthorized: false,
+      });
       expect(parsed.artifact).toBe("midus2-local-benchmark.latest.json");
       expect(parsed.wrote).toBeUndefined();
       expect(stdout).not.toContain(outputDir);
@@ -104,6 +166,12 @@ describe("MIDUS 2 local benchmark runner", () => {
     ]);
     expect(findForbiddenAggregateEgress({ rowValuesStored: true })).toEqual([
       "boundary flag rowValuesStored must be false",
+    ]);
+    expect(findForbiddenAggregateEgress({ candidateBatch: { promotionAuthorized: true } })).toEqual([
+      "boundary flag candidateBatch.promotionAuthorized must be false",
+    ]);
+    expect(findForbiddenAggregateEgress({ candidateBatch: { testSelectionAuthorized: true } })).toEqual([
+      "boundary flag candidateBatch.testSelectionAuthorized must be false",
     ]);
     expect(findForbiddenAggregateEgress({ nested: { coefficients: [1, 2, 3] } })).toEqual([
       "forbidden key nested.coefficients",
