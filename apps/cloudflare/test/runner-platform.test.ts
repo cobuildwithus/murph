@@ -21,7 +21,9 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedExecutionRuntimePlatform,
+  createCloudflareHostedRuntimeFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
+  isHostedRuntimeInternalAuthorityRejectedError,
 } from "../src/runtime-platform.ts";
 import {
   RUNNER_BROWSER_VAULT_REFRESH_SOURCE_STATE_HASH_HEADER,
@@ -339,6 +341,56 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         userId: null,
       }),
     );
+  });
+
+  it("does not classify external provider 401 responses as stale invocation authority", async () => {
+    const fetchMock = vi.fn(async () => new Response("bad provider key", {
+      status: 401,
+    }));
+    const hostedFetch = createCloudflareHostedRuntimeFetch(
+      "member_123",
+      "runner-proxy-token",
+      null,
+      fetchMock as typeof fetch,
+    );
+
+    const response = await hostedFetch("https://api.openai.example.test/v1/responses");
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies internal authority 401 responses as stale invocation authority", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "Unauthorized",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 401,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    let rejectedError: unknown;
+    try {
+      await platform.effectsPort.readRawEmailMessage("raw_123");
+    } catch (error) {
+      rejectedError = error;
+    }
+
+    expect(isHostedRuntimeInternalAuthorityRejectedError(rejectedError)).toBe(true);
+    expect(rejectedError).toMatchObject({
+      code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+      name: "HostedRuntimeInternalAuthorityRejectedError",
+      reason: "internal_authority_rejected",
+      status: 401,
+      statusCode: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
@@ -900,6 +952,39 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(retriedRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
+  });
+
+  it("does not retry replay-safe mailbox reads after internal authority rejection", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "Unauthorized",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 401,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_stale_authority",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+      reason: "internal_authority_rejected",
+      status: 401,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries replay-safe hosted mailbox fetch failures once on the signed direct web-control route", async () => {
@@ -1769,6 +1854,38 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("maps internal heartbeat authority rejection to a liveness rejection", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "Unauthorized",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 401,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    await expect(platform.runtimeLivenessPort?.touch({
+      requestId: "hosted-workspace-invocation:attempt_1",
+    })).resolves.toEqual({
+      ok: false,
+      reason: "unauthorized",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       checkpointed: true,
@@ -2178,6 +2295,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       status: 502,
       target: "telegram_chat_123",
     });
+  });
+
+  it("classifies internal provider-effect 403 responses as stale invocation authority", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "Forbidden",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 403,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    await expect(platform.effectsPort.sendLinqChatAction!({
+      action: "typing",
+      target: "linq_chat_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+      reason: "internal_authority_rejected",
+      status: 403,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves HTTP status on hosted raw email read failures", async () => {

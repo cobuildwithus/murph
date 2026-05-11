@@ -2023,7 +2023,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("preserves a due idle-shutdown checkpoint while another invocation is active", async () => {
+  it("routes a due idle-shutdown checkpoint behind active invocation recovery", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2068,11 +2068,15 @@ describe("HostedUserRunner runtime crypto context", () => {
 
     expect(invoke).toHaveBeenCalledOnce();
     const deferredRows = sql.exec<{
+      alarm_due_at: string | null;
+      alarm_kind: string | null;
       idle_shutdown_checkpoint_due_at: string | null;
       idle_shutdown_checkpoint_workspace_version: string | null;
       next_wake_at: string | null;
     }>(
-      `SELECT idle_shutdown_checkpoint_due_at,
+      `SELECT alarm_due_at,
+              alarm_kind,
+              idle_shutdown_checkpoint_due_at,
               idle_shutdown_checkpoint_workspace_version,
               next_wake_at
        FROM runner_meta WHERE user_id = ?`,
@@ -2080,13 +2084,13 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toArray();
     expect(deferredRows).toHaveLength(1);
     const deferredRow = deferredRows[0];
-    expect(deferredRow?.idle_shutdown_checkpoint_due_at).not.toBeNull();
-    expect(deferredRow?.idle_shutdown_checkpoint_workspace_version).toBe("4");
+    expect(deferredRow?.alarm_kind).toBe("work");
+    expect(deferredRow?.alarm_due_at).not.toBeNull();
+    expect(deferredRow?.idle_shutdown_checkpoint_due_at).toBeNull();
+    expect(deferredRow?.idle_shutdown_checkpoint_workspace_version).toBeNull();
     expect(deferredRow?.next_wake_at).not.toBeNull();
-    expect(
-      Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
-    ).toBeLessThan(Date.parse(deferredRow?.next_wake_at ?? ""));
-    expect(alarms.at(-1)).toBe(deferredRow?.idle_shutdown_checkpoint_due_at);
+    expect(deferredRow?.alarm_due_at).toBe(deferredRow?.next_wake_at);
+    expect(alarms.at(-1)).toBe(deferredRow?.alarm_due_at);
 
     vi.setSystemTime(new Date("2026-04-27T00:00:02.000Z"));
     await runner.alarm();
@@ -2106,11 +2110,10 @@ describe("HostedUserRunner runtime crypto context", () => {
       "member_123",
     ).toArray();
     expect(activeDeferredRows).toHaveLength(1);
-    expect(activeDeferredRows[0]?.idle_shutdown_checkpoint_workspace_version).toBe("4");
+    expect(activeDeferredRows[0]?.idle_shutdown_checkpoint_due_at).toBeNull();
+    expect(activeDeferredRows[0]?.idle_shutdown_checkpoint_workspace_version).toBeNull();
     expect(activeDeferredRows[0]?.in_flight).toBe(1);
-    expect(Date.parse(activeDeferredRows[0]?.idle_shutdown_checkpoint_due_at ?? "")).toBeLessThan(
-      Date.parse(activeDeferredRows[0]?.next_wake_at ?? ""),
-    );
+    expect(activeDeferredRows[0]?.next_wake_at).not.toBeNull();
 
     activeInvocation.resolve({ nextWakeAt: null, status: "idle" });
     await expect(activeRun).resolves.toMatchObject({ status: "idle" });
@@ -2130,10 +2133,8 @@ describe("HostedUserRunner runtime crypto context", () => {
     ).toArray();
     expect(completedRows).toHaveLength(1);
     expect(completedRows[0]?.in_flight).toBe(0);
+    expect(completedRows[0]?.idle_shutdown_checkpoint_due_at).not.toBeNull();
     expect(completedRows[0]?.idle_shutdown_checkpoint_workspace_version).toBe("4");
-    expect(Date.parse(completedRows[0]?.idle_shutdown_checkpoint_due_at ?? "")).toBeGreaterThan(
-      Date.parse(deferredRow?.idle_shutdown_checkpoint_due_at ?? ""),
-    );
     expect(completedRows[0]?.next_wake_at).toBeNull();
     expect(invoke).toHaveBeenCalledOnce();
   });
@@ -2177,7 +2178,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     );
   });
 
-  it("replays from a durable alarm after cold restore clears an expired active invocation", async () => {
+  it("recovers an expired active invocation instead of replaying a due idle checkpoint", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspace = createWorkspaceState({
@@ -2224,8 +2225,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(runner.alarm()).resolves.toBeUndefined();
 
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke).not.toHaveBeenCalled();
     expect(alarms).toEqual(["deleted"]);
     expect(
       sql.exec(
@@ -2326,6 +2326,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_orphan_observed_at = ?,
@@ -2368,6 +2369,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_worker_version_id = ?,
@@ -2420,6 +2422,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_worker_version_id = ?,
@@ -2550,6 +2553,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_worker_version_id = ?,
@@ -2659,6 +2663,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_orphan_observed_at = ?,
@@ -2874,6 +2879,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_invocation_worker_version_id = ?,
@@ -2935,6 +2941,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       `UPDATE runner_meta
       SET active_invocation_expires_at = ?,
         active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_workspace_version = ?,
@@ -3345,6 +3352,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_workspace_version = ?,
@@ -3392,6 +3400,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       `UPDATE runner_meta
       SET active_invocation_container_stopped_at = ?,
         active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
         active_workspace_version = ?,
@@ -3717,6 +3726,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     sql.exec(
       `UPDATE runner_meta
       SET active_invocation_id = ?,
+        active_invocation_consumed_pending_work = 1,
         active_invocation_last_heartbeat_at = ?,
         active_invocation_reason = ?,
         active_invocation_started_at = ?,
@@ -6409,6 +6419,79 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
+  it("starts foreground follow-up when idle-shutdown scheduled result races with pending work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspace = createWorkspaceState({
+      snapshotRef: createLayeredSnapshotRef("idle-scheduled-pending-work"),
+      version: "4",
+    });
+    let markExternalPendingNudge = () => {};
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+      if (invoke.mock.calls.length === 1) {
+        markExternalPendingNudge();
+        return {
+          nextWakeAt: "2026-04-27T00:00:45.000Z",
+          status: "scheduled",
+        };
+      }
+      if (invoke.mock.calls.length === 2) {
+        return {
+          nextWakeAt: null,
+          status: "idle",
+        };
+      }
+      throw new Error("Unexpected extra workspace invocation.");
+    });
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(workspace, {
+      destroyInstance,
+      invoke,
+    });
+    markExternalPendingNudge = () => {
+      sql.exec(
+        `UPDATE runner_meta
+         SET pending_nudge = 1,
+             pending_work = 1,
+             next_wake_at = ?
+         WHERE user_id = ?`,
+        FIXED_NOW,
+        "member_123",
+      );
+    };
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET idle_shutdown_checkpoint_due_at = ?,
+           idle_shutdown_checkpoint_workspace_version = ?
+       WHERE user_id = ?`,
+      FIXED_NOW,
+      "4",
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("idle_shutdown_checkpoint");
+    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
+    expect(destroyInstance).not.toHaveBeenCalled();
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(
+      sql.exec(
+        `SELECT in_flight,
+                pending_nudge,
+                pending_work
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      in_flight: 0,
+      pending_nudge: 0,
+      pending_work: 0,
+    }]);
+  });
+
   it("keeps the warm container for an inconsistent checkpoint marker result", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -7110,6 +7193,162 @@ describe("HostedUserRunner runtime crypto context", () => {
       status: "idle",
     });
     await flushDetachedRunnerDrive();
+  });
+
+  it("defers a due browser-vault refresh alarm while foreground invocation lock is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+      async () => invocation.promise,
+    );
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { alarms, readPendingBrowserVaultRefreshStorage, runner, sql } =
+      createRunnerCryptoContextHarness(null, {
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+
+    const activeRun = runner.runUntilIdleOrBudget({ reason: "manual" });
+    void activeRun.catch(() => undefined);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+    const pendingIntent = readPendingBrowserVaultRefreshStorage();
+    expect(pendingIntent).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
+    setBrowserVaultRefreshIntentNextAttemptAtForTest(pendingIntent, FIXED_NOW);
+
+    const runnerWakeAt = new Date(Date.parse(FIXED_NOW) + 60_000).toISOString();
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_invocation_id = NULL,
+           active_invocation_expires_at = NULL,
+           active_invocation_container_stopped_at = NULL,
+           active_invocation_consumed_pending_work = 0,
+           active_invocation_last_heartbeat_at = NULL,
+           active_invocation_orphan_observed_at = NULL,
+           active_invocation_reason = NULL,
+           active_invocation_started_at = NULL,
+           active_invocation_worker_version_id = NULL,
+           active_workspace_version = NULL,
+           in_flight = 0,
+           pending_nudge = 0,
+           pending_work = 0,
+           alarm_kind = 'work',
+           alarm_due_at = ?,
+           alarm_workspace_version = NULL,
+           alarm_checkpoint_next_wake_at = NULL,
+           next_wake_at = ?
+       WHERE user_id = ?`,
+      runnerWakeAt,
+      runnerWakeAt,
+      "member_123",
+    );
+
+    alarms.splice(0);
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
+    expect(alarms).toEqual([runnerWakeAt]);
+  });
+
+  it("defers a due browser-vault refresh alarm while a persisted invocation is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const refreshBrowserVaultReplica = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["refreshBrowserVaultReplica"]>
+    >(async () => ({
+      status: "already_fresh",
+    }));
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+      void promise.catch(() => undefined);
+    });
+    const { readPendingBrowserVaultRefreshStorage, runner, sql } =
+      createRunnerCryptoContextHarness(null, {
+        invoke,
+        refreshBrowserVaultReplica,
+        waitUntil,
+      });
+    await runner.bindUser("member_123");
+    sql.exec(
+      "UPDATE runner_meta SET pending_nudge = 1, pending_work = 1 WHERE user_id = ?",
+      "member_123",
+    );
+
+    await runner.scheduleBrowserVaultRefreshForUser({ userId: "member_123" });
+    await Promise.all(waitUntilPromises.splice(0));
+    const pendingIntent = readPendingBrowserVaultRefreshStorage();
+    expect(pendingIntent).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
+    setBrowserVaultRefreshIntentNextAttemptAtForTest(pendingIntent, FIXED_NOW);
+
+    const runnerWakeAt = new Date(Date.parse(FIXED_NOW) + 60_000).toISOString();
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_invocation_id = ?,
+           active_invocation_last_heartbeat_at = ?,
+           active_invocation_reason = ?,
+           active_invocation_started_at = ?,
+           active_workspace_version = ?,
+           alarm_kind = 'work',
+           alarm_due_at = ?,
+           alarm_workspace_version = NULL,
+           alarm_checkpoint_next_wake_at = NULL,
+           in_flight = 1,
+           lease_generation = 1,
+           next_wake_at = ?,
+           pending_nudge = 0,
+           pending_work = 0
+       WHERE user_id = ?`,
+      "workspace-invocation-browser-vault-refresh",
+      FIXED_NOW,
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "4",
+      runnerWakeAt,
+      runnerWakeAt,
+      "member_123",
+    );
+
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(refreshBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(readPendingBrowserVaultRefreshStorage()).toMatchObject({
+      lastErrorCode: "foreground_work",
+      userId: "member_123",
+    });
   });
 
   it("keeps background browser-vault refresh conflicts best-effort", async () => {

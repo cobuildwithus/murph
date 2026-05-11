@@ -115,6 +115,58 @@ type HostedWebControlTransport =
 const HOSTED_MAILBOX_READ_RETRY_ATTEMPTS = 2;
 const HOSTED_MAILBOX_READ_RETRY_DELAY_MS = 100;
 const CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS = 1_000;
+const HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE =
+  "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY";
+const HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON =
+  "internal_authority_rejected";
+
+export class HostedRuntimeInternalAuthorityRejectedError extends Error {
+  readonly code = HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE;
+  readonly reason = HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON;
+  readonly responseStatus: number;
+  readonly status: number;
+  readonly statusCode: number;
+
+  constructor(input: {
+    description: string;
+    status: number;
+  }) {
+    super(
+      `Hosted invocation is stale: ${HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON}. `
+      + `${input.description} returned HTTP ${input.status}.`,
+    );
+    this.name = "HostedRuntimeInternalAuthorityRejectedError";
+    this.responseStatus = input.status;
+    this.status = input.status;
+    this.statusCode = input.status;
+  }
+}
+
+export function isHostedRuntimeInternalAuthorityRejectedError(
+  error: unknown,
+): error is HostedRuntimeInternalAuthorityRejectedError {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+
+    if (current instanceof HostedRuntimeInternalAuthorityRejectedError) {
+      return true;
+    }
+
+    const code = (current as { code?: unknown }).code;
+    if (code === HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE) {
+      return true;
+    }
+
+    current = "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : null;
+  }
+
+  return false;
+}
 
 export interface HostedWorkspaceCheckpointBridgeAuthority {
   readCurrentLease():
@@ -639,28 +691,39 @@ function createCloudflareRuntimeLivenessPort(input: {
       });
       writeRunnerActiveInvocationLeaseHeaders(headers, lease);
 
-      const response = await fetchHostedResponse({
-        description: "Hosted runtime active invocation heartbeat",
-        fetchImpl: input.fetchImpl,
-        init: {
-          body: JSON.stringify({
-            attemptId: lease.attemptId,
-            leaseGeneration: lease.leaseGeneration,
-            requestId: touchInput.requestId,
-          }),
-          headers,
-          method: "POST",
-        },
-        logFailures: false,
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}/`,
-        ),
-        ...(touchInput.signal ? { signal: touchInput.signal } : {}),
-      });
+      let response: Response;
+      try {
+        response = await fetchHostedResponse({
+          description: "Hosted runtime active invocation heartbeat",
+          fetchImpl: input.fetchImpl,
+          init: {
+            body: JSON.stringify({
+              attemptId: lease.attemptId,
+              leaseGeneration: lease.leaseGeneration,
+              requestId: touchInput.requestId,
+            }),
+            headers,
+            method: "POST",
+          },
+          logFailures: false,
+          timeoutMs: input.timeoutMs,
+          url: new URL(
+            HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}/`,
+          ),
+          ...(touchInput.signal ? { signal: touchInput.signal } : {}),
+        });
+      } catch (error) {
+        if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+          return {
+            ok: false,
+            reason: "unauthorized",
+          };
+        }
+        throw error;
+      }
 
-      if (response.status === 401) {
+      if (isInternalAuthorityRejectedStatus(response.status)) {
         return {
           ok: false,
           reason: "unauthorized",
@@ -769,9 +832,31 @@ export function createCloudflareHostedRuntimeFetch(
           userId: boundUserId,
         });
       }
+      if (isInternalAuthorityRejectedStatus(response.status)) {
+        const error = new HostedRuntimeInternalAuthorityRejectedError({
+          description: `Hosted runtime internal request to ${url.hostname}${url.pathname}`,
+          status: response.status,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: {
+            ...details,
+            responseStatus: response.status,
+          },
+          error,
+          level: "warn",
+          message: "Hosted runtime internal authority rejected invocation.",
+          phase: "outbox",
+          userId: boundUserId,
+        });
+        throw error;
+      }
       return response;
     } catch (error) {
-      if (shouldLogInternalRequest) {
+      if (
+        shouldLogInternalRequest
+        && !isHostedRuntimeInternalAuthorityRejectedError(error)
+      ) {
         emitHostedExecutionStructuredLog({
           component: "assistant-delivery",
           details,
@@ -785,6 +870,10 @@ export function createCloudflareHostedRuntimeFetch(
       throw error;
     }
   }) as typeof fetch;
+}
+
+function isInternalAuthorityRejectedStatus(status: number): boolean {
+  return status === 401 || status === 403;
 }
 
 function createHostedLocalInternalProxyUrl(
@@ -1470,6 +1559,10 @@ async function fetchHostedResponse(input: {
       signal: combineAbortSignals(input.signal ?? input.init?.signal ?? null, timeoutSignal),
     });
   } catch (error) {
+    if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+      throw error;
+    }
+
     if (input.logFailures !== false) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
@@ -1532,6 +1625,10 @@ function formatHostedResponseFetchCause(error: unknown): string {
 }
 
 function isRetryableHostedWebControlReadError(error: unknown): boolean {
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+    return false;
+  }
+
   if (isHostedWebControlAbortError(error)) {
     return false;
   }

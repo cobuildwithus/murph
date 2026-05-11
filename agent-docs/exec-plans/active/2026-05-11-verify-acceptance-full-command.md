@@ -29,6 +29,10 @@ Updated: 2026-05-11
   - CLI package coverage timed out in `packages/cli/test/device-cli.test.ts`;
   - the final package coverage summary reported an unreported background package coverage failure.
 - Earlier app-verifier work reduced standalone hosted-web `next build` to 46s and reused prepared setup, but this does not prove the full-command objective.
+- Later focused Cloudflare timing found `apps/cloudflare/test/runner-container.test.ts` spent a real 60s waiting for a timeout in the stale active-marker cleanup test.
+- The focused stale active-marker test now settles the mocked runner request after the cleanup assertion and passes in about 1.6s wall-clock for the targeted command, without adding parallelism or skipping the behavior under test.
+- Standalone Cloudflare node verification dropped from about 77s wall-clock to about 41s wall-clock, but the run is currently blocked by unrelated dirty `apps/cloudflare/test/user-runner-alarm.test.ts` failures.
+- A fresh full `pnpm verify:acceptance` run is currently blocked before app verification by unrelated dirty Murph Age CLI work: `packages/cli` shape verification reports `config.schema.json` is stale.
 
 ## Decisions
 

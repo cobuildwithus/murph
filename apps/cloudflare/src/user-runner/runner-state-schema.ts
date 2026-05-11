@@ -6,7 +6,7 @@
 
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 6;
+const RUNNER_STATE_SCHEMA_VERSION = 7;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -26,6 +26,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_invocation_worker_version_id TEXT,
       active_invocation_expires_at TEXT,
       active_invocation_container_stopped_at TEXT,
+      active_invocation_consumed_pending_work INTEGER NOT NULL DEFAULT 0,
       active_invocation_orphan_observed_at TEXT,
       active_workspace_version TEXT,
       alarm_kind TEXT,
@@ -56,6 +57,12 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_worker_version_id", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_expires_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_container_stopped_at", "TEXT");
+  ensureRunnerStateTableColumn(
+    sql,
+    "runner_meta",
+    "active_invocation_consumed_pending_work",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_orphan_observed_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_workspace_version", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "alarm_kind", "TEXT");
@@ -130,6 +137,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_invocation_worker_version_id",
       "active_invocation_expires_at",
       "active_invocation_container_stopped_at",
+      "active_invocation_consumed_pending_work",
       "active_invocation_orphan_observed_at",
       "active_workspace_version",
       "alarm_kind",
