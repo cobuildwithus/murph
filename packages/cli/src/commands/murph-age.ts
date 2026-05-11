@@ -4,7 +4,15 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
-import { calculateMurphAgePublicReportFromVaultInputBundle } from '@murphai/query'
+import {
+  calculateMurphAgePublicReportFromVaultInputBundle,
+  loadMurphAgeLocalModelCardArtifacts,
+} from '@murphai/query'
+import {
+  isMurphAgeModelCardProductAuthorized,
+  isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  listMurphAgeModelCardPolicies,
+} from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
@@ -41,6 +49,53 @@ const murphAgePublicWarningSchema = z.object({
   code: murphAgeWarningCodeSchema,
   featureKey: z.string().min(1).optional(),
   metricKey: z.string().min(1).optional(),
+})
+
+const murphAgeValidationEvidenceTierSchema = z.enum([
+  'internal-anchor',
+  'murph-native-prospective-validation',
+  'partner-aggregate-validation',
+  'same-family-sanity',
+  'true-external-validation',
+])
+const murphAgeValidationGateStatusSchema = z.enum(['blocked', 'passed'])
+const murphAgeModelCardBlockerSchema = z.enum([
+  'MODEL_CARD_NOT_LOADED',
+  'NOT_SCORE_BEARING',
+  'PRODUCT_NOT_AUTHORIZED',
+  'RISK_TO_AGE_NOT_AUTHORIZED',
+  'WEARABLE_NOT_SCORE_BEARING',
+])
+
+const murphAgeModelCardStatusPolicySchema = z.object({
+  acceptedBundleIds: z.array(z.string().min(1)),
+  blockers: z.array(murphAgeModelCardBlockerSchema),
+  cardId: murphAgeModelCardIdSchema,
+  evidenceClass: murphAgeEvidenceClassSchema,
+  loaded: z.boolean(),
+  productAgeReady: z.boolean(),
+  productRiskReady: z.boolean(),
+  researchUsable: z.boolean(),
+  scoreBearing: z.boolean(),
+  scoreBearingMetricKeys: z.array(z.string().min(1)),
+  scoreBearingSourceKinds: z.array(z.string().min(1)),
+  validationGate: z.object({
+    evidenceTiers: z.array(murphAgeValidationEvidenceTierSchema),
+    productPromotionEvidence: z.boolean(),
+    status: murphAgeValidationGateStatusSchema,
+  }),
+  wearableScoreBearingAuthorized: z.boolean(),
+})
+
+export const murphAgeModelCardStatusResultSchema = z.object({
+  loadedCardIds: z.array(murphAgeModelCardIdSchema),
+  policies: z.array(murphAgeModelCardStatusPolicySchema),
+  productReadyCardIds: z.array(murphAgeModelCardIdSchema),
+  researchReadyCardIds: z.array(murphAgeModelCardIdSchema),
+  schemaVersion: z.literal('murph.age.model-card-status.v1'),
+  warnings: z.array(z.object({
+    code: murphAgeWarningCodeSchema,
+  })),
 })
 
 const murphAgePublicAuthorizationSchema = z.object({
@@ -257,5 +312,94 @@ export function registerMurphAgeCommands(
     },
   })
 
+  age.command('model-cards', {
+    description:
+      'Return metadata-only readiness status for local Murph Age model-card artifacts and current policy blockers.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({}),
+    examples: [
+      {
+        description:
+          'Show which local Murph Age research cards are loaded and why product age display is still blocked.',
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'This command reports policy and artifact presence only. It does not expose model internals, row values, predictions, or product claims.',
+    output: murphAgeModelCardStatusResultSchema,
+    async run({ options }) {
+      await assertInitializedVaultRoot(options.vault)
+
+      const loaded = await loadMurphAgeLocalModelCardArtifacts({
+        vaultRoot: options.vault,
+      })
+      const loadedCardIds = Object.keys(loaded.models)
+        .filter(isKnownMurphAgeModelCardId)
+        .sort()
+      const loadedCardIdSet = new Set(loadedCardIds)
+      const policies = listMurphAgeModelCardPolicies()
+        .map((policy) => summarizeMurphAgeModelCardPolicy(policy, loadedCardIdSet))
+        .sort((left, right) => left.cardId.localeCompare(right.cardId))
+
+      return {
+        loadedCardIds,
+        policies,
+        productReadyCardIds: policies
+          .filter((policy) => policy.productAgeReady)
+          .map((policy) => policy.cardId),
+        researchReadyCardIds: policies
+          .filter((policy) => policy.researchUsable)
+          .map((policy) => policy.cardId),
+        schemaVersion: 'murph.age.model-card-status.v1' as const,
+        warnings: loaded.warnings.map((warning) => ({ code: warning.code })),
+      }
+    },
+  })
+
   cli.command(age)
+}
+
+function isKnownMurphAgeModelCardId(
+  value: string,
+): value is z.infer<typeof murphAgeModelCardIdSchema> {
+  return murphAgeModelCardIdSchema.safeParse(value).success
+}
+
+function summarizeMurphAgeModelCardPolicy(
+  policy: ReturnType<typeof listMurphAgeModelCardPolicies>[number],
+  loadedCardIds: ReadonlySet<z.infer<typeof murphAgeModelCardIdSchema>>,
+): z.infer<typeof murphAgeModelCardStatusPolicySchema> {
+  const loaded = loadedCardIds.has(policy.cardId)
+  const productRiskAuthorized = isMurphAgeModelCardProductAuthorized(policy)
+  const productAgeDisplayAuthorized = isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy)
+  const productRiskReady = policy.scoreBearing && loaded && productRiskAuthorized
+  const productAgeReady = policy.scoreBearing && loaded && productAgeDisplayAuthorized
+  const blockers: Array<z.infer<typeof murphAgeModelCardBlockerSchema>> = []
+  if (policy.scoreBearing && !loaded) blockers.push('MODEL_CARD_NOT_LOADED')
+  if (!policy.scoreBearing) blockers.push('NOT_SCORE_BEARING')
+  if (!productRiskAuthorized) blockers.push('PRODUCT_NOT_AUTHORIZED')
+  if (!productAgeDisplayAuthorized) blockers.push('RISK_TO_AGE_NOT_AUTHORIZED')
+  if (!policy.wearableScoreBearingAuthorized) blockers.push('WEARABLE_NOT_SCORE_BEARING')
+
+  return {
+    acceptedBundleIds: [...policy.acceptedBundleIds].sort(),
+    blockers,
+    cardId: policy.cardId,
+    evidenceClass: policy.evidenceClass,
+    loaded,
+    productAgeReady,
+    productRiskReady,
+    researchUsable: policy.scoreBearing && loaded,
+    scoreBearing: policy.scoreBearing,
+    scoreBearingMetricKeys: [...policy.scoreBearingMetricKeys].sort(),
+    scoreBearingSourceKinds: [...policy.scoreBearingSourceKinds].sort(),
+    validationGate: {
+      evidenceTiers: [...policy.validationGate.evidenceTiers].sort(),
+      productPromotionEvidence: policy.validationGate.productPromotionEvidence,
+      status: policy.validationGate.status,
+    },
+    wearableScoreBearingAuthorized: policy.wearableScoreBearingAuthorized,
+  }
 }

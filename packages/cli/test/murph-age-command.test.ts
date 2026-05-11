@@ -89,6 +89,118 @@ async function runSliceCliResult<TData>(args: string[]): Promise<{
   }
 }
 
+interface MurphAgeModelCardStatusReport {
+  loadedCardIds: string[]
+  policies: Array<{
+    blockers: string[]
+    cardId: string
+    loaded: boolean
+    productAgeReady: boolean
+    productRiskReady: boolean
+    researchUsable: boolean
+    scoreBearing: boolean
+    validationGate: {
+      evidenceTiers: string[]
+      productPromotionEvidence: boolean
+      status: string
+    }
+    wearableScoreBearingAuthorized: boolean
+  }>
+  productReadyCardIds: string[]
+  researchReadyCardIds: string[]
+  schemaVersion: string
+  warnings: Array<{ code: string }>
+}
+
+test('age model-cards reports local research readiness without model internals', async () => {
+  const vaultRoot = await createProjectionVault()
+  try {
+    await writeLocalModelCardArtifact(vaultRoot, 'lab9.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+
+    const status = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+    ]))
+
+    assert.equal(status.schemaVersion, 'murph.age.model-card-status.v1')
+    assert.deepEqual(status.loadedCardIds, ['lab9_bp_body_10y_acm_research'])
+    assert.deepEqual(status.researchReadyCardIds, ['lab9_bp_body_10y_acm_research'])
+    assert.deepEqual(status.productReadyCardIds, [])
+    assert.deepEqual(status.warnings, [])
+
+    const lab9 = requirePolicyStatus(status, 'lab9_bp_body_10y_acm_research')
+    assert.equal(lab9.loaded, true)
+    assert.equal(lab9.researchUsable, true)
+    assert.equal(lab9.productRiskReady, false)
+    assert.equal(lab9.productAgeReady, false)
+    assert.equal(lab9.scoreBearing, true)
+    assert.equal(lab9.validationGate.status, 'blocked')
+    assert.equal(lab9.validationGate.evidenceTiers.includes('internal-anchor'), true)
+    assert.equal(lab9.validationGate.productPromotionEvidence, false)
+    assert.equal(lab9.blockers.includes('PRODUCT_NOT_AUTHORIZED'), true)
+    assert.equal(lab9.blockers.includes('RISK_TO_AGE_NOT_AUTHORIZED'), true)
+
+    const wearableContext = requirePolicyStatus(status, 'wearable_context_no_risk')
+    assert.equal(wearableContext.loaded, false)
+    assert.equal(wearableContext.researchUsable, false)
+    assert.equal(wearableContext.scoreBearing, false)
+    assert.equal(wearableContext.blockers.includes('NOT_SCORE_BEARING'), true)
+
+    const encodedStatus = JSON.stringify(status)
+    for (const forbidden of [
+      'fixture-lab9-research-model',
+      'modelId',
+      'coefficient',
+      'referenceRiskCurve',
+      'metric-point',
+      vaultRoot,
+    ]) {
+      assert.equal(encodedStatus.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('age model-cards reports missing local artifacts as policy blockers', async () => {
+  const vaultRoot = await createProjectionVault()
+  try {
+    const status = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+    ]))
+
+    assert.deepEqual(status.loadedCardIds, [])
+    assert.deepEqual(status.researchReadyCardIds, [])
+    assert.deepEqual(status.productReadyCardIds, [])
+    assert.deepEqual(status.warnings, [])
+
+    const lab9 = requirePolicyStatus(status, 'lab9_bp_body_10y_acm_research')
+    assert.equal(lab9.loaded, false)
+    assert.equal(lab9.researchUsable, false)
+    assert.equal(lab9.productRiskReady, false)
+    assert.equal(lab9.productAgeReady, false)
+    assert.equal(lab9.blockers.includes('MODEL_CARD_NOT_LOADED'), true)
+
+    const lab5 = requirePolicyStatus(status, 'lab5_bp_bmi_transport_research')
+    assert.equal(lab5.loaded, false)
+    assert.equal(lab5.researchUsable, false)
+    assert.equal(lab5.productRiskReady, false)
+    assert.equal(lab5.productAgeReady, false)
+    assert.equal(lab5.blockers.includes('MODEL_CARD_NOT_LOADED'), true)
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report returns a product-mode public abstention instead of research-only claims', async () => {
   const vaultRoot = await createProjectionVault()
   try {
@@ -919,4 +1031,13 @@ function labFeature(
 
 function hasOwnKey(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function requirePolicyStatus(
+  status: MurphAgeModelCardStatusReport,
+  cardId: string,
+): MurphAgeModelCardStatusReport['policies'][number] {
+  const policy = status.policies.find((candidate) => candidate.cardId === cardId)
+  assert.ok(policy, `expected model-card policy status for ${cardId}`)
+  return policy
 }
