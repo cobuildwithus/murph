@@ -161,7 +161,6 @@ describe("browser-vault background refresh", () => {
       await expect(readHostedBrowserVaultRefreshState({ vaultRoot })).resolves.toMatchObject({
         dirty: true,
         failureCount: 0,
-        inProgressSince: null,
         nextAttemptAt: null,
       });
     } finally {

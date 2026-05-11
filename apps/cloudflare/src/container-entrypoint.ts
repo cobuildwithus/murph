@@ -315,7 +315,7 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
-      if (browserVaultBackgroundProxyToken) {
+      if (browserVaultBackgroundProxyToken && result.status !== "failed") {
         const userId = readHostedExecutionRunnerJobUserId(job);
         void browserVaultBackground.scheduleIfDirty({
           internalWorkerProxyToken: browserVaultBackgroundProxyToken,

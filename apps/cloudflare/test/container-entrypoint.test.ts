@@ -24,6 +24,9 @@ import {
   createRequestAbortController,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
+import {
+  BrowserVaultBackgroundRefreshManager,
+} from "../src/browser-vault-refresh/background-manager.ts";
 import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -835,6 +838,53 @@ describe("startHostedContainerEntrypoint", () => {
         localInternalProxyBaseUrl: "http://127.0.0.1:8787",
       }),
     );
+  });
+
+  it("does not schedule browser-vault background refresh after failed runner results", async () => {
+    const requestBody = {
+      ...buildWorkspaceJobBody(),
+      browserVaultBackgroundProxyToken: "browser-vault-background-token",
+    };
+    const scheduleIfDirty = vi
+      .spyOn(BrowserVaultBackgroundRefreshManager.prototype, "scheduleIfDirty")
+      .mockResolvedValue(undefined);
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue({
+      nextWakeAt: null,
+      redactedStatus: null,
+      status: "failed" as const,
+    });
+    const nodeRunnerModule = {
+      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
+      runHostedWorkspaceInvocation,
+    };
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner: vi.fn(async () => nodeRunnerModule),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(requestBody),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "failed",
+    });
+    expect(scheduleIfDirty).not.toHaveBeenCalled();
   });
 
   it("keeps startup healthy when the background node-runner preload fails", async () => {

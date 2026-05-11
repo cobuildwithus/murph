@@ -119,7 +119,6 @@ type BrowserVaultRefreshState = {
   dirtySince: string | null;
   dirtyReason: "query_source_changed" | "query_source_deleted" | null;
   lastPublishedSourceHash: string | null;
-  inProgressSince: string | null;
   failureCount: number;
   nextAttemptAt: string | null;
 };
