@@ -6,6 +6,8 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
+  createMurphAgeAbstainedAuthorization,
+  createMurphAgeCustomModelAuthorization,
   listMurphAgeInputBundleMetricKeys,
   resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
@@ -447,6 +449,7 @@ function invalidAsOfResult(input: CalculateMurphAgeForVaultInput): MurphAgeResul
   };
   return {
     ageDeltaYears: null,
+    authorization: createMurphAgeCustomModelAuthorization(input.model),
     biologicalAgeYears: null,
     chronologicalAgeYears: input.chronologicalAgeYears,
     featureAttributions: [],
@@ -470,6 +473,7 @@ function invalidCalculatorOutput(input: {
     message: input.message,
   };
   return {
+    authorization: createMurphAgeAbstainedAuthorization(),
     bundleAssessment: {
       availableFeatureKeys: [],
       bundleId: "insufficient",

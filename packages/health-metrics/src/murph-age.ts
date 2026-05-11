@@ -9,7 +9,7 @@ import type {
   MetricSelectionWarning,
 } from "./types.ts";
 
-export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v1" as const;
+export const MURPH_AGE_RESULT_SCHEMA_VERSION = "murph.age.result.v2" as const;
 export const MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION = "murph.age.input-bundle.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
@@ -20,6 +20,13 @@ export type MurphAgeInputBundleId =
   | "lab5-bp-bmi"
   | "lab9-bp-body"
   | "wearable-context";
+export type MurphAgeEvidenceClass =
+  | "abstained"
+  | "context-only"
+  | "custom-model-unreviewed"
+  | "product-authorized"
+  | "research-internal"
+  | "research-transport";
 
 export type MurphAgeWarningCode =
   | "BLOCKED_MODEL_FEATURE"
@@ -110,6 +117,8 @@ export type MurphAgeCalculatorMode = "product" | "research";
 export interface MurphAgeModelCardPolicy {
   acceptedBundleIds: readonly MurphAgeInputBundleId[];
   cardId: MurphAgeModelCardId;
+  evidenceClass: MurphAgeEvidenceClass;
+  evidenceSummary: string;
   productAuthorized: boolean;
   riskToAgeDisplayAuthorized: boolean;
   scoreBearing: boolean;
@@ -205,8 +214,22 @@ export interface MurphAgeModuleAttribution {
   moduleId: string;
 }
 
+export interface MurphAgeResultAuthorization {
+  cardId: MurphAgeModelCardId | null;
+  contextOnlyMetricKeys: string[];
+  evidenceClass: MurphAgeEvidenceClass;
+  evidenceSummary: string;
+  productAuthorized: boolean;
+  riskToAgeDisplayAuthorized: boolean;
+  scoreBearing: boolean;
+  scoreBearingMetricKeys: string[];
+  scoreBearingSourceKinds: string[];
+  wearableScoreBearingAuthorized: boolean;
+}
+
 export interface MurphAgeResult {
   ageDeltaYears: number | null;
+  authorization: MurphAgeResultAuthorization;
   biologicalAgeYears: number | null;
   chronologicalAgeYears: number;
   featureAttributions: MurphAgeFeatureAttribution[];
@@ -221,6 +244,7 @@ export interface MurphAgeResult {
 }
 
 export interface MurphAgeCalculatorOutput {
+  authorization: MurphAgeResultAuthorization;
   bundleAssessment: MurphAgeInputBundleAssessment;
   cardPolicy: MurphAgeModelCardPolicy | null;
   contextAssessments: MurphAgeContextBundleAssessment[];
@@ -361,6 +385,8 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
     acceptedBundleIds: ["lab9-bp-body"],
     cardId: "lab9_bp_body_10y_acm_research",
+    evidenceClass: "research-internal",
+    evidenceSummary: "Lab9/BP/body hard-outcome research card; not product-authorized and not validated for score-bearing wearable inputs.",
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: true,
@@ -387,6 +413,8 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
     acceptedBundleIds: ["lab5-bp-bmi"],
     cardId: "lab5_bp_bmi_transport_research",
+    evidenceClass: "research-transport",
+    evidenceSummary: "Smaller lab/BP/body transport research card for partial clinical bundles; not product-authorized and not validated for score-bearing wearable inputs.",
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: true,
@@ -408,6 +436,8 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
     acceptedBundleIds: ["wearable-context"],
     cardId: "wearable_context_no_risk",
+    evidenceClass: "context-only",
+    evidenceSummary: "Wearable inputs may be shown as context, but they are not score-bearing in current Murph Age cards.",
     productAuthorized: false,
     riskToAgeDisplayAuthorized: false,
     scoreBearing: false,
@@ -438,6 +468,42 @@ export function resolveMurphAgeModelCardPolicy(
   return policy ? cloneMurphAgeModelCardPolicy(policy) : null;
 }
 
+export function createMurphAgeAbstainedAuthorization(input: {
+  contextOnlyMetricKeys?: readonly string[];
+} = {}): MurphAgeResultAuthorization {
+  return {
+    cardId: null,
+    contextOnlyMetricKeys: uniqueStrings(input.contextOnlyMetricKeys ?? []),
+    evidenceClass: "abstained",
+    evidenceSummary: "No score-bearing Murph Age model-card policy was selected.",
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: false,
+    scoreBearingMetricKeys: [],
+    scoreBearingSourceKinds: [],
+    wearableScoreBearingAuthorized: false,
+  };
+}
+
+export function createMurphAgeCustomModelAuthorization(model: MurphAgeRiskModel): MurphAgeResultAuthorization {
+  return {
+    cardId: null,
+    contextOnlyMetricKeys: [],
+    evidenceClass: "custom-model-unreviewed",
+    evidenceSummary: "Direct Murph Age model calculation without a model-card policy; not product-authorized.",
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: true,
+    scoreBearingMetricKeys: uniqueStrings(
+      model.features
+        .filter((feature) => feature.kind === "metric")
+        .map((feature) => resolveMetricInputKey(feature.metricKey)),
+    ),
+    scoreBearingSourceKinds: [],
+    wearableScoreBearingAuthorized: false,
+  };
+}
+
 export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput): MurphAgeCalculatorOutput {
   const mode = input.mode ?? "product";
   const bundleAssessment = assessMurphAgeInputBundle({
@@ -450,6 +516,11 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     primaryBundleId: bundleAssessment.bundleId,
   });
   const cardPolicy = resolveMurphAgeModelCardPolicy(bundleAssessment.recommendedCardId);
+  const authorization = createMurphAgeCardPolicyAuthorization({
+    bundleAssessment,
+    cardPolicy,
+    contextAssessments,
+  });
   const warnings = [
     ...bundleAssessment.warnings,
     ...contextAssessments.flatMap((assessment) => assessment.warnings),
@@ -463,6 +534,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       mode,
       result: null,
       status: bundleAssessment.status,
+      authorization,
       warnings,
     });
   }
@@ -479,6 +551,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       mode,
       result: null,
       status: "abstain",
+      authorization,
       warnings,
     });
   }
@@ -496,6 +569,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       mode,
       result: null,
       status: "abstain",
+      authorization,
       warnings,
     });
   }
@@ -508,13 +582,16 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
   });
   if (policyViolation) {
     warnings.push(policyViolation);
-    const result = emptyMurphAgeResult({
-      chronologicalAgeYears: input.chronologicalAgeYears,
-      featureAttributions: [],
-      model,
-      status: "abstain",
-      warnings,
-    });
+    const result = withMurphAgeAuthorization(
+      emptyMurphAgeResult({
+        chronologicalAgeYears: input.chronologicalAgeYears,
+        featureAttributions: [],
+        model,
+        status: "abstain",
+        warnings,
+      }),
+      authorization,
+    );
     return buildCalculatorOutput({
       bundleAssessment,
       cardPolicy,
@@ -522,17 +599,21 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
       mode,
       result,
       status: "abstain",
+      authorization,
       warnings,
     });
   }
 
-  const result = calculateMurphAge({
-    asOf: input.asOf,
-    chronologicalAgeYears: input.chronologicalAgeYears,
-    model,
-    points: input.points,
-    sex: input.sex,
-  });
+  const result = withMurphAgeAuthorization(
+    calculateMurphAge({
+      asOf: input.asOf,
+      chronologicalAgeYears: input.chronologicalAgeYears,
+      model,
+      points: input.points,
+      sex: input.sex,
+    }),
+    authorization,
+  );
 
   return buildCalculatorOutput({
     bundleAssessment,
@@ -541,6 +622,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     mode,
     result,
     status: result.status === "ready" ? "ready" : "abstain",
+    authorization,
     warnings: [...warnings, ...result.warnings],
   });
 }
@@ -611,6 +693,7 @@ export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResu
 
   return {
     ageDeltaYears: roundYears(biologicalAgeYears - input.chronologicalAgeYears),
+    authorization: createMurphAgeCustomModelAuthorization(input.model),
     biologicalAgeYears,
     chronologicalAgeYears: input.chronologicalAgeYears,
     featureAttributions: withContributionYears({
@@ -808,6 +891,7 @@ function featureReady(statuses: readonly MurphAgeInputBundleFeatureStatus[], fea
 }
 
 function buildCalculatorOutput(input: {
+  authorization: MurphAgeResultAuthorization;
   bundleAssessment: MurphAgeInputBundleAssessment;
   cardPolicy: MurphAgeModelCardPolicy | null;
   contextAssessments: readonly MurphAgeContextBundleAssessment[];
@@ -817,6 +901,7 @@ function buildCalculatorOutput(input: {
   warnings: readonly MurphAgeWarning[];
 }): MurphAgeCalculatorOutput {
   return {
+    authorization: cloneMurphAgeAuthorization(input.authorization),
     bundleAssessment: cloneInputBundleAssessment(input.bundleAssessment),
     cardPolicy: input.cardPolicy ? cloneMurphAgeModelCardPolicy(input.cardPolicy) : null,
     contextAssessments: input.contextAssessments.map(cloneContextBundleAssessment),
@@ -908,6 +993,53 @@ function cloneMurphAgeModelCardPolicy(policy: MurphAgeModelCardPolicy): MurphAge
     acceptedBundleIds: [...policy.acceptedBundleIds],
     scoreBearingMetricKeys: [...policy.scoreBearingMetricKeys],
     scoreBearingSourceKinds: [...policy.scoreBearingSourceKinds],
+  };
+}
+
+function createMurphAgeCardPolicyAuthorization(input: {
+  bundleAssessment: MurphAgeInputBundleAssessment;
+  cardPolicy: MurphAgeModelCardPolicy | null;
+  contextAssessments: readonly MurphAgeContextBundleAssessment[];
+}): MurphAgeResultAuthorization {
+  const contextOnlyMetricKeys = uniqueStrings(
+    [
+      ...input.contextAssessments.flatMap((assessment) => assessment.selectedMetricKeys),
+      ...(input.bundleAssessment.bundleId === "wearable-context" ? input.bundleAssessment.selectedMetricKeys : []),
+    ],
+  );
+  if (!input.cardPolicy) {
+    return createMurphAgeAbstainedAuthorization({ contextOnlyMetricKeys });
+  }
+  return {
+    cardId: input.cardPolicy.cardId,
+    contextOnlyMetricKeys,
+    evidenceClass: input.cardPolicy.evidenceClass,
+    evidenceSummary: input.cardPolicy.evidenceSummary,
+    productAuthorized: input.cardPolicy.productAuthorized,
+    riskToAgeDisplayAuthorized: input.cardPolicy.riskToAgeDisplayAuthorized,
+    scoreBearing: input.cardPolicy.scoreBearing,
+    scoreBearingMetricKeys: [...input.cardPolicy.scoreBearingMetricKeys],
+    scoreBearingSourceKinds: [...input.cardPolicy.scoreBearingSourceKinds],
+    wearableScoreBearingAuthorized: input.cardPolicy.wearableScoreBearingAuthorized,
+  };
+}
+
+function cloneMurphAgeAuthorization(authorization: MurphAgeResultAuthorization): MurphAgeResultAuthorization {
+  return {
+    ...authorization,
+    contextOnlyMetricKeys: [...authorization.contextOnlyMetricKeys],
+    scoreBearingMetricKeys: [...authorization.scoreBearingMetricKeys],
+    scoreBearingSourceKinds: [...authorization.scoreBearingSourceKinds],
+  };
+}
+
+function withMurphAgeAuthorization(
+  result: MurphAgeResult,
+  authorization: MurphAgeResultAuthorization,
+): MurphAgeResult {
+  return {
+    ...result,
+    authorization: cloneMurphAgeAuthorization(authorization),
   };
 }
 
@@ -1334,6 +1466,7 @@ function emptyMurphAgeResult(input: {
 }): MurphAgeResult {
   return {
     ageDeltaYears: null,
+    authorization: createMurphAgeCustomModelAuthorization(input.model),
     biologicalAgeYears: null,
     chronologicalAgeYears: input.chronologicalAgeYears,
     featureAttributions: input.featureAttributions,
