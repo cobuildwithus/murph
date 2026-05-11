@@ -1,6 +1,7 @@
 declare module 'incur' {
   interface Register {
     commands: {
+      'age model-cards': { args: {}; options: { vault: string; requestId?: string } }
       'age report': { args: {}; options: { vault: string; requestId?: string; asOf: string; chronologicalAgeYears: number; sex: "female" | "male"; mode: "product" | "research" } }
       'allergy import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'allergy list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
