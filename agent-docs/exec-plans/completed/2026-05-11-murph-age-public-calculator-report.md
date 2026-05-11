@@ -1,6 +1,6 @@
 # Murph Age public calculator report
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -45,5 +45,12 @@ Updated: 2026-05-11
 
 ## Verification
 
-- Commands to run: focused health-metrics/query coverage, focused typechecks, smoke, diff check, and required completion audits.
-- Expected outcomes: checks pass; any unrelated root blocker is named.
+- `pnpm --dir packages/health-metrics typecheck` passed.
+- `pnpm --dir packages/query typecheck` passed.
+- `pnpm typecheck` passed after waiting for an unrelated workspace verification lock.
+- `pnpm --dir packages/health-metrics test:coverage` passed with 32 tests.
+- `pnpm --dir packages/query test:coverage` passed with 278 tests.
+- `pnpm test:smoke` passed.
+- `git diff --check -- packages/health-metrics/src/murph-age.ts packages/health-metrics/test/index.test.ts packages/query/src/murph-age.ts packages/query/src/index.ts packages/query/test/murph-age-runtime.test.ts` passed.
+- Required audit passes completed. Final rerun after sanitizer fixes found no findings.
+Completed: 2026-05-11
