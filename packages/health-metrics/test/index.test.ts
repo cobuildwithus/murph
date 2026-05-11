@@ -7,6 +7,7 @@ import {
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   buildMetricSeries,
   calculateMurphAge,
@@ -16,6 +17,7 @@ import {
   formatTargetValue,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
+  listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
   listMetricDefinitions,
   normalizeMetricKey,
@@ -25,6 +27,7 @@ import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   resolveMurphAgeModelCardPolicy,
+  resolveMurphAgeWearableShadowIncrementPolicy,
   selectMetricGoalProgress,
   selectMetricSeries,
   selectMetricTrend,
@@ -1774,6 +1777,60 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
   assert.equal(keys.includes("hs-crp"), false);
 });
 
+test("exposes wearable shadow increment policies without score authorization", () => {
+  const policies = listMurphAgeWearableShadowIncrementPolicies();
+
+  assert.deepEqual(policies.map((policy) => policy.family).sort(), [
+    "activity",
+    "hrv",
+    "resting-heart-rate",
+    "sleep",
+  ]);
+
+  for (const policy of policies) {
+    assert.equal(policy.schemaVersion, MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION);
+    assert.equal(policy.productAuthorized, false);
+    assert.equal(policy.riskEffect, "not-estimated");
+    assert.equal(policy.scoreBearing, false);
+    assert.equal(policy.scoreContributionAuthorized, false);
+    assert.equal(policy.compatibleAnchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
+    assert.equal(policy.compatibleAnchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
+    assert.equal(policy.allowedMetricKeys.includes("wearable-coverage-index"), true);
+    assert.equal(policy.outputBoundary.aggregateOnly, true);
+    assert.equal(policy.outputBoundary.rowValuesExportAllowed, false);
+    assert.equal(policy.outputBoundary.participantLevelExportAllowed, false);
+    assert.equal(policy.outputBoundary.predictionsExportAllowed, false);
+    assert.equal(policy.outputBoundary.coefficientsExportAllowed, false);
+    assert.equal(policy.outputBoundary.productDisplayExportAllowed, false);
+  }
+
+  const activity = resolveMurphAgeWearableShadowIncrementPolicy("activity");
+  assert.equal(activity?.allowedMetricKeys.includes("steps"), true);
+  assert.equal(activity?.allowedMetricKeys.includes("mvpa-minutes"), true);
+  assert.equal(activity?.allowedMetricKeys.includes("sleep-efficiency"), false);
+
+  const sleep = resolveMurphAgeWearableShadowIncrementPolicy("sleep");
+  assert.equal(sleep?.allowedMetricKeys.includes("sleep-duration-variability-minutes"), true);
+  assert.equal(sleep?.allowedMetricKeys.includes("wearable-valid-night-count-28d"), true);
+
+  const restingHeartRate = resolveMurphAgeWearableShadowIncrementPolicy("resting-heart-rate");
+  assert.equal(restingHeartRate?.allowedMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(restingHeartRate?.allowedMetricKeys.includes("wearable-valid-day-count-28d"), true);
+
+  const hrv = resolveMurphAgeWearableShadowIncrementPolicy("hrv");
+  assert.equal(hrv?.allowedMetricKeys.includes("hrv-rmssd"), true);
+  assert.equal(hrv?.allowedMetricKeys.includes("wearable-valid-day-count-28d"), true);
+
+  if (activity) {
+    (activity.allowedMetricKeys as string[]).push("hba1c");
+    (activity.outputBoundary as { rowValuesExportAllowed: boolean }).rowValuesExportAllowed = true;
+  }
+
+  const freshActivity = resolveMurphAgeWearableShadowIncrementPolicy("activity");
+  assert.equal(freshActivity?.allowedMetricKeys.includes("hba1c"), false);
+  assert.equal(freshActivity?.outputBoundary.rowValuesExportAllowed, false);
+});
+
 test("dispatches Murph Age cards while keeping research and wearable boundaries explicit", () => {
   const asOf = "2026-05-10T00:00:00.000Z";
   const lab9Points = [
@@ -1947,9 +2004,41 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     points: lab9WithWearableContextPoints,
     sex: "female",
   });
+  const labOnlyResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9Points,
+    sex: "female",
+  });
 
   assert.equal(research.status, "ready");
   assert.equal(research.result?.status, "ready");
+  assert.equal(research.result?.biologicalAgeYears, labOnlyResearch.result?.biologicalAgeYears);
+  assert.equal(research.result?.ageDeltaYears, labOnlyResearch.result?.ageDeltaYears);
+  assert.equal(research.result?.risk?.probability, labOnlyResearch.result?.risk?.probability);
+  assert.deepEqual(
+    research.result?.featureAttributions.map((feature) => ({
+      contributionLogit: feature.contributionLogit,
+      contributionYears: feature.contributionYears,
+      featureKey: feature.featureKey,
+      metricKey: feature.metricKey,
+      moduleId: feature.moduleId,
+      selectedPointIds: feature.selectedPointIds,
+      status: feature.status,
+    })),
+    labOnlyResearch.result?.featureAttributions.map((feature) => ({
+      contributionLogit: feature.contributionLogit,
+      contributionYears: feature.contributionYears,
+      featureKey: feature.featureKey,
+      metricKey: feature.metricKey,
+      moduleId: feature.moduleId,
+      selectedPointIds: feature.selectedPointIds,
+      status: feature.status,
+    })),
+  );
+  assert.equal(labOnlyResearch.authorization.contextOnlyMetricKeys.length, 0);
   assert.equal(research.authorization.cardId, "lab9_bp_body_10y_acm_research");
   assert.equal(research.authorization.evidenceClass, "research-internal");
   assert.equal(research.authorization.productAuthorized, false);
@@ -2104,6 +2193,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
 
   assert.equal(lab5ResearchWithWearables.status, "ready");
   assert.equal(lab5ResearchWithWearables.bundleAssessment.bundleId, "lab5-bp-bmi");
+  assert.equal(lab5ResearchWithWearables.result?.biologicalAgeYears, lab5Research.result?.biologicalAgeYears);
+  assert.equal(lab5ResearchWithWearables.result?.ageDeltaYears, lab5Research.result?.ageDeltaYears);
+  assert.equal(lab5ResearchWithWearables.result?.risk?.probability, lab5Research.result?.risk?.probability);
   assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(lab5ResearchWithWearables.contextAssessments[0]?.selectedMetricKeys.includes("steps"), true);
   assert.equal(lab5ResearchWithWearables.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
