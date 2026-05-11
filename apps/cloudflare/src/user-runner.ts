@@ -84,9 +84,11 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
+import {
+  ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+} from "./runner-liveness.ts";
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const ACTIVE_INVOCATION_HEARTBEAT_STALE_MS = 3_000;
 const ACTIVE_INVOCATION_RECOVERY_MIN_DELAY_MS = 1_000;
 const PENDING_NUDGE_DRAIN_CONTINUATION_DELAY_MS = 1_000;
 const IMMEDIATE_NUDGE_FAILURE_RETRY_DELAY_MS = 1_000;

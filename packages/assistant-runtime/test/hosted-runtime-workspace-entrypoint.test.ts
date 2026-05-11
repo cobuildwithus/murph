@@ -1378,6 +1378,40 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("fails closed before workspace read when runtime liveness is required but missing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+
+    try {
+      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Snapshot should not run without required liveness.");
+        },
+        async importItem() {
+          throw new Error("Import should not run without required liveness.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          runtimeLivenessRequired: true,
+          workspacePort: {
+            async checkpoint() {
+              throw new Error("Checkpoint should not run without required liveness.");
+            },
+            async read() {
+              events.push("workspace.read");
+              throw new Error("Workspace read should not run without required liveness.");
+            },
+          },
+        }),
+        vaultRoot,
+      })).rejects.toThrow("Hosted workspace runtime job requires runtime liveness port.");
+
+      assert.deepEqual(events, []);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("fails closed while waiting for the initial runtime liveness heartbeat", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1429,7 +1463,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("returns scheduled when initial foreground liveness reports fresh input", async () => {
+  test("continues foreground work when initial liveness reports pending input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1463,7 +1497,7 @@ describe("hosted workspace runtime entrypoint", () => {
               events,
               items: [],
             }),
-            runtimeLivenessIntervalMs: 1,
+            runtimeLivenessIntervalMs: 60_000,
             runtimeLivenessPort,
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -1475,12 +1509,10 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(result, {
-        nextWakeAt: freshInputWakeAt,
-        status: "scheduled",
-      });
+      assert.equal(result.status, "idle");
       assert.equal(touchCalls, 1);
-      assert.deepEqual(events, ["heartbeat:1"]);
+      assert.deepEqual(events.slice(0, 2), ["heartbeat:1", "workspace.read"]);
+      assert.equal(events.includes("mailbox.fetch"), true);
       assert.equal(checkpointRequests.length, 0);
     } finally {
       await removeTempRoot(vaultRoot);
@@ -1576,7 +1608,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps foreground assistant work running when liveness reports only a pending nudge", async () => {
+  test("keeps foreground assistant work running when liveness yields pending input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const freshInputWakeAt = "2026-04-27T00:00:03.000Z";
@@ -1591,11 +1623,7 @@ describe("hosted workspace runtime entrypoint", () => {
         if (!assistantStarted) {
           return continueRuntimeLiveness();
         }
-        return {
-          ...continueRuntimeLiveness(),
-          nextAlarmAt: freshInputWakeAt,
-          pendingNudge: true,
-        };
+        return yieldRuntimeLiveness(freshInputWakeAt);
       },
     };
 
@@ -4624,6 +4652,7 @@ function createPlatform(input: {
   mailboxPort: HostedRuntimeMailboxPort | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
+  runtimeLivenessRequired?: boolean | null;
   stageSamples?: StageTimingSample[];
   workspacePort: HostedRuntimeWorkspacePort | null;
 }): HostedRuntimePlatform {
@@ -4677,6 +4706,9 @@ function createPlatform(input: {
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),
     ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
+    ...(input.runtimeLivenessRequired !== undefined
+      ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
+      : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
   };
 }

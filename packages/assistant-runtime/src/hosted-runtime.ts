@@ -72,7 +72,6 @@ import {
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
-  HostedWorkspaceAssistantPhaseInputAvailableError,
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
@@ -278,16 +277,6 @@ class HostedIdleShutdownCheckpointInputAvailableError extends Error {
   }
 }
 
-class HostedForegroundInputAvailableError extends Error {
-  readonly nextWakeAt: string | null | undefined;
-
-  constructor(nextWakeAt: string | null | undefined) {
-    super("Hosted foreground run stopped because fresher input became available.");
-    this.name = "HostedForegroundInputAvailableError";
-    this.nextWakeAt = nextWakeAt;
-  }
-}
-
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -315,12 +304,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let idleShutdownInputNextWakeAt: string | null | undefined;
   let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
+  if (
+    runtime.platform.runtimeLivenessRequired === true
+    && !runtime.platform.runtimeLivenessPort
+  ) {
+    throw new TypeError("Hosted workspace runtime job requires runtime liveness port.");
+  }
   const assertRuntimeLiveness = () => {
     if (livenessRejectedReason) {
       throw new HostedWorkspaceRuntimeLivenessRejectedError(livenessRejectedReason);
-    }
-    if (livenessAbortController.signal.reason instanceof HostedForegroundInputAvailableError) {
-      throw livenessAbortController.signal.reason;
     }
     if (isIdleShutdownCheckpoint && idleShutdownInputAvailable) {
       throw new HostedIdleShutdownCheckpointInputAvailableError();
@@ -338,12 +330,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         idleShutdownInputAvailable = true;
         idleShutdownInputNextWakeAt = nextWakeAt;
         livenessAbortController.abort(new HostedIdleShutdownCheckpointInputAvailableError());
-        return undefined;
       }
-
-      livenessAbortController.abort(
-        new HostedForegroundInputAvailableError(nextWakeAt),
-      );
       return undefined;
     },
     port: runtime.platform.runtimeLivenessPort,
@@ -483,15 +470,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     }
     if (
       isIdleShutdownCheckpoint
-      && hasRuntimeInputAvailable(initialLiveness)
-    ) {
-      return {
-        nextWakeAt: readRuntimeLivenessNextWakeAt(initialLiveness),
-        status: "scheduled",
-      };
-    }
-    if (
-      !isIdleShutdownCheckpoint
       && hasRuntimeInputAvailable(initialLiveness)
     ) {
       return {
@@ -724,19 +702,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "scheduled",
       };
     }
-    if (error instanceof HostedForegroundInputAvailableError) {
-      return {
-        ...(error.nextWakeAt === undefined ? {} : { nextWakeAt: error.nextWakeAt }),
-        status: "scheduled",
-      };
-    }
-    if (error instanceof HostedWorkspaceAssistantPhaseInputAvailableError) {
-      return {
-        nextWakeAt: error.nextWakeAt,
-        status: "scheduled",
-      };
-    }
-
     throw error;
   } finally {
     await heartbeat.stop();

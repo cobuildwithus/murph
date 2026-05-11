@@ -47,6 +47,8 @@ const RUNTIME_LIVENESS_CONTINUE_RESULT: RuntimeLivenessAcceptedResult = {
   instruction: { kind: "continue" },
   ok: true,
 };
+export const RUNTIME_LIVENESS_DEFAULT_INTERVAL_MS = 15_000;
+export const RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS = 5_000;
 
 export function readRuntimeLivenessInstruction(
   result: RuntimeLivenessAcceptedResult,
@@ -79,8 +81,11 @@ export function startRuntimeLivenessHeartbeat(input: {
     };
   }
 
-  const intervalMs = input.intervalMs ?? 15_000;
-  const touchTimeoutMs = Math.min(input.touchTimeoutMs ?? 5_000, 5_000);
+  const intervalMs = input.intervalMs ?? RUNTIME_LIVENESS_DEFAULT_INTERVAL_MS;
+  const touchTimeoutMs = Math.min(
+    input.touchTimeoutMs ?? RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+    RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+  );
   let currentTouchAbortController: AbortController | null = null;
   let inFlight = false;
   let initialTouchSettled = false;

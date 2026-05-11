@@ -55,6 +55,10 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
+  RUNTIME_LIVENESS_DEFAULT_INTERVAL_MS,
+  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+} from "./hosted-runtime/liveness.ts";
+export {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";

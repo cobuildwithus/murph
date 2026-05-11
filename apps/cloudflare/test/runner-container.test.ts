@@ -3889,6 +3889,51 @@ describe("RunnerContainer", () => {
     expect(destroyInstance).not.toHaveBeenCalled();
   });
 
+  it("aborts foreground workspace helpers without destroying the warm shell", async () => {
+    const abortController = new AbortController();
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => {});
+    const destroyInstance = vi.fn(async () => {});
+    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+      async () => new Promise<never>(() => {}),
+    );
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      abortWorkspaceInvocation,
+      destroyInstance,
+      invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    const job = createWorkspaceRunnerJob("member_foreground_abort");
+    const invocation = invokeHostedExecutionContainerRunner({
+      job,
+      runnerContainerNamespace: { getByName },
+      signal: abortController.signal,
+      timeoutMs: 45_000,
+      userId: "member_foreground_abort",
+    });
+
+    abortController.abort(new Error("stale local active invocation"));
+
+    await expect(invocation).rejects.toThrow("stale local active invocation");
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: job.request.attemptId,
+      userId: "member_foreground_abort",
+    });
+    expect(destroyInstance).not.toHaveBeenCalled();
+  });
+
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 

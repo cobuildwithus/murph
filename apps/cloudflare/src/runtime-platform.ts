@@ -2,6 +2,7 @@ import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
+  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
   type RuntimeLivenessInstruction,
   type RuntimeLivenessTouchResult,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -101,6 +102,10 @@ import {
 } from "./runtime-bridge-checkpoint.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
+import {
+  ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+  CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
+} from "./runner-liveness.ts";
 
 type HostedWebControlTransport =
   | {
@@ -114,7 +119,6 @@ type HostedWebControlTransport =
 
 const HOSTED_MAILBOX_READ_RETRY_ATTEMPTS = 2;
 const HOSTED_MAILBOX_READ_RETRY_DELAY_MS = 100;
-const CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS = 1_000;
 const HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE =
   "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY";
 const HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON =
@@ -184,6 +188,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   fetchImpl?: typeof fetch;
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
+  requireRuntimeLivenessPort?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   browserVaultRefreshAuthority?: boolean | null;
@@ -279,8 +284,38 @@ export function buildHostedExecutionRuntimePlatform(input: {
         workspaceCheckpointBridge: input.workspaceCheckpointBridge,
       })
     : {};
+  const runtimeLivenessPort = input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+    ? createCloudflareRuntimeLivenessPort({
+        fetchImpl,
+        timeoutMs,
+        workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+      })
+    : null;
+  const runtimeLivenessRequired = input.requireRuntimeLivenessPort === true;
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      heartbeatIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
+      heartbeatStaleMs: ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+      heartbeatTouchTimeoutMs: RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+      internalWorkerProxyTokenPresent: Boolean(input.internalWorkerProxyToken),
+      runtimeLivenessPortPresent: Boolean(runtimeLivenessPort),
+      runtimeLivenessRequired,
+      workspaceCheckpointBridgePresent: Boolean(input.workspaceCheckpointBridge),
+    },
+    message: "Hosted runner resolved runtime liveness configuration.",
+    phase: "container.ready",
+    userId: input.boundUserId,
+  });
+  if (runtimeLivenessRequired && !runtimeLivenessPort) {
+    throw new Error(
+      "Hosted runner requires runtime liveness for workspace invocation but could not build the liveness port.",
+    );
+  }
   return {
     runtimeLivenessIntervalMs: CLOUDFLARE_RUNTIME_LIVENESS_INTERVAL_MS,
+    runtimeLivenessRequired,
+    ...(runtimeLivenessPort ? { runtimeLivenessPort } : {}),
     artifactStore: {
       async get(sha256) {
         const response = await fetchHostedResponse({
@@ -340,15 +375,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport: hostedWebControlTransport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
-          ...(input.workspaceCheckpointBridge
-            ? {
-                runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
-                  fetchImpl,
-                  timeoutMs,
-                  workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-                }),
-              }
-            : {}),
         }
       : {}),
     effectsPort: {

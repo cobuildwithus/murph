@@ -279,6 +279,7 @@ export interface HostedRuntimePlatform {
   refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
+  runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
 }
