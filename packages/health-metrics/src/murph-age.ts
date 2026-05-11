@@ -15,6 +15,8 @@ export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summa
 export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
+export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
+  "murph.age.wearable-bridge-feature.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -283,6 +285,22 @@ export type MurphAgeWearableShadowIncrementFamily =
   | "resting-heart-rate"
   | "sleep";
 export type MurphAgeWearableShadowIncrementStatus = "blocked" | "missing" | "ready";
+export type MurphAgeWearableBridgeFeatureFamily =
+  | "activity"
+  | "hrv"
+  | "quality"
+  | "resting-heart-rate"
+  | "sleep";
+export type MurphAgeWearableBridgeFeatureRole =
+  | "deferred-context"
+  | "quality"
+  | "shadow-increment-signal";
+export type MurphAgeWearableBridgeMethodQualifier = "not-required" | "recommended" | "required";
+export type MurphAgeWearableBridgeSourceKind =
+  | "activity-summary"
+  | "sleep-summary"
+  | "wearable-summary";
+export type MurphAgeWearableBridgeUnlockPriority = "defer" | "first" | "second";
 
 export interface MurphAgeWearableContextSummary {
   availableFeatureFamilies: MurphAgeWearableContextFamily[];
@@ -353,6 +371,16 @@ type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
   "allowedMetricKeys"
 >;
 
+type MurphAgeWearableBridgeFeatureSpecDefinition = Omit<
+  MurphAgeWearableBridgeFeatureSpec,
+  | "outputBoundary"
+  | "productAuthorized"
+  | "riskEffect"
+  | "schemaVersion"
+  | "scoreBearing"
+  | "scoreContributionAuthorized"
+>;
+
 export interface MurphAgeWearableShadowIncrementAssessmentInput {
   anchorCardId?: MurphAgeScoreBearingCardId | null;
   asOf?: string;
@@ -378,6 +406,26 @@ export interface MurphAgeWearableShadowIncrementAssessment {
   selectedPointIds: string[];
   status: MurphAgeWearableShadowIncrementStatus;
   warnings: MurphAgeWarning[];
+}
+
+export interface MurphAgeWearableBridgeFeatureSpec {
+  evidenceSummary: string;
+  family: MurphAgeWearableBridgeFeatureFamily;
+  featureKey: string;
+  label: string;
+  measurementWindowDays: readonly number[];
+  methodQualifier: MurphAgeWearableBridgeMethodQualifier;
+  metricKeys: readonly string[];
+  outputBoundary: MurphAgeWearableShadowIncrementOutputBoundary;
+  productAuthorized: false;
+  requiredQualityMetricKeys: readonly string[];
+  riskEffect: "not-estimated";
+  role: MurphAgeWearableBridgeFeatureRole;
+  schemaVersion: typeof MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION;
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  sourceKinds: readonly MurphAgeWearableBridgeSourceKind[];
+  unlockPriority: MurphAgeWearableBridgeUnlockPriority;
 }
 
 export interface MurphAgeModelValidationResult {
@@ -565,6 +613,20 @@ const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
 const MURPH_AGE_WEARABLE_QUALITY_FEATURE_KEYS =
   MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES.quality;
 
+const MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS = [
+  "wearable-coverage-index",
+] as const;
+
+const MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS = [
+  "wearable-valid-day-count-28d",
+  ...MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS,
+] as const;
+
+const MURPH_AGE_WEARABLE_NIGHT_QUALITY_METRIC_KEYS = [
+  "wearable-valid-night-count-28d",
+  ...MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS,
+] as const;
+
 const MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY = {
   aggregateOnly: true,
   coefficientsExportAllowed: false,
@@ -583,7 +645,117 @@ const MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS = [
   "activity-summary",
   "sleep-summary",
   "wearable-summary",
-] as const;
+] as const satisfies readonly MurphAgeWearableBridgeSourceKind[];
+
+const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS = [
+  {
+    evidenceSummary: "Coverage and valid-day/night counts are bridge quality features only; they gate wearable research readiness but never score Murph Age.",
+    family: "quality",
+    featureKey: "wearable-coverage-quality",
+    label: "Wearable coverage quality",
+    measurementWindowDays: [28],
+    methodQualifier: "not-required",
+    metricKeys: [
+      "wearable-coverage-index",
+      "wearable-valid-day-count-28d",
+      "wearable-valid-night-count-28d",
+    ],
+    requiredQualityMetricKeys: [],
+    role: "quality",
+    sourceKinds: MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS,
+    unlockPriority: "first",
+  },
+  {
+    evidenceSummary: "Activity volume is the first wearable bridge candidate because steps and active-minute features have broad availability and clearer population-level interpretation.",
+    family: "activity",
+    featureKey: "activity-volume",
+    label: "Activity volume",
+    measurementWindowDays: [28],
+    methodQualifier: "recommended",
+    metricKeys: [
+      "steps",
+      "activity-minutes",
+      "mvpa-minutes",
+    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "shadow-increment-signal",
+    sourceKinds: ["activity-summary", "wearable-summary"],
+    unlockPriority: "first",
+  },
+  {
+    evidenceSummary: "Sedentary time is evaluated with activity volume but remains a shadow bridge signal until wear-time handling and external calibration are proven.",
+    family: "activity",
+    featureKey: "sedentary-time",
+    label: "Sedentary time",
+    measurementWindowDays: [28],
+    methodQualifier: "recommended",
+    metricKeys: ["sedentary-minutes"],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "shadow-increment-signal",
+    sourceKinds: ["activity-summary", "wearable-summary"],
+    unlockPriority: "first",
+  },
+  {
+    evidenceSummary: "Sleep duration and regularity are second-wave wearable bridge candidates because consumer-device methods and night-level completeness need explicit qualification.",
+    family: "sleep",
+    featureKey: "sleep-duration-regularity",
+    label: "Sleep duration and regularity",
+    measurementWindowDays: [28],
+    methodQualifier: "required",
+    metricKeys: [
+      "total-sleep-minutes",
+      "sleep-duration-variability-minutes",
+      "sleep-regularity-score",
+      "sleep-midpoint-variability-minutes",
+    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_NIGHT_QUALITY_METRIC_KEYS,
+    role: "shadow-increment-signal",
+    sourceKinds: ["sleep-summary", "wearable-summary"],
+    unlockPriority: "second",
+  },
+  {
+    evidenceSummary: "Resting heart rate is a second-wave autonomic bridge signal; it requires device/source qualification and can only be tested as a residual increment over the lab/BP/body anchor.",
+    family: "resting-heart-rate",
+    featureKey: "resting-heart-rate",
+    label: "Resting heart rate",
+    measurementWindowDays: [28],
+    methodQualifier: "required",
+    metricKeys: ["resting-heart-rate"],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "shadow-increment-signal",
+    sourceKinds: ["wearable-summary"],
+    unlockPriority: "second",
+  },
+  {
+    evidenceSummary: "HRV RMSSD is deferred until method, sampling window, and device-source comparability are explicit; it is not a score-bearing Murph Age input.",
+    family: "hrv",
+    featureKey: "hrv-rmssd",
+    label: "HRV RMSSD",
+    measurementWindowDays: [28],
+    methodQualifier: "required",
+    metricKeys: ["hrv-rmssd"],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "deferred-context",
+    sourceKinds: ["wearable-summary"],
+    unlockPriority: "defer",
+  },
+  {
+    evidenceSummary: "Estimated VO2 max is deferred because consumer estimates are model-derived and need source/method validation before any residual-increment study.",
+    family: "activity",
+    featureKey: "estimated-vo2-max",
+    label: "Estimated VO2 max",
+    measurementWindowDays: [90],
+    methodQualifier: "required",
+    metricKeys: ["estimated-vo2-max"],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
+    role: "deferred-context",
+    sourceKinds: ["activity-summary", "wearable-summary"],
+    unlockPriority: "defer",
+  },
+] satisfies readonly MurphAgeWearableBridgeFeatureSpecDefinition[];
+
+const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS =
+  MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS.map(completeWearableBridgeFeatureSpec);
 
 const MURPH_AGE_MODEL_CARD_POLICIES = [
   {
@@ -658,10 +830,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
     family: "activity",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
-    requiredQualityMetricKeys: [
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
@@ -680,10 +849,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
     family: "sleep",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
-    requiredQualityMetricKeys: [
-      "wearable-valid-night-count-28d",
-      "wearable-coverage-index",
-    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_NIGHT_QUALITY_METRIC_KEYS,
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
@@ -702,10 +868,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
     family: "resting-heart-rate",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
-    requiredQualityMetricKeys: [
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
@@ -720,10 +883,7 @@ const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
     family: "hrv",
     outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
     productAuthorized: false,
-    requiredQualityMetricKeys: [
-      "wearable-valid-day-count-28d",
-      "wearable-coverage-index",
-    ],
+    requiredQualityMetricKeys: MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS,
     riskEffect: "not-estimated",
     schemaVersion: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
     scoreBearing: false,
@@ -743,6 +903,10 @@ export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
 
 export function listMurphAgeWearableShadowIncrementPolicies(): MurphAgeWearableShadowIncrementPolicy[] {
   return MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES.map(cloneMurphAgeWearableShadowIncrementPolicy);
+}
+
+export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridgeFeatureSpec[] {
+  return MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map(cloneMurphAgeWearableBridgeFeatureSpec);
 }
 
 export function listMurphAgeInputBundleMetricKeys(): string[] {
@@ -769,6 +933,15 @@ export function resolveMurphAgeWearableShadowIncrementPolicy(
     candidate.family === family
   ) ?? null;
   return policy ? cloneMurphAgeWearableShadowIncrementPolicy(policy) : null;
+}
+
+export function resolveMurphAgeWearableBridgeFeatureSpec(
+  featureKey: string,
+): MurphAgeWearableBridgeFeatureSpec | null {
+  const spec = MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.find((candidate) =>
+    candidate.featureKey === featureKey
+  ) ?? null;
+  return spec ? cloneMurphAgeWearableBridgeFeatureSpec(spec) : null;
 }
 
 export function assessMurphAgeWearableShadowIncrements(
@@ -1420,6 +1593,20 @@ function completeWearableShadowIncrementPolicy(
   };
 }
 
+function completeWearableBridgeFeatureSpec(
+  spec: MurphAgeWearableBridgeFeatureSpecDefinition,
+): MurphAgeWearableBridgeFeatureSpec {
+  return {
+    ...spec,
+    outputBoundary: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY,
+    productAuthorized: false,
+    riskEffect: "not-estimated",
+    schemaVersion: MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+  };
+}
+
 function isMurphAgeWearableShadowPoint(point: MetricPoint): boolean {
   return MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS.includes(
     point.source.kind as typeof MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS[number],
@@ -1589,6 +1776,19 @@ function cloneMurphAgeWearableShadowIncrementPolicy(
     outputBoundary: { ...policy.outputBoundary },
     requiredQualityMetricKeys: [...policy.requiredQualityMetricKeys],
     signalMetricKeys: [...policy.signalMetricKeys],
+  };
+}
+
+function cloneMurphAgeWearableBridgeFeatureSpec(
+  spec: MurphAgeWearableBridgeFeatureSpec,
+): MurphAgeWearableBridgeFeatureSpec {
+  return {
+    ...spec,
+    measurementWindowDays: [...spec.measurementWindowDays],
+    metricKeys: [...spec.metricKeys],
+    outputBoundary: { ...spec.outputBoundary },
+    requiredQualityMetricKeys: [...spec.requiredQualityMetricKeys],
+    sourceKinds: [...spec.sourceKinds],
   };
 }
 
