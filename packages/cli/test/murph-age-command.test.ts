@@ -18,11 +18,21 @@ import {
   rebuildQueryProjection,
 } from '@murphai/query'
 import { QUERY_DB_RELATIVE_PATH, openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases'
+import {
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
+} from '@murphai/vault-usecases'
+import { registerBloodTestCommands } from '../src/commands/health-blood-test-save.js'
+import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerMurphAgeCommands } from '../src/commands/murph-age.js'
+import { registerVaultCommands } from '../src/commands/vault.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
-import { requireData } from './cli-test-helpers.js'
+import {
+  createTempVaultContext,
+  requireData,
+  runInProcessJsonCli,
+} from './cli-test-helpers.js'
 
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
@@ -31,6 +41,21 @@ function createSliceCli() {
   })
   cli.use(incurErrorBridge)
   registerMurphAgeCommands(cli, createUnwiredVaultServices())
+  return cli
+}
+
+function createCanonicalInputCli() {
+  const cli = Cli.create('vault-cli', {
+    description: 'Murph Age canonical input test cli',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+
+  const services = createIntegratedVaultServices()
+  registerVaultCommands(cli, services)
+  registerBloodTestCommands(cli, services)
+  registerMeasurementCommands(cli, services)
+  registerMurphAgeCommands(cli, services)
   return cli
 }
 
@@ -152,6 +177,150 @@ test('age report can run explicit local research mode through the public report 
     assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('age report consumes saved canonical blood tests and measurements through projection', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-canonical-')
+  try {
+    const cli = createCanonicalInputCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'UTC',
+    ])
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const bloodTestResult = await runInProcessJsonCli(cli, [
+      'blood-test',
+      'save',
+      'Functional health panel',
+      '--vault',
+      vaultRoot,
+      '--occurred-at',
+      '2026-05-01T08:00:00.000Z',
+      '--test-name',
+      'functional_health_panel',
+      '--lab-name',
+      'Function Health',
+      '--fasting-status',
+      'fasting',
+      '--result',
+      'analyte=Albumin;biomarkerSlug=albumin;value=4.4;unit=g/dL',
+      '--result',
+      'analyte=Creatinine;biomarkerSlug=creatinine;value=0.9;unit=mg/dL',
+      '--result',
+      'analyte=HbA1c;biomarkerSlug=hba1c;value=5.1;unit=percent',
+      '--result',
+      'analyte=Alkaline phosphatase;biomarkerSlug=alkaline-phosphatase;value=70;unit=U/L',
+      '--result',
+      'analyte=White blood cell count;biomarkerSlug=white-blood-cell-count;value=5.6;unit=10^3/uL',
+      '--result',
+      'analyte=Lymphocyte percentage;biomarkerSlug=lymphocyte-percentage;value=32;unit=percent',
+      '--result',
+      'analyte=Red cell distribution width;biomarkerSlug=red-cell-distribution-width;value=12.6;unit=percent',
+      '--result',
+      'analyte=HDL-C;biomarkerSlug=hdl-c;value=62;unit=mg/dL',
+      '--result',
+      'analyte=Triglycerides;biomarkerSlug=triglycerides;value=90;unit=mg/dL',
+    ])
+    requireData(bloodTestResult.envelope)
+
+    const measurementResult = await runInProcessJsonCli(cli, [
+      'measurement',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--occurred-at',
+      '2026-05-08T08:00:00.000Z',
+      '--source',
+      'manual',
+      '--metric',
+      'systolic-blood-pressure',
+      '--value',
+      '118',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'diastolic-blood-pressure',
+      '--value',
+      '74',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'bmi',
+      '--value',
+      '23.5',
+      '--unit',
+      'kg/m2',
+    ])
+    requireData(measurementResult.envelope)
+
+    await rebuildQueryProjection(vaultRoot)
+    await writeLocalModelCardArtifact(vaultRoot, 'lab9.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+
+    const report = requireData(
+      (
+        await runInProcessJsonCli<MurphAgePublicCalculatorReport>(cli, [
+          'age',
+          'report',
+          '--vault',
+          vaultRoot,
+          '--as-of',
+          '2026-05-10T00:00:00.000Z',
+          '--chronological-age-years',
+          '45',
+          '--sex',
+          'female',
+          '--mode',
+          'research',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(report.mode, 'research')
+    assert.equal(report.status, 'ready')
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    assert.equal(report.result?.status, 'ready')
+    assert.equal(report.result?.authorization.scoreBearing, true)
+    for (const metricKey of [
+      'albumin',
+      'creatinine',
+      'hba1c',
+      'alkaline-phosphatase',
+      'white-blood-cell-count',
+      'lymphocyte-percentage',
+      'red-cell-distribution-width',
+      'hdl-c',
+      'triglycerides',
+      'systolic-blood-pressure',
+      'diastolic-blood-pressure',
+      'bmi',
+    ]) {
+      assert.equal(
+        report.displaySummary.selectedScoreBearingMetricKeys.includes(metricKey),
+        true,
+        metricKey,
+      )
+    }
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'albumin'), true)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'bmi'), true)
+    for (const attribution of report.result?.featureAttributions ?? []) {
+      assert.equal(hasOwnKey(attribution, 'selectedPointIds'), false, attribution.featureKey)
+      assert.equal(hasOwnKey(attribution, 'value'), false, attribution.featureKey)
+      assert.equal(hasOwnKey(attribution, 'canonicalValue'), false, attribution.featureKey)
+    }
+    assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
+    assert.equal(hasOwnKey(report, 'selectedScoreBearingPointIds'), false)
+    assert.equal(hasOwnKey(report.displaySummary, 'selectedScoreBearingPointIds'), false)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
   }
 })
 
