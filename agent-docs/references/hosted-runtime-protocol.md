@@ -107,6 +107,13 @@ runner by active invocation identity (`attemptId`, `leaseGeneration`, and
 `userId`). `workspaceVersion` is the workspace checkpoint compare-and-swap
 guard and must stay on the checkpoint path rather than becoming generic
 side-effect authorization.
+Active invocation heartbeats are recovery hints, not the normal way to control
+container lifecycle. If the current Durable Object isolate still owns the live
+workspace invocation request, a stale heartbeat reschedules recovery and leaves
+the request running so foreground work can finish or fail under its own timeout.
+Heartbeat-stale lease clearing is reserved for persisted/orphaned invocations
+without a local request owner; hard timeouts, explicit cleanup, and
+container-stopped signals remain terminal.
 
 ## Current Protocol
 

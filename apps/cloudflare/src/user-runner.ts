@@ -1571,6 +1571,11 @@ export class HostedUserRunner {
       return null;
     }
 
+    const deferredHeartbeatRecovery = this.deferLocalHeartbeatStaleRecovery(record);
+    if (deferredHeartbeatRecovery) {
+      return deferredHeartbeatRecovery;
+    }
+
     const recovery = await this.clearExpiredActiveInvocationForRecovery();
     if (!recovery.cleared) {
       return {
@@ -1615,6 +1620,42 @@ export class HostedUserRunner {
     return {
       kind: "recovered",
       record: recovery.record,
+    };
+  }
+
+  private deferLocalHeartbeatStaleRecovery(
+    record: RunnerStateRecord,
+  ): LocalActiveInvocationRecovery | null {
+    const nowMs = Date.now();
+    const decision = resolveRunnerRecordActiveInvocationRecoveryDecision({
+      nowMs,
+      record,
+      runnerReadyTimeoutMs: this.env.runnerReadyTimeoutMs,
+      runnerTimeoutMs: this.env.runnerTimeoutMs,
+    });
+    if (decision.kind !== "recover" || decision.reason !== "heartbeat_stale") {
+      return null;
+    }
+
+    const activeExpiresAtMs = record.active?.expiresAt
+      ? Date.parse(record.active.expiresAt)
+      : Number.NaN;
+    if (Number.isFinite(activeExpiresAtMs) && nowMs >= activeExpiresAtMs) {
+      return null;
+    }
+
+    const heartbeatRetryAt = new Date(
+      nowMs + ACTIVE_INVOCATION_HEARTBEAT_STALE_MS,
+    ).toISOString();
+    const nextRecoveryAt = earliestIsoDate(
+      record.active?.expiresAt ?? null,
+      heartbeatRetryAt,
+    ) ?? heartbeatRetryAt;
+
+    return {
+      kind: "live",
+      nextRecoveryAt,
+      record,
     };
   }
 

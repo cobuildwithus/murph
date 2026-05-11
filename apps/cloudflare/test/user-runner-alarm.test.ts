@@ -1875,7 +1875,7 @@ describe("HostedUserRunner runtime crypto context", () => {
     }]);
   });
 
-  it("aborts stale local active invocations so pending nudges can drain", async () => {
+  it("keeps stale-heartbeat local active invocations running while pending nudges wait", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<{
@@ -1896,7 +1896,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       }
       throw new Error("Unexpected extra workspace invocation.");
     });
-    const { runner, sql } = createRunnerCryptoContextHarness(null, {
+    const { alarms, runner, sql } = createRunnerCryptoContextHarness(null, {
       abortWorkspaceInvocation,
       destroyInstance,
       invoke,
@@ -1927,14 +1927,42 @@ describe("HostedUserRunner runtime crypto context", () => {
     await expect(runner.alarm()).resolves.toBeUndefined();
     await flushDetachedRunnerDrive();
 
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(destroyInstance).not.toHaveBeenCalled();
+    const deferredRecoveryAlarm = alarms.at(-1);
+    expect(Date.parse(deferredRecoveryAlarm ?? "") - Date.parse(FIXED_NOW))
+      .toBeGreaterThanOrEqual(62_000);
+    expect(Date.parse(deferredRecoveryAlarm ?? "") - Date.parse(FIXED_NOW))
+      .toBeLessThan(62_500);
+    expect(
+      sql.exec(
+        `SELECT active_invocation_id IS NOT NULL AS active_invocation_present,
+                in_flight,
+                pending_nudge,
+                pending_work,
+                retry_failure_count
+         FROM runner_meta WHERE user_id = ?`,
+        "member_123",
+      ).toArray(),
+    ).toEqual([{
+      active_invocation_present: 1,
+      in_flight: 1,
+      pending_nudge: 1,
+      pending_work: 1,
+      retry_failure_count: 0,
+    }]);
+
+    firstInvocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await flushDetachedRunnerDrive();
+
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
-    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
-      attemptId: expect.any(String),
-      userId: "member_123",
-    });
-    expect(destroyInstance).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(
+    await flushDetachedRunnerDrive();
+    expect(
       sql.exec(
         `SELECT in_flight,
                 pending_nudge,
@@ -1948,19 +1976,7 @@ describe("HostedUserRunner runtime crypto context", () => {
       pending_nudge: 0,
       pending_work: 0,
       retry_failure_count: 0,
-    }]));
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.runner",
-        details: expect.objectContaining({
-          activeWorkspaceInvocationAborted: true,
-          pendingNudge: true,
-        }),
-        message: "Hosted runner cleared stale local invocation so pending nudge can drain.",
-        phase: "scheduled",
-        userId: "member_123",
-      }),
-    );
+    }]);
   });
 
   it("anchors the immediate nudge drive in Durable Object waitUntil", async () => {
