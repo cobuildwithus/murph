@@ -98,7 +98,7 @@ export const LAB_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["a1c", "hba1c", "hemoglobin-a1c", "hemoglobin_a1c"],
+    aliases: ["a1c", "hb-a1c", "hba1c", "hemoglobin-a-1c", "hemoglobin-a1c", "hemoglobin_a1c"],
     biomarkerKey: "biomarker:hba1c",
     canonicalUnit: "percent",
     category: "lab",
@@ -142,7 +142,7 @@ export const LAB_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["alk-phos", "alp", "alkaline_phosphatase"],
+    aliases: ["alk-phos", "alkaline-phos", "alkaline_phosphatase", "alp"],
     biomarkerKey: "biomarker:alkaline-phosphatase",
     canonicalUnit: "U/L",
     category: "lab",
@@ -164,7 +164,14 @@ export const LAB_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["wbc", "white-blood-cells", "white_blood_cells", "leukocytes"],
+    aliases: [
+      "leukocytes",
+      "white-blood-cell-count-wbc",
+      "white-blood-cells",
+      "white_blood_cells",
+      "wbc",
+      "wbc-count",
+    ],
     biomarkerKey: "biomarker:white-blood-cell-count",
     canonicalUnit: "10^3/uL",
     category: "lab",
@@ -175,7 +182,16 @@ export const LAB_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["lymphocyte-percent", "lymphocyte_pct", "lymphocyte-percentage", "lymphocytes-percent", "lymphocytes"],
+    aliases: [
+      "lymphocyte",
+      "lymphocyte-percent",
+      "lymphocyte-pct",
+      "lymphocyte_pct",
+      "lymphocyte-percentage",
+      "lymphocytes-percent",
+      "lymphocytes-pct",
+      "lymphocytes",
+    ],
     biomarkerKey: "biomarker:lymphocyte-percentage",
     canonicalUnit: "percent",
     category: "lab",
@@ -197,7 +213,7 @@ export const LAB_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["rdw", "red-cell-distribution-width", "red_cell_distribution_width"],
+    aliases: ["rdw", "rdw-cv", "red-cell-distribution-width", "red-cell-distribution-width-rdw", "red_cell_distribution_width"],
     biomarkerKey: "biomarker:red-cell-distribution-width",
     canonicalUnit: "percent",
     category: "lab",

@@ -811,6 +811,133 @@ test('age report consumes saved canonical blood tests and measurements through p
   }
 })
 
+test('age report resolves common analyte-only lab names from JSON imports', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-analyte-alias-')
+  const payloadPath = path.join(parentRoot, 'blood-panel.json')
+  try {
+    const cli = createCanonicalInputCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'UTC',
+    ])
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: '2026-05-01T08:00:00.000Z',
+        title: 'Function Health panel',
+        testName: 'functional_health_panel',
+        labName: 'Function Health',
+        fastingStatus: 'fasting',
+        results: [
+          { analyte: 'Albumin', value: 4.4, unit: 'g/dL' },
+          { analyte: 'Creatinine', value: 0.9, unit: 'mg/dL' },
+          { analyte: 'HbA1c', value: 5.1, unit: 'percent' },
+          { analyte: 'Alkaline phosphatase', value: 70, unit: 'U/L' },
+          { analyte: 'White blood cell count (WBC)', value: 5.6, unit: '10^3/uL' },
+          { analyte: 'Lymphocyte pct', value: 32, unit: 'percent' },
+          { analyte: 'Red cell distribution width (RDW)', value: 12.6, unit: 'percent' },
+          { analyte: 'HDL-C', value: 62, unit: 'mg/dL' },
+          { analyte: 'Triglycerides', value: 90, unit: 'mg/dL' },
+        ],
+      }),
+      'utf8',
+    )
+
+    const bloodTestResult = await runInProcessJsonCli(cli, [
+      'blood-test',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+    requireData(bloodTestResult.envelope)
+
+    const measurementResult = await runInProcessJsonCli(cli, [
+      'measurement',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--occurred-at',
+      '2026-05-08T08:00:00.000Z',
+      '--source',
+      'manual',
+      '--metric',
+      'systolic-blood-pressure',
+      '--value',
+      '118',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'diastolic-blood-pressure',
+      '--value',
+      '74',
+      '--unit',
+      'mmHg',
+      '--metric',
+      'bmi',
+      '--value',
+      '23.5',
+      '--unit',
+      'kg/m2',
+    ])
+    requireData(measurementResult.envelope)
+
+    await rebuildQueryProjection(vaultRoot)
+    await writeLocalModelCardArtifact(vaultRoot, 'lab9.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+
+    const report = requireData(
+      (
+        await runInProcessJsonCli<MurphAgePublicCalculatorReport>(cli, [
+          'age',
+          'report',
+          '--vault',
+          vaultRoot,
+          '--as-of',
+          '2026-05-10T00:00:00.000Z',
+          '--chronological-age-years',
+          '45',
+          '--sex',
+          'female',
+          '--mode',
+          'research',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(report.status, 'ready')
+    assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    for (const metricKey of [
+      'albumin',
+      'hba1c',
+      'alkaline-phosphatase',
+      'white-blood-cell-count',
+      'lymphocyte-percentage',
+      'red-cell-distribution-width',
+    ]) {
+      assert.equal(
+        report.displaySummary.selectedScoreBearingMetricKeys.includes(metricKey),
+        true,
+        metricKey,
+      )
+    }
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'hba1c'), true)
+    assert.equal(hasOwnKey(report, 'bundleAssessment'), false)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
 test('age report consumes canonical wearable observations as context-only bridge data', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-age-cli-wearable-')
   try {
