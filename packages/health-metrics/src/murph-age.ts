@@ -19,6 +19,7 @@ export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
   "murph.age.wearable-bridge-feature.v1" as const;
+export const MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION = "murph.age.model-card-artifact.v1" as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -121,6 +122,17 @@ export type MurphAgeModelCardId =
 
 export type MurphAgeScoreBearingCardId = Exclude<MurphAgeModelCardId, "wearable_context_no_risk">;
 export type MurphAgeCalculatorMode = "product" | "research";
+
+export interface MurphAgeLocalModelCardArtifact {
+  cardId: MurphAgeScoreBearingCardId;
+  model: MurphAgeRiskModel;
+  schemaVersion: typeof MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION;
+}
+
+export interface MurphAgeLocalModelCardArtifactParseResult {
+  value: MurphAgeLocalModelCardArtifact | null;
+  warnings: MurphAgeWarning[];
+}
 
 export interface MurphAgeModelCardPolicy {
   acceptedBundleIds: readonly MurphAgeInputBundleId[];
@@ -2877,6 +2889,141 @@ export function validateMurphAgeRiskModel(model: MurphAgeRiskModel): MurphAgeMod
   };
 }
 
+export function parseMurphAgeRiskModelArtifact(value: unknown): MurphAgeRiskModel | null {
+  const model = asPlainRecord(value);
+  if (!model || !recordHasOnlyKeys(model, [
+    "blockedBiomarkerKeys",
+    "blockedMetricKeys",
+    "calibration",
+    "endpoint",
+    "features",
+    "horizonYears",
+    "intercept",
+    "modelId",
+    "modelVersion",
+    "referencePopulation",
+    "referenceRiskCurve",
+    "uncertainty",
+  ])) {
+    return null;
+  }
+
+  const endpoint = parseNonEmptyString(model.endpoint);
+  const features = parseModelFeatures(model.features);
+  const horizonYears = parsePositiveFiniteNumber(model.horizonYears);
+  const intercept = parseFiniteNumber(model.intercept);
+  const modelId = parseNonEmptyString(model.modelId);
+  const modelVersion = parseOptionalNonEmptyString(model.modelVersion);
+  const referencePopulation = parseNonEmptyString(model.referencePopulation);
+  const referenceRiskCurve = parseReferenceRiskCurveArtifact(model.referenceRiskCurve);
+  const blockedBiomarkerKeys = parseOptionalStringArray(model.blockedBiomarkerKeys);
+  const blockedMetricKeys = parseOptionalStringArray(model.blockedMetricKeys);
+  const calibration = parseOptionalCalibration(model.calibration);
+  const uncertainty = parseOptionalUncertainty(model.uncertainty);
+
+  if (
+    endpoint === null ||
+    features === null ||
+    horizonYears === null ||
+    intercept === null ||
+    modelId === null ||
+    modelVersion === null ||
+    referencePopulation === null ||
+    referenceRiskCurve === null ||
+    blockedBiomarkerKeys === null ||
+    blockedMetricKeys === null ||
+    calibration === null ||
+    uncertainty === null
+  ) {
+    return null;
+  }
+
+  const parsed: MurphAgeRiskModel = {
+    endpoint,
+    features,
+    horizonYears,
+    intercept,
+    modelId,
+    referencePopulation,
+    referenceRiskCurve,
+  };
+  if (blockedBiomarkerKeys !== undefined) parsed.blockedBiomarkerKeys = blockedBiomarkerKeys;
+  if (blockedMetricKeys !== undefined) parsed.blockedMetricKeys = blockedMetricKeys;
+  if (calibration !== undefined) parsed.calibration = calibration;
+  if (modelVersion !== undefined) parsed.modelVersion = modelVersion;
+  if (uncertainty !== undefined) parsed.uncertainty = uncertainty;
+
+  return validateMurphAgeRiskModel(parsed).status === "valid" ? parsed : null;
+}
+
+export function parseMurphAgeLocalModelCardArtifact(value: unknown): MurphAgeLocalModelCardArtifactParseResult {
+  const artifact = asPlainRecord(value);
+  const cardId = artifact ? parseScoreBearingCardId(artifact.cardId) : null;
+  const model = artifact ? parseMurphAgeRiskModelArtifact(artifact.model) : null;
+
+  if (
+    !artifact ||
+    artifact.schemaVersion !== MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION ||
+    !cardId ||
+    !model
+  ) {
+    return {
+      value: null,
+      warnings: [createMurphAgeLocalModelCardWarning(
+        "A local Murph Age model-card artifact does not match the expected schema.",
+      )],
+    };
+  }
+
+  return {
+    value: {
+      cardId,
+      model,
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    },
+    warnings: [],
+  };
+}
+
+export function validateMurphAgeLocalModelCardArtifactPolicy(
+  artifact: MurphAgeLocalModelCardArtifact,
+): MurphAgeWarning[] {
+  const modelValidation = validateMurphAgeRiskModel(artifact.model);
+  const warnings: MurphAgeWarning[] = [];
+  if (modelValidation.status === "invalid") {
+    return [createMurphAgeLocalModelCardWarning("A local Murph Age model-card artifact contains an invalid model.")];
+  }
+  const policy = resolveMurphAgeModelCardPolicy(artifact.cardId);
+  if (!policy?.scoreBearing) {
+    warnings.push(createMurphAgeLocalModelCardWarning(
+      "A local Murph Age model-card artifact selected a non-score-bearing card id.",
+    ));
+    return warnings;
+  }
+
+  const allowedMetricKeys = new Set(policy.scoreBearingMetricKeys.map(resolveMetricInputKey));
+  for (const feature of artifact.model.features) {
+    if (feature.kind !== "metric") continue;
+    const metricKey = resolveMetricInputKey(feature.metricKey);
+    if (!allowedMetricKeys.has(metricKey)) {
+      warnings.push({
+        code: "MODEL_CARD_POLICY_VIOLATION",
+        featureKey: feature.key,
+        message: `${artifact.cardId} does not authorize a local score-bearing feature for this metric.`,
+        metricKey,
+      });
+    }
+  }
+  return warnings;
+}
+
+export function createMurphAgeLocalModelCardWarning(message: string): MurphAgeWarning {
+  return {
+    code: "INVALID_INPUT",
+    message,
+  };
+}
+
 function validateFeatureTransform(feature: MurphAgeModelFeature): MurphAgeWarning[] {
   const transform = feature.transform;
   if (!transform) return [];
@@ -2910,6 +3057,394 @@ function validateFeatureTransform(feature: MurphAgeModelFeature): MurphAgeWarnin
       return warnings;
     }
   }
+}
+
+function parseScoreBearingCardId(value: unknown): MurphAgeScoreBearingCardId | null {
+  return value === "lab5_bp_bmi_transport_research" || value === "lab9_bp_body_10y_acm_research"
+    ? value
+    : null;
+}
+
+function parseModelFeatures(value: unknown): readonly MurphAgeModelFeature[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const features = value.map(parseModelFeatureArtifact);
+  return features.every((feature): feature is MurphAgeModelFeature => feature !== null)
+    ? features
+    : null;
+}
+
+function parseModelFeatureArtifact(value: unknown): MurphAgeModelFeature | null {
+  const feature = asPlainRecord(value);
+  if (!feature) return null;
+  switch (feature.kind) {
+    case "chronological-age":
+      return parseChronologicalAgeFeature(feature);
+    case "sex":
+      return parseSexFeature(feature);
+    case "metric":
+      return parseMetricFeature(feature);
+    default:
+      return null;
+  }
+}
+
+function parseChronologicalAgeFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "coefficient",
+    "key",
+    "kind",
+    "label",
+    "moduleId",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  if (!base) return null;
+  return { ...base, kind: "chronological-age" };
+}
+
+function parseSexFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "coefficient",
+    "key",
+    "kind",
+    "label",
+    "moduleId",
+    "sex",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  const sex = parseMurphAgeSex(feature.sex);
+  if (!base || !sex) return null;
+  return { ...base, kind: "sex", sex };
+}
+
+function parseMetricFeature(feature: Record<string, unknown>): MurphAgeModelFeature | null {
+  if (!recordHasOnlyKeys(feature, [
+    "biomarkerKey",
+    "coefficient",
+    "expectedUnit",
+    "key",
+    "kind",
+    "label",
+    "metricKey",
+    "moduleId",
+    "required",
+    "selectionPolicy",
+    "transform",
+  ])) {
+    return null;
+  }
+  const base = parseFeatureBase(feature);
+  const metricKey = parseNonEmptyString(feature.metricKey);
+  const biomarkerKey = parseOptionalNonEmptyString(feature.biomarkerKey);
+  const expectedUnit = parseOptionalNonEmptyString(feature.expectedUnit);
+  const required = parseOptionalBoolean(feature.required);
+  const selectionPolicy = parseOptionalMetricSelectionPolicy(feature.selectionPolicy);
+  if (
+    !base ||
+    metricKey === null ||
+    biomarkerKey === null ||
+    expectedUnit === null ||
+    required === null ||
+    selectionPolicy === null
+  ) {
+    return null;
+  }
+
+  const parsed: MurphAgeModelFeature & { kind: "metric" } = {
+    ...base,
+    kind: "metric",
+    metricKey,
+  };
+  if (biomarkerKey !== undefined) parsed.biomarkerKey = biomarkerKey;
+  if (expectedUnit !== undefined) parsed.expectedUnit = expectedUnit;
+  if (required !== undefined) parsed.required = required;
+  if (selectionPolicy !== undefined) parsed.selectionPolicy = selectionPolicy;
+  return parsed;
+}
+
+function parseFeatureBase(feature: Record<string, unknown>): MurphAgeModelFeatureBase | null {
+  const coefficient = parseFiniteNumber(feature.coefficient);
+  const key = parseNonEmptyString(feature.key);
+  const label = parseNonEmptyString(feature.label);
+  const moduleId = parseOptionalNonEmptyString(feature.moduleId);
+  const transform = parseOptionalFeatureTransform(feature.transform);
+  if (coefficient === null || key === null || label === null || moduleId === null || transform === null) {
+    return null;
+  }
+  const base: MurphAgeModelFeatureBase = { coefficient, key, label };
+  if (moduleId !== undefined) base.moduleId = moduleId;
+  if (transform !== undefined) base.transform = transform;
+  return base;
+}
+
+function parseOptionalFeatureTransform(value: unknown): MurphAgeFeatureTransform | undefined | null {
+  if (value === undefined) return undefined;
+  const transform = asPlainRecord(value);
+  if (!transform) return null;
+  switch (transform.kind) {
+    case "identity":
+      return recordHasOnlyKeys(transform, ["kind"]) ? { kind: "identity" } : null;
+    case "ln": {
+      if (!recordHasOnlyKeys(transform, ["kind", "offset"])) return null;
+      const offset = parseOptionalFiniteNumber(transform.offset);
+      if (offset === null) return null;
+      return offset === undefined ? { kind: "ln" } : { kind: "ln", offset };
+    }
+    case "z-score":
+      return parseZScoreTransform(transform);
+    default:
+      return null;
+  }
+}
+
+function parseZScoreTransform(transform: Record<string, unknown>): MurphAgeFeatureTransform | null {
+  if (!recordHasOnlyKeys(transform, ["clamp", "kind", "mean", "standardDeviation"])) return null;
+  const mean = parseFiniteNumber(transform.mean);
+  const standardDeviation = parsePositiveFiniteNumber(transform.standardDeviation);
+  const clamp = parseOptionalClamp(transform.clamp);
+  if (mean === null || standardDeviation === null || clamp === null) return null;
+  const parsed: MurphAgeFeatureTransform = { kind: "z-score", mean, standardDeviation };
+  if (clamp !== undefined) parsed.clamp = clamp;
+  return parsed;
+}
+
+function parseOptionalClamp(value: unknown): { max?: number; min?: number } | undefined | null {
+  if (value === undefined) return undefined;
+  const clamp = asPlainRecord(value);
+  if (!clamp || !recordHasOnlyKeys(clamp, ["max", "min"])) return null;
+  const max = parseOptionalFiniteNumber(clamp.max);
+  const min = parseOptionalFiniteNumber(clamp.min);
+  if (max === null || min === null) return null;
+  const parsed: { max?: number; min?: number } = {};
+  if (max !== undefined) parsed.max = max;
+  if (min !== undefined) parsed.min = min;
+  return parsed;
+}
+
+function parseOptionalMetricSelectionPolicy(value: unknown): MetricSelectionPolicy | undefined | null {
+  if (value === undefined) return undefined;
+  const policy = asPlainRecord(value);
+  if (!policy) return null;
+  switch (policy.kind) {
+    case "latest-valid":
+      return parseLatestValidPolicy(policy);
+    case "latest-lab":
+      return parseLatestLabPolicy(policy);
+    case "daily-aggregate":
+      return parseDailyAggregatePolicy(policy);
+    case "latest-device-estimate":
+      return parseLatestDeviceEstimatePolicy(policy);
+    case "qualified-latest":
+      return parseQualifiedLatestPolicy(policy);
+    default:
+      return null;
+  }
+}
+
+function parseLatestValidPolicy(policy: Record<string, unknown>): MetricSelectionPolicy | null {
+  if (!recordHasOnlyKeys(policy, ["kind", "staleAfterDays"])) return null;
+  const staleAfterDays = parseOptionalPositiveFiniteNumber(policy.staleAfterDays);
+  if (staleAfterDays === null) return null;
+  return staleAfterDays === undefined ? { kind: "latest-valid" } : { kind: "latest-valid", staleAfterDays };
+}
+
+function parseLatestLabPolicy(policy: Record<string, unknown>): MetricSelectionPolicy | null {
+  if (!recordHasOnlyKeys(policy, ["kind", "preferCollectedAt", "preferFasting", "staleAfterDays"])) return null;
+  const staleAfterDays = parseOptionalPositiveFiniteNumber(policy.staleAfterDays);
+  const preferFasting = parseOptionalBoolean(policy.preferFasting);
+  if (staleAfterDays === null || preferFasting === null || policy.preferCollectedAt !== true) return null;
+  const parsed: MetricSelectionPolicy = { kind: "latest-lab", preferCollectedAt: true };
+  if (preferFasting !== undefined) parsed.preferFasting = preferFasting;
+  if (staleAfterDays !== undefined) parsed.staleAfterDays = staleAfterDays;
+  return parsed;
+}
+
+function parseDailyAggregatePolicy(policy: Record<string, unknown>): MetricSelectionPolicy | null {
+  if (!recordHasOnlyKeys(policy, [
+    "kind",
+    "latestWindowDays",
+    "minimumPoints",
+    "staleAfterDays",
+    "statistic",
+  ])) {
+    return null;
+  }
+  const statistic = parseDailyAggregateStatistic(policy.statistic);
+  const latestWindowDays = parseOptionalPositiveFiniteNumber(policy.latestWindowDays);
+  const minimumPoints = parseOptionalPositiveFiniteNumber(policy.minimumPoints);
+  const staleAfterDays = parseOptionalPositiveFiniteNumber(policy.staleAfterDays);
+  if (statistic === null || latestWindowDays === null || minimumPoints === null || staleAfterDays === null) {
+    return null;
+  }
+  const parsed: MetricSelectionPolicy = { kind: "daily-aggregate", statistic };
+  if (latestWindowDays !== undefined) parsed.latestWindowDays = latestWindowDays;
+  if (minimumPoints !== undefined) parsed.minimumPoints = minimumPoints;
+  if (staleAfterDays !== undefined) parsed.staleAfterDays = staleAfterDays;
+  return parsed;
+}
+
+function parseLatestDeviceEstimatePolicy(policy: Record<string, unknown>): MetricSelectionPolicy | null {
+  if (!recordHasOnlyKeys(policy, ["kind", "staleAfterDays"])) return null;
+  const staleAfterDays = parseOptionalPositiveFiniteNumber(policy.staleAfterDays);
+  if (staleAfterDays === null) return null;
+  return staleAfterDays === undefined
+    ? { kind: "latest-device-estimate" }
+    : { kind: "latest-device-estimate", staleAfterDays };
+}
+
+function parseQualifiedLatestPolicy(policy: Record<string, unknown>): MetricSelectionPolicy | null {
+  if (!recordHasOnlyKeys(policy, ["kind", "requiredQualifiers", "staleAfterDays"])) return null;
+  const requiredQualifiers = parseRequiredQualifiers(policy.requiredQualifiers);
+  const staleAfterDays = parseOptionalPositiveFiniteNumber(policy.staleAfterDays);
+  if (!requiredQualifiers || staleAfterDays === null) return null;
+  const parsed: MetricSelectionPolicy = { kind: "qualified-latest", requiredQualifiers };
+  if (staleAfterDays !== undefined) parsed.staleAfterDays = staleAfterDays;
+  return parsed;
+}
+
+function parseDailyAggregateStatistic(value: unknown): "count" | "max" | "mean" | "median" | "min" | "sum" | null {
+  return value === "count" || value === "max" || value === "mean" || value === "median" || value === "min" || value === "sum"
+    ? value
+    : null;
+}
+
+function parseRequiredQualifiers(value: unknown): Record<string, boolean | number | string> | null {
+  const qualifiers = asPlainRecord(value);
+  if (!qualifiers) return null;
+  const parsed: Record<string, boolean | number | string> = {};
+  for (const [key, qualifierValue] of Object.entries(qualifiers)) {
+    if (
+      typeof qualifierValue !== "string" &&
+      typeof qualifierValue !== "boolean" &&
+      !(typeof qualifierValue === "number" && Number.isFinite(qualifierValue))
+    ) {
+      return null;
+    }
+    parsed[key] = qualifierValue;
+  }
+  return parsed;
+}
+
+function parseReferenceRiskCurveArtifact(value: unknown): readonly MurphAgeReferenceRiskPoint[] | null {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const points = value.map((point) => {
+    const record = asPlainRecord(point);
+    if (!record || !recordHasOnlyKeys(record, ["ageYears", "riskProbability"])) return null;
+    const ageYears = parseFiniteNumber(record.ageYears);
+    const riskProbability = parseProbability(record.riskProbability);
+    return ageYears === null || riskProbability === null ? null : { ageYears, riskProbability };
+  });
+  return points.every((point): point is MurphAgeReferenceRiskPoint => point !== null)
+    ? points
+    : null;
+}
+
+function parseOptionalCalibration(value: unknown): MurphAgeRiskModel["calibration"] | undefined | null {
+  if (value === undefined) return undefined;
+  const calibration = asPlainRecord(value);
+  if (!calibration || !recordHasOnlyKeys(calibration, ["intercept", "slope"])) return null;
+  const intercept = parseFiniteNumber(calibration.intercept);
+  const slope = parseFiniteNumber(calibration.slope);
+  return intercept === null || slope === null ? null : { intercept, slope };
+}
+
+function parseOptionalUncertainty(value: unknown): MurphAgeRiskModel["uncertainty"] | undefined | null {
+  if (value === undefined) return undefined;
+  const uncertainty = asPlainRecord(value);
+  if (!uncertainty || !recordHasOnlyKeys(uncertainty, [
+    "baseYears",
+    "perLowConfidenceMetricYears",
+    "perMissingOptionalFeatureYears",
+  ])) {
+    return null;
+  }
+  const baseYears = parseOptionalNonnegativeFiniteNumber(uncertainty.baseYears);
+  const perLowConfidenceMetricYears = parseOptionalNonnegativeFiniteNumber(uncertainty.perLowConfidenceMetricYears);
+  const perMissingOptionalFeatureYears = parseOptionalNonnegativeFiniteNumber(uncertainty.perMissingOptionalFeatureYears);
+  if (
+    baseYears === null ||
+    perLowConfidenceMetricYears === null ||
+    perMissingOptionalFeatureYears === null
+  ) {
+    return null;
+  }
+  const parsed: NonNullable<MurphAgeRiskModel["uncertainty"]> = {};
+  if (baseYears !== undefined) parsed.baseYears = baseYears;
+  if (perLowConfidenceMetricYears !== undefined) {
+    parsed.perLowConfidenceMetricYears = perLowConfidenceMetricYears;
+  }
+  if (perMissingOptionalFeatureYears !== undefined) {
+    parsed.perMissingOptionalFeatureYears = perMissingOptionalFeatureYears;
+  }
+  return parsed;
+}
+
+function parseMurphAgeSex(value: unknown): MurphAgeSex | null {
+  return value === "female" || value === "male" ? value : null;
+}
+
+function parseNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function parseOptionalNonEmptyString(value: unknown): string | undefined | null {
+  return value === undefined ? undefined : parseNonEmptyString(value);
+}
+
+function parseOptionalStringArray(value: unknown): readonly string[] | undefined | null {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+  return value.every((item): item is string => typeof item === "string" && item.length > 0)
+    ? value
+    : null;
+}
+
+function parseFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseOptionalFiniteNumber(value: unknown): number | undefined | null {
+  return value === undefined ? undefined : parseFiniteNumber(value);
+}
+
+function parsePositiveFiniteNumber(value: unknown): number | null {
+  const number = parseFiniteNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function parseOptionalPositiveFiniteNumber(value: unknown): number | undefined | null {
+  return value === undefined ? undefined : parsePositiveFiniteNumber(value);
+}
+
+function parseOptionalNonnegativeFiniteNumber(value: unknown): number | undefined | null {
+  if (value === undefined) return undefined;
+  const number = parseFiniteNumber(value);
+  return number !== null && number >= 0 ? number : null;
+}
+
+function parseProbability(value: unknown): number | null {
+  const number = parseFiniteNumber(value);
+  return number !== null && number >= 0 && number <= 1 ? number : null;
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined | null {
+  return value === undefined ? undefined : typeof value === "boolean" ? value : null;
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function recordHasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(record).every((key) => allowed.has(key));
 }
 
 function invalidModelWarning(message: string, feature?: MurphAgeModelFeature): MurphAgeWarning {

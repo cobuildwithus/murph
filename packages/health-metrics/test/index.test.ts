@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
@@ -29,6 +30,8 @@ import {
   normalizeUnit,
   normalizeMetricValue,
   mapRiskToReferenceAge,
+  parseMurphAgeLocalModelCardArtifact,
+  parseMurphAgeRiskModelArtifact,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
   resolveMurphAgeModelCardPolicy,
@@ -43,6 +46,7 @@ import {
   summarizeMurphAgeCalculatorPublicOutput,
   toPublicMurphAgeCalculatorReport,
   toPublicMurphAgeDisplaySummary,
+  validateMurphAgeLocalModelCardArtifactPolicy,
   validateMurphAgeRiskModel,
   type GoalMetricTarget,
   type MetricPoint,
@@ -3257,6 +3261,71 @@ test("Murph Age calculator abstains on invalid external model parameters", () =>
       },
     ],
   }).status, "invalid");
+});
+
+test("Murph Age model-card artifact parser and policy validator stay with model ownership", () => {
+  const validArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "lab9_bp_body_10y_acm_research",
+    ignoredTopLevelMetadata: "local-only note",
+    model: fixtureLab9ResearchModel(),
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+
+  assert.equal(validArtifact.warnings.length, 0);
+  assert.ok(validArtifact.value);
+  assert.equal(validArtifact.value?.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(validArtifact.value?.model.modelId, "fixture-lab9-research-card-model");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(validArtifact.value, "ignoredTopLevelMetadata"),
+    false,
+  );
+  assert.equal(validateMurphAgeLocalModelCardArtifactPolicy(validArtifact.value).length, 0);
+
+  const invalidSchema = parseMurphAgeLocalModelCardArtifact({ schemaVersion: "wrong" });
+  assert.equal(invalidSchema.value, null);
+  assert.equal(invalidSchema.warnings[0]?.code, "INVALID_INPUT");
+  assert.equal(invalidSchema.warnings[0]?.message.includes("expected schema"), true);
+
+  const riskModelWithUnknownTopLevelKey = parseMurphAgeRiskModelArtifact({
+    ...fixtureLab9ResearchModel(),
+    unreviewedLocalNote: "should not be accepted inside the executable model",
+  });
+  assert.equal(riskModelWithUnknownTopLevelKey, null);
+
+  const riskModelWithUnknownFeatureKey = parseMurphAgeRiskModelArtifact({
+    ...fixtureLab9ResearchModel(),
+    features: [
+      {
+        ...fixtureLab9ResearchModel().features[0],
+        unreviewedFeatureNote: "should not be accepted inside the executable feature",
+      },
+    ],
+  });
+  assert.equal(riskModelWithUnknownFeatureKey, null);
+
+  const unauthorizedArtifact = parseMurphAgeLocalModelCardArtifact({
+    cardId: "lab9_bp_body_10y_acm_research",
+    model: {
+      ...fixtureLab9ResearchModel(),
+      features: [
+        ...fixtureLab9ResearchModel().features,
+        {
+          coefficient: -0.1,
+          key: "steps",
+          kind: "metric",
+          label: "Steps",
+          metricKey: "steps",
+          moduleId: "activity",
+        },
+      ],
+      modelId: "fixture-lab9-invalid-wearable-model",
+    },
+    schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  });
+  assert.ok(unauthorizedArtifact.value);
+  const warnings = validateMurphAgeLocalModelCardArtifactPolicy(unauthorizedArtifact.value);
+  assert.equal(warnings.some((warning) => warning.code === "MODEL_CARD_POLICY_VIOLATION"), true);
+  assert.equal(warnings.some((warning) => warning.message.includes("Steps")), false);
 });
 
 test("Murph Age calculator abstains when required model features are missing or blocked", () => {

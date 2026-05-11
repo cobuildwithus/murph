@@ -72,6 +72,7 @@ import {
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
+  HostedWorkspaceAssistantPhaseInputAvailableError,
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
@@ -726,6 +727,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (error instanceof HostedForegroundInputAvailableError) {
       return {
         ...(error.nextWakeAt === undefined ? {} : { nextWakeAt: error.nextWakeAt }),
+        status: "scheduled",
+      };
+    }
+    if (error instanceof HostedWorkspaceAssistantPhaseInputAvailableError) {
+      return {
+        nextWakeAt: error.nextWakeAt,
         status: "scheduled",
       };
     }

@@ -805,7 +805,7 @@ export class HostedUserRunner {
         inputAvailable: true,
         nextAlarmAt: instruction.nextWakeAt,
         ok: true,
-        pendingNudge: instruction.record.pendingNudge,
+        pendingNudge: instruction.record.pendingWork,
       };
     }
 
@@ -816,7 +816,7 @@ export class HostedUserRunner {
       inputAvailable: false,
       nextAlarmAt: instruction.record.nextWakeAt,
       ok: true,
-      pendingNudge: false,
+      pendingNudge: instruction.record.pendingWork,
     };
   }
 
@@ -2606,15 +2606,44 @@ export class HostedUserRunner {
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: input.preferredWakeAt,
     });
+    const destroyAttempted = await this.destroyRunnerContainerAfterIdleCheckpointBestEffort({
+      userId: input.userId,
+    });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        destroyAttempted: false,
+        destroyAttempted,
       },
-      message: "Hosted runner completed idle-shutdown checkpoint cleanup without container destroy.",
+      message: "Hosted runner completed idle-shutdown checkpoint cleanup.",
       phase: "checkpoint",
       userId: input.userId,
     });
+  }
+
+  private async destroyRunnerContainerAfterIdleCheckpointBestEffort(input: {
+    userId: string;
+  }): Promise<boolean> {
+    if (!this.runnerContainerNamespace) {
+      return false;
+    }
+
+    try {
+      await this.runnerContainerNamespace.getByName(resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.userId,
+      })).destroyInstance();
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        error,
+        level: "warn",
+        message: "Hosted runner could not destroy idle-shutdown checkpoint container after cleanup.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+      return true;
+    }
   }
 
   private async scheduleHostedWakeRetryAlarm(input: {
