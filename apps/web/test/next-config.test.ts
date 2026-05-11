@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -145,6 +146,16 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.equal(productionNextConfig.typescript, undefined);
+});
+
+test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
+  const source = readFileSync(
+    path.join(repoRoot, "apps/web/src/lib/hosted-execution/runtime-issues.ts"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /from ["']@murphai\/runtime-state\/node["']/u);
+  assert.match(source, /from ["']@murphai\/runtime-state\/node\/assistant-runtime-issues["']/u);
 });
 
 test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops", () => {

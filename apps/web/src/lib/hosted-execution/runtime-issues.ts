@@ -5,7 +5,7 @@ import {
 import {
   parseAssistantRuntimeIssueRecord,
   type AssistantRuntimeIssueRecord,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/assistant-runtime-issues";
 
 import { getPrisma } from "../prisma";
 
