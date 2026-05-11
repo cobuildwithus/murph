@@ -1,6 +1,6 @@
 # Murph Age promotion evidence tier
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -60,3 +60,4 @@ Updated: 2026-05-11
   - `pnpm test:smoke`
 - Expected outcomes:
   - All commands pass or any unrelated pre-existing failures are documented with scoped evidence.
+Completed: 2026-05-11
