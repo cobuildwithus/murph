@@ -37,8 +37,8 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const productionLikeAssistantModel = "gpt-5.5";
-const localIdleShutdownCheckpointSafetyMarginMs = "60000";
-const localRunnerIdleTtlMs = "600000";
+const localIdleShutdownCheckpointSafetyMarginMs = "2000";
+const localRunnerIdleTtlMs = "6000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";

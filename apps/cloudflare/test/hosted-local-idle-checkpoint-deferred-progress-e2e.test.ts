@@ -74,9 +74,11 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expect(activationCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectMailboxLagDrained(activationCompletionStatus);
     const activationCompletionWorkspaceVersion = requireWorkspaceVersion(activationCompletionStatus);
-    const activationStatus = await waitForIdleShutdownCheckpoint({
-      previousWorkspaceVersion: activationCompletionWorkspaceVersion,
-    });
+    const activationStatus = hasIdleShutdownSnapshotLog(activationCompletionStatus.recentLogs ?? [])
+      ? activationCompletionStatus
+      : await waitForIdleShutdownCheckpoint({
+          previousWorkspaceVersion: activationCompletionWorkspaceVersion,
+        });
     expectWorkspaceBaseOnly(activationStatus);
     const activationWorkspaceVersion = requireWorkspaceVersion(activationStatus);
 

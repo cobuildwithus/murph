@@ -30,8 +30,8 @@ describe("HostedUserRunner status", () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("reports mailbox lag with deferred checkpoint overlay", async () => {
-    const { runner, sql } = createRunnerStatusHarness();
+  it("reports mailbox lag from the hosted runtime status", async () => {
+    const { runner } = createRunnerStatusHarness();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
       boundUserId?: string;
       path: string;
@@ -58,25 +58,12 @@ describe("HostedUserRunner status", () => {
       });
     });
     await runner.bindUser("member_123");
-    sql.exec(
-      `UPDATE runner_meta
-       SET deferred_checkpoint_required = 1,
-           deferred_checkpoint_mailbox_status_json = ?
-       WHERE user_id = ?`,
-      JSON.stringify({
-        importedConversationSeq: "999",
-        hostedMailboxConversationImportedSeq: "0",
-        hostedMailboxSystemImportedSeq: "2",
-        systemImportedSeq: "999",
-      }),
-      "member_123",
-    );
 
     await expect(runner.runnerStatus()).resolves.toMatchObject({
       mailboxLag: [
         {
-          importedSeq: "2",
-          lag: "0",
+          importedSeq: "0",
+          lag: "2",
           lane: "system",
           maxSeq: "2",
         },
@@ -92,8 +79,8 @@ describe("HostedUserRunner status", () => {
     });
   });
 
-  it("reports workspace mailbox status with deferred checkpoint overlay", async () => {
-    const { runner, sql } = createRunnerStatusHarness();
+  it("reports workspace mailbox status from the hosted runtime status", async () => {
+    const { runner } = createRunnerStatusHarness();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async (input: {
       boundUserId?: string;
       path: string;
@@ -126,17 +113,6 @@ describe("HostedUserRunner status", () => {
       });
     });
     await runner.bindUser("member_123");
-    sql.exec(
-      `UPDATE runner_meta
-       SET deferred_checkpoint_required = 1,
-           deferred_checkpoint_mailbox_status_json = ?
-       WHERE user_id = ?`,
-      JSON.stringify({
-        hostedMailboxConversationImportedSeq: "586",
-        hostedMailboxSystemImportedSeq: "0",
-      }),
-      "member_123",
-    );
 
     await expect(runner.runnerStatus()).resolves.toMatchObject({
       mailboxLag: [
@@ -147,8 +123,8 @@ describe("HostedUserRunner status", () => {
           maxSeq: "1",
         },
         {
-          importedSeq: "586",
-          lag: "0",
+          importedSeq: "585",
+          lag: "1",
           lane: "conversation",
           maxSeq: "586",
         },
@@ -156,7 +132,7 @@ describe("HostedUserRunner status", () => {
       userId: "member_123",
       workspace: {
         redactedStatus: {
-          hostedMailboxConversationImportedSeq: "586",
+          hostedMailboxConversationImportedSeq: "585",
           hostedMailboxSystemImportedSeq: "1",
           hostedRuntimeOtherStatus: "preserved",
         },

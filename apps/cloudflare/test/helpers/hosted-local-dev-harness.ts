@@ -20,6 +20,7 @@ import {
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusPollIntervalMs = 250;
 const hostedLocalNudgeTimeoutMs = 2_000;
+const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
 
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -211,6 +212,7 @@ export async function startHostedLocalDevHarness(input: {
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
         let nextRecoveryNudgeAt = startedAt;
+        let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
 
         while ((Date.now() - startedAt) < timeoutMs) {
@@ -239,10 +241,18 @@ export async function startHostedLocalDevHarness(input: {
           }
 
           const now = Date.now();
+          const hasMailboxLag = hostedStatusHasMailboxLag(status);
+          mailboxLagFirstObservedAt = hasMailboxLag
+            ? mailboxLagFirstObservedAt ?? now
+            : null;
           if (
             now >= nextRecoveryNudgeAt
             && (
-              hostedStatusHasMailboxLag(status)
+              hostedStatusHasRecoverableMailboxLag({
+                firstObservedAt: mailboxLagFirstObservedAt,
+                now,
+                status,
+              })
               || hostedStatusHasDueScheduledRecovery(status, now)
             )
           ) {
@@ -403,6 +413,26 @@ function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean 
       return lane.lag !== "0";
     }
   });
+}
+
+function hostedStatusHasRecoverableMailboxLag(input: {
+  firstObservedAt: number | null;
+  now: number;
+  status: HostedRunnerStatusResponse;
+}): boolean {
+  if (!hostedStatusHasMailboxLag(input.status)) {
+    return false;
+  }
+
+  if (input.status.lastErrorCode) {
+    return true;
+  }
+
+  if (input.firstObservedAt === null) {
+    return false;
+  }
+
+  return input.now - input.firstObservedAt >= hostedLocalMailboxLagRecoveryNudgeAfterMs;
 }
 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {

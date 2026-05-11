@@ -483,7 +483,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("preserves local internal proxy heartbeat liveness when the body is absent", async () => {
+  it("keeps the legacy active-invocation heartbeat unavailable through the local internal proxy", async () => {
     installOidcJwksFetch();
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
       inputAvailable: true,
@@ -513,18 +513,11 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
-      ok: true,
-      pendingNudge: true,
+      error: "Not found",
     });
-    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
-      attemptId: "attempt_current",
-      leaseGeneration: "9",
-      userId: "member_123",
-    });
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
   });
 
   it("checks local internal proxy tokens against the version-scoped runner container", async () => {
@@ -591,10 +584,8 @@ describe("cloudflare worker routes", () => {
         leaseGeneration?: string;
         token: string;
       }): Promise<boolean> {
-        return input.token === RUNNER_PROXY_TOKEN && (
-          input.leaseGeneration === undefined
-          || input.leaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION
-        );
+        return input.token === RUNNER_PROXY_TOKEN
+          && input.leaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION;
       },
       async smokeHealth() {
         return {

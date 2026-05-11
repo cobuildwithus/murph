@@ -50,6 +50,7 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
+  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -452,6 +453,21 @@ export class HostedUserRunner {
     return await started;
   }
 
+  async runUntilIdleForTest(input: {
+    reason: HostedWorkspaceInvocationReason;
+    userId: string;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.markWakePending({
+      preferredWakeAt: new Date().toISOString(),
+      resetRetry: true,
+    });
+    await this.syncAlarm(record);
+    return await this.runUntilIdleOrBudget({
+      reason: input.reason,
+    });
+  }
+
   async startStuckInvocationForTest(input: {
     reason?: HostedWorkspaceInvocationReason;
     userId: string;
@@ -582,7 +598,8 @@ export class HostedUserRunner {
         finishedAt: new Date().toISOString(),
         token,
       });
-      await this.scheduleAfterRuntimeWake({
+      await this.scheduleAfterRuntimeWake({ result });
+      this.scheduleDeferredIdleCheckpointIfNeeded({
         result,
         userId: initialRecord.userId,
         workspaceVersion,
@@ -641,15 +658,112 @@ export class HostedUserRunner {
 
   private async scheduleAfterRuntimeWake(input: {
     result: HostedWorkspaceInvocationResult;
-    userId: string;
-    workspaceVersion: string;
   }): Promise<void> {
-    void input.userId;
-    void input.workspaceVersion;
     await this.stateStore.scheduleNextWake({
       nextWakeAt: input.result.nextWakeAt ?? null,
     });
     await this.syncAlarm(await this.stateStore.readState());
+  }
+
+  private scheduleDeferredIdleCheckpointIfNeeded(input: {
+    result: HostedWorkspaceInvocationResult;
+    userId: string;
+    workspaceVersion: string;
+  }): void {
+    if (
+      input.result.deferredCheckpointRequired !== true
+      || input.result.status === "failed"
+    ) {
+      return;
+    }
+
+    const task = Promise.resolve()
+      .then(async () => {
+        await this.runDeferredIdleCheckpointBestEffort(input);
+      })
+      .catch((error: unknown) => {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            checkpointNextWakePresent: input.result.nextWakeAt !== null,
+            workspaceVersion: input.workspaceVersion,
+          },
+          level: "warn",
+          message: "Hosted runner deferred idle-shutdown checkpoint failed best-effort.",
+          phase: "failed",
+          userId: input.userId,
+        });
+      });
+
+    try {
+      this.state.waitUntil?.(task);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted runner could not register deferred idle-shutdown checkpoint with waitUntil.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+    }
+  }
+
+  private async runDeferredIdleCheckpointBestEffort(input: {
+    result: HostedWorkspaceInvocationResult;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<void> {
+    let token: RunnerWriteFenceToken | null = null;
+    let nextWakeAt = input.result.nextWakeAt ?? null;
+
+    try {
+      token = await this.stateStore.beginWriteFence({
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+        kind: "idle_checkpoint",
+        reason: "idle_shutdown_checkpoint",
+        userId: input.userId,
+      });
+      token = await this.stateStore.bindWriteFenceWorkspaceVersion({
+        token,
+        workspaceVersion: input.workspaceVersion,
+      });
+
+      const result = await this.invokeWorkspaceRunner({
+        checkpointNextWakeAt: nextWakeAt,
+        mode: "warm-idle-checkpoint",
+        reason: "idle_shutdown_checkpoint",
+        token,
+        userId: input.userId,
+        workspaceVersion: input.workspaceVersion,
+      });
+      nextWakeAt = result.nextWakeAt ?? nextWakeAt;
+
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          idleShutdownCheckpointed: Boolean(result.idleShutdownCheckpointed),
+          idleShutdownCheckpointSkipped: result.idleShutdownCheckpointSkipped ?? null,
+          workspaceAttemptId: token.attemptId,
+          workspaceVersion: input.workspaceVersion,
+        },
+        message: "Hosted runner completed deferred idle-shutdown checkpoint.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    } finally {
+      if (!token) {
+        return;
+      }
+
+      await this.finishIdleCheckpointLease({
+        attemptId: token.attemptId,
+        generation: token.generation,
+        nextWakeAt,
+        userId: input.userId,
+      });
+    }
   }
 
   async finishIdleShutdownCheckpoint(input: {
@@ -664,6 +778,8 @@ export class HostedUserRunner {
   }
 
   private async invokeWorkspaceRunner(input: {
+    checkpointNextWakeAt?: string | null;
+    mode?: "warm-idle-checkpoint";
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -691,6 +807,9 @@ export class HostedUserRunner {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.token.attemptId,
+        ...(input.reason === "idle_shutdown_checkpoint"
+          ? { checkpointNextWakeAt: input.checkpointNextWakeAt ?? null }
+          : {}),
         leaseGeneration: input.token.generation,
         reason: input.reason,
         userId: input.userId,
@@ -718,13 +837,18 @@ export class HostedUserRunner {
         workspaceWriteFenceGeneration: input.token.generation,
         workspaceReason: input.reason,
         workspaceVersion: input.workspaceVersion,
+        warmOnly: input.mode === "warm-idle-checkpoint",
       },
       message: "Hosted runner prepared workspace invocation.",
       phase: "wake.running",
       userId: input.userId,
     });
 
-    return await invokeHostedExecutionContainerRunner({
+    const invokeContainerRunner = input.mode === "warm-idle-checkpoint"
+      ? invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm
+      : invokeHostedExecutionContainerRunner;
+
+    return await invokeContainerRunner({
       job,
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,

@@ -146,6 +146,7 @@ interface RunnerActiveOperationRecord {
 interface RunnerPendingIdleCheckpoint {
   checkpointNextWakeAt: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
+  leaseBeginFailures: number;
   timeoutMs: number;
   userId: string;
   workspaceVersion: string;
@@ -168,6 +169,10 @@ interface RunnerContainerUserRunnerStubLike {
     userId: string;
   }): Promise<{ completed: boolean }>;
 }
+
+const MAX_IDLE_CHECKPOINT_LEASE_BEGIN_FAILURES = 3;
+
+type RunnerPendingIdleCheckpointOutcome = "completed" | "retry";
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -300,9 +305,26 @@ export class RunnerContainer extends Container {
       }
 
       const pendingIdleCheckpoint = this.pendingIdleCheckpoint;
+      let deferFallbackCleanup = false;
       try {
         if (pendingIdleCheckpoint) {
-          await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+          const outcome = await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+          if (outcome === "retry") {
+            deferFallbackCleanup = true;
+            this.noteRunnerActivity("idle-checkpoint-lease-retry");
+            emitHostedExecutionStructuredLog({
+              component: "container",
+              details: {
+                idleCheckpointLeaseBeginFailures:
+                  pendingIdleCheckpoint.leaseBeginFailures,
+                lifecycleStage: "activity-expired-idle-checkpoint-lease-retry",
+              },
+              level: "warn",
+              message: "Hosted execution container deferred fallback cleanup after idle-shutdown checkpoint lease acquisition failed.",
+              phase: "container.ready",
+              userId: pendingIdleCheckpoint.userId,
+            });
+          }
         }
       } catch (error) {
         this.pendingIdleCheckpoint = null;
@@ -315,6 +337,9 @@ export class RunnerContainer extends Container {
           userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
         });
       } finally {
+        if (deferFallbackCleanup) {
+          return;
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -609,8 +634,12 @@ export class RunnerContainer extends Container {
   }): void {
     if (
       input.input.job.kind !== HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND
-      || input.input.job.request.reason === "idle_shutdown_checkpoint"
     ) {
+      return;
+    }
+
+    if (input.input.job.request.reason === "idle_shutdown_checkpoint") {
+      this.pendingIdleCheckpoint = null;
       return;
     }
 
@@ -621,6 +650,7 @@ export class RunnerContainer extends Container {
       this.pendingIdleCheckpoint = {
         checkpointNextWakeAt: input.result.nextWakeAt ?? null,
         job: input.input.job,
+        leaseBeginFailures: 0,
         timeoutMs: input.input.timeoutMs,
         userId: input.userId,
         workspaceVersion: input.input.job.request.workspaceVersion,
@@ -633,11 +663,11 @@ export class RunnerContainer extends Container {
 
   private async runPendingIdleCheckpoint(
     pending: RunnerPendingIdleCheckpoint,
-  ): Promise<void> {
+  ): Promise<RunnerPendingIdleCheckpointOutcome> {
     const runnerControlToken = this.runnerControlToken ?? await this.readRunnerControlToken();
     if (!runnerControlToken) {
       this.pendingIdleCheckpoint = null;
-      return;
+      return "completed";
     }
 
     let lease: {
@@ -647,21 +677,32 @@ export class RunnerContainer extends Container {
     try {
       lease = await this.beginIdleCheckpointLease(pending);
     } catch (error) {
-      this.pendingIdleCheckpoint = null;
+      pending.leaseBeginFailures += 1;
+      const retry =
+        pending.leaseBeginFailures <= MAX_IDLE_CHECKPOINT_LEASE_BEGIN_FAILURES;
+      if (!retry) {
+        this.pendingIdleCheckpoint = null;
+      }
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        details: {
+          ...buildRunnerContainerMetadataOnlyErrorDetails(error),
+          idleCheckpointLeaseBeginFailures:
+            retry ? pending.leaseBeginFailures : null,
+          idleCheckpointLeaseBeginRetryScheduled: retry,
+        },
         level: "warn",
         message: "Hosted execution container could not begin idle-shutdown checkpoint lease.",
         phase: "failed",
         userId: pending.userId,
       });
-      return;
+      return retry ? "retry" : "completed";
     }
     if (!lease) {
       this.pendingIdleCheckpoint = null;
-      return;
+      return "completed";
     }
+    pending.leaseBeginFailures = 0;
 
     let nextWakeAt = pending.checkpointNextWakeAt;
     try {
@@ -720,6 +761,7 @@ export class RunnerContainer extends Container {
         });
       });
     }
+    return "completed";
   }
 
   private async postRunnerRequest(input: {
