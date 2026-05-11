@@ -5,7 +5,16 @@ export type MetricConfidence = "none" | "low" | "medium" | "high";
 export type MetricGrain = "instant" | "event" | "day" | "week" | "month" | "window";
 export type MetricStatistic = "value" | "latest" | "mean" | "median" | "min" | "max" | "sum" | "count";
 export type MetricComparator = "<" | "<=" | ">" | ">=";
-export type MetricCategory = "activity" | "body" | "custom" | "fitness" | "lab" | "recovery" | "sleep" | "vital";
+export type MetricCategory =
+  | "activity"
+  | "body"
+  | "custom"
+  | "fitness"
+  | "function"
+  | "lab"
+  | "recovery"
+  | "sleep"
+  | "vital";
 export type MetricSourceFamily = "derived" | "event" | "sample";
 export type MetricSourceKind =
   | "activity-summary"

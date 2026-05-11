@@ -185,6 +185,7 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     insertMetricPoints(vaultRoot, [
       ...lab9BpBodyMetricPoints(),
       ...wearableContextMetricPoints(),
+      ...functionContextMetricPoints(),
     ]);
 
     const filters = metricPointFiltersForMurphAgeInputBundle("2026-05-10T00:00:00.000Z");
@@ -193,6 +194,7 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(filters.some((filter) => filter.metricKey === "albumin"), true);
     assert.equal(filters.some((filter) => filter.metricKey === "steps"), true);
     assert.equal(filters.some((filter) => filter.metricKey === "hrv-rmssd"), true);
+    assert.equal(filters.some((filter) => filter.metricKey === "adl-limitation-count"), true);
     assert.deepEqual(
       filters.map((filter) => filter.metricKey).sort(),
       [...listMurphAgeInputBundleMetricKeys()].sort(),
@@ -213,6 +215,7 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.authorization.productAuthorized, false);
     assert.equal(output.authorization.riskToAgeDisplayAuthorized, false);
     assert.equal(output.authorization.contextOnlyMetricKeys.includes("steps"), true);
+    assert.equal(output.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"), true);
     assert.equal(output.bundleAssessment.bundleId, "lab9-bp-body");
     assert.equal(output.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
     assert.equal(output.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
@@ -220,6 +223,11 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
     assert.equal(output.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), false);
     assert.equal(output.contextAssessments[0]?.bundleId, "wearable-context");
     assert.equal(output.contextAssessments[0]?.selectedPointIds.includes("metric-point:steps:2026-05-08:wearable:0"), true);
+    assert.equal(output.contextAssessments[1]?.bundleId, "function-context");
+    assert.equal(
+      output.contextAssessments[1]?.selectedPointIds.includes("metric-point:adl-limitation-count:2026-05-08:measurement:0"),
+      true,
+    );
 
     const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
       asOf: "2026-05-10T00:00:00.000Z",
@@ -238,6 +246,7 @@ test("calculateMurphAgeFromVaultInputBundle loads lab and wearable context but a
       true,
     );
     assert.equal(publicReport.displaySummary.wearableBridge.productAuthorized, false);
+    assert.equal(publicReport.inputReadiness.contextBundles.some((bundle) => bundle.bundleId === "function-context"), true);
     assert.equal(publicReport.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
     assert.equal(publicReport.warnings.some((warning) => "message" in warning), false);
     assert.equal("bundleAssessment" in publicReport, false);
@@ -1192,6 +1201,14 @@ function wearableContextMetricPoints(): MetricPoint[] {
     wearablePoint("steps", null, 10_000, "count"),
     wearablePoint("resting-heart-rate", "biomarker:resting-heart-rate", 62, "bpm"),
     wearablePoint("hrv-rmssd", "biomarker:hrv-rmssd", 48, "ms"),
+  ];
+}
+
+function functionContextMetricPoints(): MetricPoint[] {
+  return [
+    measurementPoint("adl-limitation-count", null, 0, "count"),
+    measurementPoint("iadl-limitation-count", null, 1, "count"),
+    measurementPoint("mobility-limitation-count", null, 1, "count"),
   ];
 }
 
