@@ -82,6 +82,10 @@ import { registerFoodCommands } from './commands/food.js'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
+import {
+  murphAgeReportResultSchema,
+  registerMurphAgeCommands,
+} from './commands/murph-age.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   knowledgeGetResultSchema as knowledgeShowResultSchema,
@@ -642,6 +646,24 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['model'],
     register({ cli }) {
       registerModelCommands(cli)
+    },
+  },
+  {
+    id: 'murph-age',
+    bindingMode: 'none',
+    rootCommandNames: ['age'],
+    leafCommands: [
+      {
+        path: ['age', 'report'],
+        description:
+          'Return the public Murph Age calculator report for labs, body metrics, and wearable context already present in the selected vault.',
+        hint:
+          'Product mode is the default and may return abstain while Murph Age remains research-only. Research mode is for local model development, not user-facing product claims.',
+        output: murphAgeReportResultSchema,
+      },
+    ],
+    register({ cli, services }) {
+      registerMurphAgeCommands(cli, services)
     },
   },
   {

@@ -1,6 +1,6 @@
 # Murph Age CLI report
 
-Status: active
+Status: completed
 Created: 2026-05-11
 Updated: 2026-05-11
 
@@ -19,7 +19,7 @@ Updated: 2026-05-11
 
 ## Scope
 
-- In scope: CLI command registration, command output schema, focused CLI tests, manifest metadata.
+- In scope: CLI command registration, command output schema, generated CLI schema/type metadata, focused CLI tests, manifest metadata.
 - Out of scope: new model science, new model-card authorization tiers, web UI, data importers, recommendation/protocol claims, and ReviewGPT gating for local command plumbing.
 
 ## Current evidence
@@ -42,3 +42,4 @@ Updated: 2026-05-11
 - CLI package coverage or truthful diff coverage.
 - `pnpm typecheck`, `pnpm test:smoke`, and `git diff --check`.
 - Required security/privacy, coverage, and final-review audits before closeout.
+Completed: 2026-05-11
