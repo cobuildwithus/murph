@@ -5,7 +5,6 @@ import type {
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
-import type { RuntimeLivenessInstruction } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -37,36 +36,15 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
    * Deletion target: 2026-05-23.
    */
   scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<unknown>;
-  ownsActiveInvocationLease(input: {
+  validateRuntimeWriteFence?(input: {
     attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
-  recordActiveInvocationHeartbeat(input: {
+  recordRuntimeWriteFenceWorkspaceCheckpoint?(input: {
     attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-  }): Promise<
-    | {
-      instruction: RuntimeLivenessInstruction;
-      inputAvailable?: boolean;
-      nextAlarmAt?: string | null;
-      ok: true;
-      pendingNudge?: boolean;
-    }
-    | {
-      ok: false;
-      reason:
-        | "no_active_invocation"
-        | "stale_attempt"
-        | "stale_generation"
-        | "wrong_user";
-    }
-  >;
-  recordActiveInvocationWorkspaceCheckpoint(input: {
-    attemptId: string;
-    leaseGeneration: string;
+    generation: string;
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;

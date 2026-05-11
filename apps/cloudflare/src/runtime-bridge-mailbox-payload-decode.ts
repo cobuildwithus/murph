@@ -12,7 +12,7 @@ import {
   parseHostedMailboxPayloadDecodeResponse,
 } from "./runtime-mailbox-payload-decode-contract.ts";
 import {
-  writeRunnerActiveInvocationLeaseHeaders,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/active-lease.ts";
 
 export function createCloudflareHostedMailboxPayloadDecoder(input: {
@@ -27,12 +27,12 @@ export function createCloudflareHostedMailboxPayloadDecoder(input: {
     async decode(decodeInput) {
       const lease = await input.readCurrentLease();
       if (!lease) {
-        throw new Error("Hosted mailbox payload decode requires an active invocation lease.");
+        throw new Error("Hosted mailbox payload decode requires a runtime write fence.");
       }
 
       const headers = new Headers();
       headers.set("content-type", "application/json; charset=utf-8");
-      writeRunnerActiveInvocationLeaseHeaders(headers, lease);
+      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
       const response = await input.fetchImpl(
         new URL(
           HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH.replace(/^\/+/u, ""),

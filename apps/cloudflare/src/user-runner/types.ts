@@ -1,5 +1,6 @@
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
+
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -36,9 +37,36 @@ export interface DurableObjectStateLike {
   waitUntil?(promise: Promise<unknown>): void;
 }
 
-export type RunnerAlarmKind = "work" | "idle_checkpoint";
+export type RunnerWriteFenceKind = "runtime" | "idle_checkpoint";
+
+export interface RunnerWriteFenceRecord {
+  attemptId: string;
+  expiresAt: string;
+  generation: number;
+  kind: RunnerWriteFenceKind;
+  startedAt: string;
+  workspaceVersion: string | null;
+}
+
+export interface RunnerIdleCheckpointRecord {
+  checkpointNextWakeAt: string | null;
+  dueAt: string;
+  workspaceVersion: string;
+}
+
+export interface RunnerRetryRecord {
+  at: string | null;
+  count: number;
+  lastErrorCode: string | null;
+}
 
 export interface RunnerStateRecord {
+  writeFence: RunnerWriteFenceRecord | null;
+  activeRun: RunnerWriteFenceRecord | null;
+  /**
+   * Legacy projection for deployed/test callers that still ask whether any
+   * write-fenced invocation exists. New scheduling code uses `writeFence`.
+   */
   active: {
     attemptId: string;
     expiresAt: string;
@@ -47,39 +75,29 @@ export interface RunnerStateRecord {
     startedAt: string;
     workspaceVersion: string | null;
   } | null;
-  alarm: {
-    checkpointNextWakeAt: string | null;
-    dueAt: string;
-    kind: RunnerAlarmKind;
-    workspaceVersion: string | null;
-  } | null;
   bundleRef: HostedExecutionBundleRef | null;
+  deferredCheckpointRequired: boolean;
+  deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
+  idleCheckpoint: RunnerIdleCheckpointRecord | null;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
-  pendingWork: boolean;
-  retry: {
-    count: number;
-    lastErrorAt: string | null;
-    lastErrorCode: string | null;
-  };
-  schema: "murph.hosted-runner.v2";
-  deferredCheckpointRequired: boolean;
-  deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
-  idleShutdownCheckpointDueAt: string | null;
-  idleShutdownCheckpointWorkspaceVersion: string | null;
   leaseGeneration: number;
   nextWakeAt: string | null;
   pendingNudge: boolean;
   pendingNudgeGeneration: number;
+  pendingWork: boolean;
+  retry: RunnerRetryRecord;
   retryFailureCount: number;
+  schema: "murph.hosted-runner.v3";
   userId: string;
+  wakePending: boolean;
   workspaceInvocation: {
     attemptId: string;
-    lastHeartbeatAt: string | null;
-    orphanObservedAt: string | null;
+    lastHeartbeatAt: null;
+    orphanObservedAt: null;
     reason: string | null;
     startedAt: string;
     workspaceVersion: string | null;

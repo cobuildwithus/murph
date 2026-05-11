@@ -43,20 +43,14 @@ export type {
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
-export type {
-  RuntimeLivenessInstruction,
-  RuntimeLivenessPort,
-  RuntimeLivenessRejectionReason,
-  RuntimeLivenessTouchResult,
-} from "./hosted-runtime/liveness.ts";
 export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
-  RUNTIME_LIVENESS_DEFAULT_INTERVAL_MS,
   RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
+  type RuntimeLivenessPort,
 } from "./hosted-runtime/liveness.ts";
 export {
   parseHostedRuntimeIssueRecordResponse,

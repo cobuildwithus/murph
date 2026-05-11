@@ -13,9 +13,13 @@ import {
   createMurphAgeAbstainedAuthorization,
   createMurphAgeCustomModelAuthorization,
   isMurphAgeInputBundleMetricPointAllowed,
+  isMurphAgeModelCardProductAuthorized,
+  isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeInputBundleMetricKeys,
   normalizeMetricValue,
   parseMurphAgeLocalModelCardArtifact,
+  resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
   summarizeMurphAgeCalculatorPublicOutput,
   toPublicMurphAgeCalculatorReport,
@@ -34,6 +38,7 @@ import {
   type MurphAgePublicCalculatorReport,
   type MurphAgePublicDisplaySummary,
   type MurphAgeModelFeature,
+  type MurphAgeProductPromotionBlocker,
   type MurphAgeResult,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
@@ -85,12 +90,39 @@ export type MurphAgeInputBundleReadiness = Omit<
   warnings: MurphAgeInputReadinessWarning[];
 };
 export type MurphAgeWearableBridgeInputReadiness = MurphAgePublicDisplaySummary["wearableBridge"];
+export type MurphAgeInputScoreReadinessStatus =
+  | "context-only"
+  | "input-incomplete"
+  | "product-age-ready"
+  | "product-risk-ready"
+  | "research-ready-product-blocked";
+export type MurphAgeInputProductBlockedReason =
+  | "CONTEXT_ONLY_NOT_SCORE_BEARING"
+  | "INPUT_BUNDLE_INCOMPLETE"
+  | MurphAgeProductPromotionBlocker;
+
+export interface MurphAgeInputScoreReadiness {
+  bundleId: MurphAgeInputBundleReadiness["bundleId"];
+  contextOnly: boolean;
+  inputReady: boolean;
+  productAgeReady: boolean;
+  productBlockedReasons: MurphAgeInputProductBlockedReason[];
+  productPromotionBlockers: MurphAgeProductPromotionBlocker[];
+  productRiskReady: boolean;
+  recommendedCardId: MurphAgeInputBundleReadiness["recommendedCardId"];
+  researchModelCardRequired: boolean;
+  researchReadiness: "context-only" | "input-incomplete" | "ready-if-local-model-card-loaded";
+  researchUsableIfModelLoaded: boolean;
+  scoreBearingInput: boolean;
+  status: MurphAgeInputScoreReadinessStatus;
+}
 
 export interface MurphAgeInputReadinessForVault {
   bundle: MurphAgeInputBundleReadiness;
   contextBundles: MurphAgeInputBundleReadiness[];
   runtimeInputs: MurphAgeRuntimeInputReadiness[];
-  schemaVersion: "murph.age.input-readiness.v3";
+  schemaVersion: "murph.age.input-readiness.v4";
+  scoreReadiness: MurphAgeInputScoreReadiness;
   wearableBridge: MurphAgeWearableBridgeInputReadiness;
 }
 
@@ -248,7 +280,20 @@ export async function assessMurphAgeInputReadinessFromVault(
       },
       contextBundles: [],
       runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-      schemaVersion: "murph.age.input-readiness.v3",
+      schemaVersion: "murph.age.input-readiness.v4",
+      scoreReadiness: buildMurphAgeInputScoreReadiness({
+        availableFeatureKeys: [],
+        bundleId: "insufficient",
+        featureStatuses: [],
+        missingFeatureKeys: [],
+        recommendedCardId: "none",
+        schemaVersion: MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
+        selectedMetricKeys: [],
+        status: "abstain",
+        warnings: [{
+          code: "INVALID_INPUT",
+        }],
+      }),
       wearableBridge: buildMurphAgeWearableBridgeReadiness({
         asOf: "1970-01-01T00:00:00.000Z",
         points: [],
@@ -274,7 +319,8 @@ export async function assessMurphAgeInputReadinessFromVault(
     bundle: sanitizeMurphAgeInputBundleAssessment(bundleAssessment),
     contextBundles: contextAssessments.map(sanitizeMurphAgeInputBundleAssessment),
     runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-    schemaVersion: "murph.age.input-readiness.v3",
+    schemaVersion: "murph.age.input-readiness.v4",
+    scoreReadiness: buildMurphAgeInputScoreReadiness(bundleAssessment),
     wearableBridge: buildMurphAgeWearableBridgeReadiness({
       asOf,
       points,
@@ -284,6 +330,66 @@ export async function assessMurphAgeInputReadinessFromVault(
 
 function buildMurphAgeRuntimeInputReadiness(): MurphAgeRuntimeInputReadiness[] {
   return MURPH_AGE_RUNTIME_INPUT_READINESS.map((input) => ({ ...input }));
+}
+
+function buildMurphAgeInputScoreReadiness(assessment: Pick<
+  MurphAgeContextBundleAssessment | MurphAgeInputBundleAssessment,
+  "bundleId" | "recommendedCardId" | "status"
+>): MurphAgeInputScoreReadiness {
+  const policy = resolveMurphAgeModelCardPolicy(assessment.recommendedCardId);
+  const inputReady = assessment.status === "ready" || assessment.status === "context-only";
+  const scoreBearingInput = inputReady && Boolean(policy?.scoreBearing);
+  const contextOnly = inputReady && !scoreBearingInput;
+  const productPromotionBlockers = scoreBearingInput && policy
+    ? listMurphAgeModelCardProductPromotionBlockers(policy)
+    : [];
+  const productRiskReady = scoreBearingInput && policy
+    ? isMurphAgeModelCardProductAuthorized(policy)
+    : false;
+  const productAgeReady = scoreBearingInput && policy
+    ? isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy)
+    : false;
+  const productBlockedReasons: MurphAgeInputProductBlockedReason[] = [];
+
+  if (!inputReady) {
+    productBlockedReasons.push("INPUT_BUNDLE_INCOMPLETE");
+  } else if (contextOnly) {
+    productBlockedReasons.push("CONTEXT_ONLY_NOT_SCORE_BEARING");
+  } else {
+    productBlockedReasons.push(...productPromotionBlockers);
+  }
+
+  const researchUsableIfModelLoaded = scoreBearingInput;
+  const researchReadiness = researchUsableIfModelLoaded
+    ? "ready-if-local-model-card-loaded"
+    : contextOnly
+      ? "context-only"
+      : "input-incomplete";
+  const status = productAgeReady
+    ? "product-age-ready"
+    : productRiskReady
+      ? "product-risk-ready"
+      : researchUsableIfModelLoaded
+        ? "research-ready-product-blocked"
+        : contextOnly
+          ? "context-only"
+          : "input-incomplete";
+
+  return {
+    bundleId: assessment.bundleId,
+    contextOnly,
+    inputReady,
+    productAgeReady,
+    productBlockedReasons,
+    productPromotionBlockers,
+    productRiskReady,
+    recommendedCardId: assessment.recommendedCardId,
+    researchModelCardRequired: researchUsableIfModelLoaded,
+    researchReadiness,
+    researchUsableIfModelLoaded,
+    scoreBearingInput,
+    status,
+  };
 }
 
 function sanitizeMurphAgeInputBundleAssessment(

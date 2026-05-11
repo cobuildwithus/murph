@@ -1,6 +1,5 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
-import type { RuntimeLivenessInstruction } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -9,6 +8,12 @@ export interface WorkerSendEmailBindingLike {
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  validateRuntimeWriteFence?(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean>;
   ownsActiveInvocationLease?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -19,28 +24,12 @@ export interface WorkerUserRunnerStubLike {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-  }): Promise<
-    | {
-      instruction: RuntimeLivenessInstruction;
-      inputAvailable?: boolean;
-      nextAlarmAt?: string | null;
-      ok: true;
-      pendingNudge?: boolean;
-    }
-    | {
-      ok: false;
-      reason:
-        | "no_active_invocation"
-        | "stale_attempt"
-        | "stale_generation"
-        | "wrong_user";
-      }
-  >;
-  recordActiveInvocationContainerStopped?(input: {
+  }): Promise<unknown>;
+  recordRuntimeWriteFenceWorkspaceCheckpoint?(input: {
     attemptId: string;
-    leaseGeneration: string;
-    stoppedAt?: string | null;
+    generation: string;
     userId: string;
+    workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
   recordActiveInvocationWorkspaceCheckpoint?(input: {
     attemptId: string;

@@ -16,8 +16,8 @@ import {
   parseHostedMailboxPayloadDecodeRequest,
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  RunnerActiveInvocationLeaseError,
+  requireRunnerRuntimeWriteFence,
+  RunnerRuntimeWriteFenceError,
 } from "./active-lease.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
@@ -37,13 +37,13 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
   }
 
   try {
-    await requireRunnerActiveInvocationLease({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
   } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
       return unauthorized();
     }
 

@@ -8,87 +8,93 @@ const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 const HOSTED_RUNTIME_LEASE_GENERATION_HEADER = "x-hosted-runtime-lease-generation";
 const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER = "x-hosted-runtime-workspace-version";
 
-export interface RunnerActiveInvocationLeaseHeaders {
+export interface RunnerRuntimeWriteFenceHeaders {
   attemptId: string;
-  leaseGeneration: string;
+  generation: string;
   workspaceVersion: string | null;
 }
 
-export interface RunnerActiveInvocationLeaseWriteHeaders
-  extends RunnerActiveInvocationLeaseHeaders {
+export interface RunnerRuntimeWriteFenceWriteHeaders
+  extends RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string;
 }
 
-export class RunnerActiveInvocationLeaseError extends Error {
-  constructor(message = "Hosted runner active invocation lease is not valid.") {
+export interface RunnerRuntimeWriteFenceLegacyWriteHeaders {
+  attemptId: string;
+  leaseGeneration: string;
+  workspaceVersion: string;
+}
+
+export class RunnerRuntimeWriteFenceError extends Error {
+  constructor(message = "Hosted runner runtime write fence is not valid.") {
     super(message);
-    this.name = "RunnerActiveInvocationLeaseError";
+    this.name = "RunnerRuntimeWriteFenceError";
   }
 }
 
-export function readRunnerActiveInvocationLeaseHeaders(
+export function readRunnerRuntimeWriteFenceHeaders(
   request: Request,
-): RunnerActiveInvocationLeaseHeaders | null {
+): RunnerRuntimeWriteFenceHeaders | null {
   const attemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
-  const leaseGeneration = request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+  const generation = request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
   const workspaceVersion = request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
 
-  if (!attemptId || !leaseGeneration) {
+  if (!attemptId || !generation) {
     return null;
   }
 
   return {
     attemptId,
-    leaseGeneration,
+    generation,
     workspaceVersion,
   };
 }
 
-export async function requireRunnerActiveInvocationLease(input: {
+export async function requireRunnerRuntimeWriteFence(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
-}): Promise<RunnerActiveInvocationLeaseHeaders> {
-  const headers = readRunnerActiveInvocationLeaseHeaders(input.request);
+}): Promise<RunnerRuntimeWriteFenceHeaders> {
+  const headers = readRunnerRuntimeWriteFenceHeaders(input.request);
   if (!headers) {
-    throw new RunnerActiveInvocationLeaseError();
+    throw new RunnerRuntimeWriteFenceError();
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
+  const validateRuntimeWriteFence = requireRunnerOutboundUserStubMethod(
     stub,
-    "ownsActiveInvocationLease",
+    "validateRuntimeWriteFence",
   );
   // Workspace version is enforced by the checkpoint route, not by invocation-local side effects.
-  const ownsLease = await ownsActiveInvocationLease({
+  const ownsWriteFence = await validateRuntimeWriteFence({
     attemptId: headers.attemptId,
-    leaseGeneration: headers.leaseGeneration,
+    generation: headers.generation,
     userId: input.userId,
   });
-  if (!ownsLease) {
-    throw new RunnerActiveInvocationLeaseError();
+  if (!ownsWriteFence) {
+    throw new RunnerRuntimeWriteFenceError();
   }
 
   return headers;
 }
 
-export function requireRunnerActiveInvocationLeaseHeaders(
+export function requireRunnerRuntimeWriteFenceHeaders(
   request: Request,
-): RunnerActiveInvocationLeaseHeaders {
-  const headers = readRunnerActiveInvocationLeaseHeaders(request);
+): RunnerRuntimeWriteFenceHeaders {
+  const headers = readRunnerRuntimeWriteFenceHeaders(request);
   if (!headers) {
-    throw new RunnerActiveInvocationLeaseError();
+    throw new RunnerRuntimeWriteFenceError();
   }
 
   return headers;
 }
 
-export function requireRunnerActiveInvocationLeaseWriteHeaders(
+export function requireRunnerRuntimeWriteFenceWriteHeaders(
   request: Request,
-): RunnerActiveInvocationLeaseWriteHeaders {
-  const headers = requireRunnerActiveInvocationLeaseHeaders(request);
+): RunnerRuntimeWriteFenceWriteHeaders {
+  const headers = requireRunnerRuntimeWriteFenceHeaders(request);
   if (!headers.workspaceVersion) {
-    throw new RunnerActiveInvocationLeaseError();
+    throw new RunnerRuntimeWriteFenceError();
   }
 
   return {
@@ -97,11 +103,70 @@ export function requireRunnerActiveInvocationLeaseWriteHeaders(
   };
 }
 
+export function writeRunnerRuntimeWriteFenceHeaders(
+  headers: Headers,
+  token: RunnerRuntimeWriteFenceWriteHeaders | RunnerRuntimeWriteFenceLegacyWriteHeaders,
+): void {
+  const generation = "generation" in token ? token.generation : token.leaseGeneration;
+  headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, token.attemptId);
+  headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, generation);
+  headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, token.workspaceVersion);
+}
+
+export type RunnerActiveInvocationLeaseHeaders = RunnerRuntimeWriteFenceHeaders & {
+  leaseGeneration: string;
+};
+export type RunnerActiveInvocationLeaseWriteHeaders =
+  RunnerRuntimeWriteFenceWriteHeaders & { leaseGeneration: string };
+export const RunnerActiveInvocationLeaseError = RunnerRuntimeWriteFenceError;
+
+export function readRunnerActiveInvocationLeaseHeaders(
+  request: Request,
+): RunnerActiveInvocationLeaseHeaders | null {
+  const headers = readRunnerRuntimeWriteFenceHeaders(request);
+  return headers
+    ? {
+        ...headers,
+        leaseGeneration: headers.generation,
+      }
+    : null;
+}
+
+export async function requireRunnerActiveInvocationLease(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerActiveInvocationLeaseHeaders> {
+  const headers = await requireRunnerRuntimeWriteFence(input);
+  return {
+    ...headers,
+    leaseGeneration: headers.generation,
+  };
+}
+
+export function requireRunnerActiveInvocationLeaseHeaders(
+  request: Request,
+): RunnerActiveInvocationLeaseHeaders {
+  const headers = requireRunnerRuntimeWriteFenceHeaders(request);
+  return {
+    ...headers,
+    leaseGeneration: headers.generation,
+  };
+}
+
+export function requireRunnerActiveInvocationLeaseWriteHeaders(
+  request: Request,
+): RunnerActiveInvocationLeaseWriteHeaders {
+  const headers = requireRunnerRuntimeWriteFenceWriteHeaders(request);
+  return {
+    ...headers,
+    leaseGeneration: headers.generation,
+  };
+}
+
 export function writeRunnerActiveInvocationLeaseHeaders(
   headers: Headers,
-  lease: RunnerActiveInvocationLeaseWriteHeaders,
+  token: RunnerRuntimeWriteFenceWriteHeaders | RunnerRuntimeWriteFenceLegacyWriteHeaders,
 ): void {
-  headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, lease.attemptId);
-  headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, lease.leaseGeneration);
-  headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, lease.workspaceVersion);
+  writeRunnerRuntimeWriteFenceHeaders(headers, token);
 }

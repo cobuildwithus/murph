@@ -41,14 +41,6 @@ import type {
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
-  readRuntimeLivenessInstruction,
-  readRuntimeLivenessNextWakeAt,
-  startRuntimeLivenessHeartbeat,
-  type RuntimeLivenessPort,
-  type RuntimeLivenessRejectionReason,
-  type RuntimeLivenessTouchResult,
-} from "./hosted-runtime/liveness.ts";
-import {
   buildHostedMailboxImportRedactedStatus,
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
@@ -150,11 +142,6 @@ export type {
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
-export type {
-  RuntimeLivenessPort,
-  RuntimeLivenessRejectionReason,
-  RuntimeLivenessTouchResult,
-} from "./hosted-runtime/liveness.ts";
 export {
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeToChildEnv,
@@ -260,23 +247,6 @@ export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Erro
   }
 }
 
-export class HostedWorkspaceRuntimeLivenessRejectedError extends Error {
-  readonly reason: RuntimeLivenessRejectionReason;
-
-  constructor(reason: RuntimeLivenessRejectionReason) {
-    super(`Hosted workspace runtime liveness heartbeat was rejected: ${reason}.`);
-    this.name = "HostedWorkspaceRuntimeLivenessRejectedError";
-    this.reason = reason;
-  }
-}
-
-class HostedIdleShutdownCheckpointInputAvailableError extends Error {
-  constructor() {
-    super("Hosted idle-shutdown checkpoint stopped because input became available.");
-    this.name = "HostedIdleShutdownCheckpointInputAvailableError";
-  }
-}
-
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -298,48 +268,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   assertHostedWorkspaceRuntimeBudgetSupported(input.request.budget?.maxRuntimeMs);
 
-  const livenessAbortController = new AbortController();
+  const runtimeAbortController = new AbortController();
   const isIdleShutdownCheckpoint = input.request.reason === "idle_shutdown_checkpoint";
-  let idleShutdownInputAvailable = false;
-  let idleShutdownInputNextWakeAt: string | null | undefined;
-  let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
-  if (
-    runtime.platform.runtimeLivenessRequired === true
-    && !runtime.platform.runtimeLivenessPort
-  ) {
-    throw new TypeError("Hosted workspace runtime job requires runtime liveness port.");
-  }
-  const assertRuntimeLiveness = () => {
-    if (livenessRejectedReason) {
-      throw new HostedWorkspaceRuntimeLivenessRejectedError(livenessRejectedReason);
-    }
-    if (isIdleShutdownCheckpoint && idleShutdownInputAvailable) {
-      throw new HostedIdleShutdownCheckpointInputAvailableError();
-    }
+  const assertRuntimeNotAborted = () => {
+    return undefined;
   };
-  const heartbeat = startRuntimeLivenessHeartbeat({
-    intervalMs: runtime.platform.runtimeLivenessIntervalMs ?? undefined,
-    onRejected: (reason) => {
-      livenessRejectedReason = reason;
-      livenessAbortController.abort(new HostedWorkspaceRuntimeLivenessRejectedError(reason));
-    },
-    onInputAvailable: (result) => {
-      const nextWakeAt = readRuntimeLivenessNextWakeAt(result);
-      if (isIdleShutdownCheckpoint) {
-        idleShutdownInputAvailable = true;
-        idleShutdownInputNextWakeAt = nextWakeAt;
-        livenessAbortController.abort(new HostedIdleShutdownCheckpointInputAvailableError());
-      }
-      return undefined;
-    },
-    port: runtime.platform.runtimeLivenessPort,
-    requestId,
-    signal: livenessAbortController.signal,
-  });
-  const guardedPlatform = createLivenessGuardedHostedRuntimePlatform(
+  const guardedPlatform = createAbortGuardedHostedRuntimePlatform(
     runtime.platform,
-    assertRuntimeLiveness,
+    assertRuntimeNotAborted,
   );
   const guardedRuntime = {
     ...runtime,
@@ -367,20 +304,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       vaultRoot: hotRestoreCacheVaultRoot,
     });
   };
-  const createLivenessGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
+  const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput) => {
-      assertRuntimeLiveness();
+      assertRuntimeNotAborted();
       const snapshot = await options.createCheckpointSnapshot(snapshotInput);
-      assertRuntimeLiveness();
+      assertRuntimeNotAborted();
       return snapshot;
     };
   const runWarmOnlyIdleShutdownCheckpoint =
     async (): Promise<HostedWorkspaceInvocationResult> => {
-      const workspaceRead = await raceHostedRuntimeLiveness(
+      const workspaceRead = await raceHostedRuntimeCancellation(
         workspacePort.read!(),
-        livenessAbortController.signal,
+        runtimeAbortController.signal,
       );
-      assertRuntimeLiveness();
+      assertRuntimeNotAborted();
       if (!workspaceRunVersionMatchesRequest({
         expectedWorkspaceVersion: input.request.workspaceVersion,
         workspace: workspaceRead.workspace,
@@ -411,7 +348,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ? input.request.checkpointNextWakeAt ?? null
         : workspaceRead.workspace?.nextWakeAt ?? null;
       const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-        createSnapshot: createLivenessGuardedCheckpointSnapshot,
+        createSnapshot: createAbortGuardedCheckpointSnapshot,
         metadata: {
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
@@ -426,66 +363,32 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         read: () => workspacePort.read!(),
         checkpoint: (request) => workspacePort.checkpoint(request),
       };
-      const latestLiveness = await touchRuntimeLivenessOnce({
-        port: runtime.platform.runtimeLivenessPort,
-        requestId,
-        signal: livenessAbortController.signal,
-      });
-      if (!latestLiveness.ok) {
-        throw new HostedWorkspaceRuntimeLivenessRejectedError(latestLiveness.reason);
-      }
-      if (hasRuntimeInputAvailable(latestLiveness)) {
-        return {
-          nextWakeAt: readRuntimeLivenessNextWakeAt(latestLiveness),
-          status: "scheduled",
-        };
-      }
 
       return await runHostedWorkspaceIdleShutdownCheckpoint({
-        assertRuntimeLiveness,
+        assertRuntimeNotAborted,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
-        livenessAbortSignal: livenessAbortController.signal,
+        runtimeAbortSignal: runtimeAbortController.signal,
         onCheckpointValidated: recordHotRestoreCache,
-        readLivenessScheduledResult: () => idleShutdownInputAvailable
-          ? {
-              ...(idleShutdownInputNextWakeAt === undefined
-                ? {}
-                : { nextWakeAt: idleShutdownInputNextWakeAt }),
-              status: "scheduled",
-            }
-          : null,
+        readScheduledCancellationResult: () => null,
         redactedStatus: await buildHostedIdleShutdownCheckpointRedactedStatus({
           baseStatus: workspaceRead.workspace?.redactedStatus ?? null,
           vaultRoot: warmWorkspace.restored.vaultRoot,
         }),
         workspacePort: idleShutdownCheckpointWorkspacePort,
       });
-    };
+  };
 
   try {
-    const initialLiveness = await heartbeat.initialTouch;
-    if (!initialLiveness.ok) {
-      throw new HostedWorkspaceRuntimeLivenessRejectedError(initialLiveness.reason);
-    }
-    if (
-      isIdleShutdownCheckpoint
-      && hasRuntimeInputAvailable(initialLiveness)
-    ) {
-      return {
-        nextWakeAt: readRuntimeLivenessNextWakeAt(initialLiveness),
-        status: "scheduled",
-      };
-    }
     if (isIdleShutdownCheckpoint) {
       return await runWarmOnlyIdleShutdownCheckpoint();
     }
 
-    let workspaceRead = await raceHostedRuntimeLiveness(
+    let workspaceRead = await raceHostedRuntimeCancellation(
       workspacePort.read(),
-      livenessAbortController.signal,
+      runtimeAbortController.signal,
     );
-    assertRuntimeLiveness();
+    assertRuntimeNotAborted();
     assertWorkspaceRunVersionMatchesRequest({
       expectedWorkspaceVersion: input.request.workspaceVersion,
       workspace: workspaceRead.workspace,
@@ -508,29 +411,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
-          assertRuntimeLiveness();
+          assertRuntimeNotAborted();
           const outcome = await options.importItem(importItem, context);
-          assertRuntimeLiveness();
+          assertRuntimeNotAborted();
           return outcome;
         },
         {
           recordMessagingReturnTarget: (target) => {
             hostedCliBridgeMessagingReturnTarget = target;
           },
-          signal: livenessAbortController.signal,
+          signal: runtimeAbortController.signal,
         },
       );
-    const restored = await raceHostedRuntimeLiveness(
+    const restored = await raceHostedRuntimeCancellation(
       restoreHostedWorkspaceRuntimeJobWorkspace({
         logContext: runtimeLogContext,
         platform: guardedRuntime.platform,
         vaultRoot: options.vaultRoot,
         workspace: workspaceRead.workspace,
       }),
-      livenessAbortController.signal,
+      runtimeAbortController.signal,
     );
     hotRestoreCacheVaultRoot = restored.vaultRoot;
-    assertRuntimeLiveness();
+    assertRuntimeNotAborted();
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
     if (!runnerMailboxPort) {
@@ -576,15 +479,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
     };
-    const hostedCodexRuntime = await raceHostedRuntimeLiveness(
+    const hostedCodexRuntime = await raceHostedRuntimeCancellation(
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot: restored.operatorHomeRoot,
         runtimeEnv: baseRuntimeEnv,
       }),
-      livenessAbortController.signal,
+      runtimeAbortController.signal,
     );
-    assertRuntimeLiveness();
-    const initialMailboxImport = await raceHostedRuntimeLiveness(
+    assertRuntimeNotAborted();
+    const initialMailboxImport = await raceHostedRuntimeCancellation(
       withHostedProcessEnvironment(
         {
           envOverrides: hostedCodexRuntime.runtimeEnv,
@@ -600,23 +503,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestId,
           }),
       ),
-      livenessAbortController.signal,
+      runtimeAbortController.signal,
     );
-    assertRuntimeLiveness();
+    assertRuntimeNotAborted();
     if (restored.restoreWasCold) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
     }
     const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
-    await raceHostedRuntimeLiveness(
+    await raceHostedRuntimeCancellation(
       ensureHostedInboxSidecarReady({
         bestEffort: true,
         rebuild: !inboxReady && restored.restoreWasCold,
         requestId,
         vaultRoot: restored.vaultRoot,
       }),
-      livenessAbortController.signal,
+      runtimeAbortController.signal,
     );
-    assertRuntimeLiveness();
+    assertRuntimeNotAborted();
     const hostedCliBridge = await startHostedCliRuntimeBridge({
       deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
       messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
@@ -628,7 +531,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
     let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
     try {
-      result = await raceHostedRuntimeLiveness(
+      result = await raceHostedRuntimeCancellation(
         withHostedProcessEnvironment(
           {
             envOverrides: runtimeEnv,
@@ -646,16 +549,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   restored,
                   runtime: foregroundRuntime,
                   runtimeEnv,
-                  signal: livenessAbortController.signal,
+                  signal: runtimeAbortController.signal,
                 }),
             }),
         ),
-        livenessAbortController.signal,
+        runtimeAbortController.signal,
       );
     } finally {
       await hostedCliBridge?.stop();
     }
-    assertRuntimeLiveness();
+    assertRuntimeNotAborted();
     const committedWorkspace = result.latestWorkspace
       ?? result.initialMailboxImport.checkpoint?.workspace
       ?? workspaceRead.workspace;
@@ -694,27 +597,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
     };
   } catch (error) {
-    if (error instanceof HostedIdleShutdownCheckpointInputAvailableError) {
-      return {
-        ...(idleShutdownInputNextWakeAt === undefined
-          ? {}
-          : { nextWakeAt: idleShutdownInputNextWakeAt }),
-        status: "scheduled",
-      };
-    }
     throw error;
-  } finally {
-    await heartbeat.stop();
   }
 }
 
 async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
-  assertRuntimeLiveness: () => void;
+  assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
-  livenessAbortSignal: AbortSignal;
+  runtimeAbortSignal: AbortSignal;
   onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
-  readLivenessScheduledResult: () => HostedWorkspaceInvocationResult | null;
+  readScheduledCancellationResult: () => HostedWorkspaceInvocationResult | null;
   redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
   workspacePort: HostedRuntimePlatform["workspacePort"];
 }): Promise<HostedWorkspaceInvocationResult> {
@@ -722,30 +615,30 @@ async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
     throw new TypeError("Hosted idle-shutdown checkpoint requires workspace port support.");
   }
 
-  input.assertRuntimeLiveness();
-  const checkpointRequest = await raceHostedRuntimeLiveness(
+  input.assertRuntimeNotAborted();
+  const checkpointRequest = await raceHostedRuntimeCancellation(
     Promise.resolve(input.checkpointRequestBuilder.createRequest({
       reason: "idle_shutdown",
       redactedStatus: input.redactedStatus ?? null,
     })),
-    input.livenessAbortSignal,
+    input.runtimeAbortSignal,
   );
-  input.assertRuntimeLiveness();
+  input.assertRuntimeNotAborted();
   const checkpointPromise = input.workspacePort.checkpoint(checkpointRequest);
   let checkpoint: Awaited<typeof checkpointPromise>;
   try {
-    checkpoint = await raceHostedRuntimeLiveness(
+    checkpoint = await raceHostedRuntimeCancellation(
       checkpointPromise,
-      input.livenessAbortSignal,
+      input.runtimeAbortSignal,
     );
   } catch (error) {
-    const scheduled = input.readLivenessScheduledResult();
+    const scheduled = input.readScheduledCancellationResult();
     if (!scheduled) {
       throw error;
     }
     return scheduled;
   }
-  input.assertRuntimeLiveness();
+  input.assertRuntimeNotAborted();
   assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
 
@@ -845,7 +738,7 @@ function shouldRefreshHotRestoreCacheAfterNoProgressRun(
   );
 }
 
-function raceHostedRuntimeLiveness<T>(
+function raceHostedRuntimeCancellation<T>(
   promise: Promise<T>,
   signal: AbortSignal,
 ): Promise<T> {
@@ -871,32 +764,10 @@ function raceHostedRuntimeLiveness<T>(
 	  });
 }
 
-async function touchRuntimeLivenessOnce(input: {
-  port?: RuntimeLivenessPort | null;
-  requestId: string;
-  signal: AbortSignal;
-}): Promise<RuntimeLivenessTouchResult> {
-  const port = input.port ?? null;
-  if (!port) {
-    return {
-      instruction: { kind: "continue" },
-      ok: true,
-    };
-  }
-
-  return await raceHostedRuntimeLiveness(
-    port.touch({
-      requestId: input.requestId,
-      signal: input.signal,
-    }),
-    input.signal,
-  );
-}
-
 function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
   return signal.reason instanceof Error
     ? signal.reason
-    : new Error("Hosted workspace runtime liveness was aborted.");
+    : new Error("Hosted workspace runtime was aborted.");
 }
 
 function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null | undefined): void {
@@ -907,7 +778,7 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
-function createLivenessGuardedHostedRuntimePlatform(
+function createAbortGuardedHostedRuntimePlatform(
   platform: HostedRuntimePlatform,
   assertLive: () => void,
 ): HostedRuntimePlatform {
@@ -1107,10 +978,6 @@ function assertWorkspaceRunUserMatchesRequest(input: {
     actualUserId: input.workspace.userId,
     expectedUserId: input.expectedUserId,
 	  });
-}
-
-function hasRuntimeInputAvailable(result: RuntimeLivenessTouchResult): boolean {
-  return result.ok && readRuntimeLivenessInstruction(result).kind === "yield";
 }
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {

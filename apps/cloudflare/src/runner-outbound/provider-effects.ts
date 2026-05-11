@@ -35,8 +35,8 @@ import {
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  RunnerActiveInvocationLeaseError,
+  requireRunnerRuntimeWriteFence,
+  RunnerRuntimeWriteFenceError,
 } from "./active-lease.ts";
 import type {
   RunnerOutboundEnvironmentSource,
@@ -58,13 +58,13 @@ export async function handleRunnerProviderEffectsRequest(input: {
   }
 
   try {
-    await requireRunnerActiveInvocationLease({
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
   } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
       return unauthorized();
     }
     throw error;

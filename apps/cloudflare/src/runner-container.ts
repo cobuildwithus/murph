@@ -1,7 +1,6 @@
 import { Container, type OutboundHandlerContext, type StopParams } from "@cloudflare/containers";
 import {
   type HostedAssistantWorkspaceRuntimeJobResult,
-  type HostedAssistantRuntimeConfig,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -12,12 +11,6 @@ import {
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedBrowserVaultReplicaRef,
-} from "@murphai/hosted-execution/parsers";
-import type {
-  HostedBrowserVaultReplicaRef,
-} from "@murphai/hosted-execution/contracts";
-import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
@@ -26,10 +19,6 @@ import {
 } from "./local-internal-proxy-route.ts";
 import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
-import {
-  buildRunnerBrowserVaultRefreshAttemptId,
-  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-} from "./runner-outbound/browser-vault-refresh-authority.ts";
 import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
@@ -45,7 +34,6 @@ const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_CONTROL_HEALTH_URL = "http://container/internal/control-health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
-const RUNNER_BROWSER_VAULT_REFRESH_URL = "http://container/internal/browser-vault-refresh";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
@@ -56,7 +44,6 @@ const OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS = 250;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
-const RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS = 500;
 const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
 const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const RUNNER_ACTIVE_OPERATION_STORAGE_KEY_PREFIX = "runner-container-active-operation:v1:";
@@ -93,35 +80,6 @@ interface HostedExecutionContainerInvokeRequest {
 
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
-interface HostedExecutionContainerBrowserVaultRefreshRequest {
-  attemptId: string;
-  runtime: HostedAssistantRuntimeConfig;
-  timeoutMs: number;
-  userId: string;
-}
-
-type HostedExecutionContainerBrowserVaultRefreshResult =
-  | {
-      byteLength: number;
-      replicaRef: HostedBrowserVaultReplicaRef;
-      status: "published";
-    }
-  | {
-      byteLength: number;
-      maxBytes: number;
-      status: "refresh_failed_too_large";
-    }
-  | {
-      status: "refresh_failed_empty_source" | "refresh_skipped_no_source";
-    }
-  | {
-      // Deploy-skew compatibility for older container shells. New live
-      // refreshes emit only published, refresh_failed_too_large,
-      // refresh_failed_empty_source, refresh_skipped_no_source, publish_conflict,
-      // or workspace_missing.
-      status: "already_fresh" | "publish_conflict" | "stale_source" | "workspace_missing";
-    };
-
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   runnerContainerName?: string;
@@ -145,9 +103,7 @@ export interface HostedExecutionContainerStubLike {
     token: string;
     userId?: string;
   }): Promise<boolean>;
-  refreshBrowserVaultReplica?(
-    input: HostedExecutionContainerBrowserVaultRefreshRequest,
-  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult>;
+  refreshBrowserVaultReplica?(input: unknown): Promise<unknown>;
   smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
 
@@ -167,17 +123,6 @@ type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
 
 interface RunnerContainerLogContext {
   userId: string;
-}
-
-interface RunnerContainerUserRunnerNamespaceLike {
-  getByName(name: string): {
-    recordActiveInvocationContainerStopped?(input: {
-      attemptId: string;
-      leaseGeneration: string;
-      stoppedAt?: string | null;
-      userId: string;
-    }): Promise<{ recorded: boolean }>;
-  };
 }
 
 interface RunnerContainerStopWaitResult {
@@ -241,13 +186,8 @@ export class RunnerContainer extends Container {
   private runnerControlToken: string | null = null;
   private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
   private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
-  private browserVaultRefreshAbortController: AbortController | null = null;
-  private browserVaultRefreshCompletion: Promise<void> | null = null;
-  private browserVaultRefreshAttemptId: string | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
-  private readonly browserVaultRefreshAttemptUsers = new Map<string, string>();
-  private readonly pendingBrowserVaultRefreshAborts = new Set<string>();
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -259,7 +199,6 @@ export class RunnerContainer extends Container {
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
     const input = parseHostedExecutionContainerInvokeInput(payload);
-    await this.preemptBrowserVaultRefreshForForegroundInvocation(input.userId);
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
     );
@@ -276,7 +215,6 @@ export class RunnerContainer extends Container {
 
   async destroyInstance(): Promise<void> {
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    this.browserVaultRefreshAbortController?.abort(new Error("browser-vault refresh runner destroyed"));
     await this.stopWarmContainer();
   }
 
@@ -294,75 +232,12 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async refreshBrowserVaultReplica(
-    payload: HostedExecutionContainerBrowserVaultRefreshRequest,
-  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
-    const input = parseHostedExecutionContainerBrowserVaultRefreshInput(payload);
-    this.browserVaultRefreshAttemptUsers.set(input.attemptId, input.userId);
-    try {
-      return await this.withLifecycleLock(async () =>
-        this.invokeHostedBrowserVaultRefresh(input)
-      );
-    } finally {
-      this.browserVaultRefreshAttemptUsers.delete(input.attemptId);
-      this.pendingBrowserVaultRefreshAborts.delete(input.attemptId);
-    }
+  async refreshBrowserVaultReplica(_input?: unknown): Promise<never> {
+    throw new Error("Hosted runner browser-vault refresh side path has been removed.");
   }
 
-  async abortBrowserVaultRefresh(input: { attemptId: string; userId: string }): Promise<void> {
-    if (this.currentLogContext?.userId && this.currentLogContext.userId !== input.userId) {
-      return;
-    }
-
-    const abortController = this.browserVaultRefreshAbortController;
-    if (!abortController || this.browserVaultRefreshAttemptId !== input.attemptId) {
-      this.pendingBrowserVaultRefreshAborts.add(input.attemptId);
-      return;
-    }
-    if (abortController.signal.aborted) {
-      return;
-    }
-
-    abortController.abort(new Error("browser-vault refresh preempted"));
-    await this.browserVaultRefreshCompletion;
-  }
-
-  private async preemptBrowserVaultRefreshForForegroundInvocation(userId: string): Promise<void> {
-    for (const [attemptId, attemptUserId] of this.browserVaultRefreshAttemptUsers) {
-      if (attemptUserId === userId) {
-        this.pendingBrowserVaultRefreshAborts.add(attemptId);
-      }
-    }
-
-    const abortController = this.browserVaultRefreshAbortController;
-    if (!abortController) {
-      return;
-    }
-    if (this.currentLogContext?.userId && this.currentLogContext.userId !== userId) {
-      return;
-    }
-    if (!abortController.signal.aborted) {
-      abortController.abort(new Error("browser-vault refresh preempted"));
-    }
-    const preempted = await waitForRunnerContainerOperationCompletion(
-      this.browserVaultRefreshCompletion,
-      RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS,
-    );
-    if (preempted) {
-      return;
-    }
-
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        preemptTimeoutMs: RUNNER_BROWSER_VAULT_REFRESH_PREEMPT_TIMEOUT_MS,
-      },
-      level: "warn",
-      message: "Hosted execution container browser-vault refresh did not release promptly after foreground preemption.",
-      phase: "container.ready",
-      userId,
-    });
-    await this.stopWarmContainer({ failClosed: true });
+  async abortBrowserVaultRefresh(_input?: unknown): Promise<void> {
+    return undefined;
   }
 
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -499,13 +374,11 @@ export class RunnerContainer extends Container {
   override onStop(params: StopParams): void {
     const context = this.currentLogContext;
     const abortedOperations = this.abortActiveOperationsForContainerStop(params);
-    const stoppedDuringActiveWork =
-      abortedOperations.browserVaultRefresh || abortedOperations.workspaceInvocation;
+    const stoppedDuringActiveWork = abortedOperations.workspaceInvocation;
     const cleanExit = params.exitCode === 0;
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeBrowserVaultRefreshAborted: abortedOperations.browserVaultRefresh,
         activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
         exitCode: params.exitCode,
         lifecycleStage: "onStop",
@@ -527,15 +400,9 @@ export class RunnerContainer extends Container {
     exitCode: number | null;
     reason: string;
   }): {
-    browserVaultRefresh: boolean;
     workspaceInvocation: boolean;
   } {
     const activeWorkspaceOperation = this.workspaceInvocationActiveOperation;
-    if (activeWorkspaceOperation) {
-      this.deferContainerLifecycleTask(
-        this.recordActiveInvocationContainerStopped(activeWorkspaceOperation),
-      );
-    }
     const workspaceInvocationAborted = abortRunnerContainerOperation(
       this.workspaceInvocationAbortController,
       new Error(
@@ -544,12 +411,6 @@ export class RunnerContainer extends Container {
     );
 
     return {
-      browserVaultRefresh: abortRunnerContainerOperation(
-        this.browserVaultRefreshAbortController,
-        new Error(
-          `browser-vault refresh container stopped during active work (${params.reason}, exit ${params.exitCode})`,
-        ),
-      ),
       workspaceInvocation: activeWorkspaceOperation !== null && workspaceInvocationAborted,
     };
   }
@@ -563,7 +424,6 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeBrowserVaultRefreshAborted: abortedOperations.browserVaultRefresh,
         activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
         lifecycleStage: "onError",
         runnerPort: RUNNER_PORT,
@@ -574,43 +434,6 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
     throw error;
-  }
-
-  private deferContainerLifecycleTask(promise: Promise<void>): void {
-    const waitUntil = (this.ctx as { waitUntil?: (task: Promise<unknown>) => void }).waitUntil;
-    if (typeof waitUntil === "function") {
-      waitUntil.call(this.ctx, promise);
-      return;
-    }
-    void promise;
-  }
-
-  private async recordActiveInvocationContainerStopped(
-    operation: RunnerActiveOperationRecord,
-  ): Promise<void> {
-    const userRunnerNamespace = readRunnerContainerUserRunnerNamespace(this.environment);
-    if (!userRunnerNamespace) {
-      return;
-    }
-
-    try {
-      const stub = userRunnerNamespace.getByName(operation.userId);
-      await stub.recordActiveInvocationContainerStopped?.({
-        attemptId: operation.attemptId,
-        leaseGeneration: operation.leaseGeneration,
-        stoppedAt: new Date().toISOString(),
-        userId: operation.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not record active invocation stop.",
-        phase: "failed",
-        userId: operation.userId,
-      });
-    }
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -814,151 +637,6 @@ export class RunnerContainer extends Container {
         if (this.workspaceInvocationActiveOperation === activeOperation) {
           this.workspaceInvocationActiveOperation = null;
         }
-      }
-    }
-  }
-
-  private async invokeHostedBrowserVaultRefresh(
-    input: HostedExecutionContainerBrowserVaultRefreshRequest,
-  ): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
-    const localInternalProxyBaseUrl = readOptionalRunnerContainerEnvString(
-      this.environment,
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
-    );
-    const logContext: RunnerContainerLogContext = {
-      userId: input.userId,
-    };
-    const outboundProxyState: RunnerOutboundProxyState = {
-      attemptId: input.attemptId,
-      leaseGeneration: RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-      token: createRunnerOutboundProxyToken(),
-      userId: input.userId,
-    };
-    const activeOperation = createRunnerActiveOperationRecord({
-      attemptId: outboundProxyState.attemptId,
-      kind: "browser-vault-refresh",
-      leaseGeneration: outboundProxyState.leaseGeneration,
-      timeoutMs: input.timeoutMs,
-      userId: input.userId,
-    });
-    const operationAbortController = new AbortController();
-    let completeRefresh: () => void = () => undefined;
-    this.browserVaultRefreshAbortController = operationAbortController;
-    this.browserVaultRefreshAttemptId = input.attemptId;
-    this.browserVaultRefreshCompletion = new Promise<void>((resolve) => {
-      completeRefresh = resolve;
-    });
-    this.currentLogContext = logContext;
-    let activeOperationAcquired = false;
-    let stopRunnerActivityRenewal: (() => void) | null = null;
-
-    try {
-      if (this.pendingBrowserVaultRefreshAborts.delete(input.attemptId)) {
-        operationAbortController.abort(new Error("browser-vault refresh preempted"));
-      }
-      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
-      await this.writeRunnerActiveOperation(activeOperation);
-      activeOperationAcquired = true;
-      stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
-      this.noteRunnerActivity("browser-vault-refresh-started");
-      const startTime = Date.now();
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          hasLocalInternalProxyBaseUrl: localInternalProxyBaseUrl !== null,
-          readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
-          runnerIdleTtlMs: readRunnerContainerIdleTtlMs(this.environment),
-          runnerPort: RUNNER_PORT,
-          timeoutMs: input.timeoutMs,
-        },
-        message: "Hosted execution container browser-vault refresh received.",
-        phase: "container.starting",
-        userId: input.userId,
-      });
-      const runnerControlToken = await this.ensureContainerReady(input);
-      this.noteRunnerActivity("container-ready");
-      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
-      this.runnerOutboundProxyState = outboundProxyState;
-      await this.installOutboundHandlers(outboundProxyState);
-
-      const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
-      const requestSignal = combineRunnerContainerAbortSignals(
-        operationAbortController.signal,
-        AbortSignal.timeout(remainingTimeoutMs),
-      );
-      const response = await raceRunnerContainerOperationAbort(
-        this.containerFetch(
-          RUNNER_BROWSER_VAULT_REFRESH_URL,
-          {
-            body: JSON.stringify({
-              internalWorkerProxyToken: outboundProxyState.token,
-              localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
-                localInternalProxyBaseUrl,
-                userId: input.userId,
-              }),
-              runtime: input.runtime,
-              userId: input.userId,
-            }),
-            headers: {
-              authorization: `Bearer ${runnerControlToken}`,
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-            signal: requestSignal,
-          },
-          RUNNER_PORT,
-        ),
-        requestSignal,
-      );
-      this.noteRunnerActivity("browser-vault-refresh-response-received");
-
-      if (!response.ok) {
-        throw await classifyHostedRunnerContainerErrorResponse(response);
-      }
-
-      const result = parseHostedBrowserVaultRefreshContainerResult(await response.json());
-      return result;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted execution container browser-vault refresh failed.",
-        phase: "failed",
-        userId: input.userId,
-      });
-      throw error;
-    } finally {
-      try {
-        if (activeOperationAcquired) {
-          const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-          if (!outboundProxyExpired) {
-            await this.stopWarmContainer({
-              failClosed: true,
-            });
-          }
-        }
-      } finally {
-        if (activeOperationAcquired) {
-          await this.clearRunnerActiveOperation(activeOperation);
-        }
-        stopRunnerActivityRenewal?.();
-        this.noteRunnerActivity("browser-vault-refresh-finished");
-        if (this.currentLogContext === logContext) {
-          this.currentLogContext = null;
-        }
-        if (this.browserVaultRefreshAbortController === operationAbortController) {
-          this.browserVaultRefreshAbortController = null;
-        }
-        if (this.browserVaultRefreshAttemptId === input.attemptId) {
-          this.browserVaultRefreshAttemptId = null;
-        }
-        if (this.browserVaultRefreshCompletion) {
-          this.browserVaultRefreshCompletion = null;
-        }
-        this.pendingBrowserVaultRefreshAborts.delete(input.attemptId);
-        completeRefresh();
       }
     }
   }
@@ -1694,39 +1372,8 @@ export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
     : await invocation;
 }
 
-export async function refreshHostedExecutionContainerBrowserVaultReplica(input: {
-  runnerContainerName?: string;
-  runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
-  runtime: HostedAssistantRuntimeConfig;
-  signal?: AbortSignal;
-  timeoutMs: number;
-  userId: string;
-}): Promise<HostedExecutionContainerBrowserVaultRefreshResult> {
-  const container = input.runnerContainerNamespace.getByName(
-    input.runnerContainerName ?? input.userId,
-  );
-  if (!container.refreshBrowserVaultReplica) {
-    throw new Error("Hosted runner container does not support browser-vault refresh.");
-  }
-  if (input.signal) {
-    throwIfRunnerContainerOperationAborted(input.signal);
-  }
-  if (input.signal && !container.abortBrowserVaultRefresh) {
-    throw new Error("Hosted runner container does not support browser-vault refresh abort.");
-  }
-
-  const attemptId = buildRunnerBrowserVaultRefreshAttemptId(createRunnerOutboundProxyToken());
-  const refresh = container.refreshBrowserVaultReplica({
-    attemptId,
-    runtime: input.runtime,
-    timeoutMs: input.timeoutMs,
-    userId: input.userId,
-  });
-  return input.signal
-    ? await raceRunnerContainerOperationAbort(refresh, input.signal, async () => {
-        await container.abortBrowserVaultRefresh?.({ attemptId, userId: input.userId });
-      })
-    : await refresh;
+export async function refreshHostedExecutionContainerBrowserVaultReplica(_input?: unknown): Promise<never> {
+  throw new Error("Hosted runner browser-vault refresh side path has been removed.");
 }
 
 async function raceRunnerContainerOperationAbort<T>(
@@ -2068,21 +1715,6 @@ function readOptionalRunnerContainerEnvString(
   return normalized.length > 0 ? normalized : null;
 }
 
-function readRunnerContainerUserRunnerNamespace(
-  env: RunnerContainerEnvironmentSource,
-): RunnerContainerUserRunnerNamespaceLike | null {
-  const value = env.USER_RUNNER;
-  if (!value || typeof value !== "object" || !("getByName" in value)) {
-    return null;
-  }
-
-  const namespace = value as { getByName?: unknown };
-  if (typeof namespace.getByName !== "function") {
-    return null;
-  }
-  return namespace as RunnerContainerUserRunnerNamespaceLike;
-}
-
 function createRunnerOutboundProxyToken(): string {
   return crypto.randomUUID();
 }
@@ -2216,87 +1848,6 @@ function parseHostedExecutionContainerInvokeInput(
   };
 }
 
-function parseHostedExecutionContainerBrowserVaultRefreshInput(
-  payload: {
-    attemptId?: unknown;
-    runtime?: unknown;
-    timeoutMs?: unknown;
-    userId?: unknown;
-  },
-): HostedExecutionContainerBrowserVaultRefreshRequest {
-  return {
-    attemptId: requireString(payload.attemptId, "payload.attemptId"),
-    runtime: readHostedAssistantRuntimeConfig(payload.runtime),
-    timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
-    userId: requireString(payload.userId, "payload.userId"),
-  };
-}
-
-function readHostedAssistantRuntimeConfig(value: unknown): HostedAssistantRuntimeConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("payload.runtime must be an object.");
-  }
-
-  return value as HostedAssistantRuntimeConfig;
-}
-
-function parseHostedBrowserVaultRefreshContainerResult(
-  value: unknown,
-): HostedExecutionContainerBrowserVaultRefreshResult {
-  const record = requireRecord(value, "Hosted browser-vault refresh container result");
-  const status = requireString(record.status, "Hosted browser-vault refresh container result.status");
-
-  if (status === "published") {
-    const replicaRef = parseHostedBrowserVaultReplicaRef(
-      record.replicaRef,
-      "Hosted browser-vault refresh container result.replicaRef",
-    );
-    if (!replicaRef) {
-      throw new TypeError("Hosted browser-vault refresh container result.replicaRef must not be null.");
-    }
-
-    return {
-      byteLength: requireNonNegativeNumber(
-        record.byteLength,
-        "Hosted browser-vault refresh container result.byteLength",
-      ),
-      replicaRef,
-      status,
-    };
-  }
-
-  if (status === "refresh_failed_too_large") {
-    return {
-      byteLength: requireNonNegativeNumber(
-        record.byteLength,
-        "Hosted browser-vault refresh container result.byteLength",
-      ),
-      maxBytes: requireNonNegativeNumber(
-        record.maxBytes,
-        "Hosted browser-vault refresh container result.maxBytes",
-      ),
-      status,
-    };
-  }
-
-  if (
-    status === "already_fresh"
-    || status === "publish_conflict"
-    || status === "refresh_failed_empty_source"
-    || status === "refresh_skipped_no_source"
-    || status === "stale_source"
-    || status === "workspace_missing"
-  ) {
-    return {
-      status,
-    };
-  }
-
-  throw new TypeError(
-    "Hosted browser-vault refresh container result.status must be published, refresh_failed_too_large, refresh_failed_empty_source, refresh_skipped_no_source, already_fresh, publish_conflict, stale_source, or workspace_missing.",
-  );
-}
-
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -2308,14 +1859,6 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function requireNonNegativeNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative number.`);
   }
 
   return value;

@@ -11,24 +11,14 @@ import {
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-  HOSTED_RUNTIME_WORKSPACE_PATH,
-} from "@murphai/hosted-execution/routes";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
-  requireRunnerActiveInvocationLease,
-  requireRunnerActiveInvocationLeaseWriteHeaders,
-  RunnerActiveInvocationLeaseError,
+  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceWriteHeaders,
+  RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/active-lease.ts";
-import {
-  buildRunnerBrowserVaultRefreshAttemptId,
-  readRunnerBrowserVaultRefreshSourceStateHash,
-  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-} from "./runner-outbound/browser-vault-refresh-authority.ts";
-import { handleRunnerHeartbeatRequest } from "./runner-outbound/heartbeat.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
@@ -63,16 +53,6 @@ export async function handleRunnerOutboundRequest(
     }
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-    if (
-      isRunnerBrowserVaultRefreshProxyContext(proxyContext)
-      && !isAllowedBrowserVaultRefreshOutboundRequest({
-        method: request.method,
-        url,
-      })
-    ) {
-      return unauthorized();
-    }
-
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
       return handleRunnerResultsRequest({
         bucket: env.BUNDLES,
@@ -94,16 +74,6 @@ export async function handleRunnerOutboundRequest(
       });
     }
 
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
-      return handleRunnerHeartbeatRequest({
-        env,
-        proxyContext,
-        request,
-        url,
-        userId,
-      });
-    }
-
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
       if (url.pathname !== "/replicas") {
         return notFound();
@@ -117,7 +87,6 @@ export async function handleRunnerOutboundRequest(
         bucket: env.BUNDLES,
         env,
         environment,
-        proxyContext,
         request,
         userId,
       });
@@ -188,12 +157,12 @@ async function handleRunnerArtifactRequest(input: {
   userId: string;
 }): Promise<Response> {
   if (input.request.method === "PUT") {
-    const ownsActiveLease = await writeRequestOwnsActiveInvocationLease({
+    const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
-    if (!ownsActiveLease) {
+    if (!ownsWriteFence) {
       return unauthorized();
     }
   }
@@ -242,23 +211,14 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  proxyContext: RunnerOutboundProxyContext;
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const refreshSourceStateHash = readRunnerBrowserVaultRefreshSourceStateHash(input.request);
-  const authorized = refreshSourceStateHash
-    ? writeRequestOwnsBrowserVaultRefreshAuthority({
-        proxyContext: input.proxyContext,
-        sourceStateHash: refreshSourceStateHash,
-      })
-    : isRunnerBrowserVaultRefreshProxyContext(input.proxyContext)
-      ? true
-    : await writeRequestOwnsActiveInvocationLease({
-        env: input.env,
-        request: input.request,
-        userId: input.userId,
-      });
+  const authorized = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
   if (!authorized) {
     return unauthorized();
   }
@@ -286,7 +246,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     userId: input.userId,
   });
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
-    expectedReplicaSourceHash: refreshSourceStateHash,
+    expectedReplicaSourceHash: null,
     replica: body.replica,
     userId: input.userId,
   });
@@ -294,59 +254,21 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   return json({ replicaRef });
 }
 
-function writeRequestOwnsBrowserVaultRefreshAuthority(input: {
-  proxyContext: RunnerOutboundProxyContext;
-  sourceStateHash: string;
-}): boolean {
-  return input.proxyContext.proxyAttemptId === buildRunnerBrowserVaultRefreshAttemptId(input.sourceStateHash)
-    && input.proxyContext.proxyLeaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION;
-}
-
-function isRunnerBrowserVaultRefreshProxyContext(
-  proxyContext: RunnerOutboundProxyContext,
-): boolean {
-  return proxyContext.proxyLeaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION
-    && (
-      proxyContext.proxyAttemptId === undefined
-      || proxyContext.proxyAttemptId === null
-      || proxyContext.proxyAttemptId.startsWith("browser-vault-refresh:")
-    );
-}
-
-function isAllowedBrowserVaultRefreshOutboundRequest(input: {
-  method: string;
-  url: URL;
-}): boolean {
-  return (
-    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
-    && input.method === "POST"
-    && input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
-  ) || (
-    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
-    && input.method === "GET"
-    && input.url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH
-  ) || (
-    input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore
-    && input.method === "POST"
-    && input.url.pathname === "/replicas"
-  );
-}
-
-async function writeRequestOwnsActiveInvocationLease(input: {
+async function writeRequestOwnsRuntimeWriteFence(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
 }): Promise<boolean> {
   try {
-    requireRunnerActiveInvocationLeaseWriteHeaders(input.request);
-    await requireRunnerActiveInvocationLease({
+    requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
+    await requireRunnerRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
     return true;
   } catch (error) {
-    if (error instanceof RunnerActiveInvocationLeaseError) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
       return false;
     }
 
