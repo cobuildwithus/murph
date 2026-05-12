@@ -3329,6 +3329,13 @@
                             "product",
                             "research"
                           ]
+                        },
+                        "cardId": {
+                          "description": "Explicit research card override. Currently only the frozen R399 NHIS proxy anchor is selectable.",
+                          "type": "string",
+                          "enum": [
+                            "r399_nhis_proxy_10y_acm_research"
+                          ]
                         }
                       }
                     }

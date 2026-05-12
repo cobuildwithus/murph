@@ -61,7 +61,6 @@ describe("hosted-local harness", () => {
       "test:e2e:workers:local",
       "test:e2e:full-stack:local",
       "test:e2e:smoke:local",
-      "test:e2e:runner-control-token:local",
       "test:e2e:runner-python:local",
     ]);
 

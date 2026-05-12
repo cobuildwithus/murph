@@ -55,7 +55,6 @@ import {
 } from "../src/runner-effects-contract.ts";
 import {
   asWorkerStringEnvironment,
-  LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER,
 } from "../src/worker-contracts.ts";
 import type {
   WorkerBindUserRunnerStubLike,
@@ -210,10 +209,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
 ] as const;
 
 describe("handleRunnerOutboundRequest", () => {
-  it("keeps the active-invocation compatibility hard cut dated", () => {
-    expect(LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER).toBe("2026-05-25");
-  });
-
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -301,66 +296,6 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).resolves.toEqual({});
   });
 
-  it("rejects internal worker proxy traffic when the proxy header is missing", async () => {
-    const response = await handleRunnerOutboundRequest(
-      new Request(MISSING_ARTIFACT_URL, {
-        method: "GET",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-  });
-
-  it("rejects artifact host proxy traffic when the invocation proxy token does not match", async () => {
-    const response = await handleRunnerOutboundRequest(
-      new Request(MISSING_ARTIFACT_URL, {
-        headers: {
-          [RUNNER_PROXY_TOKEN_HEADER]: "proxy-tokez",
-        },
-        method: "GET",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-  });
-
-
-
-
-
-
-  it("rejects heartbeat proxy traffic when the invocation proxy token does not match", async () => {
-    const response = await handleRunnerOutboundRequest(
-      new Request(HEARTBEAT_URL, {
-        headers: createRunnerProxyHeaders({
-          [RUNNER_PROXY_TOKEN_HEADER]: "proxy-tokez",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-  });
-
-
   it("returns 404 for removed Cloudflare-owned device-sync runtime hosts", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -378,8 +313,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -426,8 +360,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -449,8 +382,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -514,8 +446,7 @@ describe("handleRunnerOutboundRequest", () => {
           HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
           HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
         }),
-        "member_123",
-        RUNNER_PROXY_TOKEN,
+        "member_123" ,
       );
 
       expect(response.status).toBe(200);
@@ -562,8 +493,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(413);
@@ -620,8 +550,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -682,8 +611,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -731,8 +659,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -777,8 +704,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -817,8 +743,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName: runner.getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -836,8 +761,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "GET",
       }),
       createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(405);
@@ -850,8 +774,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv(),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -883,8 +806,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -913,8 +835,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -947,8 +868,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -977,8 +897,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName: runner.getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1012,8 +931,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv(fixture.env),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(502);
@@ -1072,8 +990,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv(fixture.env),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(502);
@@ -1101,8 +1018,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv(fixture.env),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1140,8 +1056,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -1177,8 +1092,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -1218,8 +1132,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName: runner.getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -1255,8 +1168,7 @@ describe("handleRunnerOutboundRequest", () => {
           getByName: runner.getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1292,55 +1204,12 @@ describe("handleRunnerOutboundRequest", () => {
           getByName: runner.getByName,
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(emailSendMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects provider effect requests when the invocation proxy token is missing", async () => {
-    const ownsActiveInvocationLease = vi.fn(async () => true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
-        body: JSON.stringify({
-          chatId: "linq_chat_123",
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "x-hosted-runtime-attempt-id": "attempt_1",
-          "x-hosted-runtime-lease-generation": "9",
-          "x-hosted-runtime-workspace-version": "4",
-        },
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName() {
-            return {
-              async bindUser(userId: string) {
-                return { userId };
-              },
-              ownsActiveInvocationLease,
-            };
-          },
-        },
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects malformed provider effect request JSON", async () => {
@@ -1366,8 +1235,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(400);
@@ -1400,8 +1268,7 @@ describe("handleRunnerOutboundRequest", () => {
           },
         },
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(405);
@@ -1437,8 +1304,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         TELEGRAM_BOT_TOKEN: "telegram-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1484,8 +1350,7 @@ describe("handleRunnerOutboundRequest", () => {
         WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
         WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1534,8 +1399,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         TELEGRAM_BOT_TOKEN: "telegram-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1572,8 +1436,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         TELEGRAM_BOT_TOKEN: "telegram-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1616,8 +1479,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         LINQ_API_TOKEN: "linq-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1675,8 +1537,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         LINQ_API_TOKEN: "linq-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1743,8 +1604,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         LINQ_API_TOKEN: "linq-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1783,8 +1643,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         LINQ_API_TOKEN: "linq-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(502);
@@ -1865,8 +1724,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         LINQ_API_TOKEN: "linq-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -1910,8 +1768,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const chatActionStopResponse = await handleRunnerOutboundRequest(
       new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH}`, {
@@ -1923,8 +1780,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const markReadResponse = await handleRunnerOutboundRequest(
       new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
@@ -1935,8 +1791,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const deleteResponse = await handleRunnerOutboundRequest(
       new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH}`, {
@@ -1947,8 +1802,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(chatActionResponse.status).toBe(200);
@@ -2012,8 +1866,7 @@ describe("handleRunnerOutboundRequest", () => {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -2147,8 +2000,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const secondResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
@@ -2157,8 +2009,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(secondResponse.status).toBe(200);
@@ -2201,8 +2052,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "PUT",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(deniedResponse.status).toBe(401);
@@ -2214,8 +2064,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(secondResponse.status).toBe(200);
@@ -2246,8 +2095,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const secondResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
@@ -2256,8 +2104,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "5",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(firstResponse.status).toBe(401);
@@ -2293,8 +2140,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     await handleRunnerOutboundRequest(
       createArtifactPutRequest({
@@ -2303,8 +2149,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
@@ -2337,8 +2182,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "PUT",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     expect(fixture.fetchMock).not.toHaveBeenCalled();
     const allowedResponse = await handleRunnerOutboundRequest(
@@ -2348,8 +2192,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(deniedResponse.status).toBe(401);
@@ -2384,8 +2227,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2420,8 +2262,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "PUT",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2450,8 +2291,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "5",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -2485,8 +2325,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2522,8 +2361,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2560,8 +2398,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2601,8 +2438,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       env,
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(401);
@@ -2892,8 +2728,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -2923,8 +2758,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -2955,8 +2789,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(200);
@@ -2982,8 +2815,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
     const postGetOnlyResponse = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
@@ -2998,8 +2830,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(getPostOnlyResponse.status).toBe(404);
@@ -3024,8 +2855,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -3050,8 +2880,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -3073,8 +2902,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
       }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
+      "member_123" ,
     );
 
     expect(response.status).toBe(404);
@@ -3276,21 +3104,10 @@ function createRunnerOutboundEnv(
         async bindUser() {
           return { userId: "member_123" };
         },
-        async ownsActiveInvocationLease() {
+        async validateRuntimeWriteFence() {
           return true;
         },
-        async recordActiveInvocationHeartbeat() {
-          return {
-            instruction: {
-              kind: "continue" as const,
-            },
-            inputAvailable: false,
-            nextAlarmAt: null,
-            ok: true as const,
-            pendingNudge: false,
-          };
-        },
-        async recordActiveInvocationWorkspaceCheckpoint() {
+        async recordRuntimeWriteFenceWorkspaceCheckpoint() {
           return { recorded: true };
         },
       };
@@ -3348,6 +3165,34 @@ function createRunnerOutboundEnv(
           ...stub,
           async bindUser(boundUserId: string) {
             return stub.bindUser?.(boundUserId) ?? { userId: boundUserId };
+          },
+          async validateRuntimeWriteFence(input) {
+            if (typeof stub.validateRuntimeWriteFence === "function") {
+              return await stub.validateRuntimeWriteFence(input);
+            }
+            const legacyStub = stub as {
+              ownsActiveInvocationLease?: (legacyInput: {
+                attemptId: string;
+                leaseGeneration: string;
+                userId: string;
+                workspaceVersion?: string | null;
+              }) => Promise<boolean>;
+            };
+            if (typeof legacyStub.ownsActiveInvocationLease === "function") {
+              return await legacyStub.ownsActiveInvocationLease({
+                attemptId: input.attemptId,
+                leaseGeneration: input.generation,
+                userId: input.userId,
+                workspaceVersion: input.workspaceVersion,
+              });
+            }
+            return true;
+          },
+          async recordRuntimeWriteFenceWorkspaceCheckpoint(input) {
+            if (typeof stub.recordRuntimeWriteFenceWorkspaceCheckpoint === "function") {
+              return await stub.recordRuntimeWriteFenceWorkspaceCheckpoint(input);
+            }
+            return { recorded: true };
           },
         };
       },

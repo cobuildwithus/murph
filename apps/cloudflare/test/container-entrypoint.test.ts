@@ -221,7 +221,6 @@ function buildJobBody(input: {
   const userId = typeof input.wake.event.userId === "string" ? input.wake.event.userId : "u1";
 
   return {
-    internalWorkerProxyToken: "proxy-token",
     job: {
       kind: "workspace-invocation",
       request: {
@@ -247,8 +246,6 @@ function buildWorkspaceRunnerResult() {
 
 function buildWorkspaceJobBody() {
   return {
-    internalWorkerProxyToken: "workspace-proxy-token",
-    localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     job: {
       kind: "workspace-invocation",
       request: {
@@ -776,7 +773,6 @@ describe("startHostedContainerEntrypoint", () => {
         kind: "workspace-invocation",
       },
       expect.objectContaining({
-        internalWorkerProxyToken: "proxy-token",
       }),
     );
   });
@@ -831,8 +827,6 @@ describe("startHostedContainerEntrypoint", () => {
         kind: "workspace-invocation",
       },
       expect.objectContaining({
-        internalWorkerProxyToken: "workspace-proxy-token",
-        localInternalProxyBaseUrl: "http://127.0.0.1:8787",
       }),
     );
   });
@@ -915,8 +909,6 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(runnerSpy).toHaveBeenCalledTimes(1);
       expect(runnerSpy.mock.calls[0]?.[1]).toEqual({
-        internalWorkerProxyToken: "proxy-token",
-        localInternalProxyBaseUrl: null,
         runtimeCallbackBaseUrl: null,
         signal: expect.any(AbortSignal),
       });

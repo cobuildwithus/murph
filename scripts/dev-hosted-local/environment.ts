@@ -285,9 +285,6 @@ export function mergeCloudflareLocalEnv(input: {
 
   return {
     ...resolvedExisting,
-    ALLOW_LOCAL_INTERNAL_PROXY:
-      resolvedExisting.ALLOW_LOCAL_INTERNAL_PROXY?.trim()
-      || "true",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: authoritySignKeyVersion,
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authoritySignPublicKeyPem,
     HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: authorityVerifyKeyringJson,
@@ -309,12 +306,8 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
-    HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
-      normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
-      ?? workerOrigin,
     HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
       normalizedOverrides.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL?.trim()
-      ?? normalizedOverrides.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?.trim()
       ?? workerOrigin,
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,

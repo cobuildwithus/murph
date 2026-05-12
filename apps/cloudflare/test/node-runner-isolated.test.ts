@@ -79,7 +79,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     const result = await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_cleanup"),
     });
 
@@ -97,15 +96,12 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_warm_first"),
     });
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_warm_second"),
     });
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: {
         ...createWorkspaceJob("evt_warm_other_user"),
         request: {
@@ -138,12 +134,10 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_warm_failure"),
     })).rejects.toThrow("simulated child failure");
 
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_warm_after_failure"),
     });
 
@@ -164,7 +158,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     spawnMock.mockImplementation(() => createSuccessfulChildProcess(module));
 
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_clear_stale_browser_vault_marker"),
     });
 
@@ -188,7 +181,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_browser_vault_marker_clear_failed"),
     })).rejects.toThrow();
 
@@ -210,7 +202,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         OPENAI_API_KEY: "vercel-key",
       });
       expect(options?.env?.CODEX_HOME).toBeUndefined();
-      expect(options?.env?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL).toBeUndefined();
       expect(options?.env?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
@@ -247,14 +239,13 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: {
         ...createWorkspaceJob("evt_child_env"),
         runtime: {
           forwardedEnv: {
             CODEX_HOME: "/tmp/forwarded-codex-home",
             HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-            HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
             HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
             HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
@@ -308,7 +299,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_legacy_result"),
     })).rejects.toThrow("without emitting a result payload");
 
@@ -342,7 +332,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     const result = await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_stdout_spoof"),
     });
 
@@ -373,7 +362,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_duplicate_result"),
     })).rejects.toThrow("multiple result payloads");
   });
@@ -397,7 +385,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_success_nonzero"),
     })).rejects.toThrow("after reporting success");
   });
@@ -426,7 +413,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_malformed_result"),
     })).rejects.toThrow("Hosted workspace invocation result");
   });
@@ -472,7 +458,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     });
 
     await module.runHostedWorkspaceInvocationIsolatedDetailed({
-      internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_stderr_redaction"),
     });
 
@@ -535,7 +520,6 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     let thrown: (Error & { details?: Record<string, unknown> | null }) | null = null;
     try {
       await module.runHostedWorkspaceInvocationIsolatedDetailed({
-        internalWorkerProxyToken: "proxy-token",
         job: createWorkspaceJob("evt_child_failure_redaction"),
       });
       throw new Error("Expected isolated child failure to throw.");

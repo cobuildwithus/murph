@@ -95,6 +95,15 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
   };
 }
 
+function buildTestHostedExecutionRuntimePlatform(
+  input: Parameters<typeof buildHostedExecutionRuntimePlatform>[0],
+) {
+  return buildHostedExecutionRuntimePlatform({
+    runtimeCallbackBaseUrl: "https://worker.example.test",
+    ...input,
+  });
+}
+
 function createBrowserVaultReplicaRef(sourceBundleHash: string) {
   return {
     byteLength: 256,
@@ -115,9 +124,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("does not attach stale runtime liveness controls to the Cloudflare platform", () => {
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -140,7 +148,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(
@@ -217,10 +224,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 404,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -259,10 +265,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 409,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -296,10 +301,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 500,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(
@@ -327,8 +331,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     const hostedFetch = createCloudflareHostedRuntimeFetch(
       "member_123",
-      "runner-proxy-token",
-      null,
       fetchMock as typeof fetch,
     );
 
@@ -347,10 +349,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 401,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     let rejectedError: unknown;
@@ -373,20 +374,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await platform.effectsPort.readRawEmailMessage("raw/message#1");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "effects port fetch");
-    expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/messages/raw%2Fmessage%231");
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.method).toBe("GET");
   });
 
@@ -495,7 +493,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: null,
       runtimeCallbackBaseUrl: "https://worker.example.test",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
@@ -574,92 +571,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       platform.effectsPort.readRawEmailMessage("raw_123"),
     ).rejects.toThrow(
       "Hosted raw email read request failed.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("routes local hosted internal message reads through the worker loopback bridge when configured", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
-    });
-
-    await platform.effectsPort.readRawEmailMessage("raw/message#1");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "bridged effects port fetch");
-    expect(request.url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
-    );
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.method).toBe("GET");
-  });
-
-  it("does not require a second local bridge token when loopback proxying is enabled", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
-    });
-
-    await platform.effectsPort.readRawEmailMessage("raw/message#1");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "bridged effects port fetch");
-    expect(request.url).toBe(
-      "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw%2Fmessage%231",
-    );
-  });
-
-  it("does not fall back to ambient local proxy base env when the scoped option is missing", async () => {
-    const previousLocalProxyBaseUrl = process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
-    process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL = "http://127.0.0.1:8787";
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-
-    try {
-      const platform = buildHostedExecutionRuntimePlatform({
-        boundUserId: "member_123",
-        fetchImpl: fetchMock as typeof fetch,
-        internalWorkerProxyToken: "runner-proxy-token",
-      });
-
-      await platform.effectsPort.readRawEmailMessage("raw/message#1");
-
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const request = requireFetchRequest(fetchMock.mock.calls[0], "direct effects port fetch");
-      expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
-      expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-        "runner-proxy-token",
-      );
-    } finally {
-      if (previousLocalProxyBaseUrl === undefined) {
-        delete process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
-      } else {
-        process.env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL = previousLocalProxyBaseUrl;
-      }
-    }
-  });
-
-  it("rejects a pre-scoped local bridge base for a different member", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      localInternalProxyBaseUrl:
-        "http://127.0.0.1:8787/__murph/local-internal-proxy/users/member_other/",
-    });
-
-    await expect(
-      platform.effectsPort.readRawEmailMessage("raw/message#1"),
-    ).rejects.toThrow(
-      "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is scoped to a different user.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -924,10 +835,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("fetch failed");
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(platform.deviceSyncPort!.createConnectLink({
@@ -966,10 +876,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const snapshot = await platform.deviceSyncPort!.fetchSnapshot({
@@ -979,11 +888,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(snapshot.userId).toBe("member_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied web-control fetch");
-    expect(request.url).toBe("http://web-control.worker/api/internal/device-sync/runtime/snapshot");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/device-sync/runtime/snapshot");
     expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.headers.get("content-type")).toBe("application/json");
     await expect(request.json()).resolves.toEqual({
       connectionId: "conn_123",
@@ -1023,10 +930,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.mailboxPort!.fetch({
@@ -1043,11 +949,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result.items).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "mailbox fetch");
-    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-mailbox/fetch");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-mailbox/fetch");
     expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     await expect(request.json()).resolves.toEqual({
       lanes: [
         {
@@ -1078,10 +982,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.mailboxPort!.fetch({
@@ -1098,11 +1001,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result.items).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const retriedRequest = requireFetchRequest(fetchMock.mock.calls[1], "retried mailbox fetch");
-    expect(retriedRequest.url).toBe("http://web-control.worker/api/internal/hosted-mailbox/fetch");
+    expect(retriedRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-mailbox/fetch");
     expect(retriedRequest.method).toBe("POST");
-    expect(retriedRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(retriedRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
   });
 
   it("does not retry replay-safe mailbox reads after internal authority rejection", async () => {
@@ -1114,10 +1015,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 401,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(platform.mailboxPort!.fetch({
@@ -1214,10 +1114,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.mailboxPort!.fetch({
@@ -1241,10 +1140,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       error.name = "AbortError";
       throw error;
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(platform.mailboxPort!.fetch({
@@ -1284,10 +1182,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.mailboxPort!.fetch({
@@ -1327,10 +1224,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.mailboxPort!.fetchPayload({
@@ -1347,12 +1243,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "retried mailbox payload fetch",
     );
     expect(retriedRequest.url).toBe(
-      "http://web-control.worker/api/internal/hosted-mailbox/payload/fetch",
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-mailbox/payload/fetch",
     );
     expect(retriedRequest.method).toBe("POST");
-    expect(retriedRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(retriedRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
   });
 
   it("threads checkpoint fencing fields through the workspace callback body", async () => {
@@ -1377,10 +1271,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.workspacePort!.checkpoint({
@@ -1399,7 +1292,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result.workspace.version).toBe("5");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace checkpoint");
-    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace/checkpoint");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace/checkpoint");
     expect(request.method).toBe("POST");
     await expect(request.json()).resolves.toEqual({
       attemptId: "attempt_1",
@@ -1435,10 +1328,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -1462,11 +1354,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace checkpoint");
-    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace/checkpoint");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace/checkpoint");
     expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
@@ -1486,7 +1376,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+      if (request.url === "https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace/checkpoint") {
         return new Response(JSON.stringify({
           checkpointed: true,
           workspace: {
@@ -1510,10 +1400,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       return new Response(null, { status: 200 });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => currentLease,
         recordCheckpoint: ({ workspaceVersion }) => {
@@ -1542,7 +1431,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const artifactRequest = requireFetchRequest(fetchMock.mock.calls[1], "artifact upload");
-    expect(artifactRequest.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
+    expect(artifactRequest.url).toBe(`https://worker.example.test/__murph/runtime-callback/users/member_123/artifacts.worker/objects/${"a".repeat(64)}`);
     expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
@@ -1565,10 +1454,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -1584,11 +1472,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result).toEqual(replicaRef);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
-    expect(request.url).toBe("http://browser-vault.worker/replicas");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/browser-vault.worker/replicas");
     expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
@@ -1623,7 +1509,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
       runtimeCallbackBaseUrl: "https://worker.example.test",
@@ -1680,10 +1566,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     };
     const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => null,
       },
@@ -1699,10 +1584,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("deduplicates successful artifact uploads by SHA within one platform instance", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await platform.artifactStore.put({
@@ -1720,10 +1604,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(requireFetchRequest(fetchMock.mock.calls[0], "first artifact upload").url).toBe(
-      `http://artifacts.worker/objects/${"a".repeat(64)}`,
+      `https://worker.example.test/__murph/runtime-callback/users/member_123/artifacts.worker/objects/${"a".repeat(64)}`,
     );
     expect(requireFetchRequest(fetchMock.mock.calls[1], "second artifact upload").url).toBe(
-      `http://artifacts.worker/objects/${"b".repeat(64)}`,
+      `https://worker.example.test/__murph/runtime-callback/users/member_123/artifacts.worker/objects/${"b".repeat(64)}`,
     );
   });
 
@@ -1735,10 +1619,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       resolveUpload = resolve;
     });
     const fetchMock = vi.fn(async () => uploadResponse);
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const firstUpload = platform.artifactStore.put({
@@ -1771,10 +1654,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       return new Response(null, { status: 200 });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const firstUpload = platform.artifactStore.put({
@@ -1808,10 +1690,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       return new Response(null, { status: 200 });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(platform.artifactStore.put({
@@ -1846,10 +1727,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -1897,10 +1777,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const readWorkspace = platform.workspacePort!.read;
@@ -1913,7 +1792,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result.workspace?.version).toBe("5");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace read");
-    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-workspace");
     expect(request.method).toBe("GET");
   });
 
@@ -1926,10 +1805,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 200,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     const result = await platform.logPort!.write({
@@ -1956,7 +1834,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result.loggedCount).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "runtime log");
-    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-runtime/log");
+    expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/web-control.worker/api/internal/hosted-runtime/log");
     expect(request.method).toBe("POST");
     await expect(request.json()).resolves.toEqual({
       entries: [
@@ -2020,10 +1898,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
     const { effectsPort } = platform;
 
@@ -2049,8 +1926,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(readRequest).toBeInstanceOf(Request);
     expect(sendRequest).toBeInstanceOf(Request);
-    expect(readRequest.url).toBe("http://results.worker/messages/raw_123");
-    expect(sendRequest.url).toBe("http://results.worker/send");
+    expect(readRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/messages/raw_123");
+    expect(sendRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/send");
   });
 
   it("routes provider effects through the internal effects port with active lease headers", async () => {
@@ -2099,10 +1976,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         status: 200,
       });
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -2162,14 +2038,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const linqStopRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq action stop");
     const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[3], "linq send");
     const whatsAppSendRequest = requireFetchRequest(fetchMock.mock.calls[4], "whatsapp send");
-    expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
-    expect(linqStartRequest.url).toBe("http://results.worker/linq/chat-action");
-    expect(linqStopRequest.url).toBe("http://results.worker/linq/chat-action");
-    expect(linqSendRequest.url).toBe("http://results.worker/linq/send");
-    expect(whatsAppSendRequest.url).toBe("http://results.worker/whatsapp/send");
-    expect(telegramRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
+    expect(telegramRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/telegram/send");
+    expect(linqStartRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/linq/chat-action");
+    expect(linqStopRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/linq/chat-action");
+    expect(linqSendRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/linq/send");
+    expect(whatsAppSendRequest.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/whatsapp/send");
+    expect(telegramRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(telegramRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(telegramRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
@@ -2199,7 +2073,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("preserves structured Telegram ambiguity details from provider effect failures", async () => {
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({
         cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
@@ -2213,7 +2087,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
         status: 502,
       })) as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -2246,10 +2119,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       status: 403,
     }));
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
       workspaceCheckpointBridge: {
         readCurrentLease: () => ({
           attemptId: "attempt_1",
@@ -2272,10 +2144,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("preserves HTTP status on hosted raw email read failures", async () => {
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response("unavailable", { status: 503 })) as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
     });
 
     await expect(

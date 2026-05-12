@@ -13,9 +13,6 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-} from "@murphai/hosted-execution/contracts";
 
 import {
   buildHostedExecutionJobRuntime,
@@ -70,8 +67,6 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         },
       },
     }, {
-      internalWorkerProxyToken: "proxy-token",
-      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     })).resolves.toEqual(result);
 
     expect(buildRuntime).toHaveBeenCalledWith({
@@ -115,11 +110,9 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         ? requestInfo
         : new Request(requestInfo, init);
       expect(requestObject.url).toBe(
-        `http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
+        `https://worker.example.test/__murph/runtime-callback/users/${request.userId}/web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
       );
-      expect(requestObject.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(
-        "proxy-token",
-      );
+      expect(requestObject.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
       expect(requestObject.headers.get("x-hosted-runtime-attempt-id")).toBe(
         request.attemptId,
       );
@@ -170,7 +163,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         platformEnv: {},
       },
     }, {
-      internalWorkerProxyToken: "proxy-token",
+      runtimeCallbackBaseUrl: "https://worker.example.test",
     })).resolves.toEqual(result);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -216,7 +209,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         platformEnv: {},
       },
     }, {
-      internalWorkerProxyToken: "proxy-token",
+      runtimeCallbackBaseUrl: "https://worker.example.test",
     })).rejects.toMatchObject({
       status: 503,
       statusCode: 503,
@@ -245,13 +238,11 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         },
       },
     }, {
-      internalWorkerProxyToken: "proxy-token",
       signal: controller.signal,
     })).resolves.toEqual(result);
 
     expect(runIsolated).toHaveBeenCalledWith(
       expect.objectContaining({
-        internalWorkerProxyToken: "proxy-token",
         job: {
           kind: "workspace-invocation",
           request,
@@ -261,10 +252,8 @@ describe("createHostedWorkspaceInvocationRunner", () => {
             },
           },
         },
-        localInternalProxyBaseUrl: null,
       }),
       {
-        internalWorkerProxyToken: "proxy-token",
         signal: controller.signal,
       },
     );

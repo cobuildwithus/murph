@@ -31,8 +31,6 @@ import {
 } from "./hosted-runtime-redaction.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
-  internalWorkerProxyToken?: string | null;
-  localInternalProxyBaseUrl?: string | null;
   runtimeCallbackBaseUrl?: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }

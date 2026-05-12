@@ -139,8 +139,6 @@ const TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST = new Set<string>([
     ],
     CURRENT_RESOLVED_CONFIG_SECRET_SUFFIXES,
   ),
-  "job payload sent to container.internalWorkerProxyToken",
-  "child stdin payload.internalWorkerProxyToken",
 ]);
 
 afterEach(() => {
@@ -226,8 +224,8 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
       '{"kty":"EC","d":"fixture-automation"}',
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
       '{"keys":[{"keyId":"cloudflare-automation:v1","privateJwk":{"kty":"EC","d":"fixture-automation"}}]}',
-    HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:
-      "http://host.docker.internal:8787",
+    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
+      "http://runner-callback.example.test",
     HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -286,7 +284,6 @@ async function serializeContainerRequestBody(
   let requestBody = "";
   let running = false;
   const container = new RunnerContainer({}, {
-    HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
     HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://runner-callback.example.test",
   });
 
@@ -384,9 +381,7 @@ async function serializeChildStdinPayload(
   });
 
   await module.runHostedWorkspaceInvocationIsolatedDetailed({
-    internalWorkerProxyToken: "fixture-invocation-token",
     job,
-    localInternalProxyBaseUrl: "http://127.0.0.1:8787",
   });
 
   expect(stdinPayload.length).toBeGreaterThan(0);

@@ -22,6 +22,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-delivery"
   | "linq-scheduled-reminder"
   | "linq-webhook"
+  | "runner-warm-auth-recovery"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
   | "telegram"
@@ -86,6 +87,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     name: "linq-webhook",
     requiresParserToolchain: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",
+    manualOnly: true,
+    name: "runner-warm-auth-recovery",
   },
   {
     file: "apps/cloudflare/test/hosted-local-snapshot-stress-e2e.test.ts",

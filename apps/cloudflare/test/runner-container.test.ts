@@ -23,7 +23,6 @@ import {
   HostedExecutionConfigurationError,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
-  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
 } from "../src/runner-container.ts";
@@ -92,9 +91,8 @@ describe("RunnerContainer", () => {
     expect(destroy).not.toHaveBeenCalled();
 
     const supervisorEnv = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
-    expect(supervisorEnv).toMatchObject({
+    expect(supervisorEnv).toEqual({
       PORT: "8080",
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
     });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -102,24 +100,14 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(2);
     expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/workspace-invocation");
-    const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
-    const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-    expect(firstAuthorization).toBe(
-      `Bearer ${supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN}`,
-    );
-    expect(secondAuthorization).toBe(firstAuthorization);
+    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
+    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
 
     const firstBody = JSON.parse(executeCalls[0]?.[1]?.body as string);
     const secondBody = JSON.parse(executeCalls[1]?.[1]?.body as string);
     expect(firstBody).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: RUNNER_CALLBACK_BASE_URL,
     });
     expect(secondBody).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: RUNNER_CALLBACK_BASE_URL,
     });
   });
 
@@ -185,7 +173,6 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "public-pem",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: '{"kty":"EC"}',
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-loopback-token",
         HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
@@ -209,9 +196,8 @@ describe("RunnerContainer", () => {
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars ?? {};
-    expect(envVars).toMatchObject({
+    expect(envVars).toEqual({
       PORT: "8080",
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
     });
     expect(envVars).not.toHaveProperty("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
     expect(envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
@@ -250,10 +236,10 @@ describe("RunnerContainer", () => {
     expect(procEnv).not.toContain("OPENAI_API_KEY");
   });
 
-  it("uses callback transport when legacy local internal bridge config is present", async () => {
+  it("uses callback transport for container runtime requests", async () => {
     const { container, containerFetch } = createContainerDouble({
       env: {
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
       },
     });
 
@@ -275,14 +261,11 @@ describe("RunnerContainer", () => {
     }
 
     expect(JSON.parse(executeCall[1].body)).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: RUNNER_CALLBACK_BASE_URL,
     });
   });
 
-  it("does not expose legacy workspace proxy tokens to the child runner", async () => {
-    let observedToken: unknown = undefined;
+  it("sends only the callback runtime request payload to the child runner", async () => {
+    let observedTopLevelKeys: string[] = [];
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
@@ -297,15 +280,8 @@ describe("RunnerContainer", () => {
         if (!init?.body || typeof init.body !== "string") {
           throw new Error("Expected JSON runner request body.");
         }
-        const body = JSON.parse(init.body) as { internalWorkerProxyToken?: unknown };
-        observedToken = body.internalWorkerProxyToken;
-        expect(await container.ownsInternalWorkerProxyToken({
-          attemptId: "attempt_evt_active_proxy_token",
-          leaseGeneration: "11",
-          token: "legacy-token",
-          userId: "member_123",
-        })).toBe(false);
-
+        const body = JSON.parse(init.body) as Record<string, unknown>;
+        observedTopLevelKeys = Object.keys(body).sort();
         return new Response(JSON.stringify(createRunnerResult()), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -324,11 +300,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(observedToken).toBeNull();
-    expect(await container.ownsInternalWorkerProxyToken({
-      token: "legacy-token",
-      userId: "member_123",
-    })).toBe(false);
+    expect(observedTopLevelKeys).toEqual(["job", "runtimeCallbackBaseUrl"]);
   });
 
   it("does not install legacy outbound handlers before runner requests", async () => {
@@ -386,11 +358,6 @@ describe("RunnerContainer", () => {
         timeoutMs: 60_000,
         userId: "member_123",
       });
-      const firstExecuteCall = containerFetch.mock.calls.find(([url]) =>
-        String(url).endsWith("/internal/workspace-invocation")
-      );
-      const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
-
       expect(destroy).not.toHaveBeenCalled();
       vi.setSystemTime(new Date("2026-05-06T00:07:01.000Z"));
       await container.onActivityExpired();
@@ -411,14 +378,13 @@ describe("RunnerContainer", () => {
         timeoutMs: 60_000,
         userId: "member_123",
       });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(destroy).toHaveBeenCalledTimes(1);
       const executeCalls = containerFetch.mock.calls.filter(([url]) =>
         String(url).endsWith("/internal/workspace-invocation")
       );
-      const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(firstToken).not.toBe(secondToken);
+      expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
+      expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -439,10 +405,6 @@ describe("RunnerContainer", () => {
       timeoutMs: 60_000,
       userId: "member_123",
     });
-    const firstExecuteCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
     renewActivityTimeout.mockClear();
 
     await container.onActivityExpired();
@@ -457,13 +419,12 @@ describe("RunnerContainer", () => {
       timeoutMs: 60_000,
       userId: "member_123",
     });
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );
-    const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
-    expect(secondToken).not.toBe(firstToken);
+    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
+    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -783,12 +744,8 @@ describe("RunnerContainer", () => {
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );
-    const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
-    const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-
-    expect(firstAuthorization).toMatch(/^Bearer .+/u);
-    expect(secondAuthorization).toMatch(/^Bearer .+/u);
-    expect(secondAuthorization).toBe(firstAuthorization);
+    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
+    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(destroy).not.toHaveBeenCalled();
     expect(setOutboundByHosts).not.toHaveBeenCalled();
@@ -860,95 +817,7 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("does not probe or invoke a surviving shell when no control token can be recovered", async () => {
-    let status: "running" | "stopped" = "running";
-    let freshShellStarted = false;
-    let freshControlToken: string | null = null;
-
-    const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
-      status,
-    }));
-    const destroy = vi.fn(async () => {
-      status = "stopped";
-    });
-    const startAndWaitForPorts = vi.fn(async (options: {
-      startOptions?: {
-        envVars?: Record<string, string>;
-      };
-    }) => {
-      expect(status).toBe("stopped");
-      freshControlToken = options.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN ?? null;
-      expect(freshControlToken).toMatch(/^[0-9a-f-]{36}$/u);
-      status = "running";
-      freshShellStarted = true;
-    });
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (!freshShellStarted) {
-        throw new Error("Stale warm shell must not receive health checks or invocation requests.");
-      }
-      expect(url).toBe("http://container/internal/workspace-invocation");
-      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${freshControlToken}`);
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const { container } = createContainerDouble({
-      containerFetch,
-      destroy,
-      getState,
-      initialStatus: "running",
-      startAndWaitForPorts,
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_do_memory_lost_control_token"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
-      startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
-    expect(startAndWaitForPorts.mock.invocationCallOrder[0]).toBeLessThan(
-      containerFetch.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
-    expect(containerFetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("reuses a surviving shell after recovering the durable control token", async () => {
-    const storage = createContainerStorageDouble();
-    const initial = createContainerDouble({
-      state: {
-        storage,
-      },
-    });
-
-    await initial.container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_persist_control_token"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    });
-
-    const supervisorEnv = initial.startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
-    const recoveredControlToken = supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-    expect(recoveredControlToken).toMatch(/^[0-9a-f-]{36}$/u);
-    if (!recoveredControlToken) {
-      throw new Error("Expected persisted runner control token.");
-    }
-
-    let controlHealthChecks = 0;
+  it("reuses a surviving warm shell after plain health succeeds", async () => {
     const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
@@ -959,19 +828,8 @@ describe("RunnerContainer", () => {
         });
       }
 
-      if (url.endsWith("/internal/control-health")) {
-        controlHealthChecks += 1;
-        expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
       expect(url).toBe("http://container/internal/workspace-invocation");
-      expect(readAuthorizationHeader(init?.headers)).toBe(`Bearer ${recoveredControlToken}`);
+      expect(readAuthorizationHeader(init?.headers)).toBeNull();
       return new Response(JSON.stringify(createRunnerResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -982,9 +840,6 @@ describe("RunnerContainer", () => {
     const rehydrated = createContainerDouble({
       containerFetch: rehydratedContainerFetch,
       initialStatus: "running",
-      state: {
-        storage,
-      },
     });
 
     await expect(rehydrated.container.invoke({
@@ -996,7 +851,6 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(controlHealthChecks).toBe(1);
     expect(rehydrated.destroy).not.toHaveBeenCalled();
     expect(rehydrated.startAndWaitForPorts).not.toHaveBeenCalled();
     expect(rehydratedContainerFetch.mock.calls.some(([url]) =>
@@ -1004,163 +858,10 @@ describe("RunnerContainer", () => {
     )).toBe(true);
   });
 
-  it("invalidates the durable control token when destroy cannot prove the shell stopped", async () => {
-    vi.useFakeTimers();
-
-    const storage = createContainerStorageDouble();
-    let status: "running" | "stopped" = "stopped";
-    const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
-      status,
-    }));
-    const destroy = vi.fn(async () => {});
-    const startAndWaitForPorts = vi.fn(async () => {
-      status = "running";
-    });
-    const initial = createContainerDouble({
-      destroy,
-      getState,
-      startAndWaitForPorts,
-      state: {
-        storage,
-      },
-    });
-
-    await initial.container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_persist_before_failed_destroy"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    });
-
-    const recoveredControlToken = await readStoredRunnerControlToken(storage);
-    expect(recoveredControlToken).toMatch(/^[0-9a-f-]{36}$/u);
-    if (!recoveredControlToken) {
-      throw new Error("Expected persisted runner control token.");
-    }
-
-    try {
-      const destroyResultPromise = initial.container.destroyInstance().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(5_500);
-
-      const thrown = await destroyResultPromise;
-      expect(thrown).toBeInstanceOf(Error);
-      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
-    } finally {
-      vi.useRealTimers();
-    }
-
-    await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
-
-    const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      if (url.endsWith("/internal/control-health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      expect(url).toBe("http://container/internal/workspace-invocation");
-      expect(readAuthorizationHeader(init?.headers)).toMatch(/^Bearer [0-9a-f-]{36}$/u);
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const rehydrated = createContainerDouble({
-      containerFetch: rehydratedContainerFetch,
-      initialStatus: "running",
-      state: {
-        storage,
-      },
-    });
-
-    await expect(rehydrated.container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recover_after_failed_destroy"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(rehydrated.destroy).toHaveBeenCalledOnce();
-    expect(rehydrated.startAndWaitForPorts).toHaveBeenCalledOnce();
-  });
-
-  it("clears the durable control token after destroy confirms the shell stopped", async () => {
-    const storage = createContainerStorageDouble();
-    const { container, destroy } = createContainerDouble({
-      state: {
-        storage,
-      },
-    });
-
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_clear_control_token_after_confirmed_destroy"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    });
-
-    await expect(readStoredRunnerControlToken(storage)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
-
-    await expect(container.destroyInstance()).resolves.toBeUndefined();
-
-    expect(destroy).toHaveBeenCalledTimes(1);
-    await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
-  });
-
-  it("does not start a shell when its control token cannot be persisted", async () => {
-    const storage = createContainerStorageDouble();
-    const put = storage.put.bind(storage);
-    storage.put = vi.fn(async (key: string, value: unknown) => {
-      if (key === "runner-container-control-token:v1") {
-        throw new Error("control token storage unavailable");
-      }
-      await put(key, value);
-    });
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
-      state: {
-        storage,
-      },
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_control_token_storage_failed"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).rejects.toThrow("Hosted runner container control token state could not be persisted.");
-
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
-  });
-
-  it("does not restore the durable control token when destroy races with cold start", async () => {
+  it("does not publish an active invocation abort controller during cold start", async () => {
     vi.useFakeTimers();
 
     try {
-      const storage = createContainerStorageDouble();
       const startGate = createDeferred<void>();
       let status: "running" | "stopped" = "stopped";
       const getState = vi.fn(async () => ({
@@ -1180,9 +881,6 @@ describe("RunnerContainer", () => {
         destroy,
         getState,
         startAndWaitForPorts,
-        state: {
-          storage,
-        },
       });
 
       const invokeResultPromise = container.invoke({
@@ -1195,70 +893,11 @@ describe("RunnerContainer", () => {
       }).catch((error: unknown) => error);
 
       await vi.waitFor(() => expect(startAndWaitForPorts).toHaveBeenCalledTimes(1));
-      const supervisorEnv = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
-      const startedControlToken = supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-      expect(startedControlToken).toMatch(/^[0-9a-f-]{36}$/u);
-      if (!startedControlToken) {
-        throw new Error("Expected cold start to receive a runner control token.");
-      }
-
       await expect(container.destroyInstance()).resolves.toBeUndefined();
-      await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
 
       startGate.resolve();
-      await vi.advanceTimersByTimeAsync(5_500);
-      const thrown = await invokeResultPromise;
-      expect(thrown).toBeInstanceOf(Error);
-      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
-      await expect(readStoredRunnerControlToken(storage)).resolves.toBeNull();
-
-      const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        if (url.endsWith("/internal/control-health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        expect(url).toBe("http://container/internal/workspace-invocation");
-        expect(readAuthorizationHeader(init?.headers)).toMatch(/^Bearer [0-9a-f-]{36}$/u);
-        return new Response(JSON.stringify(createRunnerResult()), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      });
-      const rehydrated = createContainerDouble({
-        containerFetch: rehydratedContainerFetch,
-        initialStatus: "running",
-        state: {
-          storage,
-        },
-      });
-
-      await expect(rehydrated.container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_recover_after_cold_start_destroy_race"),
-        },
-        timeoutMs: 30_000,
-        userId: "member_123",
-      })).resolves.toEqual(createRunnerResult());
-
-      expect(rehydrated.destroy).toHaveBeenCalledOnce();
-      expect(rehydrated.startAndWaitForPorts).toHaveBeenCalledOnce();
+      await expect(invokeResultPromise).resolves.toEqual(createRunnerResult());
+      expect(destroy).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -2257,9 +1896,6 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
       async smokeHealth() {
         return {
           ok: true,
@@ -2301,9 +1937,6 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
       async smokeHealth() {
         return {
           ok: true,
@@ -2384,9 +2017,6 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
       async smokeHealth() {
         return {
           ok: true,
@@ -2434,9 +2064,6 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
       async smokeHealth() {
         return {
           ok: true,
@@ -2506,7 +2133,6 @@ describe("RunnerContainer", () => {
     }
     const forwarded = JSON.parse(executeCall[1].body) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
-      internalWorkerProxyToken: null,
       job: {
         kind: "workspace-invocation",
         request: {
@@ -2517,8 +2143,6 @@ describe("RunnerContainer", () => {
           workspaceVersion: "6",
         },
       },
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: RUNNER_CALLBACK_BASE_URL,
     });
     const forwardedJob = requireObject(
       requireObject(forwarded.job, "forwarded.job").request,
@@ -2527,128 +2151,6 @@ describe("RunnerContainer", () => {
     expect(forwardedJob).not.toHaveProperty("run");
     expect(forwardedJob).not.toHaveProperty("runDrain");
     expect(forwardedJob).not.toHaveProperty("runToken");
-  });
-
-  it("skips warm-only idle checkpoint without starting a cold container", async () => {
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
-
-    await expect(container.invokeIdleCheckpointIfWarm({
-      job: {
-        ...createWorkspaceRunnerJob("member_idle_checkpoint_cold"),
-        request: {
-          ...createWorkspaceRunnerJob("member_idle_checkpoint_cold").request,
-          reason: "idle_shutdown_checkpoint",
-        },
-      },
-      timeoutMs: 45_000,
-      userId: "member_idle_checkpoint_cold",
-    })).resolves.toEqual({
-      idleShutdownCheckpointSkipped: "container_not_warm",
-      status: "idle",
-    });
-
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
-  });
-
-  it("routes warm-only idle checkpoint helper to the container warm-only method", async () => {
-    const invoke = vi.fn<NonNullable<HostedExecutionContainerStubLike["invokeIdleCheckpointIfWarm"]>>(
-      async () => ({
-        idleShutdownCheckpointSkipped: "container_not_warm",
-        status: "idle",
-      }),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      async invoke() {
-        throw new Error("Warm-only helper must not use foreground invoke.");
-      },
-      invokeIdleCheckpointIfWarm: invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await expect(invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm({
-      job: {
-        ...createWorkspaceRunnerJob("member_idle_checkpoint_helper"),
-        request: {
-          ...createWorkspaceRunnerJob("member_idle_checkpoint_helper").request,
-          reason: "idle_shutdown_checkpoint",
-        },
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_idle_checkpoint_helper",
-    })).resolves.toEqual({
-      idleShutdownCheckpointSkipped: "container_not_warm",
-      status: "idle",
-    });
-
-    expect(getByName).toHaveBeenCalledWith("member_idle_checkpoint_helper");
-    expect(invoke).toHaveBeenCalledOnce();
-  });
-
-  it("aborts warm-only idle checkpoint helpers without destroying the warm shell", async () => {
-    const abortController = new AbortController();
-    const abortWorkspaceInvocation = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<NonNullable<HostedExecutionContainerStubLike["invokeIdleCheckpointIfWarm"]>>(
-      async () => new Promise<never>(() => {}),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      abortWorkspaceInvocation,
-      destroyInstance,
-      async invoke() {
-        throw new Error("Warm-only helper must not use foreground invoke.");
-      },
-      invokeIdleCheckpointIfWarm: invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    const job = createWorkspaceRunnerJob("member_idle_checkpoint_abort");
-    const invocation = invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm({
-      job: {
-        ...job,
-        request: {
-          ...job.request,
-          reason: "idle_shutdown_checkpoint",
-        },
-      },
-      runnerContainerNamespace: { getByName },
-      signal: abortController.signal,
-      timeoutMs: 45_000,
-      userId: "member_idle_checkpoint_abort",
-    });
-
-    abortController.abort(new Error("foreground input arrived"));
-
-    await expect(invocation).rejects.toThrow("foreground input arrived");
-    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
-      attemptId: job.request.attemptId,
-      userId: "member_idle_checkpoint_abort",
-    });
-    expect(destroyInstance).not.toHaveBeenCalled();
   });
 
   it("aborts foreground workspace helpers without destroying the warm shell", async () => {
@@ -2664,9 +2166,6 @@ describe("RunnerContainer", () => {
       abortWorkspaceInvocation,
       destroyInstance,
       invoke,
-      async ownsInternalWorkerProxyToken() {
-        return false;
-      },
       async smokeHealth() {
         return {
           ok: true,
@@ -2768,9 +2267,6 @@ describe("RunnerContainer", () => {
     }
     const forwarded = JSON.parse(executeCall[1].body) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: RUNNER_CALLBACK_BASE_URL,
       job: {
         kind: "workspace-invocation",
         request: {
@@ -2797,7 +2293,6 @@ describe("RunnerContainer", () => {
     const getByName = vi.fn(() => ({
       destroyInstance,
       invoke: vi.fn(async () => createRunnerResult()),
-      ownsInternalWorkerProxyToken: vi.fn(async () => false),
       smokeHealth: vi.fn(async () => ({
         ok: true,
         runnerBundle: null,

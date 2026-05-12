@@ -238,7 +238,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
@@ -267,7 +267,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(buildHostedRunnerAmbientEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]: "http://127.0.0.1:4222/v1",
@@ -426,7 +426,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     const configSource = {
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -795,7 +795,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("does not serialize Telegram platform authority for container runtime", () => {
     const runtime = buildHostedRunnerJobRuntimeConfig({
       configSource: {
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
         TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -981,7 +981,7 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       forwardedEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",

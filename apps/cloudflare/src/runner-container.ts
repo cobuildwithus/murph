@@ -25,7 +25,6 @@ import {
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
-const RUNNER_CONTROL_HEALTH_URL = "http://container/internal/control-health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
@@ -35,8 +34,6 @@ const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
-const RUNNER_CONTROL_TOKEN_STORAGE_KEY = "runner-container-control-token:v1";
-const RUNNER_CONTROL_TOKEN_SCHEMA_VERSION = 1;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
 const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
   "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL";
@@ -84,15 +81,6 @@ export interface HostedExecutionContainerStubLike {
   abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
-  invokeIdleCheckpointIfWarm?(
-    input: HostedExecutionContainerInvokeRequest,
-  ): Promise<HostedExecutionRunnerJobResult>;
-  ownsInternalWorkerProxyToken(input: {
-    attemptId?: string;
-    leaseGeneration?: string;
-    token: string;
-    userId?: string;
-  }): Promise<boolean>;
   refreshBrowserVaultReplica?(input: unknown): Promise<unknown>;
   smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
@@ -129,12 +117,6 @@ interface HostedExecutionContainerSmokeHealthResult {
 
 interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
-}
-
-interface RunnerControlTokenRecord {
-  schemaVersion: typeof RUNNER_CONTROL_TOKEN_SCHEMA_VERSION;
-  token: string;
-  updatedAt: number;
 }
 
 interface RunnerActiveOperationRecord {
@@ -183,7 +165,6 @@ export class RunnerContainer extends Container {
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private currentLogContext: RunnerContainerLogContext | null = null;
-  private runnerControlToken: string | null = null;
   private pendingIdleCheckpoint: RunnerPendingIdleCheckpoint | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
@@ -200,15 +181,6 @@ export class RunnerContainer extends Container {
     const input = parseHostedExecutionContainerInvokeInput(payload);
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
-    );
-  }
-
-  async invokeIdleCheckpointIfWarm(
-    payload: HostedExecutionContainerInvokeRequest,
-  ): Promise<HostedExecutionRunnerJobResult> {
-    const input = parseHostedExecutionContainerInvokeInput(payload);
-    return this.withLifecycleLock(async () =>
-      this.invokeHostedExecution(input, { warmOnly: true })
     );
   }
 
@@ -273,16 +245,6 @@ export class RunnerContainer extends Container {
         await this.stopWarmContainer({ failClosed: false });
       }
     });
-  }
-
-  async ownsInternalWorkerProxyToken(input: {
-    attemptId?: string;
-    leaseGeneration?: string;
-    token: string;
-    userId?: string;
-  }): Promise<boolean> {
-    void input;
-    return false;
   }
 
   override async onActivityExpired(): Promise<void> {
@@ -371,58 +333,31 @@ export class RunnerContainer extends Container {
 
   override onStop(params: StopParams): void {
     const context = this.currentLogContext;
-    const abortedOperations = this.abortActiveOperationsForContainerStop(params);
-    const stoppedDuringActiveWork = abortedOperations.workspaceInvocation;
     const cleanExit = params.exitCode === 0;
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
+        activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
         exitCode: params.exitCode,
         lifecycleStage: "onStop",
         runnerPort: RUNNER_PORT,
         stopReason: params.reason,
       },
-      level: cleanExit && !stoppedDuringActiveWork ? "info" : "warn",
-      message: stoppedDuringActiveWork
-        ? "Hosted execution container stopped during active work."
-        : cleanExit
+      level: cleanExit ? "info" : "warn",
+      message: cleanExit
         ? "Hosted execution container lifecycle hook reported stop."
         : "Hosted execution container lifecycle hook reported non-zero stop.",
-      phase: cleanExit && !stoppedDuringActiveWork ? "container.ready" : "failed",
+      phase: cleanExit ? "container.ready" : "failed",
       userId: context?.userId,
     });
   }
 
-  private abortActiveOperationsForContainerStop(params: {
-    exitCode: number | null;
-    reason: string;
-  }): {
-    workspaceInvocation: boolean;
-  } {
-    const activeWorkspaceOperation = this.workspaceInvocationActiveOperation;
-    const workspaceInvocationAborted = abortRunnerContainerOperation(
-      this.workspaceInvocationAbortController,
-      new Error(
-        `workspace invocation container stopped during active work (${params.reason}, exit ${params.exitCode})`,
-      ),
-    );
-
-    return {
-      workspaceInvocation: activeWorkspaceOperation !== null && workspaceInvocationAborted,
-    };
-  }
-
   override onError(error: unknown): never {
     const context = this.currentLogContext;
-    const abortedOperations = this.abortActiveOperationsForContainerStop({
-      exitCode: null,
-      reason: "error",
-    });
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeWorkspaceInvocationAborted: abortedOperations.workspaceInvocation,
+        activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
         lifecycleStage: "onError",
         runnerPort: RUNNER_PORT,
       },
@@ -434,18 +369,8 @@ export class RunnerContainer extends Container {
     throw error;
   }
 
-  override async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (
-      url.pathname === "/internal/workspace-invocation"
-      || url.pathname === "/internal/browser-vault-refresh"
-      || url.pathname === "/internal/destroy"
-    ) {
-      return methodNotAllowed();
-    }
-
-    return super.fetch(request);
+  override async fetch(_request: Request): Promise<Response> {
+    return methodNotAllowed();
   }
 
   private async invokeHostedExecution(
@@ -468,7 +393,6 @@ export class RunnerContainer extends Container {
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
     const operationAbortController = new AbortController();
-    this.workspaceInvocationAbortController = operationAbortController;
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
@@ -492,10 +416,10 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
-      const runnerControlToken = options.warmOnly === true
+      const containerReady = options.warmOnly === true
         ? await this.openWarmContainerIfReady(input)
         : await this.ensureContainerReady(input);
-      if (!runnerControlToken) {
+      if (!containerReady) {
         return {
           idleShutdownCheckpointSkipped: "container_not_warm",
           status: "idle",
@@ -529,13 +453,10 @@ export class RunnerContainer extends Container {
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
-            internalWorkerProxyToken: null,
             job: input.job,
-            localInternalProxyBaseUrl: null,
             runtimeCallbackBaseUrl,
           }),
           headers: {
-            authorization: `Bearer ${runnerControlToken}`,
             "content-type": "application/json; charset=utf-8",
           },
           method: "POST",
@@ -664,8 +585,11 @@ export class RunnerContainer extends Container {
   private async runPendingIdleCheckpoint(
     pending: RunnerPendingIdleCheckpoint,
   ): Promise<RunnerPendingIdleCheckpointOutcome> {
-    const runnerControlToken = this.runnerControlToken ?? await this.readRunnerControlToken();
-    if (!runnerControlToken) {
+    const warmContainerReady = await this.openWarmContainerIfReady({
+      timeoutMs: pending.timeoutMs,
+      userId: pending.userId,
+    });
+    if (!warmContainerReady) {
       this.pendingIdleCheckpoint = null;
       return "completed";
     }
@@ -718,7 +642,6 @@ export class RunnerContainer extends Container {
             workspaceVersion: pending.workspaceVersion,
           },
         },
-        runnerControlToken,
         timeoutMs: pending.timeoutMs,
         userId: pending.userId,
       });
@@ -766,7 +689,6 @@ export class RunnerContainer extends Container {
 
   private async postRunnerRequest(input: {
     job: HostedExecutionRunnerJobInput;
-    runnerControlToken: string;
     timeoutMs: number;
     userId: string;
   }): Promise<HostedExecutionRunnerJobResult> {
@@ -778,13 +700,10 @@ export class RunnerContainer extends Container {
       RUNNER_EXECUTE_URL,
       {
         body: JSON.stringify({
-          internalWorkerProxyToken: null,
           job: input.job,
-          localInternalProxyBaseUrl: null,
           runtimeCallbackBaseUrl,
         }),
         headers: {
-          authorization: `Bearer ${input.runnerControlToken}`,
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -836,23 +755,14 @@ export class RunnerContainer extends Container {
 
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
-  ): Promise<string> {
+  ): Promise<true> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
-    const warmRunnerControlToken = isRunnerContainerStopped(status)
-      ? null
-      : this.runnerControlToken ?? await this.readRunnerControlToken();
 
-    if (!isRunnerContainerStopped(status) && warmRunnerControlToken) {
+    if (!isRunnerContainerStopped(status)) {
       try {
-        this.runnerControlToken = warmRunnerControlToken;
         await assertRunnerHealthy(this, Math.min(input.timeoutMs, readyTimeoutMs));
-        await assertRunnerControlAuthorized(
-          this,
-          warmRunnerControlToken,
-          Math.min(input.timeoutMs, readyTimeoutMs),
-        );
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -865,7 +775,7 @@ export class RunnerContainer extends Container {
           phase: "container.ready",
           userId: input.userId,
         });
-        return warmRunnerControlToken;
+        return true;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -883,19 +793,6 @@ export class RunnerContainer extends Container {
         });
         await this.stopWarmContainer();
       }
-    } else if (!isRunnerContainerStopped(status)) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          startMode: "cold",
-          statusBeforeStart: status,
-        },
-        level: "warn",
-        message: "Hosted execution container found a running shell without a control token; destroying before cold start.",
-        phase: "container.starting",
-        userId: input.userId,
-      });
-      await this.stopWarmContainer();
     }
 
     emitHostedExecutionStructuredLog({
@@ -915,11 +812,8 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    const runnerControlToken = crypto.randomUUID();
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
-    this.runnerControlToken = runnerControlToken;
-    await this.writeRunnerControlToken(runnerControlToken, { failClosed: true });
 
     try {
       await this.startAndWaitForPorts({
@@ -934,10 +828,10 @@ export class RunnerContainer extends Container {
           enableInternet: true,
           envVars: buildHostedRunnerSupervisorEnv({
             port: RUNNER_PORT,
-            runnerControlToken,
           }),
         },
       });
+      await assertRunnerHealthy(this, readinessTimeoutMs);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -957,8 +851,6 @@ export class RunnerContainer extends Container {
       });
       throw error;
     }
-    this.runnerControlToken = runnerControlToken;
-    await this.writeRunnerControlToken(runnerControlToken, { failClosed: true });
 
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -975,39 +867,33 @@ export class RunnerContainer extends Container {
       userId: input.userId,
     });
 
-    return runnerControlToken;
+    return true;
   }
 
   private async openWarmContainerIfReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
-  ): Promise<string | null> {
+  ): Promise<boolean> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
     const readyTimeoutMs = Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment));
-    const warmRunnerControlToken = isRunnerContainerStopped(status)
-      ? null
-      : this.runnerControlToken ?? await this.readRunnerControlToken();
 
-    if (isRunnerContainerStopped(status) || !warmRunnerControlToken) {
+    if (isRunnerContainerStopped(status)) {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
           readinessLatencyMs: Date.now() - readinessStartedAt,
           startMode: "warm-only",
           statusBeforeStart: status,
-          warmControlTokenPresent: Boolean(warmRunnerControlToken),
         },
         message: "Hosted execution container skipped warm-only idle checkpoint because no warm shell is available.",
         phase: "container.ready",
         userId: input.userId,
       });
-      return null;
+      return false;
     }
 
     try {
-      this.runnerControlToken = warmRunnerControlToken;
       await assertRunnerHealthy(this, readyTimeoutMs);
-      await assertRunnerControlAuthorized(this, warmRunnerControlToken, readyTimeoutMs);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1020,7 +906,7 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: input.userId,
       });
-      return warmRunnerControlToken;
+      return true;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1037,7 +923,7 @@ export class RunnerContainer extends Container {
         userId: input.userId,
       });
       await this.stopWarmContainer({ failClosed: false });
-      return null;
+      return false;
     }
   }
 
@@ -1173,12 +1059,6 @@ export class RunnerContainer extends Container {
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
     this.pendingIdleCheckpoint = null;
-    const hadRunnerControlToken =
-      this.runnerControlToken !== null || (await this.readRunnerControlToken()) !== null;
-    if (hadRunnerControlToken) {
-      this.runnerControlToken = null;
-      await this.clearRunnerControlToken();
-    }
     await this.destroyIfRunning({ failClosed });
   }
 
@@ -1218,69 +1098,6 @@ export class RunnerContainer extends Container {
         userId: this.currentLogContext?.userId,
       });
       return false;
-    }
-  }
-
-  private async readRunnerControlToken(): Promise<string | null> {
-    try {
-      const value = await this.ctx.storage.get<unknown>(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
-      return parseRunnerControlTokenRecord(value)?.token ?? null;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not read control token state.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-      return null;
-    }
-  }
-
-  private async writeRunnerControlToken(
-    token: string,
-    input?: {
-      failClosed?: boolean;
-    },
-  ): Promise<boolean> {
-    const record: RunnerControlTokenRecord = {
-      schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
-      token,
-      updatedAt: Date.now(),
-    };
-
-    try {
-      await this.ctx.storage.put(RUNNER_CONTROL_TOKEN_STORAGE_KEY, record);
-      return true;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not write control token state.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
-      if (input?.failClosed) {
-        throw new Error("Hosted runner container control token state could not be persisted.");
-      }
-      return false;
-    }
-  }
-
-  private async clearRunnerControlToken(): Promise<void> {
-    try {
-      await this.ctx.storage.delete(RUNNER_CONTROL_TOKEN_STORAGE_KEY);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "warn",
-        message: "Hosted execution container could not clear control token state.",
-        phase: "container.ready",
-        userId: this.currentLogContext?.userId,
-      });
     }
   }
 
@@ -1361,51 +1178,6 @@ export async function invokeHostedExecutionContainerRunner(
           message: "Hosted runner left a preempted invocation request for lease fencing.",
           phase: "failed",
           userId: jobUserId,
-        });
-      })
-    : await invocation;
-}
-
-export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
-  input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
-): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
-  input: HostedExecutionContainerRunnerInput,
-): Promise<HostedExecutionRunnerJobResult>;
-export async function invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm(
-  input: HostedExecutionContainerRunnerInput,
-): Promise<HostedExecutionRunnerJobResult> {
-  const jobUserId = readHostedExecutionRunnerJobUserId(input.job);
-  if (input.userId !== jobUserId) {
-    throw new TypeError("Hosted runner container route userId must match workspace job userId.");
-  }
-
-  const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
-  if (!container.invokeIdleCheckpointIfWarm) {
-    throw new Error("Hosted runner container does not support warm-only idle checkpoints.");
-  }
-  const invocation = container.invokeIdleCheckpointIfWarm({
-    job: input.job,
-    timeoutMs: input.timeoutMs,
-    userId: jobUserId,
-  });
-  return input.signal
-    ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
-        if (!container.abortWorkspaceInvocation) {
-          return;
-        }
-        await container.abortWorkspaceInvocation({
-          attemptId: input.job.request.attemptId,
-          userId: jobUserId,
-        }).catch((error: unknown) => {
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            error,
-            level: "warn",
-            message: "Hosted runner could not abort a preempted warm-only invocation.",
-            phase: "failed",
-            userId: jobUserId,
-          });
         });
       })
     : await invocation;
@@ -1496,18 +1268,6 @@ function throwIfRunnerContainerOperationAborted(signal: AbortSignal): void {
       ? signal.reason
       : new DOMException("The operation was aborted.", "AbortError");
   }
-}
-
-function abortRunnerContainerOperation(
-  controller: AbortController | null,
-  reason: Error,
-): boolean {
-  if (!controller || controller.signal.aborted) {
-    return false;
-  }
-
-  controller.abort(reason);
-  return true;
 }
 
 function combineRunnerContainerAbortSignals(
@@ -1947,30 +1707,6 @@ async function assertRunnerHealthy(
   }
 }
 
-async function assertRunnerControlAuthorized(
-  container: RunnerContainer,
-  runnerControlToken: string,
-  timeoutMs: number,
-): Promise<void> {
-  const response = await container.containerFetch(
-    RUNNER_CONTROL_HEALTH_URL,
-    {
-      headers: {
-        authorization: `Bearer ${runnerControlToken}`,
-      },
-      method: "GET",
-      signal: AbortSignal.timeout(timeoutMs),
-    },
-    RUNNER_PORT,
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Hosted runner container control health check returned HTTP ${response.status}.`,
-    );
-  }
-}
-
 function readContainerStatus(state: unknown): string | null {
   if (!state || typeof state !== "object" || Array.isArray(state)) {
     return null;
@@ -2146,28 +1882,6 @@ function computeRunnerActivityRenewIntervalMs(idleTtlMs: number): number {
   );
 }
 
-function parseRunnerControlTokenRecord(value: unknown): RunnerControlTokenRecord | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  if (
-    record.schemaVersion !== RUNNER_CONTROL_TOKEN_SCHEMA_VERSION
-    || typeof record.token !== "string"
-    || record.token.length === 0
-    || !isSafeNonNegativeInteger(record.updatedAt)
-  ) {
-    return null;
-  }
-
-  return {
-    schemaVersion: RUNNER_CONTROL_TOKEN_SCHEMA_VERSION,
-    token: record.token,
-    updatedAt: record.updatedAt,
-  };
-}
-
 function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
   if (!diagnostics) {
@@ -2185,10 +1899,6 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
-}
-
-function isSafeNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

@@ -417,8 +417,6 @@ export type HostedRuntimeTimerTriggerKind =
   (typeof HOSTED_RUNTIME_TIMER_TRIGGER_KINDS)[number];
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
-export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
-  "x-hosted-execution-runner-proxy-token";
 
 export type HostedExecutionDeviceSyncJobHint =
   DeviceSyncHostedExecutionDeviceSyncJobHint;

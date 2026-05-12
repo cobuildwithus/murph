@@ -112,92 +112,6 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(alarms.slice(1)).toEqual(["deleted", "deleted"]);
   });
 
-  it("runs foreground-deferred checkpoints through the warm container after releasing the runtime fence", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const { flushWaitUntil, idleCheckpointInvoke, invoke, runner, sql } = createRunnerHarness({
-      idleCheckpointResults: [{
-        idleShutdownCheckpointed: true,
-        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
-        status: "idle",
-      }],
-      invocationResults: [{
-        deferredCheckpointRequired: true,
-        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
-        status: "idle",
-      }],
-      workspace: createWorkspaceState({ version: "9" }),
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-    await flushWaitUntil();
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(idleCheckpointInvoke).toHaveBeenCalledOnce();
-    expect(idleCheckpointInvoke.mock.calls[0]?.[0].job.request).toMatchObject({
-      checkpointNextWakeAt: WORKSPACE_NEXT_WAKE_AT,
-      reason: "idle_shutdown_checkpoint",
-      userId: "member_123",
-      workspaceVersion: "9",
-    });
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      backoff_until: null,
-      failure_count: 0,
-      wake_at: WORKSPACE_NEXT_WAKE_AT,
-    });
-  });
-
-  it("preserves the foreground wake when a deferred warm checkpoint fails", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const { flushWaitUntil, idleCheckpointInvoke, invoke, runner, sql } = createRunnerHarness({
-      idleCheckpointResults: [new Error("warm checkpoint failed")],
-      invocationResults: [{
-        deferredCheckpointRequired: true,
-        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
-        status: "idle",
-      }],
-      workspace: createWorkspaceState({ version: "9" }),
-    });
-    await runner.bindUser("member_123");
-
-    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
-      accepted: true,
-      immediateDriveStarted: true,
-    });
-    await flushWaitUntil();
-
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(idleCheckpointInvoke).toHaveBeenCalledOnce();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      backoff_until: null,
-      failure_count: 0,
-      wake_at: WORKSPACE_NEXT_WAKE_AT,
-    });
-
-    const warning = mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([entry]) => entry)
-      .find((entry) =>
-        entry.message === "Hosted runner deferred idle-shutdown checkpoint failed best-effort."
-      );
-    expect(warning).toMatchObject({
-      component: "hosted.runner",
-      details: expect.objectContaining({
-        checkpointNextWakePresent: true,
-        workspaceVersion: "9",
-      }),
-      level: "warn",
-      phase: "failed",
-      userId: "member_123",
-    });
-  });
-
   it("queues a foreground nudge behind an active write fence and follows up after release", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -507,12 +421,10 @@ describe("HostedUserRunner wake scheduling", () => {
 function createRunnerHarness(input: {
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
-  idleCheckpointResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState();
-  const idleCheckpointResults = [...(input.idleCheckpointResults ?? [])];
   const invocationResults = [...(input.invocationResults ?? [])];
   const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
     async () => {
@@ -523,25 +435,10 @@ function createRunnerHarness(input: {
       return await next;
     },
   );
-  const idleCheckpointInvoke = vi.fn<NonNullable<HostedExecutionContainerStubLike["invokeIdleCheckpointIfWarm"]>>(
-    async () => {
-      const next = idleCheckpointResults.shift() ?? {
-        idleShutdownCheckpointed: true,
-        nextWakeAt: null,
-        status: "idle",
-      };
-      if (next instanceof Error) {
-        throw next;
-      }
-      return await next;
-    },
-  );
   const runnerContainerNames: string[] = [];
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: input.destroyInstance ?? (async () => {}),
     invoke,
-    invokeIdleCheckpointIfWarm: idleCheckpointInvoke,
-    ownsInternalWorkerProxyToken: async () => false,
     smokeHealth: async () => ({
       ok: true,
       runnerBundle: null,
@@ -576,7 +473,6 @@ function createRunnerHarness(input: {
         await Promise.all(durable.waitUntilPromises.splice(0));
       }
     },
-    idleCheckpointInvoke,
     invoke,
     runner,
     runnerContainerNames,
