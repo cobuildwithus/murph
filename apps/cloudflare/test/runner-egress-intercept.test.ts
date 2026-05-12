@@ -215,12 +215,64 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
+
+  it("rewrites WhatsApp sentinel phone ids only for numeric graph versions", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://graph.facebook.com/v25.0/phone_123/messages");
+    expect(forwarded.headers.get("authorization")?.startsWith("Bearer ")).toBe(true);
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
+  it("does not inject WhatsApp credentials for malformed graph versions", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("passthrough"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/vbeta/__cloudflare_injected__/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://graph.facebook.com/vbeta/__cloudflare_injected__/messages");
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
 });
 
 function createInterceptEnv(input: {
   LINQ_API_TOKEN?: string;
   OPENAI_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
+  WHATSAPP_ACCESS_TOKEN?: string;
+  WHATSAPP_PHONE_NUMBER_ID?: string;
   validateRuntimeWriteFence?: (input: {
     attemptId: string;
     generation: string;
@@ -234,6 +286,8 @@ function createInterceptEnv(input: {
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
+    WHATSAPP_ACCESS_TOKEN: input.WHATSAPP_ACCESS_TOKEN,
+    WHATSAPP_PHONE_NUMBER_ID: input.WHATSAPP_PHONE_NUMBER_ID,
     USER_RUNNER: {
       getByName: () => ({
         validateRuntimeWriteFence: input.validateRuntimeWriteFence ?? (async () => false),
