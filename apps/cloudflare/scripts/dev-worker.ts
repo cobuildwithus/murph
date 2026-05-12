@@ -6,6 +6,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
+import {
+  hostedLocalRunnerBaseImageTag,
+} from "./runner-base-image-contract.js";
 import { runnerBundleDirectoryName } from "./runner-bundle-contract.js";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,9 +16,6 @@ const preparedRunnerBundleDir = path.join(
   resolveCloudflareDeployPaths(appDir).deployDir,
   runnerBundleDirectoryName,
 );
-export const hostedLocalRunnerBaseImageTag =
-  "murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en";
-
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];
 }

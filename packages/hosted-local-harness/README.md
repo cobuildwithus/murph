@@ -37,6 +37,10 @@ override any value explicitly.
   webhook tunnel registration unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
 
+`runner:docker:base` is cache-aware: it skips the native runner base-image build
+when the local image already carries the current Dockerfile fingerprint label. Use
+`pnpm --dir apps/cloudflare runner:docker:base -- --force` to force a rebuild.
+
 ## State files
 
 Each command writes a redacted state file under:

@@ -49,7 +49,7 @@
     "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
     "runner:bundle:manifest:refresh": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/refresh-runner-bundle-manifest.ts",
     "runner:bundle:manifest:validate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-runner-bundle-manifest.ts",
-    "runner:docker:base": "docker buildx build --load --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-base -t murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en ../..",
+    "runner:docker:base": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-base-image.ts",
     "runner:docker:build": "pnpm runner:bundle && pnpm runner:docker:base && docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     "runner:docker:python-path": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-python-path-e2e.ts",
     "runner:docker:smoke:prepare": "node ../../scripts/rm-paths.mjs .deploy/smoke-dist .deploy/runner-smoke-bundle && pnpm --dir ../.. exec tsc -p apps/cloudflare/tsconfig.smoke-build.json --pretty false && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
