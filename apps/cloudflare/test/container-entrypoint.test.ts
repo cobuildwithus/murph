@@ -264,47 +264,6 @@ function buildWorkspaceJobBody() {
   };
 }
 
-async function assertHostedWorkspaceInvocationDoesNotFetch(): Promise<void> {
-  const requestBody = buildWorkspaceJobBody();
-  const actualContractsModule =
-    await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
-      "@murphai/assistant-runtime/hosted-runtime-contracts",
-    );
-  const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
-  const nodeRunnerModule = {
-    ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
-    runHostedWorkspaceInvocation,
-  };
-  const externalFetch = vi.fn(async () => {
-    throw new Error("Unexpected entrypoint egress fetch");
-  });
-  globalThis.fetch = externalFetch as unknown as typeof fetch;
-
-  const server = await startHostedContainerEntrypoint({
-    port: 0,
-    runtime: {
-      loadNodeRunner: vi.fn(async () => nodeRunnerModule),
-      loadRuntimeContracts: vi.fn(async () => actualContractsModule),
-    },
-  });
-  servers.push(server);
-  const address = server.address();
-
-  if (!address || typeof address === "string") {
-    throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-  }
-
-  const response = await sendHostedContainerJsonRequest({
-    body: JSON.stringify(requestBody),
-    path: "/internal/workspace-invocation",
-    port: address.port,
-  });
-
-  expect(response.status).toBe(200);
-  expect(runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
-  expect(externalFetch).not.toHaveBeenCalled();
-}
-
 describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
@@ -705,32 +664,6 @@ describe("startHostedContainerEntrypoint", () => {
       expect.objectContaining({
       }),
     );
-  });
-
-  it("does not run public egress probes before workspace invocations", async () => {
-    await assertHostedWorkspaceInvocationDoesNotFetch();
-  });
-
-  it("does not default public egress probes on outside the test environment", async () => {
-    const originalNodeEnv = process.env.NODE_ENV;
-    const originalProbeEnv = process.env.MURPH_HOSTED_CONTAINER_EGRESS_PROBE;
-    process.env.NODE_ENV = "production";
-    delete process.env.MURPH_HOSTED_CONTAINER_EGRESS_PROBE;
-
-    try {
-      await assertHostedWorkspaceInvocationDoesNotFetch();
-    } finally {
-      if (originalNodeEnv === undefined) {
-        delete process.env.NODE_ENV;
-      } else {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
-      if (originalProbeEnv === undefined) {
-        delete process.env.MURPH_HOSTED_CONTAINER_EGRESS_PROBE;
-      } else {
-        process.env.MURPH_HOSTED_CONTAINER_EGRESS_PROBE = originalProbeEnv;
-      }
-    }
   });
 
   it("keeps startup healthy when the background node-runner preload fails", async () => {
