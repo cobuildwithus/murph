@@ -73,6 +73,9 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "./runner-egress-intercept.ts";
+import {
   assertAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
@@ -161,6 +164,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  proxyBoundUserIdHeader?: boolean | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
@@ -169,6 +173,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     input.boundUserId,
     input.fetchImpl ?? fetch,
     {
+      injectBoundUserIdHeader: input.proxyBoundUserIdHeader ?? false,
       readCurrentLease: input.workspaceCheckpointBridge?.readCurrentLease,
     },
   );
@@ -276,14 +281,14 @@ export function buildHostedExecutionRuntimePlatform(input: {
         await putArtifactOnce({ bytes, sha256 });
       },
     },
-    ...(hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
+    ...(input.workspaceCheckpointBridge
       ? {
           providerFetch: createCloudflareHostedProviderFetch(
             input.boundUserId,
             input.fetchImpl ?? fetch,
             {
+              injectBoundUserIdHeader: input.proxyBoundUserIdHeader ?? false,
               readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
-              runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
             },
           ),
         }
@@ -642,10 +647,11 @@ function resolveHostedWebControlTransport(input: {
   return null;
 }
 
-export function createCloudflareHostedProviderFetch(
+function createCloudflareHostedRuntimeFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
+    injectBoundUserIdHeader?: boolean;
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   } = {},
 ): typeof fetch {
@@ -671,6 +677,9 @@ export function createCloudflareHostedProviderFetch(
       );
     }
     writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    if (options.injectBoundUserIdHeader) {
+      headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
+    }
     const internalRequest = createHostedInternalRequest(request, headers);
     const shouldLogInternalRequest = true;
     const details = {
@@ -750,8 +759,8 @@ export function createCloudflareHostedProviderFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
+    injectBoundUserIdHeader?: boolean;
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
-    runtimeCallbackBaseUrl?: string | null;
   } = {},
 ): typeof fetch {
   const runtimeFetch = createCloudflareHostedRuntimeFetch(boundUserId, fetchImpl, options);
@@ -764,8 +773,11 @@ export function createCloudflareHostedProviderFetch(
 
     const headers = new Headers(request.headers);
     const lease = await options.readCurrentLease?.() ?? null;
-    if (lease) {
+    if (options.injectBoundUserIdHeader && lease) {
       writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    }
+    if (options.injectBoundUserIdHeader) {
+      headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, boundUserId);
     }
 
     return await fetchImpl(new Request(request, { headers }));

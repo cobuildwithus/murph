@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import type {
@@ -11,6 +12,10 @@ const WRITE_FENCE_HEADERS = {
   "x-hosted-runtime-attempt-id": "attempt_1",
   "x-hosted-runtime-lease-generation": "7",
   "x-hosted-runtime-workspace-version": "4",
+} as const;
+const BOUND_USER_WRITE_FENCE_HEADERS = {
+  ...WRITE_FENCE_HEADERS,
+  [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
 } as const;
 
 afterEach(() => {
@@ -50,14 +55,14 @@ describe("hostedRunnerIntercept", () => {
     const response = await hostedRunnerIntercept(
       new Request("https://api.linqapp.com/api/partner/v3/chats/chat_1/messages", {
         body: JSON.stringify({ text: "hello" }),
-        headers: WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
         LINQ_API_TOKEN: "linq-worker-secret",
         validateRuntimeWriteFence,
       }),
-      { containerId: "member_123--v-version_1" },
+      { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
@@ -70,6 +75,7 @@ describe("hostedRunnerIntercept", () => {
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
   it("rejects Linq writes without a valid runtime write fence", async () => {
@@ -96,20 +102,21 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
-        headers: WRITE_FENCE_HEADERS,
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "POST",
       }),
       createInterceptEnv({
         TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
         validateRuntimeWriteFence: async () => true,
       }),
-      { containerId: "member_123" },
+      { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 });
 

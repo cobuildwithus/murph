@@ -25,6 +25,9 @@ import {
   createHostedBrowserVaultReplicaWriteHeaders,
   isHostedRuntimeInternalAuthorityRejectedError,
 } from "../src/runtime-platform.ts";
+import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "../src/runner-egress-intercept.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -510,12 +513,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("routes internal runtime requests through virtual hosts with write-fence headers", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "runtime_write_123",
+  const platform = buildHostedExecutionRuntimePlatform({
+    boundUserId: "member_123",
+    fetchImpl: fetchMock as typeof fetch,
+    proxyBoundUserIdHeader: true,
+    workspaceCheckpointBridge: {
+      readCurrentLease: () => ({
+        attemptId: "runtime_write_123",
           leaseGeneration: "7",
           userId: "member_123",
           workspaceVersion: "6",
@@ -530,12 +534,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.url).toBe(
       "http://results.worker/messages/raw%2Fmessage%231",
     );
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
-    expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
-    expect(request.method).toBe("GET");
-  });
+  expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("runtime_write_123");
+  expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
+  expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
+  expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+  expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+  expect(request.method).toBe("GET");
+});
 
   it("attaches web-control ports and routes them through internal virtual hosts", async () => {
     const fetchMock = vi.fn(async (requestInput: RequestInfo | URL) => {
