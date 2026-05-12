@@ -207,18 +207,20 @@ describe("cleanupHostedRunnerContainers", () => {
     ]);
   });
 
-  it("removes only persisted local container durable object state for the worker namespace", async () => {
+  it("removes persisted local hosted runner durable object state for the worker namespace", async () => {
     const { cleanupHostedRunnerContainerLocalState } = await importRuntimeWithSpawnSequence([]);
     const root = await mkdtemp(path.join(os.tmpdir(), "murph-runner-state-test-"));
     const persistDir = path.join(root, "state");
     const runnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-RunnerContainer");
     const smokeStateDir = path.join(persistDir, "v3", "do", "murph-hosted-DeploySmokeRunnerContainer");
     const userRunnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-UserRunnerDurableObject");
+    const unrelatedStateDir = path.join(persistDir, "v3", "do", "murph-hosted-OtherDurableObject");
 
     try {
       await mkdir(runnerStateDir, { recursive: true });
       await mkdir(smokeStateDir, { recursive: true });
       await mkdir(userRunnerStateDir, { recursive: true });
+      await mkdir(unrelatedStateDir, { recursive: true });
 
       await cleanupHostedRunnerContainerLocalState({
         persistDir,
@@ -226,13 +228,14 @@ describe("cleanupHostedRunnerContainers", () => {
 
       await expect(access(runnerStateDir)).rejects.toThrow();
       await expect(access(smokeStateDir)).rejects.toThrow();
-      await expect(access(userRunnerStateDir)).resolves.toBeUndefined();
+      await expect(access(userRunnerStateDir)).rejects.toThrow();
+      await expect(access(unrelatedStateDir)).resolves.toBeUndefined();
     } finally {
       await rm(root, { force: true, recursive: true });
     }
   });
 
-  it("uses the isolated E2E worker name when clearing local container durable object state", async () => {
+  it("uses the isolated E2E worker name when clearing local hosted runner durable object state", async () => {
     const { cleanupHostedRunnerContainerLocalState } = await importRuntimeWithSpawnSequence([]);
     const root = await mkdtemp(path.join(os.tmpdir(), "murph-runner-state-test-"));
     const persistDir = path.join(root, "state");
@@ -247,14 +250,28 @@ describe("cleanupHostedRunnerContainers", () => {
         "do",
         `murph-hosted-e2e-${suffix}-RunnerContainer`,
       );
+      const e2eUserRunnerStateDir = path.join(
+        persistDir,
+        "v3",
+        "do",
+        `murph-hosted-e2e-${suffix}-UserRunnerDurableObject`,
+      );
       const defaultRunnerStateDir = path.join(
         persistDir,
         "v3",
         "do",
         "murph-hosted-RunnerContainer",
       );
+      const defaultUserRunnerStateDir = path.join(
+        persistDir,
+        "v3",
+        "do",
+        "murph-hosted-UserRunnerDurableObject",
+      );
       await mkdir(e2eRunnerStateDir, { recursive: true });
+      await mkdir(e2eUserRunnerStateDir, { recursive: true });
       await mkdir(defaultRunnerStateDir, { recursive: true });
+      await mkdir(defaultUserRunnerStateDir, { recursive: true });
 
       await cleanupHostedRunnerContainerLocalState({
         env: {
@@ -265,7 +282,9 @@ describe("cleanupHostedRunnerContainers", () => {
       });
 
       await expect(access(e2eRunnerStateDir)).rejects.toThrow();
+      await expect(access(e2eUserRunnerStateDir)).rejects.toThrow();
       await expect(access(defaultRunnerStateDir)).resolves.toBeUndefined();
+      await expect(access(defaultUserRunnerStateDir)).resolves.toBeUndefined();
     } finally {
       await rm(root, { force: true, recursive: true });
     }

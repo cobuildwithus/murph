@@ -59,7 +59,8 @@ const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
 export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
 export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build";
 
-const HOSTED_RUNNER_CONTAINER_LOCAL_DO_CLASS_NAMES = [
+const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
+  "UserRunnerDurableObject",
   "RunnerContainer",
   "DeploySmokeRunnerContainer",
 ] as const;
@@ -789,7 +790,7 @@ export async function cleanupHostedRunnerContainerLocalState(input: {
     : path.join(cloudflareDir, input.persistDir);
   const workerName = resolveWranglerLocalDevWorkerName(input.env ?? {});
 
-  for (const className of HOSTED_RUNNER_CONTAINER_LOCAL_DO_CLASS_NAMES) {
+  for (const className of HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES) {
     const stateDir = path.join(persistDir, "v3", "do", `${workerName}-${className}`);
     try {
       await rm(stateDir, {
