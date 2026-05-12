@@ -269,6 +269,21 @@ function buildWorkspaceJobBody() {
   };
 }
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
 describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
@@ -291,6 +306,69 @@ describe("startHostedContainerEntrypoint", () => {
       ok: true,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("accepts runtime wakes only after the active child reports readiness", async () => {
+    const childReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    let runtimeWakeCount = 0;
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onChildReadyForRuntimeWake?.(() => {
+          runtimeWakeCount += 1;
+        });
+        childReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const idleWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    expect(idleWake.status).toBe(204);
+    expect(idleWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_ready",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await childReady.promise;
+
+    const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    const secondWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    expect(firstWake.status).toBe(204);
+    expect(secondWake.status).toBe(204);
+    expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(runtimeWakeCount).toBe(2);
+    expect(invocationResponse.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
   });
 
   it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {
@@ -967,6 +1045,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(runnerSpy).toHaveBeenCalledTimes(1);
       expect(runnerSpy.mock.calls[0]?.[1]).toEqual({
+        onChildReadyForRuntimeWake: expect.any(Function),
         signal: expect.any(AbortSignal),
       });
     } finally {

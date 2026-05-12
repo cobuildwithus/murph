@@ -464,14 +464,7 @@ export async function sendAssistantMessageLocal(
         ) {
           let preProviderAdmissionCount = 0
           while (true) {
-            const activeTurnInput =
-              await resolveAssistantActiveTurnInputAdmission({
-                activeTurnInputController,
-                currentInput,
-                phase: 'request_boundary',
-                sessionId: currentSession.sessionId,
-                userTurn: currentUserTurn,
-              })
+            const activeTurnInput = await activeTurnInputController?.admitAvailable()
             if (activeTurnInput?.kind !== 'accepted') {
               break
             }

@@ -124,6 +124,65 @@ describe("RunnerContainer", () => {
     expect(Object.keys(secondBody).sort()).toEqual(["job"]);
   });
 
+  it("posts a payloadless runtime wake to the active workspace invocation", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/runtime-wake")) {
+          return new Response(null, {
+            headers: {
+              "x-runtime-wake-accepted": "1",
+            },
+            status: 204,
+          });
+        }
+
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest(),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.wakeRuntime({ userId: "member_123" })).resolves.toEqual({
+      accepted: true,
+    });
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    const wakeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    );
+    expect(wakeCall?.[1]).toMatchObject({
+      method: "POST",
+    });
+    expect(wakeCall?.[1]?.body).toBeUndefined();
+  });
+
   it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {

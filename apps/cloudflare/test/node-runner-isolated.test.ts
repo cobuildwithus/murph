@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createHostedExecutionRunnerChildRuntimeWakeReadyMessage,
   createHostedExecutionRunnerChildResultMessage,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.ts";
@@ -425,6 +426,50 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     })).rejects.toThrow("multiple result payloads");
   });
 
+  it("exposes the runtime wake sink only after the child readiness ack", async () => {
+    const module = await import("../src/node-runner-isolated.ts");
+    const ready = createDeferred();
+    const release = createDeferred();
+    const spawnedChild = createDeferred<MockChildProcess>();
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4250);
+      child.send = vi.fn();
+      spawnedChild.resolve(child);
+      queueMicrotask(() => {
+        child.emit("message", createHostedExecutionRunnerChildRuntimeWakeReadyMessage());
+      });
+      return child;
+    });
+
+    const invocation = module.runHostedWorkspaceInvocationIsolatedDetailed({
+      job: createWorkspaceJob("evt_child_runtime_wake"),
+    }, {
+      onChildReadyForRuntimeWake(sendWake: () => void) {
+        ready.resolve();
+        sendWake();
+        release.resolve();
+      },
+    });
+
+    await ready.promise;
+    const activeChild = await spawnedChild.promise;
+    emitChildResult(activeChild, module, {
+      ok: true,
+      result: createRunnerResult(),
+    });
+    activeChild.stdout.end();
+    activeChild.emit("close", 0);
+
+    await expect(invocation).resolves.toMatchObject({ status: "idle" });
+    expect(activeChild.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "murph.hosted-execution.runner-child-runtime-wake.v1",
+      }),
+    );
+    await release.promise;
+  });
+
   it("rejects a successful IPC result when the child exits nonzero", async () => {
     const module = await import("../src/node-runner-isolated.ts");
 
@@ -703,15 +748,22 @@ function readChildProcessDiagnostics(error: Error): Record<string, unknown> {
   return childProcess as Record<string, unknown>;
 }
 
-function createMockChildProcess(pid: number) {
-  const child = new EventEmitter() as EventEmitter & {
-    kill: ReturnType<typeof vi.fn>;
-    pid: number;
-    stderr: PassThrough;
-    stdin: PassThrough;
-    stdout: PassThrough;
-  };
+interface MockChildProcess extends EventEmitter {
+  connected: boolean;
+  kill: ReturnType<typeof vi.fn>;
+  killed: boolean;
+  pid: number;
+  send?: ReturnType<typeof vi.fn>;
+  stderr: PassThrough;
+  stdin: PassThrough;
+  stdout: PassThrough;
+}
+
+function createMockChildProcess(pid: number): MockChildProcess {
+  const child = new EventEmitter() as MockChildProcess;
+  child.connected = true;
   child.kill = vi.fn();
+  child.killed = false;
   child.pid = pid;
   child.stderr = new PassThrough();
   child.stdin = new PassThrough();
@@ -719,6 +771,21 @@ function createMockChildProcess(pid: number) {
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   return child;
+}
+
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
 }
 
 function emitChildResult(

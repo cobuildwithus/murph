@@ -154,16 +154,9 @@ class AssistantActiveTurnInputController {
   async admit(
     input: AssistantActiveTurnInputAdmissionInput,
   ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    this.throwFatalAdmissionError()
-    const queuedAdmission = await this.admitPending()
-    if (queuedAdmission?.kind === 'accepted') {
-      return queuedAdmission
-    }
-
-    await this.waitForInputAvailableAdmission()
-    const inputAvailableAdmission = await this.admitPending()
-    if (inputAvailableAdmission?.kind === 'accepted') {
-      return inputAvailableAdmission
+    const availableAdmission = await this.admitAvailable()
+    if (availableAdmission?.kind === 'accepted') {
+      return availableAdmission
     }
 
     if (this.input.boundaryAdmissionEnabled === false) {
@@ -172,6 +165,17 @@ class AssistantActiveTurnInputController {
 
     const hookAdmission = await this.admitHookInput(input)
     return (await this.admitPending()) ?? hookAdmission
+  }
+
+  async admitAvailable(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    this.throwFatalAdmissionError()
+    const queuedAdmission = await this.admitPending()
+    if (queuedAdmission?.kind === 'accepted') {
+      return queuedAdmission
+    }
+
+    await this.waitForInputAvailableAdmission()
+    return await this.admitPending()
   }
 
   private async admitPending(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
@@ -456,6 +460,7 @@ export function createAssistantActiveTurnInputController(input: {
   admit(input: AssistantActiveTurnInputAdmissionInput): Promise<
     AssistantActiveTurnInputAdmissionResult | undefined
   >
+  admitAvailable(): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
@@ -481,6 +486,7 @@ export function createAssistantActiveTurnInputController(input: {
 
   return {
     admit: (admissionInput) => controller.admit(admissionInput),
+    admitAvailable: () => controller.admitAvailable(),
     close() {
       controller.close()
       for (const key of keys) {

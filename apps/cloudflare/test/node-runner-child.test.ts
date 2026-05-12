@@ -34,6 +34,9 @@ import type {
   HostedExecutionRunnerChildResult,
 } from "../src/runner-job-transport.ts";
 import {
+  createHostedExecutionRunnerChildRuntimeWakeMessage,
+} from "../src/runner-job-transport.ts";
+import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
@@ -260,6 +263,69 @@ describe("runHostedExecutionChild", () => {
     expect(debugOutput).not.toContain("fixture-openai-code");
   });
 
+  it("sends runtime wake readiness and forwards IPC wakes into the workspace runtime", async () => {
+    const launcherRoot = "/tmp/hosted-runner-wake-test";
+    vi.spyOn(process, "cwd").mockReturnValue(launcherRoot);
+    const sendResult = vi.fn();
+    const sendRuntimeWakeReady = vi.fn();
+    const setExitCode = vi.fn();
+    const wakeObserved = createDeferred();
+    const runWorkspaceInProcess = vi.fn(async (
+      _input: HostedAssistantWorkspaceRuntimeJobInput,
+      options: HostedWorkspaceRuntimeJobOptions,
+    ) => {
+      if (!options.runtimeWakeSignal) {
+        throw new Error("Expected runtime wake signal.");
+      }
+      const wakeWait = options.runtimeWakeSignal.wait();
+      process.emit("message", createHostedExecutionRunnerChildRuntimeWakeMessage());
+      await wakeWait;
+      wakeObserved.resolve();
+      return {
+        nextWakeAt: null,
+        status: "idle" as const,
+      };
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_child_wake",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace_wake",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_MODEL: "gpt-test",
+              HOSTED_ASSISTANT_PROVIDER: "openai",
+              OPENAI_API_KEY: "fixture-openai-code",
+            },
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      sendResult,
+      sendRuntimeWakeReady,
+      setExitCode,
+    });
+
+    await wakeObserved.promise;
+    expect(sendRuntimeWakeReady).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInProcess.mock.calls[0]?.[1].runtimeWakeSignal).toBeDefined();
+    expect(setExitCode).not.toHaveBeenCalled();
+    expect(readChildResult(sendResult.mock.calls[0]?.[0])).toEqual({
+      ok: true,
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+    });
+  });
+
   it("uses proxy mailbox decoding in the child when no local proxy base URL is present", async () => {
     const launcherRoot = await mkdtemp(path.join(tmpdir(), "murph-node-runner-child-decode-"));
     cleanupPaths.push(launcherRoot);
@@ -473,6 +539,21 @@ function readChildResult(chunk: unknown): HostedExecutionRunnerChildResult {
   }
 
   return chunk as HostedExecutionRunnerChildResult;
+}
+
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
 }
 
 function createSystemMailboxImportItem(userId: string) {
