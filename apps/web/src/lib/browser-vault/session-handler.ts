@@ -2,8 +2,6 @@ import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
-import { after } from "next/server";
-
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   requireActiveHostedAppSessionFromRequest,
@@ -59,9 +57,6 @@ export function createBrowserVaultSessionRoute(input: {
     const freshness = replicaRef ? "fresh" as const : "stale" as const;
 
     if (!replicaRef) {
-      scheduleAfterResponseOrFireAndForget(() =>
-        scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
-      );
       return emptyBrowserVaultSession({
         refreshPending: true,
         workspaceVersion,
@@ -106,9 +101,6 @@ export function createBrowserVaultSessionRoute(input: {
       );
     } catch (error) {
       if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-        scheduleAfterResponseOrFireAndForget(() =>
-          scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
-        );
         return emptyBrowserVaultSession({
           refreshPending: true,
           workspaceVersion,
@@ -128,14 +120,6 @@ export function createBrowserVaultSessionRoute(input: {
   });
 }
 
-function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
-  try {
-    after(task);
-  } catch {
-    void task();
-  }
-}
-
 function emptyBrowserVaultSession(input: {
   refreshPending?: boolean;
   workspaceVersion?: string | null;
@@ -150,21 +134,4 @@ function emptyBrowserVaultSession(input: {
     state: "empty" as const,
     workspaceVersion: input.workspaceVersion ?? null,
   });
-}
-
-async function scheduleBrowserVaultRefreshBestEffort(input: {
-  userId: string;
-}): Promise<void> {
-  try {
-    const client = readHostedExecutionControlClientIfConfigured();
-    if (!client) {
-      return;
-    }
-
-    await client.scheduleBrowserVaultRefresh({
-      userId: input.userId,
-    });
-  } catch {
-    // Browser-vault freshness is a best-effort derived read-model refresh.
-  }
 }

@@ -25,7 +25,6 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "getRunnerStatus",
       "nudgeUserRunner",
-      "scheduleBrowserVaultRefresh",
     ]);
   });
 
@@ -86,11 +85,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
-    expect(() =>
-      client.scheduleBrowserVaultRefresh({
-        userId: "",
-      })
-    ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
@@ -583,60 +577,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(JSON.parse(String(request.init?.body))).toEqual({
       aiUsageAllowDecision,
     });
-  });
-
-  it("schedules browser vault refreshes without a workspace source hash", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const result = {
-      accepted: true,
-      scheduled: true,
-      userId: "user_123",
-    };
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse(result);
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.scheduleBrowserVaultRefresh({
-      userId: "user_123",
-    })).resolves.toEqual(result);
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/refresh");
-    expect(request.init?.method).toBe("POST");
-    expect(request.init?.body).toBe("{}");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
-  });
-
-  it("rejects browser vault refresh responses without a true scheduled flag", async () => {
-    for (const result of [
-      {
-        accepted: true,
-        userId: "user_123",
-      },
-      {
-        accepted: true,
-        scheduled: false,
-        userId: "user_123",
-      },
-    ]) {
-      const client = createCloudflareHostedControlClient({
-        baseUrl: "https://runner.example.test/root/",
-        fetchImpl: vi.fn(async () => createJsonResponse(result)) as typeof fetch,
-        getBearerToken: async () => "Bearer token-123",
-        timeoutMs: 2_500,
-      });
-
-      await expect(client.scheduleBrowserVaultRefresh({
-        userId: "user_123",
-      })).rejects.toThrow("Cloudflare browser-vault refresh result scheduled must be true.");
-    }
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {

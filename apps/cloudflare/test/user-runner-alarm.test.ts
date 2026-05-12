@@ -266,37 +266,6 @@ describe("HostedUserRunner wake scheduling", () => {
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
   });
 
-  it("keeps legacy browser-vault refresh scheduling behind retry backoff", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness();
-    await runner.bindUser("member_123");
-    sql.exec(
-      `UPDATE runner_meta
-       SET wake_at = ?, backoff_until = ?, failure_count = 1
-       WHERE singleton = 1`,
-      FIXED_NOW,
-      RETRY_AT,
-    );
-
-    await expect(runner.scheduleBrowserVaultRefreshForUser({
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      accepted: true,
-      scheduled: true,
-      userId: "member_123",
-    });
-    await flushWaitUntil();
-
-    expect(invoke).not.toHaveBeenCalled();
-    expect(alarms.at(-1)).toBe(RETRY_AT);
-    expect(readRunnerMeta(sql)).toMatchObject({
-      backoff_until: RETRY_AT,
-      failure_count: 1,
-      wake_at: FIXED_NOW,
-    });
-  });
-
   it("arms test-only run-until-idle work before draining", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

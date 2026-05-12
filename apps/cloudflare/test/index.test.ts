@@ -480,7 +480,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("preserves local internal proxy heartbeat liveness when the body is absent", async () => {
+  it("rejects the removed local internal proxy heartbeat route", async () => {
     installOidcJwksFetch();
     const recordActiveInvocationHeartbeat = vi.fn(async () => ({
       inputAvailable: true,
@@ -510,18 +510,8 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
-      ok: true,
-      pendingNudge: true,
-    });
-    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
-      attemptId: "attempt_current",
-      leaseGeneration: "9",
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
   });
 
   it("checks local internal proxy tokens against the version-scoped runner container", async () => {
@@ -1499,15 +1489,9 @@ describe("cloudflare worker routes", () => {
     expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
   });
 
-  it("schedules browser-vault refreshes through the direct Durable Object path", async () => {
+  it("rejects the removed browser-vault refresh control route", async () => {
     const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
-        userId: string;
-      }) => ({
-        accepted: true,
-        scheduled: true as const,
-        userId: input.userId,
-      })),
+      nudgeHostedRunnerForUser: vi.fn(),
     });
     const env = createWorkerEnv(stub);
 
@@ -1522,81 +1506,9 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-  });
-
-  it("normalizes legacy direct browser-vault refresh responses during rollout", async () => {
-    const scheduleBrowserVaultRefreshForUser = vi.fn(async (_input: {
-      userId: string;
-    }) => undefined);
-    const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser,
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
-    expect(scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
-  });
-
-  it("falls back to the legacy dashboard refresh Durable Object method during rollout", async () => {
-    const scheduleDashboardReplicaRefreshForUser = vi.fn(async (_input: {
-      userId: string;
-    }) => undefined);
-    const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser: undefined,
-      scheduleDashboardReplicaRefreshForUser,
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
-    expect(scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
@@ -2384,13 +2296,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recentLogs: [],
       userId: "member_123",
       workspace: null,
-    })),
-    scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
-      userId: string;
-    }) => ({
-      accepted: true as const,
-      scheduled: true as const,
-      userId: input.userId,
     })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;

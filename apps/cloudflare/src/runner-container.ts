@@ -112,7 +112,6 @@ export interface HostedExecutionContainerStubLike {
     token: string;
     userId?: string;
   }): Promise<RunnerOutboundProxyTokenContext | null>;
-  refreshBrowserVaultReplica?(input: unknown): Promise<unknown>;
   smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
 
@@ -268,10 +267,6 @@ export class RunnerContainer extends Container {
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
     }
-  }
-
-  async refreshBrowserVaultReplica(_input?: unknown): Promise<never> {
-    throw new Error("Hosted runner browser-vault refresh side path has been removed.");
   }
 
   async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
@@ -2600,6 +2595,7 @@ function isTransientOutboundHandlerInstallError(error: unknown): boolean {
       message.includes("sidecar")
       || message.includes("connect")
       || message.includes("ECONNREFUSED")
+      || message.includes("proxy-everything")
       || message.includes("not ready")
     );
 }

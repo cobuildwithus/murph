@@ -2,6 +2,10 @@ import { stdin } from "node:process";
 import { pathToFileURL } from "node:url";
 
 import {
+  readHostedExecutionSafeErrorName,
+  summarizeHostedExecutionError,
+} from "@murphai/hosted-execution";
+import {
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
@@ -31,7 +35,11 @@ interface BrowserVaultBackgroundRefreshInput {
 
 if (isBrowserVaultBackgroundChildEntrypoint()) {
   void runBrowserVaultBackgroundChildCli().catch((error) => {
-    console.error(error);
+    console.error(JSON.stringify({
+      errorName: readHostedExecutionSafeErrorName(error),
+      message: summarizeHostedExecutionError(error),
+      service: "browser-vault-background-refresh",
+    }));
     process.exitCode = 1;
   });
 }

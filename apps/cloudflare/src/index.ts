@@ -249,20 +249,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "browser-vault-refresh");
-    },
-    async handle(context, params) {
-      return handleBrowserVaultRefreshRoute(context, params.userId);
-    },
-    match: (pathname) => matchCloudflareHostedControlUserRoutePath("browserVaultRefresh", pathname),
-    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.browserVaultRefresh.method],
-    name: "browser-vault-refresh",
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod(context, params) {
       return requireBoundInternalRouteUser(context, params, "user-status");
     },
     async handle(context, params) {
@@ -365,19 +351,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     input?: HostedRunnerNudgeRequest,
   ): Promise<HostedRunnerNudgeResult> {
     return this.runner.nudgeHostedRunnerForUser(userId, input);
-  }
-
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    // Legacy deploy-skew compatibility only: generic nudge only, not a
-    // browser-vault scheduler. Delete after 2026-05-25.
-    return this.runner.scheduleBrowserVaultRefreshForUser(input);
-  }
-
-  async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    // Legacy Durable Object method for deploy skew. Deletion target:
-    // 2026-05-23, after deployed web callers have switched to
-    // `scheduleBrowserVaultRefreshForUser`.
-    return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
   async validateRuntimeWriteFence(input: {
@@ -1062,58 +1035,8 @@ async function handleBrowserVaultSessionRoute(
   });
 }
 
-async function handleBrowserVaultRefreshRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  try {
-    parseBrowserVaultRefreshRequest(parseJsonValue(await readCachedRequestText(context)));
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "browser-vault-refresh-request-invalid",
-        routeName: "browser-vault-refresh",
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker browser-vault refresh route rejected an invalid request body.",
-      phase: "failed",
-      userId,
-    });
-    throw error;
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  if (stub.scheduleBrowserVaultRefreshForUser) {
-    await stub.scheduleBrowserVaultRefreshForUser({ userId });
-    return json({
-      accepted: true,
-      scheduled: true,
-      userId,
-    });
-  }
-  if (stub.scheduleDashboardReplicaRefreshForUser) {
-    // Legacy Durable Object fallback for deploy skew. Deletion target:
-    // 2026-05-23, after deployed Durable Objects expose
-    // `scheduleBrowserVaultRefreshForUser`.
-    await stub.scheduleDashboardReplicaRefreshForUser({ userId });
-    return json({
-      accepted: true,
-      scheduled: true,
-      userId,
-    });
-  }
-  throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
-}
-
 function parseJsonValue(value: string): unknown {
   return JSON.parse(value);
-}
-
-function parseBrowserVaultRefreshRequest(value: unknown): void {
-  requireJsonRecord(value, "Browser vault refresh request");
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {

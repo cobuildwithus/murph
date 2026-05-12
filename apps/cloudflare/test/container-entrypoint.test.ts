@@ -840,6 +840,55 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
+  it("schedules browser-vault background refresh through the container manager after successful runner results", async () => {
+    const requestBody = {
+      ...buildWorkspaceJobBody(),
+      browserVaultBackgroundProxyToken: "browser-vault-background-token",
+    };
+    const scheduleIfDirty = vi
+      .spyOn(BrowserVaultBackgroundRefreshManager.prototype, "scheduleIfDirty")
+      .mockResolvedValue(undefined);
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const nodeRunnerModule = {
+      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
+      runHostedWorkspaceInvocation,
+    };
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner: vi.fn(async () => nodeRunnerModule),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(requestBody),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(scheduleIfDirty).toHaveBeenCalledOnce();
+    expect(scheduleIfDirty).toHaveBeenCalledWith(expect.objectContaining({
+      internalWorkerProxyToken: "browser-vault-background-token",
+      localInternalProxyBaseUrl: "http://127.0.0.1:8787",
+      userId: "u_container_workspace",
+      vaultRoot: expect.stringContaining("vault"),
+    }));
+  });
+
   it("does not schedule browser-vault background refresh after failed runner results", async () => {
     const requestBody = {
       ...buildWorkspaceJobBody(),

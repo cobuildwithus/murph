@@ -21,6 +21,9 @@ import {
   fetchBrowserVaultBackgroundWithRetry,
 } from "../src/browser-vault-refresh/background-child.ts";
 import {
+  HostedRuntimeInternalAuthorityRejectedError,
+} from "../src/runtime-platform.ts";
+import {
   refreshBrowserVaultReplicaFromWarmVault,
 } from "../src/browser-vault-refresh/refresher.ts";
 import {
@@ -171,14 +174,15 @@ describe("browser-vault background refresh", () => {
     }
   });
 
-  it("retries thrown 401 proxy authority races", async () => {
+  it("retries thrown 401 hosted runtime authority races", async () => {
     let attempts = 0;
     const response = await fetchBrowserVaultBackgroundWithRetry(
       async () => {
         attempts += 1;
         if (attempts < 3) {
-          throw Object.assign(new Error("proxy token is not installed yet"), {
-            responseStatus: 401,
+          throw new HostedRuntimeInternalAuthorityRejectedError({
+            description: "Browser-vault background proxy",
+            status: 401,
           });
         }
         return Response.json({ ok: true });

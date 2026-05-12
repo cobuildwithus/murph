@@ -24,7 +24,6 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
-  buildCloudflareHostedControlBrowserVaultRefreshPath,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserRunnerNudgePath,
@@ -68,12 +67,6 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
-export interface CloudflareHostedControlBrowserVaultRefreshResult {
-  accepted: true;
-  scheduled: true;
-  userId: string;
-}
-
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -86,7 +79,6 @@ export interface CloudflareHostedControlClient {
     userId: string,
     input?: { aiUsageAllowDecision?: HostedAiUsageAllowDecision | null },
   ): Promise<HostedRunnerNudgeResult>;
-  scheduleBrowserVaultRefresh(input: { userId: string }): Promise<CloudflareHostedControlBrowserVaultRefreshResult>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -216,30 +208,6 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlUserRunnerNudgePath(expectedUserId),
         request: {
           body,
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    scheduleBrowserVaultRefresh(input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "browser vault refresh",
-        parse: (value) =>
-          parseCloudflareHostedControlBrowserVaultRefreshResult(value, {
-            userId: expectedUserId,
-          }),
-        path: buildCloudflareHostedControlBrowserVaultRefreshPath(expectedUserId),
-        request: {
-          body: "{}",
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -407,33 +375,6 @@ function parseCloudflareHostedControlBrowserVaultSession(
     replicaKeyEnvelope,
     replicaRef,
     state,
-  };
-}
-
-function parseCloudflareHostedControlBrowserVaultRefreshResult(
-  value: unknown,
-  expected: {
-    userId: string;
-  },
-): CloudflareHostedControlBrowserVaultRefreshResult {
-  const record = requireRecord(value, "Cloudflare browser-vault refresh result");
-
-  if (record.accepted !== true) {
-    throw new TypeError("Cloudflare browser-vault refresh result accepted must be true.");
-  }
-
-  const userId = requireString(record.userId, "Cloudflare browser-vault refresh result userId");
-  assertMatchingString(
-    userId,
-    expected.userId,
-    "Cloudflare browser-vault refresh result userId",
-    "the requested userId",
-  );
-
-  return {
-    accepted: true,
-    scheduled: requireTrue(record.scheduled, "Cloudflare browser-vault refresh result scheduled"),
-    userId,
   };
 }
 
@@ -819,14 +760,6 @@ function requireBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
-}
-
-function requireTrue(value: unknown, label: string): true {
-  if (value !== true) {
-    throw new TypeError(`${label} must be true.`);
-  }
-
-  return true;
 }
 
 function requireNumber(value: unknown, label: string): number {

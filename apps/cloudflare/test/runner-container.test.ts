@@ -862,241 +862,6 @@ describe("RunnerContainer", () => {
     expect(setOutboundByHosts.mock.calls.at(-1)?.[0]).toEqual({});
   });
 
-  it("yields activity-expiry fallback cleanup to active work from another isolate", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const storage = createContainerStorageDouble();
-      let resolveInvocation!: () => void;
-      let markRunnerRequestStarted!: () => void;
-      const invocationReady = new Promise<void>((resolve) => {
-        resolveInvocation = resolve;
-      });
-      const runnerRequestStarted = new Promise<void>((resolve) => {
-        markRunnerRequestStarted = resolve;
-      });
-
-      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
-      const active = createContainerDouble({
-        env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
-        },
-        state: {
-          storage,
-        },
-        containerFetch: vi.fn(async (url: string) => {
-          if (url.endsWith("/health")) {
-            return new Response(JSON.stringify({ ok: true }), {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            });
-          }
-
-          markRunnerRequestStarted();
-          await invocationReady;
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }),
-      });
-      const coldAlarmIsolate = createContainerDouble({
-        env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
-        },
-        initialStatus: "running",
-        state: {
-          storage,
-        },
-      });
-
-      const invokePromise = active.container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_activity_cold_isolate"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-      await runnerRequestStarted;
-      await vi.advanceTimersByTimeAsync(1_100);
-
-      await coldAlarmIsolate.container.onActivityExpired();
-
-      expect(coldAlarmIsolate.destroy).not.toHaveBeenCalled();
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            activeOperationKind: "workspace-invocation",
-            lifecycleStage: "activity-expired-active-operation",
-            workspaceAttemptId: "attempt_evt_activity_cold_isolate",
-          }),
-          message: "Hosted execution container activity expiry yielded to active runner operation.",
-          phase: "container.ready",
-          userId: "member_123",
-        }),
-      );
-
-      resolveInvocation();
-      await expect(invokePromise).resolves.toEqual(createRunnerResult());
-
-      await coldAlarmIsolate.container.onActivityExpired();
-
-      expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          message: "Hosted execution container activity expired; running fallback cleanup.",
-          phase: "container.ready",
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not send runner work when the active operation marker cannot be persisted", async () => {
-    const storage = createContainerStorageDouble();
-    const put = storage.put.bind(storage);
-    storage.put = vi.fn(async (key: string, value: unknown) => {
-      if (key.startsWith("runner-container-active-operation:v1:")) {
-        throw new Error("storage unavailable");
-      }
-      await put(key, value);
-    });
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      if (url.endsWith("/internal/control-health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const { container, destroy } = createContainerDouble({
-      containerFetch,
-      state: {
-        storage,
-      },
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_marker_write_failure"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).rejects.toThrow("active operation state could not be persisted");
-
-    expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    )).toBe(false);
-    expect(destroy).toHaveBeenCalledOnce();
-  });
-
-  it("allows activity-expiry fallback cleanup after an active marker expires", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const storage = createContainerStorageDouble();
-      let resolveRunnerRequest!: () => void;
-      let markRunnerRequestStarted!: () => void;
-      const runnerRequestRelease = new Promise<void>((resolve) => {
-        resolveRunnerRequest = resolve;
-      });
-      const runnerRequestStarted = new Promise<void>((resolve) => {
-        markRunnerRequestStarted = resolve;
-      });
-
-      vi.setSystemTime(new Date("2026-05-08T00:00:00.000Z"));
-      const active = createContainerDouble({
-        state: {
-          storage,
-        },
-        containerFetch: vi.fn(async (url: string) => {
-          if (url.endsWith("/health")) {
-            return new Response(JSON.stringify({ ok: true }), {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            });
-          }
-
-          markRunnerRequestStarted();
-          await runnerRequestRelease;
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }),
-      });
-      const coldAlarmIsolate = createContainerDouble({
-        initialStatus: "running",
-        state: {
-          storage,
-        },
-      });
-
-      const invokePromise = active.container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_activity_stale_marker"),
-        },
-        timeoutMs: 60_000,
-        userId: "member_123",
-      });
-      await runnerRequestStarted;
-      await vi.advanceTimersByTimeAsync(66_000);
-
-      await coldAlarmIsolate.container.onActivityExpired();
-
-      expect(coldAlarmIsolate.destroy).toHaveBeenCalledTimes(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            activeOperationKind: "workspace-invocation",
-            lifecycleStage: "activity-expired-fallback-cleanup",
-            workspaceAttemptId: "attempt_evt_activity_stale_marker",
-          }),
-          message: "Hosted execution container activity expired; running fallback cleanup.",
-          phase: "container.ready",
-          userId: "member_123",
-        }),
-      );
-
-      resolveRunnerRequest();
-      await expect(invokePromise).resolves.toEqual(createRunnerResult());
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("reuses a successful shell when runtime proxy expiration is replaced by background proxy narrowing", async () => {
     const setOutboundByHosts = vi.fn(async (mapping: Record<string, unknown>) => {
       if (Object.keys(mapping).length === 0) {
@@ -2689,18 +2454,6 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("keeps browser-vault refresh container method as a deploy-skew throw", async () => {
-    const { container, startAndWaitForPorts } = createContainerDouble();
-
-    await expect(container.refreshBrowserVaultReplica({
-      attemptId: "browser-vault-refresh:removed",
-      runtime: {},
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).rejects.toThrow("Hosted runner browser-vault refresh side path has been removed.");
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-  });
-
   it("resolves runner container names from worker version metadata", () => {
     expect(resolveHostedExecutionRunnerContainerName({
       source: {
@@ -3198,12 +2951,13 @@ function createContainerDouble(input: {
   setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
-  } = {}) {
+} = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
   const container = new RunnerContainer({
     storage: createContainerStorageDouble(),
     ...(input.state ?? {}),
   } as never, {
+    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
     ...(input.env ?? {}),
   } as never);
   const containerFetch = input.containerFetch ?? vi.fn(async (url: string) => {

@@ -8,7 +8,7 @@ import type {
 } from "../src/runner-job-transport.js";
 
 describe("RunnerContainer runtime callback dispatch", () => {
-  it("posts workspace jobs without installing outbound handlers or active-operation storage", async () => {
+  it("posts workspace jobs with callback proxy authority and without active-operation storage", async () => {
     const storage = createContainerStorageDouble();
     const setOutboundByHosts = vi.fn(async () => {});
     const startAndWaitForPorts = vi.fn(async () => {});
@@ -60,11 +60,11 @@ describe("RunnerContainer runtime callback dispatch", () => {
 
     const requestBody = readPostedRunnerBody(containerFetch, 0);
     expect(requestBody).toMatchObject({
-      internalWorkerProxyToken: null,
+      internalWorkerProxyToken: expect.any(String),
       localInternalProxyBaseUrl: null,
       runtimeCallbackBaseUrl: "https://worker.example.test/",
     });
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
+    expect(setOutboundByHosts).toHaveBeenCalled();
     expect([...storage.values.keys()].some((key) => key.includes("active-operation"))).toBe(false);
     expect(destroy).not.toHaveBeenCalled();
   });

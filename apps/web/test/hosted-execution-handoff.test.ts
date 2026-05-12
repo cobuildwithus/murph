@@ -65,7 +65,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -94,7 +93,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await nudgeHostedRunnerBestEffort({
@@ -119,7 +117,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -169,7 +166,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     const handoff = maybeHandoffHostedExecutionWebhookWake({
@@ -225,7 +221,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     const handoff = maybeHandoffHostedExecutionWebhookWake({
@@ -305,7 +300,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
       id: "mailbox_123",
@@ -383,7 +377,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     workflowMocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(
       new Error("workflow unavailable"),
@@ -432,7 +425,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
       deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
       id: "mailbox_123",
@@ -550,7 +542,6 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deleteUserData,
       getRunnerStatus: vi.fn(),
       nudgeUserRunner: vi.fn(),
-      scheduleBrowserVaultRefresh: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await expect(deleteHostedRunnerUserDataBestEffort({

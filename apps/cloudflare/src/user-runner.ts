@@ -95,12 +95,6 @@ export interface HostedRunnerUserDataDeletionResult {
   userId: string;
 }
 
-export interface HostedBrowserVaultRefreshScheduleResult {
-  accepted: true;
-  scheduled: true;
-  userId: string;
-}
-
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
   runnerSecrets: RunnerSecretsService;
@@ -296,29 +290,6 @@ export class HostedUserRunner {
   ): Promise<HostedRunnerNudgeResult> {
     await this.stateStore.bindUser(userId);
     return this.nudgeHostedRunner(input);
-  }
-
-  /**
-   * Legacy deploy-skew compatibility only: generic nudge only, not a
-   * browser-vault scheduler. Delete after 2026-05-25.
-   */
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
-    await this.stateStore.bindUser(input.userId);
-    await this.nudgeHostedRunner();
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        scheduled: true,
-      },
-      message: "Hosted runner accepted legacy browser-vault refresh as a generic runtime nudge.",
-      phase: "scheduled",
-      userId: input.userId,
-    });
-    return {
-      accepted: true,
-      scheduled: true,
-      userId: input.userId,
-    };
   }
 
   async validateRuntimeWriteFence(input: {

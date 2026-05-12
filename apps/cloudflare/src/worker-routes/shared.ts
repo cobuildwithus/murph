@@ -30,12 +30,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     userId: string,
     input?: HostedRunnerNudgeRequest,
   ): Promise<HostedRunnerNudgeResult>;
-  scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<unknown>;
-  /**
-   * @deprecated Compatibility-only Durable Object method for deploy skew.
-   * Deletion target: 2026-05-23.
-   */
-  scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<unknown>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
