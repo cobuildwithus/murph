@@ -435,7 +435,7 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
   }
 });
 
-it("treats recent foreground mailbox imports as local hosted completion", async () => {
+it("treats recent foreground conversation mailbox imports as local hosted completion", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {
     inFlight: false,
@@ -444,7 +444,7 @@ it("treats recent foreground mailbox imports as local hosted completion", async 
       {
         importedSeq: "0",
         lag: "1",
-        lane: "system",
+        lane: "conversation",
         maxSeq: "1",
       },
     ],
@@ -464,7 +464,7 @@ it("treats recent foreground mailbox imports as local hosted completion", async 
         level: "info",
         phase: "import",
         redactedJson: {
-          systemSeqEnd: "1",
+          conversationSeqEnd: "1",
         },
       },
     ],
@@ -502,7 +502,7 @@ it("treats recent foreground mailbox imports as local hosted completion", async 
       mailboxLag: [{
         importedSeq: "1",
         lag: "0",
-        lane: "system",
+        lane: "conversation",
         maxSeq: "1",
       }],
       userId: "member_local_import",
@@ -514,7 +514,7 @@ it("treats recent foreground mailbox imports as local hosted completion", async 
   }
 });
 
-it("waits for an assistant pass before treating foreground mailbox imports as local hosted completion", async () => {
+it("waits for an assistant pass before treating foreground conversation imports as local hosted completion", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const importOnlyStatus = {
     inFlight: false,
@@ -523,7 +523,7 @@ it("waits for an assistant pass before treating foreground mailbox imports as lo
       {
         importedSeq: "0",
         lag: "1",
-        lane: "system",
+        lane: "conversation",
         maxSeq: "1",
       },
     ],
@@ -535,7 +535,7 @@ it("waits for an assistant pass before treating foreground mailbox imports as lo
         level: "info",
         phase: "import",
         redactedJson: {
-          systemSeqEnd: "1",
+          conversationSeqEnd: "1",
         },
       },
     ],
@@ -595,7 +595,7 @@ it("waits for an assistant pass before treating foreground mailbox imports as lo
       mailboxLag: [{
         importedSeq: "1",
         lag: "0",
-        lane: "system",
+        lane: "conversation",
         maxSeq: "1",
       }],
       userId: "member_local_import_wait",
@@ -610,29 +610,9 @@ it("waits for an assistant pass before treating foreground mailbox imports as lo
   }
 });
 
-it("waits for a durable workspace checkpoint before using recent foreground mailbox imports as completion", async () => {
+it("treats processed foreground system mailbox imports as local hosted completion", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
-  const checkpointLogs: NonNullable<HostedRunnerStatusResponse["recentLogs"]> = [
-    {
-      at: "2026-05-08T00:00:01.000Z",
-      component: "assistant",
-      eventCode: "assistant.pass_finished",
-      level: "info",
-      phase: "invoke",
-      redactedJson: {},
-    },
-    {
-      at: "2026-05-08T00:00:00.000Z",
-      component: "mailbox",
-      eventCode: "mailbox.imported",
-      level: "info",
-      phase: "import",
-      redactedJson: {
-        systemSeqEnd: "1",
-      },
-    },
-  ];
-  const uncheckpointedStatus = {
+  const status = {
     inFlight: false,
     lastErrorCode: null,
     mailboxLag: [
@@ -643,7 +623,99 @@ it("waits for a durable workspace checkpoint before using recent foreground mail
         maxSeq: "1",
       },
     ],
-    recentLogs: checkpointLogs,
+    recentLogs: [
+      {
+        at: "2026-05-08T00:00:01.000Z",
+        component: "mailbox",
+        eventCode: "mailbox.system_processed",
+        level: "info",
+        phase: "checkpoint",
+        redactedJson: {
+          status: "processed",
+        },
+      },
+      {
+        at: "2026-05-08T00:00:00.000Z",
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+        redactedJson: {
+          systemSeqEnd: "1",
+        },
+      },
+    ],
+    userId: "member_local_system_import",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:02.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:02.000Z",
+      userId: "member_local_system_import",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const fetch = vi.fn(async () => Response.json(status));
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_local_system_import", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      mailboxLag: [{
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      }],
+      userId: "member_local_system_import",
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("treats foreground system mailbox imports as local hosted completion without a durable checkpoint", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const status = {
+    inFlight: false,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [
+      {
+        at: "2026-05-08T00:00:00.000Z",
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+        redactedJson: {
+          systemSeqEnd: "1",
+        },
+      },
+    ],
     userId: "member_local_import_checkpoint",
     workspace: {
       browserVaultReplicaRef: null,
@@ -658,27 +730,12 @@ it("waits for a durable workspace checkpoint before using recent foreground mail
       version: "0",
     },
   } satisfies HostedRunnerStatusResponse;
-  const checkpointedStatus = {
-    inFlight: uncheckpointedStatus.inFlight,
-    lastErrorCode: uncheckpointedStatus.lastErrorCode,
-    mailboxLag: uncheckpointedStatus.mailboxLag,
-    recentLogs: uncheckpointedStatus.recentLogs,
-    userId: uncheckpointedStatus.userId,
-    workspace: {
-      ...uncheckpointedStatus.workspace,
-      checkpointedAt: "2026-05-08T00:00:02.000Z",
-      updatedAt: "2026-05-08T00:00:02.000Z",
-      version: "1",
-    },
-  } satisfies HostedRunnerStatusResponse;
-  let statusRequests = 0;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
     if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=idle_shutdown_checkpoint")) {
       return Response.json({ status: "idle" });
     }
 
-    statusRequests += 1;
-    return Response.json(statusRequests === 1 ? uncheckpointedStatus : checkpointedStatus);
+    return Response.json(status);
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -704,14 +761,14 @@ it("waits for a durable workspace checkpoint before using recent foreground mail
       }],
       userId: "member_local_import_checkpoint",
       workspace: {
-        version: "1",
+        version: "0",
       },
     });
 
-    expect(statusRequests).toBe(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=idle_shutdown_checkpoint")
-    )).toBe(true);
+    )).toBe(false);
   } finally {
     await harness.stop();
   }

@@ -111,7 +111,10 @@ export function ConnectSourcesGrid({
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [locationConnectIntent, setLocationConnectIntent] = useState<InitialDeviceConnectIntent>(null);
+  const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() => (
+    initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation()
+  ));
+  const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] = useState(false);
   const initialConnectIntentAttemptedRef = useRef(false);
   const callbackConnectedSourceId = initialCallback?.status === "connected"
     ? resolveCallbackSourceId(initialCallback, sources)
@@ -131,23 +134,20 @@ export function ConnectSourcesGrid({
   );
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
+  const initialConnectIntentPresentation = useMemo(
+    () => initialConnectIntentDismissed || !authenticated
+      ? null
+      : resolveInitialConnectIntentPresentation(activeConnectIntent, displaySources),
+    [activeConnectIntent, authenticated, displaySources, initialConnectIntentDismissed],
+  );
+  const visibleNotice = notice ?? initialConnectIntentPresentation?.notice ?? null;
+  const visibleActionError = actionError ?? initialConnectIntentPresentation?.actionError ?? null;
 
   useEffect(() => {
     if (hasInitialCallback) {
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
-
-  useEffect(() => {
-    if (initialConnectIntent || locationConnectIntent) {
-      return;
-    }
-
-    const intent = readDeviceConnectIntentFromCurrentLocation(displaySources);
-    if (intent) {
-      setLocationConnectIntent(intent);
-    }
-  }, [displaySources, initialConnectIntent, locationConnectIntent]);
 
   const startConnection = useCallback(async (
     source: ConnectSource,
@@ -157,26 +157,15 @@ export function ConnectSourcesGrid({
       return;
     }
 
+    setInitialConnectIntentDismissed(true);
     setPendingSourceId(source.id);
     setActionError(null);
     setNotice(null);
     setConsentRequest(null);
 
     try {
-      const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
-        ...(options.intentClaim
-          ? {
-              headers: {
-                accept: "application/json",
-              },
-            }
-          : {}),
-        method: "POST",
-        url: options.intentClaim
-          ? `/device/connect/${encodeURIComponent(options.intentClaim)}`
-          : `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
-      });
-      window.location.assign(readConnectAuthorizationUrl(result));
+      const authorizationUrl = await requestConnectionAuthorizationUrl(source, options);
+      window.location.assign(authorizationUrl);
     } catch (error) {
       if (isHostedConsentRequiredError(error)) {
         setConsentRequest({
@@ -209,36 +198,45 @@ export function ConnectSourcesGrid({
     stripDeviceConnectIntentParams();
 
     const source = findInitialConnectIntentSource(activeConnectIntent, displaySources);
-    if (!source) {
-      setNotice({
-        kind: "error",
-        title: "Unable to start connection",
-        message: "This connection link does not match an available source.",
-      });
+    if (!source || !source.connectTarget || source.connected) {
       return;
     }
 
-    if (!source.connectTarget) {
-      setActionError({
-        message: "This source is not available to connect right now.",
-        sourceId: source.id,
-      });
-      return;
-    }
+    let cancelled = false;
+    void requestConnectionAuthorizationUrl(source, { intentClaim: activeConnectIntent.claim })
+      .then((authorizationUrl) => {
+        if (cancelled) {
+          return;
+        }
 
-    if (source.connected) {
-      setNotice({
-        kind: "success",
-        title: "Device already connected",
-        message: `${source.name} is already connected.`,
-      });
-      return;
-    }
+        setInitialConnectIntentDismissed(true);
+        window.location.assign(authorizationUrl);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
 
-    void startConnection(source, {
-      intentClaim: activeConnectIntent.claim,
-    });
-  }, [activeConnectIntent, authenticated, displaySources, startConnection]);
+        setInitialConnectIntentDismissed(true);
+        if (isHostedConsentRequiredError(error)) {
+          setConsentRequest({
+            intentClaim: activeConnectIntent.claim,
+            source,
+          });
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Connection could not be started.";
+        setActionError({
+          message,
+          sourceId: source.id,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConnectIntent, authenticated, displaySources]);
 
   async function disconnectConnection(source: ConnectSource) {
     const connectionId = source.disconnectConnectionId?.trim();
@@ -284,21 +282,21 @@ export function ConnectSourcesGrid({
         </Alert>
       ) : null}
 
-      {notice ? (
-        notice.kind === "success" ? (
+      {visibleNotice ? (
+        visibleNotice.kind === "success" ? (
           <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
-            <AlertTitle>{notice.title}</AlertTitle>
-            <AlertDescription>{notice.message}</AlertDescription>
+            <AlertTitle>{visibleNotice.title}</AlertTitle>
+            <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>
-        ) : notice.kind === "warning" ? (
+        ) : visibleNotice.kind === "warning" ? (
           <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-            <AlertTitle>{notice.title}</AlertTitle>
-            <AlertDescription>{notice.message}</AlertDescription>
+            <AlertTitle>{visibleNotice.title}</AlertTitle>
+            <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>
         ) : (
           <Alert variant="destructive">
             <AlertTitle>Unable to finish connection</AlertTitle>
-            <AlertDescription>{notice.message}</AlertDescription>
+            <AlertDescription>{visibleNotice.message}</AlertDescription>
           </Alert>
         )
       ) : null}
@@ -334,7 +332,7 @@ export function ConnectSourcesGrid({
             <SourceCard
               key={source.id}
               authenticated={authenticated}
-              errorMessage={actionError?.sourceId === source.id ? actionError.message : null}
+              errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
               pending={pendingSourceId === source.id}
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
@@ -666,15 +664,34 @@ function stripDeviceConnectIntentParams() {
   window.history?.replaceState?.({}, "", url.toString());
 }
 
-function readDeviceConnectIntentFromCurrentLocation(
-  sources: readonly ConnectSource[],
-): InitialDeviceConnectIntent {
+async function requestConnectionAuthorizationUrl(
+  source: ConnectSource,
+  options: { intentClaim?: string } = {},
+): Promise<string> {
+  const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
+    ...(options.intentClaim
+      ? {
+          headers: {
+            accept: "application/json",
+          },
+        }
+      : {}),
+    method: "POST",
+    url: options.intentClaim
+      ? `/device/connect/${encodeURIComponent(options.intentClaim)}`
+      : `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
+  });
+
+  return readConnectAuthorizationUrl(result);
+}
+
+function readDeviceConnectIntentFromCurrentLocation(): InitialDeviceConnectIntent {
   if (typeof window === "undefined") {
     return null;
   }
 
   const hashParams = readDeviceConnectIntentHashParams(window.location.hash);
-  return hashParams ? readDeviceConnectIntentParams(hashParams, sources) : null;
+  return hashParams ? readDeviceConnectIntentParams(hashParams) : null;
 }
 
 function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {
@@ -690,24 +707,62 @@ function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchP
   return params.has("deviceConnectIntent") ? params : null;
 }
 
-function readDeviceConnectIntentParams(
-  params: URLSearchParams,
-  sources: readonly ConnectSource[],
-): InitialDeviceConnectIntent {
+function readDeviceConnectIntentParams(params: URLSearchParams): InitialDeviceConnectIntent {
   const claim = params.get("deviceConnectIntent");
   if (!claim || !DEVICE_CONNECT_INTENT_CLAIM_PATTERN.test(claim)) {
     return null;
   }
 
   const requestedSource = normalizeConnectSourceId(params.get("connectSource"));
-  const connectSource = requestedSource
-    ? sources.find((source) => normalizeConnectSourceId(source.id) === requestedSource)?.id ?? null
-    : null;
 
   return {
     claim,
-    connectSource,
+    connectSource: requestedSource,
   };
+}
+
+function resolveInitialConnectIntentPresentation(
+  input: InitialDeviceConnectIntent,
+  sources: readonly ConnectSource[],
+): { actionError: { message: string; sourceId: string } | null; notice: ConnectCallbackNotice } | null {
+  if (!input?.claim) {
+    return null;
+  }
+
+  const source = findInitialConnectIntentSource(input, sources);
+  if (!source) {
+    return {
+      actionError: null,
+      notice: {
+        kind: "error",
+        title: "Unable to start connection",
+        message: "This connection link does not match an available source.",
+      },
+    };
+  }
+
+  if (!source.connectTarget) {
+    return {
+      actionError: {
+        message: "This source is not available to connect right now.",
+        sourceId: source.id,
+      },
+      notice: null,
+    };
+  }
+
+  if (source.connected) {
+    return {
+      actionError: null,
+      notice: {
+        kind: "success",
+        title: "Device already connected",
+        message: `${source.name} is already connected.`,
+      },
+    };
+  }
+
+  return null;
 }
 
 function findInitialConnectIntentSource(

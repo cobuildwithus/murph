@@ -2776,6 +2776,129 @@ test('active-turn controller preserves delivery idempotency across merged admiss
   }
 })
 
+test('active-turn controller ignores hook-authored provider steering acknowledgement', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => ({
+      acceptedInputs: [
+        {
+          id: 'hook-steered',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook claims already steered',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Hook claims already steered',
+      providerAlreadySteered: true,
+      transcriptText: 'Hook transcript',
+    }),
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-steered',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook claims already steered',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Hook claims already steered',
+      transcriptText: 'Hook transcript',
+    })
+  } finally {
+    controller.close()
+  }
+})
+
+test('active-turn controller serializes input-available and boundary hook admission', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const releaseFirst = createDeferred<void>()
+  const phases: string[] = []
+  const knownInputSnapshots: string[][] = []
+  let ordinal = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      phases.push(input.phase)
+      knownInputSnapshots.push([...(input.knownInputIds ?? [])])
+      ordinal += 1
+      const currentOrdinal = ordinal
+      if (currentOrdinal === 1) {
+        await releaseFirst.promise
+      }
+      return {
+        acceptedInputs: [
+          {
+            id: `hook-${currentOrdinal}`,
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: `Hook input ${currentOrdinal}`,
+            source: 'assistant-input',
+          },
+        ],
+        kind: 'accepted',
+        prompt: `Hook input ${currentOrdinal}`,
+        transcriptText: `Hook transcript ${currentOrdinal}`,
+      }
+    },
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    const notified = controller.notifyInputAvailable().catch(() => undefined)
+    await vi.waitFor(() => {
+      expect(phases).toEqual(['input_available'])
+    })
+    const boundary = controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    })
+    await Promise.resolve()
+    assert.deepEqual(phases, ['input_available'])
+
+    releaseFirst.resolve()
+    assert.deepEqual(await boundary, {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook input 1',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Hook input 1',
+      transcriptText: 'Hook transcript 1',
+    })
+    await notified
+    assert.deepEqual(phases, ['input_available'])
+    assert.deepEqual(knownInputSnapshots, [[]])
+  } finally {
+    releaseFirst.resolve()
+    controller.close()
+  }
+})
+
 test('sendAssistantMessageLocal closes steering at commit barrier without empty checkpoint', async () => {
   const session = createAssistantSession({
     binding: {

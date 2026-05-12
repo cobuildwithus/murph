@@ -330,11 +330,15 @@ function createBufferedChild(input: {
   return {
     child,
     name: input.name,
-    stderrTail: () => "",
+    stderrTail: (maxChars?: number) => tailForTest(input.stderrText ?? "", maxChars),
     stderrText: () => input.stderrText ?? "",
-    stdoutTail: () => "",
+    stdoutTail: (maxChars?: number) => tailForTest(input.stdoutText ?? "", maxChars),
     stdoutText: () => input.stdoutText ?? "",
   };
+}
+
+function tailForTest(value: string, maxChars: number = 2_000): string {
+  return value.length <= maxChars ? value : value.slice(value.length - maxChars);
 }
 
 describe("hosted local dev stack", () => {

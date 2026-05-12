@@ -22,6 +22,7 @@ import {
 } from "../../../../scripts/dev-hosted-local/stack.ts";
 
 const hostedLocalStatusTimeoutMs = 180_000;
+const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
 const hostedLocalNudgeTimeoutMs = 2_000;
 const hostedLocalIdleCheckpointTimeoutMs = 15_000;
@@ -477,7 +478,7 @@ function resolveHostedCompletionStatus(
     return status.workspace !== null ? status : null;
   }
 
-  if (!hasDurableHostedWorkspaceCheckpoint(status.workspace)) {
+  if (status.workspace === null) {
     return null;
   }
 
@@ -492,7 +493,10 @@ function resolveLocallyDrainedMailboxLag(
   status: HostedRunnerStatusResponse,
 ): HostedRunnerStatusResponse["mailboxLag"] | null {
   const resolved: HostedRunnerStatusResponse["mailboxLag"] = [];
-  const importedLogIndices: number[] = [];
+  const importedLogs: Array<{
+    index: number;
+    lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
+  }> = [];
 
   for (const lane of status.mailboxLag) {
     if (lane.lag === "0") {
@@ -504,7 +508,10 @@ function resolveLocallyDrainedMailboxLag(
     if (!imported || compareMailboxSeq(imported.seq, lane.maxSeq) < 0) {
       return null;
     }
-    importedLogIndices.push(imported.index);
+    importedLogs.push({
+      index: imported.index,
+      lane: lane.lane,
+    });
 
     resolved.push({
       ...lane,
@@ -513,17 +520,11 @@ function resolveLocallyDrainedMailboxLag(
     });
   }
 
-  if (!hasAssistantPassAfterMailboxImports(status, importedLogIndices)) {
+  if (!hasLocalCompletionAfterMailboxImports(status, importedLogs)) {
     return null;
   }
 
   return resolved;
-}
-
-function hasDurableHostedWorkspaceCheckpoint(
-  workspace: HostedRunnerStatusResponse["workspace"],
-): boolean {
-  return workspace !== null && compareMailboxSeq(workspace.version, "0") > 0;
 }
 
 function readRecentMailboxImportedSeq(
@@ -546,17 +547,36 @@ function readRecentMailboxImportedSeq(
   return null;
 }
 
-function hasAssistantPassAfterMailboxImports(
+function hasLocalCompletionAfterMailboxImports(
   status: HostedRunnerStatusResponse,
-  importIndices: readonly number[],
+  imports: readonly {
+    index: number;
+    lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
+  }[],
 ): boolean {
-  if (importIndices.length === 0) {
+  if (imports.length === 0) {
     return true;
   }
 
   const logs = status.recentLogs ?? [];
-  return importIndices.every((importIndex) => logs.some((log, logIndex) => {
-    return logIndex < importIndex && log.eventCode === "assistant.pass_finished";
+  return imports.every((imported) => logs.some((log, logIndex) => {
+    if (imported.lane === "system") {
+      return logIndex === imported.index
+        || (
+          logIndex < imported.index &&
+          log.eventCode === "mailbox.system_processed"
+          && (
+            log.redactedJson?.status === "processed"
+            || log.redactedJson?.status === "recorded"
+          )
+        );
+    }
+
+    if (logIndex >= imported.index) {
+      return false;
+    }
+
+    return log.eventCode === "assistant.pass_finished";
   }));
 }
 
@@ -629,6 +649,7 @@ async function readHostedUserStatus(input: {
 }): Promise<HostedRunnerStatusResponse> {
   const status = await input.requestJson<HostedRunnerStatusResponse>(input.statusPath(input.userId), {
     headers: input.statusHeaders(input.userId),
+    signal: AbortSignal.timeout(hostedLocalStatusRequestTimeoutMs),
   });
 
   return parseHostedRunnerStatusResponse(status);

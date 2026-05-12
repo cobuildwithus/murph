@@ -47,8 +47,33 @@ export interface BrowserVaultContextValue {
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
 
+const anonymousBrowserVaultContext: BrowserVaultContextValue = {
+  client: null,
+  dataVersion: null,
+  error: null,
+  freshness: "stale",
+  ref: null,
+  refreshPending: false,
+  refresh: async () => undefined,
+  status: "empty",
+  workspaceVersion: null,
+};
+
 export function BrowserVaultProvider({ children }: { children: ReactNode }) {
   const { authenticated } = useAuth();
+
+  if (!authenticated) {
+    return (
+      <BrowserVaultContext.Provider value={anonymousBrowserVaultContext}>
+        {children}
+      </BrowserVaultContext.Provider>
+    );
+  }
+
+  return <AuthenticatedBrowserVaultProvider>{children}</AuthenticatedBrowserVaultProvider>;
+}
+
+function AuthenticatedBrowserVaultProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
@@ -76,16 +101,6 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     activeAbortControllerRef.current = null;
     inFlightLoadRef.current = null;
   }, []);
-
-  const resetAnonymousVaultState = useCallback(() => {
-    cancelActiveLoad();
-    commitClientAndRef(null, null);
-    setStatus("empty");
-    setError(null);
-    setFreshness("stale");
-    setRefreshPending(false);
-    setWorkspaceVersion(null);
-  }, [cancelActiveLoad, commitClientAndRef]);
 
   const commitLoadResult = useCallback((result: BrowserVaultSessionLoadResult) => {
     setFreshness(result.freshness);
@@ -115,12 +130,7 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, [commitClientAndRef]);
 
-  const loadReplica = useCallback(async (options: { background?: boolean } = {}) => {
-    if (!authenticated) {
-      resetAnonymousVaultState();
-      return;
-    }
-
+  const startBrowserVaultReplicaLoad = useCallback(async () => {
     if (inFlightLoadRef.current) {
       return inFlightLoadRef.current;
     }
@@ -129,10 +139,6 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
     activeLoadIdRef.current = loadId;
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
-    if (!options.background) {
-      setStatus("loading");
-    }
-    setError(null);
 
     const loadPromise = (async () => {
       try {
@@ -166,7 +172,18 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
     inFlightLoadRef.current = loadPromise;
     return loadPromise;
-  }, [authenticated, commitLoadResult, resetAnonymousVaultState]);
+  }, [commitLoadResult]);
+
+  const loadReplica = useCallback(async (options: { background?: boolean } = {}) => {
+    if (!inFlightLoadRef.current) {
+      if (!options.background) {
+        setStatus("loading");
+      }
+      setError(null);
+    }
+
+    return startBrowserVaultReplicaLoad();
+  }, [startBrowserVaultReplicaLoad]);
 
   const load = useCallback(async () => loadReplica(), [loadReplica]);
   const pollStaleReplica = useCallback(
@@ -176,16 +193,16 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    void load();
+    void startBrowserVaultReplicaLoad();
 
     return () => {
       mountedRef.current = false;
       cancelActiveLoad();
     };
-  }, [cancelActiveLoad, load]);
+  }, [cancelActiveLoad, startBrowserVaultReplicaLoad]);
 
   useEffect(() => {
-    if (!authenticated || status === "error" || !refreshPending) {
+    if (status === "error" || !refreshPending) {
       return;
     }
 
@@ -213,13 +230,9 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
         clearTimeout(timeoutId);
       }
     };
-  }, [authenticated, freshness, pollStaleReplica, refreshPending, status]);
+  }, [freshness, pollStaleReplica, refreshPending, status]);
 
   useEffect(() => {
-    if (!authenticated) {
-      return;
-    }
-
     const onFocus = () => {
       if (refreshPending) {
         void pollStaleReplica();
@@ -228,22 +241,21 @@ export function BrowserVaultProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [authenticated, freshness, pollStaleReplica, refreshPending]);
+  }, [freshness, pollStaleReplica, refreshPending]);
 
   const value = useMemo<BrowserVaultContextValue>(() => ({
-    client: authenticated ? client : null,
-    dataVersion: authenticated ? ref?.dataVersion ?? null : null,
-    error: authenticated ? error : null,
-    freshness: authenticated ? freshness : "stale",
-    ref: authenticated ? ref : null,
-    refreshPending: authenticated ? refreshPending : false,
+    client,
+    dataVersion: ref?.dataVersion ?? null,
+    error,
+    freshness,
+    ref,
+    refreshPending,
     refresh: load,
-    status: authenticated ? status : "empty",
-    workspaceVersion: authenticated ? workspaceVersion : null,
-  }), [authenticated, client, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
+    status,
+    workspaceVersion,
+  }), [client, error, freshness, load, ref, refreshPending, status, workspaceVersion]);
   const showSyncIndicator =
-    authenticated
-    && status !== "error"
+    status !== "error"
     && refreshPending;
 
   return (

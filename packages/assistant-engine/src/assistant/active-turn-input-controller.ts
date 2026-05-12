@@ -52,6 +52,7 @@ type AssistantActiveTurnInputSteerResult =
 class AssistantActiveTurnInputController {
   private nextInputOrdinal = 1
   private closed = false
+  private admissionHookQueue: Promise<void> = Promise.resolve()
   private fatalAdmissionError: unknown = null
   private inputAvailableAdmission: Promise<AssistantActiveTurnInputAdmissionResult | undefined> | null = null
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
@@ -252,12 +253,7 @@ class AssistantActiveTurnInputController {
       return this.inputAvailableAdmission
     }
 
-    const admissionInput = this.buildAdmissionInput(input)
-    const admission = this.input.admissionHook(admissionInput)
-      .then(async (result) => {
-        await this.queueHookAdmission(result)
-        return result
-      })
+    const admission = this.runAdmissionHook(() => this.buildAdmissionInput(input))
       .finally(() => {
         if (this.inputAvailableAdmission === admission) {
           this.inputAvailableAdmission = null
@@ -274,12 +270,35 @@ class AssistantActiveTurnInputController {
       return undefined
     }
 
-    const result = await this.input.admissionHook({
+    return await this.runAdmissionHook(() => ({
       ...input,
       ...this.resolveKnownAdmissionInput(),
+    }))
+  }
+
+  private async runAdmissionHook(
+    buildInput: () => AssistantActiveTurnInputAdmissionInput,
+  ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    const previous = this.admissionHookQueue
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
     })
-    await this.queueHookAdmission(result)
-    return result
+    this.admissionHookQueue = previous.then(() => current, () => current)
+
+    await previous.catch(() => undefined)
+
+    try {
+      if (!this.input.admissionHook || this.closed) {
+        return undefined
+      }
+
+      const result = await this.input.admissionHook(buildInput())
+      await this.queueHookAdmission(result)
+      return result
+    } finally {
+      release()
+    }
   }
 
   private async waitForInputAvailableAdmission(): Promise<void> {
@@ -673,9 +692,6 @@ function mergeAssistantActiveTurnInputAdmissions(
         : second.deliveryIdempotencyKey,
     kind: 'accepted',
     prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
-    ...(first.providerAlreadySteered === true && second.providerAlreadySteered === true
-      ? { providerAlreadySteered: true }
-      : {}),
     receiptMetadata: mergeAssistantActiveTurnReceiptMetadata([
       first.receiptMetadata,
       second.receiptMetadata,
@@ -694,9 +710,14 @@ function mergeAssistantActiveTurnInputAdmissions(
 function normalizeAcceptedActiveTurnInputAdmission(
   admission: Extract<AssistantActiveTurnInputAdmissionResult, { kind: 'accepted' }>,
 ): AssistantAcceptedActiveTurnInputAdmission {
+  const {
+    acceptedInputs,
+    providerAlreadySteered: _providerAlreadySteered,
+    ...rest
+  } = admission
   return {
-    ...admission,
-    acceptedInputs: [...(admission.acceptedInputs ?? [])],
+    ...rest,
+    acceptedInputs: [...(acceptedInputs ?? [])],
   }
 }
 

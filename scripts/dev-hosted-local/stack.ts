@@ -739,12 +739,12 @@ export async function startHostedLocalDevStack(input: {
       workerRuntimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
         reportingChildren.map(
-          (child) => `[${child.name}:stderr]\n${child.stderrText()}`,
+          (child) => `[${child.name}:stderr]\n${child.stderrTail(maxChars)}`,
         ),
       ), maxChars),
       stdoutTail: (maxChars?: number): string => tail(combineChildOutput(
         reportingChildren.map(
-          (child) => `[${child.name}:stdout]\n${child.stdoutText()}`,
+          (child) => `[${child.name}:stdout]\n${child.stdoutTail(maxChars)}`,
         ),
       ), maxChars),
       stop,
@@ -1418,9 +1418,9 @@ function combineChildOutput(input: readonly BufferedNamedChildProcess[] | readon
       ? value
       : [
         `[${value.name}:stdout]`,
-        value.stdoutText(),
+        value.stdoutTail(),
         `[${value.name}:stderr]`,
-        value.stderrText(),
+        value.stderrTail(),
       ].join("\n"))
     .filter((value) => value.trim().length > 0)
     .join("\n");

@@ -87,6 +87,35 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 
+  it("treats the IPC result as completion when a successful child leaves handles open", async () => {
+    const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const module = await import("../src/node-runner-isolated.ts");
+    let spawnedChild: MockChildProcess | null = null;
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4243);
+      spawnedChild = child;
+
+      queueMicrotask(() => {
+        emitChildResult(child, module, {
+          ok: true,
+          result: createRunnerResult(),
+        });
+        child.stdout.end();
+      });
+
+      return child;
+    });
+
+    const result = await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      job: createWorkspaceJob("evt_child_result_before_close"),
+    });
+
+    expect(result.status).toBe("idle");
+    expect(spawnedChild).not.toBeNull();
+    expect(processKillSpy).toHaveBeenCalledWith(-4243, "SIGKILL");
+  });
+
   it("reuses the same redacted warm launcher root for successful invocations by the same user", async () => {
     const module = await import("../src/node-runner-isolated.ts");
     const cwdValues: string[] = [];

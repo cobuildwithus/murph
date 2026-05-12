@@ -143,14 +143,24 @@ export function useHostedPhoneAuthController({
       readHostedPrivyClientSessionState({ user }),
     );
   }, [suppressAuthenticatedSessionIssue, user]);
+  const staleAuthenticatedFinalizationState =
+    !authenticated && finalizationState !== "idle";
+  const effectiveFinalizationState = staleAuthenticatedFinalizationState
+    ? "idle"
+    : finalizationState;
+  const effectiveRequiresAuthenticatedSessionRestart =
+    requiresAuthenticatedSessionRestart;
+  const effectivePendingAction = staleAuthenticatedFinalizationState
+    ? null
+    : pendingAction;
 
-  const flowDisabled = !ready || pendingAction !== null;
-  const phoneEntrySendCodeDisabled = pendingAction !== null || !normalizedPhoneNumber;
-  const showAuthenticatedLoadingState = authenticated && finalizationState !== "idle";
+  const flowDisabled = !ready || effectivePendingAction !== null;
+  const phoneEntrySendCodeDisabled = effectivePendingAction !== null || !normalizedPhoneNumber;
+  const showAuthenticatedLoadingState = authenticated && effectiveFinalizationState !== "idle";
   const allowAuthenticatedSessionStateUi = !suppressAuthenticatedSessionIssue;
   const showAuthenticatedManualResumeState =
     allowAuthenticatedSessionStateUi
-    && !requiresAuthenticatedSessionRestart
+    && !effectiveRequiresAuthenticatedSessionRestart
     && intent !== "link"
     && shouldShowHostedPrivyManualResumeState({
       authenticated,
@@ -160,12 +170,12 @@ export function useHostedPhoneAuthController({
   const showAuthenticatedRestartState =
     allowAuthenticatedSessionStateUi
     && intent !== "link"
-    && (requiresAuthenticatedSessionRestart || shouldShowHostedPrivyRestartState({
+    && (effectiveRequiresAuthenticatedSessionRestart || shouldShowHostedPrivyRestartState({
       authenticated,
       issue: authenticatedSessionIssue,
       showAuthenticatedLoadingState,
     }));
-  const authenticatedView = pendingAction === "verify-code"
+  const authenticatedView = effectivePendingAction === "verify-code"
     ? null
     : resolveHostedAuthenticatedPhoneAuthView({
       showAuthenticatedLoadingState,
@@ -192,7 +202,7 @@ export function useHostedPhoneAuthController({
     intent,
     phoneFieldDescription: null,
     phoneFieldLabel: null,
-    pendingAction,
+    pendingAction: effectivePendingAction,
     phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
     phoneNumber,
     sendCodeDisabled: phoneEntrySendCodeDisabled,
@@ -223,6 +233,7 @@ export function useHostedPhoneAuthController({
   function resetPhoneAuthFlow() {
     setErrorMessage(null);
     setRequiresAuthenticatedSessionRestart(false);
+    updateFinalizationState("idle");
     setCode("");
     setPhoneVerificationAttempt(null);
     setQueuedPhoneCodeSend(null);
@@ -236,11 +247,13 @@ export function useHostedPhoneAuthController({
       resetAuthenticatedSessionRestart: true,
     });
   });
+  const activeQueuedPhoneCodeSend =
+    intent !== "link" && authenticated ? null : queuedPhoneCodeSend;
 
   useEffect(() => {
     if (!authenticated) {
-      updateFinalizationState("idle");
-      setRequiresAuthenticatedSessionRestart(false);
+      completedUserRef.current = null;
+      finalizationStateRef.current = "idle";
     }
   }, [authenticated]);
 
@@ -252,7 +265,7 @@ export function useHostedPhoneAuthController({
 
     if (
       !phoneVerificationAttempt
-      || pendingAction !== null
+      || effectivePendingAction !== null
       || lastAutoSubmittedCodeRef.current === normalizedVerificationCode
     ) {
       return;
@@ -260,15 +273,10 @@ export function useHostedPhoneAuthController({
 
     lastAutoSubmittedCodeRef.current = normalizedVerificationCode;
     submitVerificationCodeEffect(normalizedVerificationCode);
-  }, [normalizedVerificationCode, pendingAction, phoneVerificationAttempt]);
+  }, [effectivePendingAction, normalizedVerificationCode, phoneVerificationAttempt]);
 
   useEffect(() => {
-    if (!queuedPhoneCodeSend || pendingAction !== null) {
-      return;
-    }
-
-    if (intent !== "link" && authenticated) {
-      setQueuedPhoneCodeSend(null);
+    if (!activeQueuedPhoneCodeSend || effectivePendingAction !== null) {
       return;
     }
 
@@ -276,8 +284,8 @@ export function useHostedPhoneAuthController({
       return;
     }
 
-    drainQueuedPhoneCodeSendEffect(queuedPhoneCodeSend);
-  }, [authenticated, intent, pendingAction, queuedPhoneCodeSend, ready]);
+    drainQueuedPhoneCodeSendEffect(activeQueuedPhoneCodeSend);
+  }, [activeQueuedPhoneCodeSend, effectivePendingAction, ready]);
 
   async function handleSendCode(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -332,6 +340,9 @@ export function useHostedPhoneAuthController({
       await runHostedPhonePendingAction({
         action: "send-code",
         onBeforeAction: () => {
+          if (finalizationState !== "idle" || finalizationStateRef.current !== "idle") {
+            updateFinalizationState("idle");
+          }
           setErrorMessage(null);
           if (resetAuthenticatedSessionRestart) {
             setRequiresAuthenticatedSessionRestart(false);
@@ -515,14 +526,14 @@ export function useHostedPhoneAuthController({
   return {
     authenticatedLoadingBody,
     authenticatedLoadingTitle,
-    authenticatedSessionDescription: requiresAuthenticatedSessionRestart
+    authenticatedSessionDescription: effectiveRequiresAuthenticatedSessionRestart
       ? "This browser is signed into a different Murph account. Sign out, then verify the phone number you want to use."
       : describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
         ?? "Sign out and request a fresh code to continue.",
     authenticatedView,
     errorMessage,
     flowDisabled,
-    pendingAction,
+    pendingAction: effectivePendingAction,
     privyReady: ready,
     sharedFlowProps,
     handleContinueAuthenticated,
