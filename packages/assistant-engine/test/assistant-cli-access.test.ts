@@ -70,17 +70,29 @@ describe("prepareAssistantDirectCliEnv", () => {
       ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "hello",
       ASSISTANT_MEMORY_BOUND_TURN_ID: "turn_123",
       ASSISTANT_MEMORY_BOUND_VAULT: "/tmp/murph-vault",
+      ALL_PROXY: "http://platform-all-proxy.example.test:8080",
+      CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CODEX_HOME: "/tmp/murph-home/.codex-hosted",
+      CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       HOME: "/tmp/murph-home",
+      HTTP_PROXY: "http://platform-proxy.example.test:8080",
+      HTTPS_PROXY: "http://platform-proxy.example.test:8080",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "bridge-token",
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
+      MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_123",
+      MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_123",
+      MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "7",
+      MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
       DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
       DEVICE_SYNC_CONTROL_TOKEN: "device-token",
       LINQ_API_TOKEN: "linq-secret",
+      NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
       NODE_ENV: "production",
+      NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       NODE_OPTIONS: "--require /tmp/injected.js",
       PATH: `${path.join("/tmp/murph-home", ".codex-hosted", "bin")}${path.delimiter}/usr/bin`,
+      REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       TELEGRAM_BOT_TOKEN: "telegram-secret",
       VAULT: "/tmp/murph-vault",
       OPENAI_API_KEY: "openai-secret",
@@ -95,6 +107,18 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBe("bridge-token");
     expect(env[HOSTED_CLI_BRIDGE_URL_ENV]).toBe("http://127.0.0.1:43123/");
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
+    expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
+    expect(env.CURL_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
+    expect(env.HTTP_PROXY).toBe("http://platform-proxy.example.test:8080");
+    expect(env.HTTPS_PROXY).toBe("http://platform-proxy.example.test:8080");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,host.docker.internal");
+    expect(env.NODE_EXTRA_CA_CERTS).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
+    expect(env.REQUESTS_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
+    expect(env.MURPH_HOSTED_CODEX_BOUND_USER_ID).toBe("member_123");
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID).toBe("attempt_123");
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION).toBe("7");
+    expect(env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION).toBe("42");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));
