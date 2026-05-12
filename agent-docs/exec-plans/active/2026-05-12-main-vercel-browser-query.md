@@ -2,7 +2,7 @@
 
 ## Goal
 
-Fix the current `main` Vercel build failure caused by browser client code importing a broad query entrypoint that pulls Node-only modules into a Turbopack client chunk.
+Fix the current `main` production gate failures: the Vercel build failure caused by browser client code importing Node-backed modules, and the follow-on assistant-runtime CI snapshot failure on hosted Codex config.
 
 ## Constraints
 
@@ -13,11 +13,12 @@ Fix the current `main` Vercel build failure caused by browser client code import
 ## Plan
 
 1. Confirm the current failing status and available logs.
-2. Add or narrow a browser-safe query public entrypoint for experiment-result selectors.
-3. Point `apps/web` experiment-run projection code at that browser-safe entrypoint.
-4. Run focused package/app verification and report any unrelated blockers.
+2. Add or narrow browser-safe query public entrypoints for dashboard client selectors.
+3. Point browser-vault and health-commons client code at browser-safe modules.
+4. Update the hosted Codex config test to include env-header variable names without credential values.
+5. Run focused package/app verification and report any unrelated blockers.
 
 ## Verification
 
-- Pending: focused `apps/web` build or verify lane.
-- Pending: focused query/web typecheck as needed.
+- Done: `pnpm --dir apps/web build` passed locally after the browser entrypoint split.
+- Pending: focused assistant-runtime hosted Codex config test.

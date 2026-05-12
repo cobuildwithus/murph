@@ -329,6 +329,74 @@ describe("runSmokeHostedDeploy", () => {
     expect(headers.get("x-hosted-execution-timestamp")).toEqual(expect.any(String));
   });
 
+  it("can request the deployed runner OpenAI intercept smoke", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-openai-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/internal/deploy/container-smoke?openAiIntercept=1")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            ok: true,
+            openAiIntercept: {
+              client: "codex",
+              model: "gpt-5.4-mini",
+              stderrBytes: 0,
+              stdoutBytes: 256,
+            },
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(fetchCalls).toContain(
+      "https://worker.example.test/internal/deploy/container-smoke?openAiIntercept=1",
+    );
+  });
+
   it("retries the deploy-signed runner container smoke until the expected bundle is active", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-retry-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
