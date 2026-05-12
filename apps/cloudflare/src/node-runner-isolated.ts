@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +10,9 @@ import {
   clearHostedBrowserVaultWarmSourceStateHash,
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime";
+import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
@@ -71,6 +74,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   const launcherDirectories = await createHostedRunnerChildLauncherDirectories(warmRoot);
   const childEntry = resolveNodeRunnerChildEntry();
   const isTypeScriptChild = childEntry.endsWith(".ts");
+  const detached = process.platform !== "win32";
   const child = spawn(
     process.execPath,
     isTypeScriptChild
@@ -78,7 +82,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
       : [childEntry],
     {
       cwd: warmRoot,
-      detached: process.platform !== "win32",
+      detached,
       env: createHostedRunnerChildProcessEnv({
         forwardedEnv: buildHostedRunnerChildRuntimeEnv({
           forwardedEnv: input.job.runtime?.forwardedEnv,
@@ -89,6 +93,12 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
       stdio: ["pipe", "pipe", "pipe", "ipc"],
     },
   );
+  emitHostedRunnerChildProcessDiagnostic({
+    childPid: child.pid,
+    detached,
+    reason: "spawn",
+    stage: "spawned",
+  });
 
   if (!child.stdin || !child.stdout || !child.stderr) {
     throw new Error("Hosted runner child requires piped stdin, stdout, and stderr.");
@@ -120,7 +130,13 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   });
 
   const terminateChild = () => {
-    terminateChildProcess(child.pid);
+    terminateChildProcess(child.pid, "abort-handler");
+    emitHostedRunnerChildProcessDiagnostic({
+      childPid: child.pid,
+      detached,
+      reason: "abort-handler",
+      stage: "direct-child-kill",
+    });
     child.kill("SIGKILL");
   };
   const abortHandler = () => {
@@ -169,7 +185,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
     return assertHostedExecutionRunnerJobResult(result, input.job);
   } finally {
     options?.signal?.removeEventListener("abort", abortHandler);
-    terminateChildProcess(child.pid);
+    terminateChildProcess(child.pid, "finally-cleanup");
   }
 }
 
@@ -226,7 +242,7 @@ function createHostedRunnerWarmWorkspaceId(userId: string): string {
     .slice(0, HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH);
 }
 
-function terminateChildProcess(pid: number | undefined): void {
+function terminateChildProcess(pid: number | undefined, reason: string): void {
   if (typeof pid !== "number") {
     return;
   }
@@ -236,10 +252,87 @@ function terminateChildProcess(pid: number | undefined): void {
   }
 
   try {
+    emitHostedRunnerChildProcessDiagnostic({
+      childPid: pid,
+      detached: true,
+      reason,
+      stage: "process-group-kill",
+    });
     process.kill(-pid, "SIGKILL");
   } catch {
     // best-effort abort only
   }
+}
+
+function emitHostedRunnerChildProcessDiagnostic(input: {
+  childPid: number | undefined;
+  detached: boolean;
+  reason: string;
+  stage: string;
+}): void {
+  const childProcess = typeof input.childPid === "number"
+    ? readLinuxProcessIdentity(input.childPid)
+    : null;
+  const supervisorProcess = readLinuxProcessIdentity(process.pid);
+
+  emitHostedExecutionStructuredLog({
+    component: "child-supervisor",
+    details: {
+      childPid: input.childPid ?? null,
+      childProcessGroupId: childProcess?.processGroupId ?? null,
+      childSessionId: childProcess?.sessionId ?? null,
+      detached: input.detached,
+      parentPid: process.pid,
+      parentProcessGroupId: supervisorProcess?.processGroupId ?? null,
+      parentSessionId: supervisorProcess?.sessionId ?? null,
+      reason: input.reason,
+      signal: input.stage.includes("kill") ? "SIGKILL" : null,
+      stage: input.stage,
+    },
+    message: "Hosted runner child process diagnostic.",
+    phase: "wake.running",
+  });
+}
+
+function readLinuxProcessIdentity(pid: number): {
+  parentPid: number | null;
+  processGroupId: number | null;
+  sessionId: number | null;
+} | null {
+  if (process.platform === "win32") {
+    return null;
+  }
+
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return null;
+  }
+
+  const commandEnd = stat.lastIndexOf(") ");
+  if (commandEnd === -1 || commandEnd + 2 >= stat.length) {
+    return null;
+  }
+
+  const fields = stat.slice(commandEnd + 2).trim().split(/\s+/u);
+  const parentPid = parseIntegerOrNull(fields[1]);
+  const processGroupId = parseIntegerOrNull(fields[2]);
+  const sessionId = parseIntegerOrNull(fields[3]);
+  return {
+    parentPid,
+    processGroupId,
+    sessionId,
+  };
+}
+
+function parseIntegerOrNull(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function createHostedRuntimeChildFailure(
