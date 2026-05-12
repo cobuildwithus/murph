@@ -23,9 +23,12 @@ import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
 import { unauthorized } from "./json.ts";
-
-export const HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL =
-  "__cloudflare_injected__";
+export {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 
 const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -190,6 +193,11 @@ async function maybeHandleMapboxRequest(input: {
   }
   if (!hasQueryCredentialSentinel(input.url, "access_token")) {
     return disallowedProviderEgress();
+  }
+
+  const authorized = await requestOwnsRuntimeWriteFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");

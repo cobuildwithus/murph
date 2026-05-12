@@ -168,6 +168,26 @@ export async function runSmokeHostedDeploy(input: {
     versionOverrideHeaders,
   );
 
+  let status: SmokeUserStatus | null = null;
+  const statusRequest: SmokeControlRequest | null = smokeUserId && authorizationHeader
+    ? {
+        authorizationHeader,
+        boundUserId: smokeUserId,
+        fetchImpl,
+        url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
+        versionOverrideHeaders,
+      }
+    : null;
+
+  if (shouldSmokeOpenAiIntercept) {
+    if (!statusRequest) {
+      throw new Error(
+        "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires authenticated hosted status configuration.",
+      );
+    }
+    status = await readSmokeUserStatus(statusRequest);
+  }
+
   if (shouldSmokeRunnerContainer) {
     await assertRunnerContainerSmoke({
       fetchImpl,
@@ -194,14 +214,10 @@ export async function runSmokeHostedDeploy(input: {
     );
   }
 
-  const statusRequest: SmokeControlRequest = {
-    authorizationHeader,
-    boundUserId: smokeUserId,
-    fetchImpl,
-    url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
-    versionOverrideHeaders,
-  };
-  const status = await readSmokeUserStatus(statusRequest);
+  if (!statusRequest) {
+    throw new Error("Authenticated hosted status configuration is missing.");
+  }
+  status ??= await readSmokeUserStatus(statusRequest);
   log(
     "Authenticated hosted status check passed. "
       + `mailboxLag=${JSON.stringify(status.mailboxLag)}`,
