@@ -1,5 +1,8 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { EventEmitter } from "node:events";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,6 +72,7 @@ interface ClassifiedRunnerPayload {
 async function sendHostedContainerJsonRequest(input: {
   authorization?: string;
   body: string;
+  headers?: Record<string, string>;
   path: string;
   port: number;
 }): Promise<{ json: unknown; status: number }> {
@@ -76,6 +80,7 @@ async function sendHostedContainerJsonRequest(input: {
     const request = httpRequest({
       headers: {
         ...(input.authorization ? { authorization: input.authorization } : {}),
+        ...(input.headers ?? {}),
         "connection": "close",
         "content-type": "application/json; charset=utf-8",
       },
@@ -356,6 +361,12 @@ describe("startHostedContainerEntrypoint", () => {
       body: "",
       path: "/internal/deploy-openai-intercept-smoke",
       port: address.port,
+      headers: {
+        "x-hosted-runner-bound-user-id": "member_smoke",
+        "x-hosted-runtime-attempt-id": "attempt_smoke",
+        "x-hosted-runtime-lease-generation": "17",
+        "x-hosted-runtime-workspace-version": "42",
+      },
     });
 
     expect(response.status).toBe(200);
@@ -368,7 +379,133 @@ describe("startHostedContainerEntrypoint", () => {
         stdoutBytes: 128,
       },
     });
-    expect(runOpenAiInterceptSmoke).toHaveBeenCalledTimes(1);
+    expect(runOpenAiInterceptSmoke).toHaveBeenCalledWith({
+      authority: {
+        attemptId: "attempt_smoke",
+        leaseGeneration: "17",
+        userId: "member_smoke",
+        workspaceVersion: "42",
+      },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("runs the OpenAI intercept smoke Codex process with an allowlisted environment", async () => {
+    const originalPath = process.env.PATH;
+    const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const originalSecret = process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK;
+    const originalCaCert = process.env.CODEX_CA_CERTIFICATE;
+    const originalSslCertFile = process.env.SSL_CERT_FILE;
+    const root = await mkdtemp(path.join(tmpdir(), "hosted-container-codex-smoke-test-"));
+    const binDir = path.join(root, "bin");
+    const capturePath = path.join(root, "env.json");
+    const codexPath = path.join(binDir, "codex");
+
+    try {
+      await mkdir(binDir, { recursive: true });
+      await writeFile(
+        codexPath,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
+          "  CODEX_CA_CERTIFICATE: process.env.CODEX_CA_CERTIFICATE,",
+          "  CODEX_HOME: process.env.CODEX_HOME,",
+          "  HOME: process.env.HOME,",
+          "  MURPH_HOSTED_CODEX_BOUND_USER_ID: process.env.MURPH_HOSTED_CODEX_BOUND_USER_ID,",
+          "  MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: process.env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID,",
+          "  MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: process.env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION,",
+          "  MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: process.env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION,",
+          "  NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,",
+          "  OPENAI_API_KEY: process.env.OPENAI_API_KEY,",
+          "  REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE,",
+          "  SECRET: process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK,",
+          "  SSL_CERT_FILE: process.env.SSL_CERT_FILE,",
+          "}));",
+          "process.stdout.write('OK\\n');",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await chmod(codexPath, 0o700);
+
+      process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+      process.env.OPENAI_API_KEY = "real-provider-secret";
+      process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK = "do-not-forward";
+      process.env.CODEX_CA_CERTIFICATE = "/managed-container/cloudflare-ca.pem";
+      process.env.SSL_CERT_FILE = "/managed-container/ssl-cert-file.pem";
+
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await sendHostedContainerJsonRequest({
+        body: "",
+        path: "/internal/deploy-openai-intercept-smoke",
+        port: address.port,
+        headers: {
+          "x-hosted-runner-bound-user-id": "member_smoke",
+          "x-hosted-runtime-attempt-id": "attempt_smoke",
+          "x-hosted-runtime-lease-generation": "17",
+          "x-hosted-runtime-workspace-version": "42",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json).toMatchObject({
+        ok: true,
+        openAiIntercept: {
+          client: "codex",
+          model: "gpt-5.4-mini",
+        },
+      });
+      const captured = JSON.parse(await readFile(capturePath, "utf8")) as Record<string, unknown>;
+      expect(captured).toMatchObject({
+        CODEX_CA_CERTIFICATE: "/managed-container/cloudflare-ca.pem",
+        MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_smoke",
+        MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_smoke",
+        MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "17",
+        MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
+        OPENAI_API_KEY: "__cloudflare_injected__",
+        SSL_CERT_FILE: "/managed-container/ssl-cert-file.pem",
+      });
+      expect(captured.CODEX_HOME).toEqual(expect.stringContaining(".codex-smoke"));
+      expect(captured.HOME).toEqual(expect.stringContaining("hosted-openai-intercept-smoke-"));
+      expect(captured.NODE_EXTRA_CA_CERTS).toEqual(expect.any(String));
+      expect(captured.REQUESTS_CA_BUNDLE).toEqual(expect.any(String));
+      expect(captured.SECRET).toBeUndefined();
+    } finally {
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      if (originalOpenAiApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+      }
+      if (originalSecret === undefined) {
+        delete process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK;
+      } else {
+        process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK = originalSecret;
+      }
+      if (originalCaCert === undefined) {
+        delete process.env.CODEX_CA_CERTIFICATE;
+      } else {
+        process.env.CODEX_CA_CERTIFICATE = originalCaCert;
+      }
+      if (originalSslCertFile === undefined) {
+        delete process.env.SSL_CERT_FILE;
+      } else {
+        process.env.SSL_CERT_FILE = originalSslCertFile;
+      }
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("rejects the removed legacy internal run alias", async () => {

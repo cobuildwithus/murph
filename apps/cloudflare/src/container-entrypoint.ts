@@ -17,6 +17,15 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "./runner-outbound/headers.ts";
+import type {
+  RunnerRuntimeWriteFenceToken,
+} from "./runner-outbound/write-fence.ts";
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
@@ -26,6 +35,20 @@ const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL =
   "__cloudflare_injected__";
+const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
+  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV = {
+  attemptId: "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID",
+  boundUserId: "MURPH_HOSTED_CODEX_BOUND_USER_ID",
+  leaseGeneration: "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION",
+  workspaceVersion: "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION",
+} as const;
+
+type HostedContainerRuntimeAuthority = RunnerRuntimeWriteFenceToken & {
+  leaseGeneration: string;
+  userId: string;
+  workspaceVersion: string;
+};
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -69,7 +92,7 @@ interface HostedContainerRuntimeOptions {
   processApi?: Partial<HostedContainerProcessApi>;
   processIsolation?: boolean;
   runOpenAiInterceptSmoke?: (
-    options: { signal: AbortSignal },
+    options: { authority: HostedContainerRuntimeAuthority; signal: AbortSignal },
   ) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
 }
 
@@ -81,7 +104,10 @@ interface HostedContainerRuntimeDependencies {
   processApi: HostedContainerProcessApi;
   processIsolation: boolean;
   runOpenAiInterceptSmoke:
-    (options: { signal: AbortSignal }) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
+    (options: {
+      authority: HostedContainerRuntimeAuthority;
+      signal: AbortSignal;
+    }) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
 }
 
 interface HostedContainerOpenAiInterceptSmokeResult {
@@ -186,8 +212,16 @@ export async function startHostedContainerEntrypoint(input: {
         }
         activeHostedRunnerJobCount += 1;
         claimedRunnerSlot = true;
+        const authority = readHostedContainerOpenAiInterceptSmokeAuthority(request);
         discardUnreadRequestBody(request);
+        if (!authority) {
+          writeJsonResponse(response, 401, {
+            error: "Hosted OpenAI intercept smoke requires a runtime write fence.",
+          });
+          return;
+        }
         const result = await runtime.runOpenAiInterceptSmoke({
+          authority,
           signal: requestAbort.signal,
         });
         writeJsonResponse(response, 200, {
@@ -451,6 +485,42 @@ function discardUnreadRequestBody(request: IncomingMessage): void {
   }
 }
 
+function readHostedContainerOpenAiInterceptSmokeAuthority(
+  request: IncomingMessage,
+): HostedContainerRuntimeAuthority | null {
+  const userId = readSingleHeaderValue(request, HOSTED_RUNNER_BOUND_USER_ID_HEADER);
+  const attemptId = readSingleHeaderValue(request, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+  const leaseGeneration = readSingleHeaderValue(
+    request,
+    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  );
+  const workspaceVersion = readSingleHeaderValue(
+    request,
+    HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+  );
+
+  if (!userId || !attemptId || !leaseGeneration || !workspaceVersion) {
+    return null;
+  }
+
+  return {
+    attemptId,
+    leaseGeneration,
+    userId,
+    workspaceVersion,
+  };
+}
+
+function readSingleHeaderValue(
+  request: IncomingMessage,
+  name: string,
+): string | null {
+  const value = request.headers[name];
+  const raw = Array.isArray(value) ? value[0] : value;
+  const normalized = typeof raw === "string" ? raw.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return null;
@@ -484,6 +554,7 @@ function resolveHostedContainerRuntimeDependencies(
 }
 
 async function runHostedContainerOpenAiInterceptSmoke(input: {
+  authority: HostedContainerRuntimeAuthority;
   signal: AbortSignal;
 }): Promise<HostedContainerOpenAiInterceptSmokeResult> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-openai-intercept-smoke-"));
@@ -504,6 +575,7 @@ async function runHostedContainerOpenAiInterceptSmoke(input: {
       "utf8",
     );
     const result = await runHostedContainerOpenAiInterceptCodexProbe({
+      authority: input.authority,
       codexHome,
       signal: input.signal,
       workspaceRoot,
@@ -535,6 +607,7 @@ function buildHostedContainerOpenAiInterceptSmokeCodexConfig(): string {
     'base_url = "https://api.openai.com/v1"',
     'env_key = "OPENAI_API_KEY"',
     'wire_api = "responses"',
+    `env_http_headers = { "${HOSTED_RUNNER_BOUND_USER_ID_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.boundUserId}", "${HOSTED_RUNTIME_ATTEMPT_ID_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.attemptId}", "${HOSTED_RUNTIME_LEASE_GENERATION_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.leaseGeneration}", "${HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER}" = "${HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.workspaceVersion}" }`,
     'requires_openai_auth = false',
     "request_max_retries = 0",
     "stream_max_retries = 0",
@@ -552,6 +625,7 @@ function buildHostedContainerOpenAiInterceptSmokeCodexConfig(): string {
 }
 
 async function runHostedContainerOpenAiInterceptCodexProbe(input: {
+  authority: HostedContainerRuntimeAuthority;
   codexHome: string;
   signal: AbortSignal;
   workspaceRoot: string;
@@ -560,6 +634,8 @@ async function runHostedContainerOpenAiInterceptCodexProbe(input: {
     let stderrBytes = 0;
     let stdoutBytes = 0;
     let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+    let abort: () => void = () => {};
     const child = spawn("codex", [
       "exec",
       "--ignore-user-config",
@@ -575,26 +651,18 @@ async function runHostedContainerOpenAiInterceptCodexProbe(input: {
       "read-only",
       "Reply exactly OK. Do not run tools or inspect files.",
     ], {
-      env: {
-        ...process.env,
-        CODEX_HOME: input.codexHome,
-        OPENAI_API_KEY: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL,
-      },
+      env: buildHostedContainerOpenAiInterceptSmokeProcessEnv(input),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const abort = (): void => {
-      finish(new Error("Hosted OpenAI intercept smoke aborted."));
-    };
-    const timeout = setTimeout(() => {
-      finish(new Error("Hosted OpenAI intercept smoke timed out."));
-    }, HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS);
     const finish = (error?: Error, result?: { stderrBytes: number; stdoutBytes: number }): void => {
       if (settled) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       input.signal.removeEventListener("abort", abort);
       if (error) {
         child.kill();
@@ -603,6 +671,12 @@ async function runHostedContainerOpenAiInterceptCodexProbe(input: {
       }
       resolve(result ?? { stderrBytes, stdoutBytes });
     };
+    abort = (): void => {
+      finish(new Error("Hosted OpenAI intercept smoke aborted."));
+    };
+    timeout = setTimeout(() => {
+      finish(new Error("Hosted OpenAI intercept smoke timed out."));
+    }, HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS);
 
     input.signal.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", (chunk) => {
@@ -623,6 +697,58 @@ async function runHostedContainerOpenAiInterceptCodexProbe(input: {
       ));
     });
   });
+}
+
+function buildHostedContainerOpenAiInterceptSmokeProcessEnv(input: {
+  authority: HostedContainerRuntimeAuthority;
+  codexHome: string;
+  workspaceRoot: string;
+}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    CODEX_CA_CERTIFICATE:
+      process.env.CODEX_CA_CERTIFICATE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
+    CODEX_HOME: input.codexHome,
+    CURL_CA_BUNDLE:
+      process.env.CURL_CA_BUNDLE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
+    HOME: input.workspaceRoot,
+    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.attemptId]: input.authority.attemptId,
+    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.boundUserId]: input.authority.userId,
+    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.leaseGeneration]: input.authority.leaseGeneration,
+    [HOSTED_CONTAINER_SMOKE_CODEX_AUTHORITY_ENV.workspaceVersion]: input.authority.workspaceVersion,
+    NODE_EXTRA_CA_CERTS:
+      process.env.NODE_EXTRA_CA_CERTS ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
+    OPENAI_API_KEY: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL,
+    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    REQUESTS_CA_BUNDLE:
+      process.env.REQUESTS_CA_BUNDLE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
+    SSL_CERT_FILE:
+      process.env.SSL_CERT_FILE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
+    TMPDIR: input.workspaceRoot,
+  };
+
+  copyOptionalHostedContainerSmokeEnv(env, "CI");
+  copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");
+  copyOptionalHostedContainerSmokeEnv(env, "FORCE_COLOR");
+  copyOptionalHostedContainerSmokeEnv(env, "LANG");
+  copyOptionalHostedContainerSmokeEnv(env, "LC_ALL");
+  copyOptionalHostedContainerSmokeEnv(env, "LC_CTYPE");
+  copyOptionalHostedContainerSmokeEnv(env, "NO_COLOR");
+  copyOptionalHostedContainerSmokeEnv(env, "SSL_CERT_DIR");
+  copyOptionalHostedContainerSmokeEnv(env, "TERM");
+  copyOptionalHostedContainerSmokeEnv(env, "TEMP");
+  copyOptionalHostedContainerSmokeEnv(env, "TMP");
+
+  return env;
+}
+
+function copyOptionalHostedContainerSmokeEnv(
+  target: NodeJS.ProcessEnv,
+  name: string,
+): void {
+  const value = process.env[name];
+  if (typeof value === "string" && value.length > 0) {
+    target[name] = value;
+  }
 }
 
 async function enforceHostedContainerProcessIsolation(

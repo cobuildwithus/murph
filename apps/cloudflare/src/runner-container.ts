@@ -15,6 +15,13 @@ import {
   hostedRunnerIntercept,
 } from "./runner-egress-intercept.ts";
 import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "./runner-outbound/headers.ts";
+import {
+  writeRunnerRuntimeWriteFenceHeaders,
+  type RunnerRuntimeWriteFenceToken,
+} from "./runner-outbound/write-fence.ts";
+import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   parseHostedExecutionRunnerJobInput,
@@ -118,6 +125,7 @@ interface HostedExecutionContainerSmokeHealthResult {
 
 interface HostedExecutionContainerSmokeHealthInput {
   openAiIntercept?: boolean;
+  openAiInterceptAuthority?: RunnerRuntimeWriteFenceToken & { userId: string };
 }
 
 interface RunnerActivityTimeoutRenewable {
@@ -247,7 +255,7 @@ export class RunnerContainer extends Container {
         }
 
         const openAiIntercept = input.openAiIntercept === true
-          ? await this.smokeOpenAiIntercept(readyTimeoutMs)
+          ? await this.smokeOpenAiIntercept(readyTimeoutMs, input.openAiInterceptAuthority)
           : undefined;
 
         return {
@@ -265,10 +273,18 @@ export class RunnerContainer extends Container {
 
   private async smokeOpenAiIntercept(
     readyTimeoutMs: number,
+    authority: HostedExecutionContainerSmokeHealthInput["openAiInterceptAuthority"],
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["openAiIntercept"]>> {
+    if (!authority) {
+      throw new Error("Hosted runner OpenAI intercept smoke requires a runtime write fence.");
+    }
+    const headers = new Headers();
+    headers.set(HOSTED_RUNNER_BOUND_USER_ID_HEADER, authority.userId);
+    writeRunnerRuntimeWriteFenceHeaders(headers, authority);
     const response = await this.containerFetch(
       RUNNER_OPENAI_INTERCEPT_SMOKE_URL,
       {
+        headers,
         method: "POST",
         signal: AbortSignal.timeout(Math.max(
           readyTimeoutMs,

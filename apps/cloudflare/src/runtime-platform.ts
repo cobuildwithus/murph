@@ -63,6 +63,9 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
@@ -342,9 +345,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
         const headers = new Headers();
         const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
         if (lease) {
-          headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
-          headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
-          headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+          headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, lease.attemptId);
+          headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, lease.leaseGeneration);
+          headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, lease.workspaceVersion);
         }
         const payload = await fetchHostedJson({
           body: request,

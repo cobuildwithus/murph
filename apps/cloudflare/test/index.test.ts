@@ -239,6 +239,81 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("passes the OpenAI intercept option to the managed container smoke route", async () => {
+    const userRunner = createUserRunnerStub();
+    const smokeHealth = vi.fn(async () => ({
+      ok: true,
+      openAiIntercept: {
+        client: "codex",
+        model: "gpt-5.4-mini",
+        stderrBytes: 0,
+        stdoutBytes: 256,
+      },
+      runnerBundle: null,
+      service: "cloudflare-hosted-runner-node",
+      status: 200,
+    }));
+    const env = {
+      ...createWorkerEnv(userRunner),
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?openAiIntercept=1");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const payload = JSON.stringify({ openAiInterceptUserId: "member_123" });
+    const request = new Request(url, {
+      body: payload,
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload,
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(userRunner.beginIdleCheckpointLease).toHaveBeenCalledWith({
+      userId: "member_123",
+      workspaceVersion: "0",
+    });
+    expect(smokeHealth).toHaveBeenCalledWith({
+      openAiIntercept: true,
+      openAiInterceptAuthority: {
+        attemptId: "smoke_attempt_1",
+        leaseGeneration: "1",
+        userId: "member_123",
+        workspaceVersion: "0",
+      },
+    });
+    expect(userRunner.finishIdleCheckpointLease).toHaveBeenCalledWith({
+      attemptId: "smoke_attempt_1",
+      generation: "1",
+      nextWakeAt: null,
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      runnerContainer: {
+        openAiIntercept: {
+          client: "codex",
+        },
+      },
+    });
+  });
+
   it("rejects replayed deploy-signed managed container smoke requests", async () => {
     const env = createWorkerEnv();
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
@@ -2075,6 +2150,16 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunnerForUser"];
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
+    beginIdleCheckpointLease: vi.fn(async (input: {
+      userId: string;
+      workspaceVersion: string;
+    }) => ({
+      attemptId: "smoke_attempt_1",
+      generation: "1",
+      leaseGeneration: "1",
+      userId: input.userId,
+      workspaceVersion: input.workspaceVersion,
+    })),
     deleteHostedUserData: vi.fn(async (userId: string) => ({
       deletedAt: "2026-04-29T00:00:00.000Z",
       durableObject: {
@@ -2121,6 +2206,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       scheduled: true as const,
       userId: input.userId,
     })),
+    finishIdleCheckpointLease: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),
     recordRuntimeWriteFenceWorkspaceCheckpoint: vi.fn(async () => ({ recorded: true })),
     ...overrides,

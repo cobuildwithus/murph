@@ -105,6 +105,7 @@ interface DeclarativeRoute<Context> {
 
 const INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES = 4 * 1024;
 const DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES = 4 * 1024;
+const DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION = "0";
 
 const workerPublicRoutes: readonly DeclarativeRoute<{
   env: WorkerEnvironmentSource;
@@ -620,17 +621,78 @@ async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const openAiIntercept = context.url.searchParams.get("openAiIntercept") === "1";
-  const result = await context.env.RUNNER_CONTAINER_SMOKE
-    .getByName(resolveDeployContainerSmokeObjectName(context.env))
-    .smokeHealth({
-      openAiIntercept,
-    });
+  const container = context.env.RUNNER_CONTAINER_SMOKE
+    .getByName(resolveDeployContainerSmokeObjectName(context.env));
+  const result = openAiIntercept
+    ? await runDeployContainerOpenAiInterceptSmokeWithFence(context, container)
+    : await container.smokeHealth({ openAiIntercept });
 
   return json({
     ok: result.ok === true,
     runnerContainer: result,
     service: "cloudflare-hosted-runner",
   });
+}
+
+async function runDeployContainerOpenAiInterceptSmokeWithFence(
+  context: WorkerRouteContext,
+  container: ReturnType<WorkerEnvironmentSource["RUNNER_CONTAINER_SMOKE"]["getByName"]>,
+): Promise<Awaited<ReturnType<typeof container.smokeHealth>>> {
+  const userId = await readDeployContainerOpenAiInterceptSmokeUserId(context);
+  if (!userId) {
+    throw new TypeError("OpenAI intercept deploy smoke requires openAiInterceptUserId.");
+  }
+
+  const userRunner = context.env.USER_RUNNER.getByName(userId);
+  if (
+    typeof userRunner.beginIdleCheckpointLease !== "function"
+    || typeof userRunner.finishIdleCheckpointLease !== "function"
+  ) {
+    throw new TypeError("Hosted user runner does not support deploy-smoke write fences.");
+  }
+
+  const lease = await userRunner.beginIdleCheckpointLease({
+    userId,
+    workspaceVersion: DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
+  });
+  try {
+    return await container.smokeHealth({
+      openAiIntercept: true,
+      openAiInterceptAuthority: {
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.generation,
+        userId,
+        workspaceVersion:
+          lease.workspaceVersion ?? DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
+      },
+    });
+  } finally {
+    await userRunner.finishIdleCheckpointLease({
+      attemptId: lease.attemptId,
+      generation: lease.generation,
+      nextWakeAt: null,
+      userId,
+    });
+  }
+}
+
+async function readDeployContainerOpenAiInterceptSmokeUserId(
+  context: WorkerRouteContext,
+): Promise<string | null> {
+  const payloadText = await readCachedRequestText(context);
+  if (!payloadText.trim()) {
+    return null;
+  }
+  const payload = requireJsonRecord(
+    parseJsonValue(payloadText),
+    "Deploy container smoke request",
+  );
+  return normalizeNonEmptyString(payload.openAiInterceptUserId);
+}
+
+function normalizeNonEmptyString(value: unknown): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function resolveDeployContainerSmokeObjectName(
