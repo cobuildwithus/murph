@@ -60,7 +60,7 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('run: pnpm release:check')
     expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
     expect(workflow).toContain('name: npm-tarballs')
-    expect(workflow).toContain('cache: pnpm')
+    expect(workflow).not.toContain('cache: pnpm')
     expect(workflow).toContain('scope: "@murphai"')
     expect(workflow).not.toContain('name: Update npm')
     expect(workflow).not.toContain('run: npm install -g npm@latest')

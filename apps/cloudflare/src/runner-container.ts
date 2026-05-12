@@ -661,6 +661,7 @@ export class RunnerContainer extends Container {
     try {
       leaseAttempt = await this.beginIdleCheckpointLease(pending);
     } catch (error) {
+      this.pendingIdleCheckpoint = null;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: buildRunnerContainerLeaseErrorDetails(error),
@@ -669,7 +670,7 @@ export class RunnerContainer extends Container {
         phase: "failed",
         userId: pending.userId,
       });
-      return false;
+      return true;
     }
     if (leaseAttempt.status === "busy") {
       emitHostedExecutionStructuredLog({
