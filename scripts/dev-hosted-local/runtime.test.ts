@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   redactHostedLocalDiagnosticText,
   resolveHostedLocalWorkerPortMode,
+  spawnChildProcess,
   terminateChildProcessAndWait,
   waitForHealthyHttpEndpoint,
 } from "./runtime.ts";
@@ -224,6 +225,37 @@ describe("redactHostedLocalDiagnosticText", () => {
     expect(redacted).not.toContain("private-jwk");
     expect(redacted).not.toContain("provider-token");
     expect(redacted).not.toContain(process.cwd());
+  });
+});
+
+describe("spawnChildProcess diagnostics", () => {
+  it("tails captured child output before running expensive diagnostic redaction", async () => {
+    const child = spawnChildProcess(
+      "web",
+      process.execPath,
+      [
+        "-e",
+        "process.stdout.write('x'.repeat(200000) + process.cwd() + '/apps/cloudflare/.dev.vars')",
+      ],
+      process.env,
+      { pipeOutput: false },
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      child.child.once("exit", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(`child exited with ${String(code)}`));
+      });
+    });
+
+    const outputTail = child.stdoutTail(128);
+    expect(outputTail.length).toBeLessThan(256);
+    expect(outputTail).toContain("<redacted-path>");
+    expect(outputTail).not.toContain(process.cwd());
   });
 });
 

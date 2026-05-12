@@ -1,5 +1,5 @@
 import { useLinkAccount, useUpdateEmail, useUser } from "@privy-io/react-auth";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import type {
   HostedPrivyEmailAccount,
@@ -76,12 +76,7 @@ export function useHostedEmailSettingsController(input: {
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
   const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
-
-  useEffect(() => {
-    if (isAwaitingCode || isSubmittingCode) {
-      setDialogOpen(true);
-    }
-  }, [isAwaitingCode, isSubmittingCode]);
+  const effectiveDialogOpen = dialogOpen || isAwaitingCode || isSubmittingCode;
 
   async function requestCodeForEmail(nextEmailAddress: string) {
     setErrorMessage(null);
@@ -207,7 +202,7 @@ export function useHostedEmailSettingsController(input: {
       if (verifiedEmailAddress) {
         setVerifiedEmailOverride({
           address: verifiedEmailAddress,
-          verifiedAt: nextEmail?.verifiedAt ?? Math.trunc(Date.now() / 1000),
+          verifiedAt: nextEmail?.verifiedAt ?? readCurrentUnixTimestamp(),
         });
       }
     } catch (error) {
@@ -307,7 +302,7 @@ export function useHostedEmailSettingsController(input: {
     authenticated: input.authenticated,
     canManageEmail,
     code,
-    dialogOpen,
+    dialogOpen: effectiveDialogOpen,
     effectiveCurrentEmail,
     effectiveVerifiedEmail,
     emailAddress,
@@ -381,6 +376,10 @@ function doesEmailDisplayStateMatch(
 
 function hasEmailDisplayState(state: HostedEmailSettingsDisplayState): boolean {
   return Boolean(state.currentVerifiedEmail ?? state.currentEmail);
+}
+
+function readCurrentUnixTimestamp(): number {
+  return Math.trunc(Date.now() / 1000);
 }
 
 function readPrivyLinkedAccounts(input: HostedEmailPrivyUser): readonly PrivyLinkedAccountLike[] | null {

@@ -82,8 +82,17 @@ export function HostedInvitePhoneAuth({
     && savedPhoneHint !== null;
   const inviteShortcutActive =
     !manualEntryVisible && savedPhoneHint !== null;
+  const activeQueuedInvitePhoneCodeSend =
+    queuedInvitePhoneCodeSend
+    && inviteShortcutActive
+    && !sendCodeGated
+    && controller.authenticatedView === null
+    && queuedInvitePhoneCodeSend.inviteCode === inviteCode
+    && queuedInvitePhoneCodeSend.phoneHint === savedPhoneHint
+      ? queuedInvitePhoneCodeSend
+      : null;
   const inviteShortcutDisabled =
-    sendCodeGated || controller.pendingAction !== null || queuedInvitePhoneCodeSend !== null;
+    sendCodeGated || controller.pendingAction !== null || activeQueuedInvitePhoneCodeSend !== null;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
@@ -167,18 +176,7 @@ export function HostedInvitePhoneAuth({
   });
 
   useEffect(() => {
-    if (!queuedInvitePhoneCodeSend) {
-      return;
-    }
-
-    if (
-      !inviteShortcutActive
-      || sendCodeGated
-      || controller.authenticatedView !== null
-      || queuedInvitePhoneCodeSend.inviteCode !== inviteCode
-      || queuedInvitePhoneCodeSend.phoneHint !== savedPhoneHint
-    ) {
-      setQueuedInvitePhoneCodeSend(null);
+    if (!activeQueuedInvitePhoneCodeSend) {
       return;
     }
 
@@ -188,14 +186,9 @@ export function HostedInvitePhoneAuth({
 
     drainQueuedInvitePhoneCodeSendEffect();
   }, [
+    activeQueuedInvitePhoneCodeSend,
     controller.pendingAction,
     controller.privyReady,
-    controller.authenticatedView,
-    inviteShortcutActive,
-    inviteCode,
-    queuedInvitePhoneCodeSend,
-    savedPhoneHint,
-    sendCodeGated,
   ]);
 
   async function handleResendCode() {
@@ -228,9 +221,9 @@ export function HostedInvitePhoneAuth({
     >
       <HostedPrivyCaptcha />
       {showMaskedPhoneHint && savedPhoneHint ? (
-          <HostedInviteMaskedPhoneStep
-            disabled={inviteShortcutDisabled}
-            pendingAction={queuedInvitePhoneCodeSend ? "send-code" : controller.pendingAction}
+            <HostedInviteMaskedPhoneStep
+              disabled={inviteShortcutDisabled}
+              pendingAction={activeQueuedInvitePhoneCodeSend ? "send-code" : controller.pendingAction}
             phoneHint={savedPhoneHint}
             onSendCode={handleInviteSendCode}
             onUseDifferentNumber={handleUseDifferentNumber}

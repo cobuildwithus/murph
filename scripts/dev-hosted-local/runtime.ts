@@ -60,6 +60,7 @@ const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
 const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;
 const HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS = 2_000;
 const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
+const HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS = 2_000_000;
 
 export type HostedLocalWorkerPortMode = "start" | "reuse-existing";
 export type HostedRunnerContainerCleanupScope = "all-builds" | "current-build";
@@ -406,9 +407,9 @@ export function spawnChildProcess(
   return {
     child,
     name,
-    stderrTail: (maxChars?: number): string => tail(stderr.read(), maxChars),
+    stderrTail: (maxChars?: number): string => stderr.read(maxChars),
     stderrText: (): string => stderr.read(),
-    stdoutTail: (maxChars?: number): string => tail(stdout.read(), maxChars),
+    stdoutTail: (maxChars?: number): string => stdout.read(maxChars),
     stdoutText: (): string => stdout.read(),
   };
 }
@@ -1573,6 +1574,9 @@ function createOutputBuffer(): {
   return {
     append(chunk: string | Buffer): void {
       value += chunk.toString();
+      if (value.length > HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS) {
+        value = value.slice(value.length - HOSTED_LOCAL_OUTPUT_BUFFER_MAX_CHARS);
+      }
     },
     read(): string {
       return value;
@@ -1584,7 +1588,7 @@ function createRedactedOutputBuffer(
   redactor: (value: string) => string,
 ): {
   append(chunk: string | Buffer): void;
-  read(): string;
+  read(maxChars?: number): string;
 } {
   const buffer = createOutputBuffer();
 
@@ -1592,8 +1596,8 @@ function createRedactedOutputBuffer(
     append(chunk: string | Buffer): void {
       buffer.append(chunk);
     },
-    read(): string {
-      return redactor(buffer.read());
+    read(maxChars?: number): string {
+      return redactor(tail(buffer.read(), maxChars));
     },
   };
 }

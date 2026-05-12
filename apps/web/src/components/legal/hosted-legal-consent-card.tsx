@@ -29,7 +29,16 @@ interface HostedLegalConsentCardProps {
   source: string;
 }
 
-export function HostedLegalConsentCard({
+export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
+  return (
+    <HostedLegalConsentCardState
+      key={resolveHostedConsentCardStateKey(props)}
+      {...props}
+    />
+  );
+}
+
+function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
   className,
   initialStatus = null,
@@ -39,19 +48,21 @@ export function HostedLegalConsentCard({
   preferredScope = "launch.legal",
   source,
 }: HostedLegalConsentCardProps) {
-  const [status, setStatus] = useState<HostedConsentStatus | null>(initialStatus);
+  const [loadedStatus, setLoadedStatus] = useState<HostedConsentStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
+  const [featureAccepted, setFeatureAccepted] = useState(false);
+  const status = initialStatus ?? loadedStatus;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const nextStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-        url: "/api/legal/consent/status",
-      });
-      setStatus(nextStatus);
+      const nextStatus = await requestHostedLegalConsentStatus();
+      setLoadedStatus(nextStatus);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
@@ -59,18 +70,38 @@ export function HostedLegalConsentCard({
       setLoading(false);
     }
   }, []);
-
   useEffect(() => {
     if (initialStatus) {
-      setStatus(initialStatus);
-      setAcceptedHandoffPending(false);
-      setLoading(false);
-      setErrorMessage(null);
       return;
     }
 
-    void loadStatus();
-  }, [initialStatus, loadStatus]);
+    let cancelled = false;
+    void requestHostedLegalConsentStatus()
+      .then((nextStatus) => {
+        if (cancelled) {
+          return;
+        }
+
+        setLoadedStatus(nextStatus);
+        setErrorMessage(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialStatus]);
 
   const pendingScopes = useMemo(() => {
     if (!status) return [];
@@ -88,8 +119,6 @@ export function HostedLegalConsentCard({
   const isLaunchFlow = pendingScopes.some((s) => s.startsWith("launch."));
   const isFeatureFlow = !isLaunchFlow && pendingScopes.length > 0;
 
-  const [legalAccepted, setLegalAccepted] = useState(false);
-  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
   const legalScope = status ? findConsentScope(status, "launch.legal") : null;
   const healthDataScope = status ? findConsentScope(status, "launch.health-data") : null;
 
@@ -97,8 +126,6 @@ export function HostedLegalConsentCard({
     if (!isFeatureFlow || !status) return null;
     return findConsentScope(status, preferredScope);
   }, [isFeatureFlow, preferredScope, status]);
-  const [featureAccepted, setFeatureAccepted] = useState(false);
-
   useEffect(() => {
     if (!status) return;
     onRequirementChange?.(pendingScopes.length > 0);
@@ -151,7 +178,7 @@ export function HostedLegalConsentCard({
     }
   }
 
-  if (loading) {
+  if (!initialStatus && loading) {
     return (
       <div
         aria-busy="true"
@@ -389,6 +416,33 @@ function findConsentScope(
   scope: HostedConsentScope,
 ): HostedConsentScopeStatus | null {
   return status.scopes.find((candidate) => candidate.scope === scope) ?? null;
+}
+
+function resolveHostedConsentCardStateKey({
+  initialStatus,
+  preferredScope = "launch.legal",
+  source,
+}: HostedLegalConsentCardProps): string {
+  if (!initialStatus) {
+    return `loaded:${preferredScope}:${source}`;
+  }
+
+  const scopeState = initialStatus.scopes
+    .map((scope) => {
+      const documentState = scope.documents
+        .map((document) => `${document.id}@${document.version}`)
+        .join(",");
+      return `${scope.scope}:${scope.granted ? "granted" : "pending"}:${documentState}`;
+    })
+    .join("|");
+
+  return `initial:${preferredScope}:${source}:${initialStatus.generatedAt}:${scopeState}`;
+}
+
+async function requestHostedLegalConsentStatus(): Promise<HostedConsentStatus> {
+  return requestHostedOnboardingJson<HostedConsentStatus>({
+    url: "/api/legal/consent/status",
+  });
 }
 
 function readConsentErrorMessage(error: unknown, fallback: string): string {

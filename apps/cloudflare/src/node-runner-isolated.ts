@@ -42,6 +42,7 @@ export interface HostedExecutionIsolatedRunnerInput {
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
 const HOSTED_RUNNER_CHILD_OUTPUT_TAIL_MAX_CHARS = 4096;
+const HOSTED_RUNNER_CHILD_RESULT_CLOSE_GRACE_MS = 250;
 
 const hostedRunnerWarmLauncherRoots = new Map<string, string>();
 
@@ -152,7 +153,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
 
   try {
     child.stdin.end(JSON.stringify(input));
-    const closeResult = await new Promise<HostedRunnerChildCloseResult>((resolve, reject) => {
+    const closePromise = new Promise<HostedRunnerChildCloseResult>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code, signal) => {
         resolve({
@@ -161,6 +162,19 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
         });
       });
     });
+    const firstCompletion = await Promise.race([
+      closePromise.then((closeResult) => ({
+        closeResult,
+        kind: "close" as const,
+      })),
+      childResultState.firstResultOrError.then(() => ({
+        closeResult: null,
+        kind: "child_result" as const,
+      })),
+    ]);
+    const closeResult = firstCompletion.kind === "close"
+      ? firstCompletion.closeResult
+      : await waitForHostedRunnerChildCloseAfterResult(closePromise);
     flushHostedRuntimeChildOutputRemainder({
       remainder: stdoutRemainder,
       sink: process.stdout,
@@ -171,13 +185,16 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
     });
     const childDiagnostics = createHostedRunnerChildExitDiagnostics({
       abortSignal: options?.signal,
-      closeResult,
+      closeResult: closeResult ?? {
+        code: null,
+        signal: null,
+      },
       stderrTail: stderrTail.read(),
       stdoutTail: stdoutTail.read(),
     });
     const childResult = readHostedRunnerChildResult(childResultState, childDiagnostics);
 
-    if (childResult.ok && closeResult.code !== 0) {
+    if (childResult.ok && closeResult !== null && closeResult.code !== 0) {
       throw new Error(
         `Hosted assistant runtime child exited with code ${closeResult.code ?? "unknown"} after reporting success.`,
       );
@@ -387,6 +404,7 @@ function createHostedRuntimeChildFailure(
 
 interface HostedRunnerChildResultState {
   errors: Error[];
+  firstResultOrError: Promise<void>;
   results: HostedExecutionRunnerChildResult[];
 }
 
@@ -413,9 +431,18 @@ function createHostedRunnerChildResultState(
 ): HostedRunnerChildResultState {
   const state: HostedRunnerChildResultState = {
     errors: [],
+    firstResultOrError: Promise.resolve(),
     results: [],
   };
   let runtimeWakeReady = false;
+  let resolveFirstResultOrError: (() => void) | null = null;
+  state.firstResultOrError = new Promise((resolve) => {
+    resolveFirstResultOrError = resolve;
+  });
+  const markResultOrError = () => {
+    resolveFirstResultOrError?.();
+    resolveFirstResultOrError = null;
+  };
 
   child.on("message", (message: unknown) => {
     try {
@@ -437,12 +464,26 @@ function createHostedRunnerChildResultState(
         return;
       }
       state.results.push(parseHostedExecutionRunnerChildResultMessage(message));
+      markResultOrError();
     } catch (error) {
       state.errors.push(error instanceof Error ? error : new Error(String(error)));
+      markResultOrError();
     }
   });
 
   return state;
+}
+
+async function waitForHostedRunnerChildCloseAfterResult(
+  closePromise: Promise<HostedRunnerChildCloseResult>,
+): Promise<HostedRunnerChildCloseResult | null> {
+  return await Promise.race([
+    closePromise,
+    new Promise<null>((resolve) => {
+      const timeout = setTimeout(resolve, HOSTED_RUNNER_CHILD_RESULT_CLOSE_GRACE_MS, null);
+      timeout.unref?.();
+    }),
+  ]);
 }
 
 function readHostedRunnerChildResult(
