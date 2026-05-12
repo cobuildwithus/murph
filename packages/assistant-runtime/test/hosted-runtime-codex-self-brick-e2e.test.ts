@@ -11,6 +11,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
+  HOSTED_CODEX_RUNTIME_AUTHORITY_ENV,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 
@@ -94,6 +95,23 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   assert.match(nextConfig, /model_provider = "hosted-openai"/u);
   assert.match(nextConfig, /\[model_providers\."hosted-openai"\]/u);
   assert.match(nextConfig, /wire_api = "responses"/u);
+  assert.match(nextConfig, /env_http_headers = \{ /u);
+  assert.match(nextConfig, new RegExp(
+    `"x-hosted-runner-bound-user-id" = "${HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId}"`,
+    "u",
+  ));
+  assert.match(nextConfig, new RegExp(
+    `"x-hosted-runtime-attempt-id" = "${HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId}"`,
+    "u",
+  ));
+  assert.match(nextConfig, new RegExp(
+    `"x-hosted-runtime-lease-generation" = "${HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration}"`,
+    "u",
+  ));
+  assert.match(nextConfig, new RegExp(
+    `"x-hosted-runtime-workspace-version" = "${HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion}"`,
+    "u",
+  ));
   assert.match(nextConfig, /requires_openai_auth = false/u);
   assert.doesNotMatch(nextConfig, /not valid hosted codex config/u);
   await assert.rejects(

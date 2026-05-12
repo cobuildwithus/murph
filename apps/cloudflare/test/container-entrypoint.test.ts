@@ -332,6 +332,45 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("runs the managed-container OpenAI intercept smoke through the Codex client hook", async () => {
+    const runOpenAiInterceptSmoke = vi.fn(async () => ({
+      client: "codex" as const,
+      model: "gpt-5.4-mini",
+      stderrBytes: 0,
+      stdoutBytes: 128,
+    }));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runOpenAiInterceptSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: "",
+      path: "/internal/deploy-openai-intercept-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toEqual({
+      ok: true,
+      openAiIntercept: {
+        client: "codex",
+        model: "gpt-5.4-mini",
+        stderrBytes: 0,
+        stdoutBytes: 128,
+      },
+    });
+    expect(runOpenAiInterceptSmoke).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects the removed legacy internal run alias", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,

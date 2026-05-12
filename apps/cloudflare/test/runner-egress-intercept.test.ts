@@ -100,12 +100,13 @@ describe("hostedRunnerIntercept", () => {
   it("injects OpenAI authorization without forwarding runtime authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI credential injection must not require a runtime write fence.");
+    });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
           "openai-organization": "org_user_supplied",
           "openai-project": "proj_user_supplied",
@@ -123,12 +124,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
     expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
@@ -143,24 +139,27 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("rejects OpenAI sentinel credential injection without an active runtime fence", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("injects OpenAI authorization without an active runtime write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
         method: "POST",
       }),
-      createInterceptEnv({}),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+      }),
       { containerId: "member_123--v-version_1" },
     );
 
-    expect(response.status).toBe(401);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
+    expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
   });
 
   it("rejects OpenAI credential injection outside the canonical HTTPS origin", async () => {
@@ -215,12 +214,13 @@ describe("hostedRunnerIntercept", () => {
   it("allows the observed OpenAI models read path", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("OpenAI model reads must not require a runtime write fence.");
+    });
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
         method: "GET",
@@ -233,12 +233,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/models");
     const authorization = forwarded.headers.get("authorization");
@@ -292,14 +287,15 @@ describe("hostedRunnerIntercept", () => {
   it("injects Mapbox access tokens only for allowed GET path families", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Mapbox credential injection must not require a runtime write fence.");
+    });
 
     const response = await hostedRunnerIntercept(
       new Request(
         `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         {
           headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
             authorization: "Bearer user-supplied-mapbox-token",
             cookie: "session=user-supplied-cookie",
             "proxy-authorization": "Bearer user-supplied-proxy-token",
@@ -316,12 +312,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     const forwarded = readForwardedRequest(fetchMock);
     const forwardedUrl = new URL(forwarded.url);
     expect(forwardedUrl.origin).toBe("https://api.mapbox.com");
@@ -335,24 +326,27 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("rejects Mapbox sentinel credential injection without an active runtime fence", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("injects Mapbox access tokens without an active runtime write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
       new Request(
         `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         {
-          headers: BOUND_USER_WRITE_FENCE_HEADERS,
           method: "GET",
         },
       ),
-      createInterceptEnv({}),
+      createInterceptEnv({
+        MAPBOX_ACCESS_TOKEN: "mapbox-worker-secret",
+      }),
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(401);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    const forwardedUrl = new URL(forwarded.url);
+    expect(forwardedUrl.searchParams.get("access_token")).toBe("mapbox-worker-secret");
   });
 
   it("rejects Mapbox token injection outside the canonical HTTPS origin", async () => {
