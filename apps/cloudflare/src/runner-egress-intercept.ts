@@ -30,11 +30,41 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
   "x-hosted-runtime-workspace-version",
 ] as const;
 
-const DEFAULT_LINQ_API_HOST = "api.linqapp.com";
+const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_HOST = "api.openai.com";
 const DEFAULT_MAPBOX_API_HOST = "api.mapbox.com";
 const DEFAULT_TELEGRAM_API_HOST = "api.telegram.org";
 const DEFAULT_WHATSAPP_API_HOST = "graph.facebook.com";
+
+const OPENAI_EGRESS_POLICY = [
+  {
+    method: "POST",
+    pathname: "/v1/responses",
+  },
+  {
+    method: "GET",
+    pathname: "/v1/models",
+  },
+] as const;
+
+const MAPBOX_EGRESS_POLICY = [
+  {
+    method: "GET",
+    pathPrefix: "/directions/",
+  },
+  {
+    method: "GET",
+    pathPrefix: "/search/geocode/",
+  },
+  {
+    method: "GET",
+    pathPrefix: "/search/searchbox/",
+  },
+  {
+    method: "GET",
+    pathPrefix: "/v4/mapbox.mapbox-terrain-v2/tilequery/",
+  },
+] as const;
 
 interface HostedRunnerOutboundContext {
   containerId?: string;
@@ -105,7 +135,13 @@ async function maybeHandleOpenAiRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  if (input.url.hostname !== DEFAULT_OPENAI_API_HOST || !input.url.pathname.startsWith("/v1/")) {
+  if (input.url.hostname !== DEFAULT_OPENAI_API_HOST) {
+    return null;
+  }
+  if (!isAllowedOpenAiRequest(input.request.method, input.url.pathname)) {
+    return disallowedProviderEgress();
+  }
+  if (!hasBearerCredentialSentinel(input.request.headers)) {
     return null;
   }
 
@@ -121,7 +157,13 @@ async function maybeHandleMapboxRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  if (input.url.hostname !== DEFAULT_MAPBOX_API_HOST || !isAllowedMapboxPath(input.url.pathname)) {
+  if (input.url.hostname !== DEFAULT_MAPBOX_API_HOST) {
+    return null;
+  }
+  if (!isAllowedMapboxRequest(input.request.method, input.url.pathname)) {
+    return disallowedProviderEgress();
+  }
+  if (!hasQueryCredentialSentinel(input.url, "access_token")) {
     return null;
   }
 
@@ -143,16 +185,27 @@ async function maybeHandleLinqRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const configuredHost = readConfiguredHost(input.env.LINQ_API_BASE_URL) ?? DEFAULT_LINQ_API_HOST;
-  if (input.url.hostname !== configuredHost || !isAllowedLinqRequest(input.request.method, input.url.pathname)) {
+  const baseUrl = readConfiguredBaseUrl(input.env.LINQ_API_BASE_URL, DEFAULT_LINQ_API_BASE_URL);
+  if (input.url.origin !== baseUrl.origin) {
     return null;
   }
 
-  if (isSideEffectMethod(input.request.method)) {
-    const authorized = await requestOwnsRuntimeWriteFence(input);
-    if (!authorized) {
-      return new Response("Unauthorized", { status: 401 });
-    }
+  const prefix = baseUrl.pathname.replace(/\/+$/u, "");
+  if (!input.url.pathname.startsWith(prefix)) {
+    return null;
+  }
+
+  const suffix = input.url.pathname.slice(prefix.length);
+  if (!isAllowedLinqRequest(input.request.method, suffix)) {
+    return null;
+  }
+  if (!hasBearerCredentialSentinel(input.request.headers)) {
+    return null;
+  }
+
+  const authorized = await requestOwnsRuntimeWriteFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.LINQ_API_TOKEN, "LINQ_API_TOKEN");
@@ -177,11 +230,9 @@ async function maybeHandleTelegramRequest(input: {
     return null;
   }
 
-  if (isTelegramWriteOperation(operation)) {
-    const authorized = await requestOwnsRuntimeWriteFence(input);
-    if (!authorized) {
-      return new Response("Unauthorized", { status: 401 });
-    }
+  const authorized = await requestOwnsRuntimeWriteFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
@@ -237,30 +288,45 @@ function readHostedRunnerBoundUserId(request: Request): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function isAllowedMapboxPath(pathname: string): boolean {
-  return pathname.startsWith("/directions/")
-    || pathname.startsWith("/search/geocode/")
-    || pathname.startsWith("/search/searchbox/")
-    || pathname.startsWith("/v4/mapbox.mapbox-terrain-v2/tilequery/");
+function isAllowedOpenAiRequest(method: string, pathname: string): boolean {
+  return OPENAI_EGRESS_POLICY.some((policy) =>
+    method === policy.method && pathname === policy.pathname
+  );
 }
 
-function isAllowedLinqRequest(method: string, pathname: string): boolean {
-  if (method === "GET" && pathname === "/api/partner/v3/phone_numbers") {
+function isAllowedMapboxRequest(method: string, pathname: string): boolean {
+  return MAPBOX_EGRESS_POLICY.some((policy) =>
+    method === policy.method && pathname.startsWith(policy.pathPrefix)
+  );
+}
+
+function hasBearerCredentialSentinel(headers: Headers): boolean {
+  const value = headers.get("authorization")?.trim() ?? "";
+  const match = /^Bearer\s+(.+)$/iu.exec(value);
+  return match?.[1]?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+}
+
+function hasQueryCredentialSentinel(url: URL, name: string): boolean {
+  return url.searchParams.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+}
+
+function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
+  if (method === "GET" && pathnameSuffix === "/phone_numbers") {
     return true;
   }
-  if (method === "POST" && pathname === "/api/partner/v3/chats") {
+  if (method === "POST" && pathnameSuffix === "/chats") {
     return true;
   }
   if (
     method === "POST"
-    && /^\/api\/partner\/v3\/chats\/[^/]+\/(?:messages|typing|read)$/u.test(pathname)
+    && /^\/chats\/[^/]+\/(?:messages|typing|read)$/u.test(pathnameSuffix)
   ) {
     return true;
   }
-  if (method === "DELETE" && /^\/api\/partner\/v3\/chats\/[^/]+\/typing$/u.test(pathname)) {
+  if (method === "DELETE" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
     return true;
   }
-  return method === "DELETE" && /^\/api\/partner\/v3\/messages\/[^/]+$/u.test(pathname);
+  return method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix);
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {
@@ -278,14 +344,6 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "deleteMessages"
     || operation === "deleteBusinessMessages"
     || operation === "getFile";
-}
-
-function isTelegramWriteOperation(operation: string): boolean {
-  return operation !== "getFile";
-}
-
-function isSideEffectMethod(method: string): boolean {
-  return method === "POST" || method === "DELETE" || method === "PATCH" || method === "PUT";
 }
 
 async function requestOwnsRuntimeWriteFence(input: {
@@ -368,4 +426,12 @@ function readConfiguredHost(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function disallowedProviderEgress(): Response {
+  return new Response("Forbidden", { status: 403 });
+}
+
+function readConfiguredBaseUrl(value: unknown, fallback: string): URL {
+  return new URL(typeof value === "string" && value.trim() ? value : fallback);
 }

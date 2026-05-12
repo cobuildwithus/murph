@@ -35,21 +35,11 @@ import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "./runner-email-route.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
-  HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
-  parseHostedRunnerLinqSendResponse,
   parseHostedRunnerProviderEffectErrorResponse,
   parseHostedRunnerTelegramDownloadFileResponse,
   parseHostedRunnerTelegramGetFileResponse,
-  parseHostedRunnerTelegramSendResponse,
-  parseHostedRunnerWhatsAppSendResponse,
 } from "./runner-effects-contract.ts";
 import {
   writeRunnerRuntimeWriteFenceHeaders,
@@ -253,8 +243,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
     inFlightArtifactUploads.set(artifact.sha256, upload);
     await upload;
   };
-  const providerEffectsPort = input.workspaceCheckpointBridge
-    ? createCloudflareRunnerProviderEffectsPort({
+  const providerFileEffectsPort = input.workspaceCheckpointBridge
+    ? createCloudflareRunnerProviderFileEffectsPort({
         fetchImpl,
         timeoutMs,
         workspaceCheckpointBridge: input.workspaceCheckpointBridge,
@@ -329,7 +319,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     effectsPort: {
-      ...providerEffectsPort,
+      ...providerFileEffectsPort,
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
           description: "Hosted raw email read",
@@ -430,7 +420,7 @@ function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): stri
   return `/messages/${encodeURIComponent(rawMessageKey)}`;
 }
 
-function createCloudflareRunnerProviderEffectsPort(input: {
+function createCloudflareRunnerProviderFileEffectsPort(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
@@ -455,13 +445,6 @@ function createCloudflareRunnerProviderEffectsPort(input: {
   });
 
   return {
-    async deleteLinqMessages(request) {
-      await post({
-        body: request,
-        description: "Hosted Linq message cleanup",
-        path: HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
-      });
-    },
     async downloadTelegramFile(request) {
       const payload = await post({
         body: request,
@@ -477,51 +460,6 @@ function createCloudflareRunnerProviderEffectsPort(input: {
         path: HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
       });
       return parseHostedRunnerTelegramGetFileResponse(payload).file;
-    },
-    async markLinqRead(request) {
-      await post({
-        body: request,
-        description: "Hosted Linq mark-read",
-        path: HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
-      });
-    },
-    async sendLinq(request) {
-      const payload = await post({
-        body: request,
-        description: "Hosted Linq send",
-        path: HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
-      });
-      return parseHostedRunnerLinqSendResponse(payload);
-    },
-    async sendLinqChatAction(request) {
-      await post({
-        body: request,
-        description: "Hosted Linq chat action",
-        path: HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
-      });
-    },
-    async sendTelegram(request) {
-      const payload = await post({
-        body: request,
-        description: "Hosted Telegram send",
-        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
-      });
-      return parseHostedRunnerTelegramSendResponse(payload);
-    },
-    async sendTelegramChatAction(request) {
-      await post({
-        body: request,
-        description: "Hosted Telegram chat action",
-        path: HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
-      });
-    },
-    async sendWhatsApp(request) {
-      const payload = await post({
-        body: request,
-        description: "Hosted WhatsApp send",
-        path: HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
-      });
-      return parseHostedRunnerWhatsAppSendResponse(payload);
     },
   };
 }

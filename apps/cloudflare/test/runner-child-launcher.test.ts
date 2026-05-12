@@ -40,16 +40,19 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   const launcherDirectories = createLauncherDirectories("/tmp/hosted-runner");
   const env = createHostedRunnerChildProcessEnv({
     ambientEnv: {
+      CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       FFMPEG_COMMAND: "/usr/bin/ffmpeg",
       FILE_COMMAND: "/usr/bin/file",
       HTTPS_PROXY: "https://proxy.example.test",
       LANG: "en_US.UTF-8",
       MUTOOL_COMMAND: "/usr/bin/mutool",
+      NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       PATH: "/usr/bin:/bin",
       PDFINFO_COMMAND: "/usr/bin/pdfinfo",
       PDFTOPPM_COMMAND: "/usr/bin/pdftoppm",
       PDFTOTEXT_COMMAND: "/usr/bin/pdftotext",
       QPDF_COMMAND: "/usr/bin/qpdf",
+      REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       SSL_CERT_FILE: "/etc/ssl/cert.pem",
       TZ: "UTC",
       WHISPER_COMMAND: "/usr/local/bin/whisper-cli",
@@ -74,11 +77,14 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   });
 
   assert.deepEqual(env, {
+    CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     HF_HOME: launcherDirectories.huggingFaceRoot,
     HOME: launcherDirectories.homeRoot,
     LANG: "en_US.UTF-8",
+    NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     OPENAI_API_KEY: "secret",
     PATH: "/usr/bin:/bin",
+    REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     SSL_CERT_FILE: "/etc/ssl/cert.pem",
     TEMP: launcherDirectories.tempRoot,
     TMP: launcherDirectories.tempRoot,

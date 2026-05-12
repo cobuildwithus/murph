@@ -9,7 +9,7 @@ import {
 } from "../src/runner-egress-intercept.ts";
 
 describe("hosted assistant runner env policy", () => {
-  it("forwards hosted Codex seed vars and the OpenAI key", () => {
+  it("forwards hosted Codex seed vars and sentinel OpenAI config without platform secrets", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -22,8 +22,6 @@ describe("hosted assistant runner env policy", () => {
     });
 
     expect(env).toMatchObject({
-      HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
-      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -31,6 +29,8 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
+    expect(env.HOSTED_AI_USAGE_REPORTING_SECRET).toBeUndefined();
+    expect(env.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
   });
 
   it("does not forward unsupported hosted assistant api key alias vars", () => {

@@ -220,8 +220,11 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
 test("hosted runtime child env does not project typed parser toolchain into process env", () => {
   const childEnv = projectHostedRuntimeToChildEnv({
     ambientEnv: {
+      CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       HOME: "/ambient/home",
+      NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       PATH: "/usr/bin:/bin",
+      REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       WHISPER_COMMAND: "/ambient/whisper-cli",
     },
     forwardedEnv: {
@@ -239,14 +242,17 @@ test("hosted runtime child env does not project typed parser toolchain into proc
   });
 
   assert.deepEqual(childEnv, {
+    CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS: "1",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE: "/tmp/checkpoint-debug.json",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
+    NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     NODE_ENV: "production",
     PATH: "/usr/bin:/bin",
     OPENAI_API_KEY: "worker-openai-secret",
+    REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
   });
   assert.equal("FFMPEG_COMMAND" in childEnv, false);
   assert.equal("HOME" in childEnv, false);
@@ -685,6 +691,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        CURL_CA_BUNDLE: "/tmp/forwarded-curl-ca.pem",
         LD_PRELOAD: "/tmp/injected.so",
         CODEX_HOME: "/tmp/forwarded-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
@@ -705,6 +712,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HTTPS_PROXY: "http://forwarded-proxy.example.test:8080",
         NODE_EXTRA_CA_CERTS: "/tmp/forwarded-ca.pem",
         NPM_CONFIG_USERCONFIG: "/tmp/forwarded-npmrc",
+        REQUESTS_CA_BUNDLE: "/tmp/forwarded-requests-ca.pem",
         SSL_CERT_FILE: "/tmp/forwarded-cert.pem",
         TMPDIR: "/tmp/forwarded-tmp",
         OPENAI_API_KEY: "openai-secret",
@@ -712,6 +720,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
       userEnv: {
         AGENTMAIL_API_KEY: "agentmail-user-secret",
         CF_ACCOUNT_ID: "cf-account",
+        CURL_CA_BUNDLE: "/tmp/user-curl-ca.pem",
         LD_PRELOAD: "/tmp/user-injected.so",
         CODEX_HOME: "/tmp/user-codex-home",
         HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
@@ -730,6 +739,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HTTPS_PROXY: "http://user-proxy.example.test:8080",
         NODE_EXTRA_CA_CERTS: "/tmp/user-ca.pem",
         NPM_CONFIG_USERCONFIG: "/tmp/user-npmrc",
+        REQUESTS_CA_BUNDLE: "/tmp/user-requests-ca.pem",
         SSL_CERT_FILE: "/tmp/user-cert.pem",
         TMPDIR: "/tmp/user-tmp",
         OPENAI_API_KEY: "user-openai-secret",
@@ -980,27 +990,33 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   const originalValues = new Map(
     [
       "AMBIENT_CHANNEL_SECRET",
+      "CURL_CA_BUNDLE",
       "CUSTOM_HOSTED_ENV",
       "HOSTED_ASSISTANT_BASE_URL",
       "HOSTED_ASSISTANT_PROVIDER_NAME",
       "HOSTED_EXECUTION_CONTROL_TOKEN",
       "MURPH_HOSTED_RUNTIME_PROCESS",
       "MUTATED_DURING_HOSTED_ENV",
+      "NODE_EXTRA_CA_CERTS",
       "PATH",
       "HOME",
       "VAULT",
       "OPENAI_API_KEY",
+      "REQUESTS_CA_BUNDLE",
     ].map((key) => [key, process.env[key]]),
   );
 
   process.env.AMBIENT_CHANNEL_SECRET = "ambient-secret";
+  process.env.CURL_CA_BUNDLE = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
   process.env.HOSTED_ASSISTANT_BASE_URL = "https://legacy-provider.example.test/v1";
   process.env.HOSTED_ASSISTANT_PROVIDER_NAME = "legacy-provider";
   process.env.HOSTED_EXECUTION_CONTROL_TOKEN = "control-secret";
+  process.env.NODE_EXTRA_CA_CERTS = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
   process.env.PATH = "/usr/bin";
   process.env.HOME = "/tmp/original-home";
   process.env.VAULT = "/tmp/original-vault";
   process.env.OPENAI_API_KEY = "ambient-openai-secret";
+  process.env.REQUESTS_CA_BUNDLE = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
   delete process.env.CUSTOM_HOSTED_ENV;
   delete process.env.MURPH_HOSTED_RUNTIME_PROCESS;
   delete process.env.MUTATED_DURING_HOSTED_ENV;
@@ -1020,10 +1036,22 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         assert.equal(process.env.HOSTED_ASSISTANT_BASE_URL, undefined);
         assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
         assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, undefined);
+        assert.equal(
+          process.env.CURL_CA_BUNDLE,
+          "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+        );
+        assert.equal(
+          process.env.NODE_EXTRA_CA_CERTS,
+          "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+        );
         assert.equal(process.env.CUSTOM_HOSTED_ENV, "runtime-value");
         assert.equal(process.cwd(), roots.vaultRoot);
         assert.equal(process.env.HOME, roots.operatorHomeRoot);
         assert.equal(process.env.PATH, "/usr/bin");
+        assert.equal(
+          process.env.REQUESTS_CA_BUNDLE,
+          "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+        );
         assert.equal(process.env.MURPH_HOSTED_RUNTIME_PROCESS, "1");
         assert.equal(process.env.VAULT, roots.vaultRoot);
         assert.equal(process.env.OPENAI_API_KEY, "runtime-openai-secret");

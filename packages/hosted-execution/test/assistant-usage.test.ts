@@ -4,6 +4,7 @@ import { test } from "vitest";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
+  createAssistantUsageReportingUserId,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
@@ -33,6 +34,43 @@ test("assistant usage ids validate and normalize turn ids before formatting", ()
         turnId: "turn_123",
       }),
     /attemptCount must be a non-negative integer when provided/u,
+  );
+});
+
+test("assistant usage reporting user ids are stable HMAC identifiers", () => {
+  assert.equal(
+    createAssistantUsageReportingUserId({
+      memberId: " member_123 ",
+      reportingSecret: " usage-secret ",
+    }),
+    createAssistantUsageReportingUserId({
+      memberId: "member_123",
+      reportingSecret: "usage-secret",
+    }),
+  );
+  assert.match(
+    createAssistantUsageReportingUserId({
+      memberId: "member_123",
+      reportingSecret: "usage-secret",
+    }) ?? "",
+    /^musr_[A-Za-z0-9_-]{32}$/u,
+  );
+  assert.notEqual(
+    createAssistantUsageReportingUserId({
+      memberId: "member_123",
+      reportingSecret: "usage-secret",
+    }),
+    createAssistantUsageReportingUserId({
+      memberId: "member_456",
+      reportingSecret: "usage-secret",
+    }),
+  );
+  assert.equal(
+    createAssistantUsageReportingUserId({
+      memberId: "member_123",
+      reportingSecret: "",
+    }),
+    null,
   );
 });
 

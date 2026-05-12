@@ -1,36 +1,15 @@
 import {
-  deleteHostedProviderLinqMessages,
   downloadHostedProviderTelegramFile,
   getHostedProviderTelegramFile,
-  markHostedProviderLinqRead,
-  sendHostedProviderLinqChatAction,
-  sendHostedProviderLinqMessage,
-  sendHostedProviderTelegramChatAction,
-  sendHostedProviderTelegramMessage,
-  sendHostedProviderWhatsAppMessage,
   type HostedProviderEffectDependencies,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
 
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
-  HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
-  parseHostedRunnerLinqChatActionRequest,
-  parseHostedRunnerLinqDeleteMessagesRequest,
-  parseHostedRunnerLinqMarkReadRequest,
-  parseHostedRunnerLinqSendRequest,
-  parseHostedRunnerTelegramChatActionRequest,
   parseHostedRunnerTelegramDownloadFileRequest,
   parseHostedRunnerTelegramGetFileRequest,
-  parseHostedRunnerTelegramSendRequest,
-  parseHostedRunnerWhatsAppSendRequest,
   type HostedRunnerProviderEffectErrorResponse,
 } from "../runner-effects-contract.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
@@ -44,8 +23,6 @@ import type {
 
 const PROVIDER_EFFECT_BODY_LIMIT_BYTES = 1024 * 1024;
 const TELEGRAM_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
-const HOSTED_FOREGROUND_LINQ_SEND_EFFECT_TIMEOUT_MS = 15_000;
-const HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS = 800;
 
 export async function handleRunnerProviderEffectsRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -113,17 +90,6 @@ async function dispatchRunnerProviderEffectsRequest(input: {
   });
 
   switch (input.pathname) {
-    case HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH:
-      return json(await sendHostedProviderTelegramMessage(
-        parseHostedRunnerTelegramSendRequest(input.body),
-        dependencies,
-      ));
-    case HOSTED_EXECUTION_RUNNER_TELEGRAM_CHAT_ACTION_PATH:
-      await sendHostedProviderTelegramChatAction(
-        parseHostedRunnerTelegramChatActionRequest(input.body),
-        dependencies,
-      );
-      return json({ ok: true });
     case HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH:
       return json({
         file: await getHostedProviderTelegramFile(
@@ -133,50 +99,6 @@ async function dispatchRunnerProviderEffectsRequest(input: {
       });
     case HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH:
       return await handleTelegramDownloadFileEffect(input.body, dependencies);
-    case HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH:
-      return json(await sendHostedProviderLinqMessage(
-        parseHostedRunnerLinqSendRequest(input.body),
-        createProviderEffectDependencies({
-          env: input.env,
-          requestSignal: input.requestSignal,
-          timeoutMs: HOSTED_FOREGROUND_LINQ_SEND_EFFECT_TIMEOUT_MS,
-        }),
-      ));
-    case HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH:
-      await sendHostedProviderLinqChatAction(
-        parseHostedRunnerLinqChatActionRequest(input.body),
-        createProviderEffectDependencies({
-          env: input.env,
-          requestSignal: input.requestSignal,
-          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
-        }),
-      );
-      return json({ ok: true });
-    case HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH:
-      await markHostedProviderLinqRead(
-        parseHostedRunnerLinqMarkReadRequest(input.body),
-        createProviderEffectDependencies({
-          env: input.env,
-          requestSignal: input.requestSignal,
-          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
-        }),
-      );
-      return json({ ok: true });
-    case HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH:
-      await deleteHostedProviderLinqMessages(
-        parseHostedRunnerLinqDeleteMessagesRequest(input.body),
-        createProviderEffectDependencies({
-          env: input.env,
-          requestSignal: input.requestSignal,
-          timeoutMs: HOSTED_FOREGROUND_LINQ_ACTIVITY_EFFECT_TIMEOUT_MS,
-        }),
-      );
-      return json({ ok: true });
-    case HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH:
-      return json(await sendHostedProviderWhatsAppMessage(
-        parseHostedRunnerWhatsAppSendRequest(input.body),
-        dependencies,
-      ));
     default:
       return jsonError("Not found", 404);
   }

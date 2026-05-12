@@ -183,7 +183,8 @@ Hosted assistant provider secrets:
 
 Hosted usage-reporting secrets:
 
-- `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be forwarded to the hosted assistant and Gateway
+- `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the child runtime env.
+- `HOSTED_LOG_FINGERPRINT_SECRET` when Worker-owned log fingerprinting is enabled. This secret must stay out of child runtime env.
 - `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET` and optional
   `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID` when Cloudflare should accept
   short-lived signed web allow decisions on foreground runner nudges before

@@ -1,5 +1,9 @@
+import { createHmac } from "node:crypto";
+
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
 const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"]);
+const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
+  "murph.assistant-usage.reporting-user.v1";
 const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
   "cacheWriteTokens",
   "cache_write_tokens",
@@ -84,6 +88,27 @@ export function createAssistantUsageId(input: {
   return providerRequestOrdinal === 0
     ? `${turnId}.attempt-${attemptCount}`
     : `${turnId}.request-${providerRequestOrdinal}.attempt-${attemptCount}`;
+}
+
+export function createAssistantUsageReportingUserId(input: {
+  memberId: string;
+  reportingSecret?: string | null;
+}): string | null {
+  const memberId = input.memberId.trim();
+  const reportingSecret = input.reportingSecret?.trim() ?? "";
+
+  if (!memberId || !reportingSecret) {
+    return null;
+  }
+
+  const digest = createHmac("sha256", reportingSecret)
+    .update(ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT)
+    .update("\0")
+    .update(memberId)
+    .digest("base64url")
+    .slice(0, 32);
+
+  return `musr_${digest}`;
 }
 
 export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord {

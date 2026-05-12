@@ -1620,7 +1620,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(request.json()).resolves.toEqual({ replica });
   });
 
-  it("exposes callback-only browser-vault writes and provider effects", async () => {
+  it("exposes callback-only browser-vault writes without legacy provider delivery effects", async () => {
     const sourceBundleHash = "c".repeat(64);
     const replica = {
       generatedAt: "2026-04-26T00:00:00.000Z",
@@ -1633,10 +1633,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      if (request.url.endsWith("/telegram/send")) {
+      if (request.url.endsWith("/telegram/files/get")) {
         return new Response(JSON.stringify({
-          providerMessageId: "telegram_message_123",
-          target: "telegram_chat_123",
+          file: {
+            file_id: "telegram_file_123",
+          },
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
@@ -1662,20 +1663,26 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(platform.browserVaultReplicaPort).toBeDefined();
-    expect(platform.effectsPort.sendTelegram).toBeDefined();
+    expect(platform.effectsPort.getTelegramFile).toBeDefined();
+    expect("sendTelegram" in platform.effectsPort).toBe(false);
+    expect("sendTelegramChatAction" in platform.effectsPort).toBe(false);
+    expect("sendLinq" in platform.effectsPort).toBe(false);
+    expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
+    expect("markLinqRead" in platform.effectsPort).toBe(false);
+    expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
+    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
     await platform.browserVaultReplicaPort!.write({ replica });
-    await platform.effectsPort.sendTelegram!({
-      message: "hello",
-      target: "telegram_chat_123",
+    await platform.effectsPort.getTelegramFile!({
+      fileId: "telegram_file_123",
     });
 
     const replicaRequest = requireFetchRequest(fetchMock.mock.calls[0], "callback browser-vault write");
-    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[1], "callback telegram send");
+    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[1], "callback telegram file lookup");
     expect(replicaRequest.url).toBe(
       "http://browser-vault.worker/replicas",
     );
     expect(telegramRequest.url).toBe(
-      "http://results.worker/telegram/send",
+      "http://results.worker/telegram/files/get",
     );
     expect(replicaRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
@@ -2068,37 +2075,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(sendRequest.url).toBe("http://results.worker/send");
   });
 
-  it("routes provider effects through the internal effects port with active lease headers", async () => {
+  it("keeps only Telegram file lookup on the provider effects port after delivery cutover", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      if (request.url.endsWith("/telegram/send")) {
+      if (request.url.endsWith("/telegram/files/get")) {
         return new Response(JSON.stringify({
-          providerMessageId: "telegram_message_123",
-          target: "telegram_chat_123",
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
+          file: {
+            file_id: "telegram_file_123",
+            file_path: "photos/file.jpg",
           },
-          status: 200,
-        });
-      }
-      if (request.url.endsWith("/linq/send")) {
-        return new Response(JSON.stringify({
-          providerMessageId: "linq_message_123",
-          providerThreadId: "linq_chat_123",
-          target: "linq_chat_123",
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      if (request.url.endsWith("/whatsapp/send")) {
-        return new Response(JSON.stringify({
-          providerMessageId: "whatsapp_message_123",
-          providerThreadId: "15550100001",
-          target: "15550100001",
         }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -2127,90 +2112,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    await expect(platform.effectsPort.sendTelegram!({
-      message: "hello",
-      target: "telegram_chat_123",
+    await expect(platform.effectsPort.getTelegramFile!({
+      fileId: "telegram_file_123",
     })).resolves.toEqual({
-      cleanupTargetAliases: null,
-      providerMessageId: "telegram_message_123",
-      providerMessageIds: null,
-      providerThreadId: null,
-      target: "telegram_chat_123",
-      targetKind: null,
-    });
-    await platform.effectsPort.sendLinqChatAction!({
-      action: "typing",
-      target: "linq_chat_123",
-    });
-    await platform.effectsPort.sendLinqChatAction!({
-      action: "typing_stop",
-      target: "linq_chat_123",
-    });
-    await expect(platform.effectsPort.sendLinq!({
-      directRecipientPhoneNumber: "+15550001",
-      message: "hello",
-      target: "stale-chat",
-      targetKind: "thread",
-    })).resolves.toEqual({
-      providerMessageId: "linq_message_123",
-      providerMessageIds: null,
-      providerThreadId: "linq_chat_123",
-      target: "linq_chat_123",
-      targetKind: null,
-    });
-    await expect(platform.effectsPort.sendWhatsApp!({
-      message: "hello",
-      replyToMessageId: "wamid.REPLY_1",
-      target: "15550100001",
-    })).resolves.toEqual({
-      providerMessageId: "whatsapp_message_123",
-      providerMessageIds: null,
-      providerThreadId: "15550100001",
-      target: "15550100001",
-      targetKind: null,
+      file_id: "telegram_file_123",
+      file_path: "photos/file.jpg",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(5);
-    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram send");
-    const linqStartRequest = requireFetchRequest(fetchMock.mock.calls[1], "linq action start");
-    const linqStopRequest = requireFetchRequest(fetchMock.mock.calls[2], "linq action stop");
-    const linqSendRequest = requireFetchRequest(fetchMock.mock.calls[3], "linq send");
-    const whatsAppSendRequest = requireFetchRequest(fetchMock.mock.calls[4], "whatsapp send");
-    expect(telegramRequest.url).toBe("http://results.worker/telegram/send");
-    expect(linqStartRequest.url).toBe("http://results.worker/linq/chat-action");
-    expect(linqStopRequest.url).toBe("http://results.worker/linq/chat-action");
-    expect(linqSendRequest.url).toBe("http://results.worker/linq/send");
-    expect(whatsAppSendRequest.url).toBe("http://results.worker/whatsapp/send");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "telegram file lookup");
+    expect(telegramRequest.url).toBe("http://results.worker/telegram/files/get");
     expect(telegramRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(telegramRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(telegramRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
     await expect(telegramRequest.json()).resolves.toEqual({
-      message: "hello",
-      target: "telegram_chat_123",
+      fileId: "telegram_file_123",
     });
-    await expect(linqStartRequest.json()).resolves.toEqual({
-      action: "typing",
-      target: "linq_chat_123",
-    });
-    await expect(linqStopRequest.json()).resolves.toEqual({
-      action: "typing_stop",
-      target: "linq_chat_123",
-    });
-    await expect(linqSendRequest.json()).resolves.toEqual({
-      directRecipientPhoneNumber: "+15550001",
-      message: "hello",
-      target: "stale-chat",
-      targetKind: "thread",
-    });
-    await expect(whatsAppSendRequest.json()).resolves.toEqual({
-      message: "hello",
-      replyToMessageId: "wamid.REPLY_1",
-      target: "15550100001",
-    });
+    expect("sendTelegram" in platform.effectsPort).toBe(false);
+    expect("sendTelegramChatAction" in platform.effectsPort).toBe(false);
+    expect("sendLinq" in platform.effectsPort).toBe(false);
+    expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
+    expect("markLinqRead" in platform.effectsPort).toBe(false);
+    expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
+    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
   });
 
-  it("preserves structured Telegram ambiguity details from provider effect failures", async () => {
+  it("preserves structured details from remaining provider effect failures", async () => {
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({
@@ -2235,9 +2163,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    await expect(platform.effectsPort.sendTelegram!({
-      message: "hello",
-      target: "telegram_chat_123",
+    await expect(platform.effectsPort.getTelegramFile!({
+      fileId: "telegram_file_123",
     })).rejects.toMatchObject({
       cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
       code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
@@ -2270,9 +2197,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    await expect(platform.effectsPort.sendLinqChatAction!({
-      action: "typing",
-      target: "linq_chat_123",
+    await expect(platform.effectsPort.getTelegramFile!({
+      fileId: "telegram_file_123",
     })).rejects.toMatchObject({
       code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
       reason: "internal_authority_rejected",

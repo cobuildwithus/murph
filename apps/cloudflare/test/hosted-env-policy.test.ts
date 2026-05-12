@@ -78,18 +78,22 @@ describe("buildHostedRunnerContainerEnv", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
         "CODEX_HOME",
+        "CURL_CA_BUNDLE",
         "HTTPS_PROXY",
         "NODE_EXTRA_CA_CERTS",
         "NPM_CONFIG_USERCONFIG",
+        "REQUESTS_CA_BUNDLE",
         "SSL_CERT_FILE",
         "TMPDIR",
       ].join(","),
     };
 
     expect(isHostedRunnerSecretKeyAllowed("CODEX_HOME", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("CURL_CA_BUNDLE", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HTTPS_PROXY", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NODE_EXTRA_CA_CERTS", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NPM_CONFIG_USERCONFIG", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("REQUESTS_CA_BUNDLE", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("SSL_CERT_FILE", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TMPDIR", source)).toBe(false);
   });
