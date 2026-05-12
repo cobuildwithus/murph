@@ -775,7 +775,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("forwards the invocation proxy token and local bridge config into the node runner", async () => {
+  it("forwards only the hosted runner job and abort signal into the node runner", async () => {
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
-  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
+import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "../src/runner-outbound/headers.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -23,6 +25,25 @@ afterEach(() => {
 });
 
 describe("hostedRunnerIntercept", () => {
+  it("rejects internal virtual-host requests without a runtime write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://web-control.worker/internal/hosted-runtime/mailbox-payload/decode", {
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("injects OpenAI authorization without forwarding runtime authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

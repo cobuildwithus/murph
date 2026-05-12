@@ -323,7 +323,7 @@ test('linq runtime preserves path-prefixed base urls when building requests', as
     {
       env: {
         LINQ_API_BASE_URL:
-          'http://host.docker.internal:8902/__murph/runtime-callback/users/member_123/results.worker',
+          'http://host.docker.internal:8902/custom/results.worker',
         LINQ_API_TOKEN: 'token',
       },
       fetchImplementation: async (url) => {
@@ -337,7 +337,7 @@ test('linq runtime preserves path-prefixed base urls when building requests', as
   )
 
   assert.deepEqual(seenUrls, [
-    'http://host.docker.internal:8902/__murph/runtime-callback/users/member_123/results.worker/chats/chat%3A123/messages',
+    'http://host.docker.internal:8902/custom/results.worker/chats/chat%3A123/messages',
   ])
 })
 

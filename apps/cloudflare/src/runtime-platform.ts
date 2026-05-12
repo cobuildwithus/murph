@@ -74,7 +74,7 @@ import {
 } from "./internal-hosts.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
-} from "./runner-egress-intercept.ts";
+} from "./runner-outbound/headers.ts";
 import {
   assertAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -647,7 +647,7 @@ function resolveHostedWebControlTransport(input: {
   return null;
 }
 
-function createCloudflareHostedRuntimeFetch(
+function createCloudflareHostedInternalFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
@@ -763,12 +763,12 @@ export function createCloudflareHostedProviderFetch(
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   } = {},
 ): typeof fetch {
-  const runtimeFetch = createCloudflareHostedRuntimeFetch(boundUserId, fetchImpl, options);
+  const internalFetch = createCloudflareHostedInternalFetch(boundUserId, fetchImpl, options);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return await runtimeFetch(request);
+      return await internalFetch(request);
     }
 
     const headers = new Headers(request.headers);

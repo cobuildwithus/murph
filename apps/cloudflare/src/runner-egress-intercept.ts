@@ -9,12 +9,17 @@ import {
   handleRunnerOutboundRequest,
 } from "./runner-outbound.ts";
 import {
+  requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
+import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "./runner-outbound/headers.ts";
+import { unauthorized } from "./json.ts";
 
 export const HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL =
   "__cloudflare_injected__";
@@ -30,8 +35,6 @@ const DEFAULT_OPENAI_API_HOST = "api.openai.com";
 const DEFAULT_MAPBOX_API_HOST = "api.mapbox.com";
 const DEFAULT_TELEGRAM_API_HOST = "api.telegram.org";
 const DEFAULT_WHATSAPP_API_HOST = "graph.facebook.com";
-export const HOSTED_RUNNER_BOUND_USER_ID_HEADER =
-  "x-hosted-runner-bound-user-id";
 
 interface HostedRunnerOutboundContext {
   containerId?: string;
@@ -49,6 +52,18 @@ export async function hostedRunnerIntercept(
   if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
     if (!userId) {
       return new Response("Missing hosted runner identity.", { status: 403 });
+    }
+    try {
+      await requireRunnerRuntimeWriteFence({
+        env,
+        request,
+        userId,
+      });
+    } catch (error) {
+      if (error instanceof RunnerRuntimeWriteFenceError) {
+        return unauthorized();
+      }
+      throw error;
     }
     return await handleRunnerOutboundRequest(
       createHostedRunnerInternalRequest(request),
@@ -307,7 +322,8 @@ function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
 }
 
 function createHostedRunnerInternalRequest(source: Request): Request {
-  const headers = stripHostedRuntimeAuthorityHeaders(source.headers);
+  const headers = new Headers(source.headers);
+  headers.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
   return new Request(source, {
     headers,
   });
