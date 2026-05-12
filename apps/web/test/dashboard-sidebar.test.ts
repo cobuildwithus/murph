@@ -194,6 +194,15 @@ test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   );
 });
 
+test("Sidebar does not render research-only Age navigation", () => {
+  mocks.usePathname.mockReturnValue("/home");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.doesNotMatch(markup, /href="\/age"/);
+  assert.doesNotMatch(markup, />Age<\/a>/);
+});
+
 test("Sidebar keeps the Biomarkers tab active across biomarker section routes", () => {
   mocks.usePathname.mockReturnValue("/biomarkers/heart-rate-variability");
 

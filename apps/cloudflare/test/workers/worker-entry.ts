@@ -124,6 +124,22 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return await this.runner.validateRuntimeWriteFence(input);
   }
 
+  async beginIdleCheckpointLease(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): ReturnType<HostedUserRunner["beginIdleCheckpointLease"]> {
+    return this.runner.beginIdleCheckpointLease(input);
+  }
+
+  async finishIdleCheckpointLease(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt?: string | null;
+    userId: string;
+  }): ReturnType<HostedUserRunner["finishIdleCheckpointLease"]> {
+    return this.runner.finishIdleCheckpointLease(input);
+  }
+
   async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
     return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
   }

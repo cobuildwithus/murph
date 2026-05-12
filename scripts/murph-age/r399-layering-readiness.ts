@@ -30,6 +30,10 @@ export const R399_LAYERING_READINESS_SCHEMA_VERSION =
 
 const DEFAULT_MODEL_RUNS_DIR = path.join(".runtime", "operations", "research", "murph-age", "model-runs");
 const DEFAULT_MIDUS2_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "midus2-local-benchmark.latest.json");
+const DEFAULT_MIDUS_REFRESHER_OUTPUT_PATH = path.join(
+  DEFAULT_MODEL_RUNS_DIR,
+  "r399-midus-refresher-biomarker-increment.latest.json",
+);
 const DEFAULT_CRELES_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "creles-local-benchmark.latest.json");
 const DEFAULT_TRANSPORT_OUTPUT_PATH = path.join(DEFAULT_MODEL_RUNS_DIR, "midus2-creles-transport-benchmark.latest.json");
 const DEFAULT_R399_MODEL_CARD_PATH = path.join(DEFAULT_R399_MODEL_CARD_OUTPUT_DIR, R399_LOCAL_MODEL_CARD_FILENAME);
@@ -65,6 +69,7 @@ export interface R399LayeringReadinessOptions {
   createdAt?: string;
   crelesOutputPath?: string;
   midus2OutputPath?: string;
+  midusRefresherOutputPath?: string;
   outputDir?: string;
   r399ModelCardPath?: string;
   r399ParamsPath?: string;
@@ -119,6 +124,27 @@ export interface R399LayeringReadinessOutput {
   >;
   localPathsStored: false;
   modelParametersStored: false;
+  nextLoop: {
+    candidateBatch: {
+      batchId: "r600-frozen-anchor-residual-increment-batch";
+      candidates: Array<{
+        id: string;
+        role: "abstain_display" | "proposal" | "reference" | "shadow";
+        scoreBearing: boolean;
+      }>;
+      selectionPolicy: "predeclared-small-batch";
+      status: "frozen-research-only";
+    };
+    reviewGate: {
+      nextGate: "aggregate-results";
+      requiredBeforeReview: string[];
+    };
+    sourceRoles: Array<{
+      id: string;
+      optimizationAllowed: boolean;
+      role: "frozen_anchor" | "internal_development" | "internal_replication" | "shadow_context" | "transport_stress";
+    }>;
+  };
   participantIdentifiersStored: false;
   predictionsStored: false;
   productPromotionAuthorized: false;
@@ -152,10 +178,11 @@ export async function runR399LayeringReadiness(
   const outputDir = resolveR399RepoPath(options.outputDir ?? DEFAULT_MODEL_RUNS_DIR);
   const r399ParamsPath = resolveR399RepoPath(options.r399ParamsPath ?? DEFAULT_R399_PARAMS_PATH);
   const r399ModelCardPath = resolveR399RepoPath(options.r399ModelCardPath ?? DEFAULT_R399_MODEL_CARD_PATH);
-  const [r399Metadata, r399ModelCardMetadata, midus2, creles, transport] = await Promise.all([
+  const [r399Metadata, r399ModelCardMetadata, midus2, midusRefresher, creles, transport] = await Promise.all([
     readR399ModelMetadata(r399ParamsPath),
     readR399LocalModelCardMetadata(r399ModelCardPath, r399ParamsPath),
     readOptionalJson(options.midus2OutputPath ?? DEFAULT_MIDUS2_OUTPUT_PATH),
+    readOptionalJson(options.midusRefresherOutputPath ?? DEFAULT_MIDUS_REFRESHER_OUTPUT_PATH),
     readOptionalJson(options.crelesOutputPath ?? DEFAULT_CRELES_OUTPUT_PATH),
     readOptionalJson(options.transportOutputPath ?? DEFAULT_TRANSPORT_OUTPUT_PATH),
   ]);
@@ -165,6 +192,7 @@ export async function runR399LayeringReadiness(
   const calculatorScorePathReady = committedCalculatorCardPresent && r399ModelCardMetadata.present;
   const biomarkerIncrement = [
     summarizeMidus2Increment(midus2),
+    summarizeMidusRefresherIncrement(midusRefresher),
     summarizeCrelesIncrement(creles),
     summarizeMidus2ToCrelesTransport(transport),
   ];
@@ -241,6 +269,7 @@ export async function runR399LayeringReadiness(
     gates,
     localPathsStored: false,
     modelParametersStored: false,
+    nextLoop: buildNextLoopManifest(),
     participantIdentifiersStored: false,
     predictionsStored: false,
     productPromotionAuthorized: false,
@@ -266,6 +295,40 @@ export async function runR399LayeringReadiness(
   return { output, outputPath };
 }
 
+function buildNextLoopManifest(): R399LayeringReadinessOutput["nextLoop"] {
+  return {
+    candidateBatch: {
+      batchId: "r600-frozen-anchor-residual-increment-batch",
+      candidates: [
+        { id: "r399-anchor-research-comparator", role: "reference", scoreBearing: true },
+        { id: "r399-plus-compact-bloodwork-residual", role: "proposal", scoreBearing: true },
+        { id: "r399-plus-compact-bloodwork-body-residual", role: "proposal", scoreBearing: true },
+        { id: "wearable-shadow-qc-only", role: "shadow", scoreBearing: false },
+        { id: "age-like-display-abstain", role: "abstain_display", scoreBearing: false },
+      ],
+      selectionPolicy: "predeclared-small-batch",
+      status: "frozen-research-only",
+    },
+    reviewGate: {
+      nextGate: "aggregate-results",
+      requiredBeforeReview: [
+        "same-denominator aggregate metrics against the frozen R399 anchor",
+        "MIDUS 2 development result and MIDUS Refresher internal-replication result without Refresher retuning",
+        "calibration, proper-score, missingness, and uncertainty summaries",
+        "wearable availability/QC summary kept shadow-only",
+        "explicit no-product, no-row, no-prediction, no-coefficient artifact-boundary attestation",
+      ],
+    },
+    sourceRoles: [
+      { id: "nhis-r399", optimizationAllowed: false, role: "frozen_anchor" },
+      { id: "midus2", optimizationAllowed: true, role: "internal_development" },
+      { id: "midus-refresher", optimizationAllowed: false, role: "internal_replication" },
+      { id: "creles", optimizationAllowed: false, role: "transport_stress" },
+      { id: "wearables", optimizationAllowed: false, role: "shadow_context" },
+    ],
+  };
+}
+
 function summarizeMidus2Increment(value: unknown): R399LayeringEvidenceSummary {
   const models = optionalRecord(optionalRecord(value)?.models);
   const reference = aggregateMetricsAt(models?.age_sex_reference, ["splitMetrics", "test"]);
@@ -283,6 +346,31 @@ function summarizeMidus2Increment(value: unknown): R399LayeringEvidenceSummary {
     summary: promising
       ? "MIDUS 2 lab5 biomarker candidate improves aggregate test discrimination or proper scores over the MIDUS age/sex reference, but this is internal evidence only."
       : "MIDUS 2 lab5 biomarker candidate does not clearly improve aggregate test metrics over the MIDUS age/sex reference.",
+    verdict: promising ? "promising_internal_only" : "not_promotable",
+  };
+}
+
+function summarizeMidusRefresherIncrement(value: unknown): R399LayeringEvidenceSummary {
+  const models = optionalRecord(optionalRecord(value)?.models);
+  const anchor = aggregateMetricsAt(models?.r399_anchor_recalibrated, ["splitMetrics", "test"]);
+  const candidate = aggregateMetricsAt(models?.r399_plus_lab3_bmi_increment, ["splitMetrics", "test"]);
+  if (!anchor || !candidate) {
+    return missingEvidence(
+      "midus-refresher-r399-lab3-internal",
+      "internal-biomarker",
+      "MIDUS Refresher aggregate R399-plus-lab3 increment output is missing or incomplete.",
+    );
+  }
+  const comparison = metricDelta("r399_plus_lab3_bmi_increment", "r399_anchor_recalibrated", candidate, anchor);
+  const promising = isPositiveInternalDelta(comparison);
+  return {
+    comparison,
+    evidenceClass: "internal-biomarker",
+    present: true,
+    sourceId: "midus-refresher-r399-lab3-internal",
+    summary: promising
+      ? "MIDUS Refresher lab3 biomarker increment improves aggregate test discrimination or proper scores over the transported R399 anchor, but this is internal evidence only."
+      : "MIDUS Refresher lab3 biomarker increment does not clearly improve aggregate test metrics over the transported R399 anchor.",
     verdict: promising ? "promising_internal_only" : "not_promotable",
   };
 }
@@ -554,6 +642,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   runR399LayeringReadiness({
     crelesOutputPath: process.env.MURPH_AGE_CRELES_OUTPUT_PATH,
     midus2OutputPath: process.env.MURPH_AGE_MIDUS2_OUTPUT_PATH,
+    midusRefresherOutputPath: process.env.MURPH_AGE_MIDUS_REFRESHER_OUTPUT_PATH,
     outputDir: process.env.MURPH_AGE_RESEARCH_OUTPUT_DIR,
     r399ModelCardPath: process.env.MURPH_AGE_R399_MODEL_CARD_PATH,
     r399ParamsPath: process.env.MURPH_AGE_R399_PARAMS_PATH,

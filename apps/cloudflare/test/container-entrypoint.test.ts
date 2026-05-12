@@ -411,6 +411,7 @@ describe("startHostedContainerEntrypoint", () => {
           `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
           "  CODEX_CA_CERTIFICATE: process.env.CODEX_CA_CERTIFICATE,",
           "  CODEX_HOME: process.env.CODEX_HOME,",
+          "  CODEX_CONFIG: fs.readFileSync(`${process.env.CODEX_HOME}/config.toml`, 'utf8'),",
           "  HOME: process.env.HOME,",
           "  MURPH_HOSTED_CODEX_BOUND_USER_ID: process.env.MURPH_HOSTED_CODEX_BOUND_USER_ID,",
           "  MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: process.env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID,",
@@ -474,6 +475,19 @@ describe("startHostedContainerEntrypoint", () => {
         SSL_CERT_FILE: "/managed-container/ssl-cert-file.pem",
       });
       expect(captured.CODEX_HOME).toEqual(expect.stringContaining(".codex-smoke"));
+      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining("env_http_headers"));
+      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
+        '"x-hosted-runner-bound-user-id" = "MURPH_HOSTED_CODEX_BOUND_USER_ID"',
+      ));
+      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
+        '"x-hosted-runtime-attempt-id" = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID"',
+      ));
+      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
+        '"x-hosted-runtime-lease-generation" = "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION"',
+      ));
+      expect(captured.CODEX_CONFIG).toEqual(expect.stringContaining(
+        '"x-hosted-runtime-workspace-version" = "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION"',
+      ));
       expect(captured.HOME).toEqual(expect.stringContaining("hosted-openai-intercept-smoke-"));
       expect(captured.NODE_EXTRA_CA_CERTS).toEqual(expect.any(String));
       expect(captured.REQUESTS_CA_BUNDLE).toEqual(expect.any(String));

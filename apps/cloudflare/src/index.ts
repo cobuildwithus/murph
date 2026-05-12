@@ -365,6 +365,22 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
+  async beginIdleCheckpointLease(input: {
+    userId: string;
+    workspaceVersion: string;
+  }): ReturnType<HostedUserRunner["beginIdleCheckpointLease"]> {
+    return this.runner.beginIdleCheckpointLease(input);
+  }
+
+  async finishIdleCheckpointLease(input: {
+    attemptId: string;
+    generation: string;
+    nextWakeAt?: string | null;
+    userId: string;
+  }): ReturnType<HostedUserRunner["finishIdleCheckpointLease"]> {
+    return this.runner.finishIdleCheckpointLease(input);
+  }
+
   async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
     attemptId: string;
     generation: string;
@@ -655,6 +671,9 @@ async function runDeployContainerOpenAiInterceptSmokeWithFence(
     userId,
     workspaceVersion: DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
   });
+  if (!lease) {
+    throw new Error("OpenAI intercept deploy smoke could not acquire a hosted runner write fence.");
+  }
   try {
     return await container.smokeHealth({
       openAiIntercept: true,

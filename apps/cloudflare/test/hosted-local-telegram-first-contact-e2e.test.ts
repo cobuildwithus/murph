@@ -18,10 +18,14 @@ import {
   startHostedLocalTelegramStub,
   type HostedLocalTelegramStub,
 } from "./helpers/hosted-local-telegram-support.js";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-injected-credential.ts";
 
 const userId = `member_local_telegram_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_telegram_fast_reply_${Date.now()}`;
 const telegramBotToken = "telegram-local-test-token";
+const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
@@ -70,13 +74,13 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     await requireTelegramStub().waitForRequest({
-      expectedPath: `/bot${telegramBotToken}/sendChatAction`,
+      expectedPath: `/bot${hostedLocalTelegramRequestToken}/sendChatAction`,
       matchRequest: requireTelegramStub().createTypingMatcher(userId),
       scenario: requireScenario(),
       userId,
     });
     const sendRequest = await requireTelegramStub().waitForRequest({
-      expectedPath: `/bot${telegramBotToken}/sendMessage`,
+      expectedPath: `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
       matchRequest: requireTelegramStub().createSendMessageMatcher(userId),
       scenario: requireScenario(),
       userId,
@@ -84,7 +88,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
     const requestsAfterInbound = requireTelegramStub().observedRequests.slice(requestCountBeforeInbound);
     const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
-      request.url === `/bot${telegramBotToken}/sendChatAction`
+      request.url === `/bot${hostedLocalTelegramRequestToken}/sendChatAction`
       && requireTelegramStub().createTypingMatcher(userId)(request)
     );
 
@@ -110,7 +114,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId,
     });
     expect(requireTelegramStub().countObservedRequests(
-      `/bot${telegramBotToken}/deleteMessages`,
+      `/bot${hostedLocalTelegramRequestToken}/deleteMessages`,
     )).toBe(0);
   }, 300_000);
 
@@ -124,7 +128,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: fastReplyUserId,
     });
 
-    const expectedSendPath = `/bot${telegramBotToken}/sendMessage`;
+    const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
     const baselineSendCount = requireTelegramStub().countObservedRequests(
       expectedSendPath,
       requireTelegramStub().createSendMessageMatcher(fastReplyUserId),

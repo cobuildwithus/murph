@@ -332,14 +332,30 @@ export class HostedUserRunner {
   async beginIdleCheckpointLease(input: {
     userId: string;
     workspaceVersion: string;
-  }): Promise<RunnerWriteFenceToken> {
+  }): Promise<RunnerWriteFenceToken | null> {
     await this.stateStore.bindUser(input.userId);
-    let token = await this.stateStore.beginWriteFence({
-      expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-      kind: "idle_checkpoint",
-      reason: "idle_shutdown_checkpoint",
-      userId: input.userId,
-    });
+    const existing = await this.stateStore.readState();
+    if (existing.writeFence) {
+      await this.syncAlarm(existing);
+      return null;
+    }
+
+    let token: RunnerWriteFenceToken;
+    try {
+      token = await this.stateStore.beginWriteFence({
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+        kind: "idle_checkpoint",
+        reason: "idle_shutdown_checkpoint",
+        userId: input.userId,
+      });
+    } catch (error) {
+      const activeRecord = readRunnerWriteFenceAlreadyActiveRecord(error);
+      if (!activeRecord) {
+        throw error;
+      }
+      await this.syncAlarm(activeRecord);
+      return null;
+    }
     token = await this.stateStore.bindWriteFenceWorkspaceVersion({
       token,
       workspaceVersion: input.workspaceVersion,
@@ -1119,6 +1135,25 @@ function latestIsoDate(left: string | null, right: string | null): string | null
 
 function safeCleanupErrorCode(error: unknown): string {
   return error instanceof Error && error.name ? error.name : "UnknownError";
+}
+
+function readRunnerWriteFenceAlreadyActiveRecord(error: unknown): RunnerStateRecord | null {
+  if (error instanceof RunnerWriteFenceAlreadyActiveError) {
+    return error.record;
+  }
+  if (!isObjectRecord(error) || error.name !== "RunnerWriteFenceAlreadyActiveError") {
+    return null;
+  }
+  const record = error.record;
+  return isRunnerStateRecord(record) ? record : null;
+}
+
+function isRunnerStateRecord(value: unknown): value is RunnerStateRecord {
+  return isObjectRecord(value) && "writeFence" in value;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {

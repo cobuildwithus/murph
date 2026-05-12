@@ -14,7 +14,9 @@ import {
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
 import {
   R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION,
+  R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION,
   runR399Midus2BiomarkerIncrement,
+  runR399MidusRefresherBiomarkerIncrement,
 } from "./r399-midus2-biomarker-increment.ts";
 import { R399_RESEARCH_CARD_ID } from "./r399-local-model-card.ts";
 
@@ -46,7 +48,7 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(output.anchor.predictionsStored).toBe(false);
       expect(output.candidateBatch).toEqual({
         batchId: "r399-midus2-first-biomarker-increment-batch",
-        candidateCount: 5,
+        candidateCount: 6,
         exposureLabel: "diagnostic-only",
         hypothesisSources: [
           "literature or mechanistic rationale",
@@ -108,6 +110,10 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(r399Recalibrated?.coefficientsStored).toBe(false);
       expect(r399Recalibrated?.predictionsStored).toBe(false);
 
+      expect(output.models.r399_plus_bmi_increment?.featureKeys).toEqual([
+        "r399-logit",
+        "bmi",
+      ]);
       expect(output.models.r399_plus_lab3_increment?.featureKeys).toEqual([
         "r399-logit",
         "hba1c",
@@ -156,6 +162,57 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
     }
   });
 
+  it("runs the MIDUS Refresher cohort with separate aggregate-only metadata", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-midus-refresher-"));
+    try {
+      const downloadsDir = path.join(tmp, "downloads");
+      const outputDir = path.join(tmp, "runtime");
+      const r399ModelCardPath = path.join(tmp, "model-cards", "r399.json");
+      await mkdir(downloadsDir, { recursive: true });
+      await writeSyntheticMidusRefresherDownloads(downloadsDir);
+      await writeSyntheticR399ModelCard(r399ModelCardPath);
+
+      const { output, outputPath } = await runR399MidusRefresherBiomarkerIncrement({
+        createdAt: "2026-05-12T00:00:00.000Z",
+        downloadsDir,
+        outputDir,
+        r399ModelCardPath,
+      });
+
+      expect(output.schemaVersion).toBe(R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION);
+      expect(output.status).toBe("research-local-aggregate-only");
+      expect(output.benchmarkId).toBe("r399-midus-refresher-biomarker-increment-local-0");
+      expect(output.candidateBatch.batchId).toBe("r399-midus-refresher-biomarker-increment-batch");
+      expect(output.dataShape.eligibleRows).toBe(180);
+      expect(output.dataShape.events).toBeGreaterThan(0);
+      expect(output.incrementEvaluationCard.candidateBatchId).toBe("r399-midus-refresher-biomarker-increment-batch");
+      expect(output.incrementEvaluationCard.candidateId).toBe("r399-plus-refresher-lab3-bmi-increment");
+      expect(output.incrementEvaluationCard.sourceRouteId).toBe("midus-biomarker-mortality");
+      expect(output.incrementEvaluationCard.productAuthorized).toBe(false);
+      expect(output.incrementEvaluationCard.outputBoundary.productDisplayExportAllowed).toBe(false);
+      expect(validateMurphAgeIncrementEvaluationCard(output.incrementEvaluationCard)).toEqual({
+        status: "valid",
+        warnings: [],
+      });
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+
+      const serialized = JSON.stringify(output);
+      expect(serialized).not.toContain("MR0001");
+      expect(serialized).not.toContain("same MIDUS 2 denominator");
+      expect(serialized).not.toContain("selectedPointIds");
+      expect(serialized).not.toContain("rawRows");
+      expect(serialized).not.toContain("coefficients\":");
+      expect(serialized).not.toContain("predictions\":");
+      expect(serialized).not.toContain(tmp);
+
+      expect(path.basename(outputPath)).toBe("r399-midus-refresher-biomarker-increment.latest.json");
+      const persisted = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(persisted).toEqual(output);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
   it("prints only aggregate CLI summary fields without local output paths", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-midus2-cli-"));
     try {
@@ -185,9 +242,15 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(parsed.schemaVersion).toBe(R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION);
       expect(parsed.artifact).toBe("r399-midus2-biomarker-increment.latest.json");
       expect(parsed.anchor.cardId).toBe(R399_RESEARCH_CARD_ID);
+      expect(parsed.dataShape).toMatchObject({
+        eligibleRowsBand: "100-499",
+        eventCountBand: "50-99",
+      });
+      expect(["1-9", "10-49"]).toContain(parsed.dataShape.splitCountBands.test.eventCountBand);
       expect(parsed.modelIds).toEqual([
         "age_sex_reference",
         "r399_anchor_recalibrated",
+        "r399_plus_bmi_increment",
         "r399_plus_lab3_increment",
         "r399_plus_lab3_bmi_increment",
         "lab3_age_sex_reference",
@@ -196,6 +259,53 @@ describe("R399 MIDUS 2 biomarker increment runner", () => {
       expect(stdout).not.toContain(r399ModelCardPath);
       expect(stdout).not.toContain(tmp);
       expect(stdout).not.toContain("M0001");
+      expect(stdout).not.toContain("coefficient");
+      expect(findForbiddenAggregateEgress(parsed)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("prints MIDUS Refresher aggregate CLI summary fields when the cohort env is set", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r399-midus-refresher-cli-"));
+    try {
+      const downloadsDir = path.join(tmp, "downloads");
+      const outputDir = path.join(tmp, "absolute-output-dir");
+      const r399ModelCardPath = path.join(tmp, "model-cards", "r399.json");
+      await mkdir(downloadsDir, { recursive: true });
+      await writeSyntheticMidusRefresherDownloads(downloadsDir);
+      await writeSyntheticR399ModelCard(r399ModelCardPath);
+
+      const stdout = execFileSync("pnpm", [
+        "exec",
+        "tsx",
+        path.join(process.cwd(), "scripts/murph-age/r399-midus2-biomarker-increment.ts"),
+      ], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MURPH_AGE_DOWNLOADS_DIR: downloadsDir,
+          MURPH_AGE_MIDUS_COHORT: "midus-refresher",
+          MURPH_AGE_RESEARCH_OUTPUT_DIR: outputDir,
+          MURPH_AGE_R399_MODEL_CARD_PATH: r399ModelCardPath,
+        },
+      });
+
+      const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe("research-local-aggregate-only");
+      expect(parsed.schemaVersion).toBe(R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION);
+      expect(parsed.artifact).toBe("r399-midus-refresher-biomarker-increment.latest.json");
+      expect(parsed.benchmarkId).toBe("r399-midus-refresher-biomarker-increment-local-0");
+      expect(parsed.anchor.cardId).toBe(R399_RESEARCH_CARD_ID);
+      expect(parsed.dataShape).toMatchObject({
+        eligibleRowsBand: "100-499",
+        eventCountBand: "10-49",
+      });
+      expect(parsed.dataShape.splitCountBands.test.eventCountBand).toBe("1-9");
+      expect(stdout).not.toContain(outputDir);
+      expect(stdout).not.toContain(r399ModelCardPath);
+      expect(stdout).not.toContain(tmp);
+      expect(stdout).not.toContain("MR0001");
       expect(stdout).not.toContain("coefficient");
       expect(findForbiddenAggregateEgress(parsed)).toEqual([]);
     } finally {
@@ -344,6 +454,76 @@ async function writeSyntheticMidus2Downloads(
   });
   await writeZip(downloadsDir, "ICPSR_37237-V6.zip", {
     "ICPSR_37237/DS0001/37237-0001-Data.tsv": toTsv(mortalityRows),
+  });
+}
+
+async function writeSyntheticMidusRefresherDownloads(downloadsDir: string): Promise<void> {
+  const surveyHeader = [
+    "MRID",
+    "RA1PIDATE_YR",
+    "RA1PA1",
+    "RA1PA24",
+    "RA1PA38A",
+    "RA1PA39",
+    "RA1SA11X",
+    "RA1SA30A",
+    "RA1SA30B",
+    "RA1SA30C",
+    "RA1SA30D",
+    "RA1SA30E",
+    "RA1SA30F",
+    "RA1SA31",
+  ];
+  const surveyRows = [surveyHeader];
+  const biomarkerRows = [[
+    "MRID",
+    "RA4ZAGE",
+    "RA1PRSEX",
+    "RA4PBMI",
+    "RA4BHA1C",
+    "RA4BTRIGL",
+    "RA4BHDL",
+  ]];
+  const mortalityRows = [["MRID", "DOD_Y"]];
+
+  for (let index = 1; index <= 180; index += 1) {
+    const id = `MR${String(index).padStart(4, "0")}`;
+    const age = 39 + (index % 43);
+    const event = index % 7 === 0 || age > 77;
+    const worseSurveyRisk = event ? 1 : 0;
+    surveyRows.push([
+      id,
+      index % 2 === 0 ? "2011" : "2012",
+      String(Math.min(5, 1 + (index % 3) + worseSurveyRisk)),
+      event || index % 5 === 0 ? "1" : "2",
+      event || index % 4 === 0 ? "1" : "2",
+      event && index % 3 === 0 ? "1" : "2",
+      event && index % 2 === 0 ? "1" : "2",
+      ...Array.from({ length: 6 }, (_, offset) => String(event ? 5 + (offset % 2) : 1 + ((index + offset) % 3))),
+      String(event ? 5 : 2 + (index % 3)),
+    ]);
+    biomarkerRows.push([
+      id,
+      String(age),
+      String(index % 2 === 0 ? 1 : 2),
+      String(22 + (index % 19) + (event ? 2 : 0)),
+      String(5.0 + (index % 8) * 0.17 + (event ? 0.38 : 0)),
+      String(75 + (index % 95) + (event ? 28 : 0)),
+      String(42 + (index % 33) - (event ? 5 : 0)),
+    ]);
+    if (event) {
+      mortalityRows.push([id, String(2014 + (index % 7))]);
+    }
+  }
+
+  await writeZip(downloadsDir, "ICPSR_36532-V4.zip", {
+    "ICPSR_36532/DS0001/36532-0001-Data.tsv": toTsv(surveyRows),
+  });
+  await writeZip(downloadsDir, "ICPSR_36901-V6.zip", {
+    "ICPSR_36901/DS0001/36901-0001-Data.tsv": toTsv(biomarkerRows),
+  });
+  await writeZip(downloadsDir, "ICPSR_38024-V3.zip", {
+    "ICPSR_38024/DS0001/38024-0001-Data.tsv": toTsv(mortalityRows),
   });
 }
 

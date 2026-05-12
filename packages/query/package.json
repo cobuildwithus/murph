@@ -31,6 +31,11 @@
       "import": "./dist/browser-experiments.js",
       "default": "./dist/browser-experiments.js"
     },
+    "./browser-murph-age": {
+      "types": "./dist/browser-murph-age.d.ts",
+      "import": "./dist/browser-murph-age.js",
+      "default": "./dist/browser-murph-age.js"
+    },
     "./browser-overview": {
       "types": "./dist/browser-overview.d.ts",
       "import": "./dist/browser-overview.js",

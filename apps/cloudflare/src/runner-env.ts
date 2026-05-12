@@ -22,6 +22,9 @@ import {
 import {
   createHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-injected-credential.ts";
 
 const HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS =
   new Set<string>(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES);
@@ -111,6 +114,43 @@ export function buildHostedRunnerLegacyDeviceSyncPlatformEnv(
   );
 }
 
+export function buildHostedRunnerChannelPlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+  options: {
+    rewriteLoopbackUrlsForContainer?: boolean;
+  } = {},
+): Record<string, string> {
+  const platformEnv = buildHostedRunnerPlatformEnv(source, options);
+  const channelEnv: Record<string, string> = {};
+
+  if (platformEnv.TELEGRAM_BOT_TOKEN) {
+    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "TELEGRAM_API_BASE_URL");
+    channelEnv.TELEGRAM_BOT_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "TELEGRAM_FILE_BASE_URL");
+  }
+
+  if (platformEnv.WHATSAPP_ACCESS_TOKEN && platformEnv.WHATSAPP_PHONE_NUMBER_ID) {
+    channelEnv.WHATSAPP_ACCESS_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "WHATSAPP_API_BASE_URL");
+    channelEnv.WHATSAPP_PHONE_NUMBER_ID = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+    copyHostedChannelPlatformEnv(platformEnv, channelEnv, "WHATSAPP_GRAPH_VERSION");
+  }
+
+  return channelEnv;
+}
+
+function buildHostedRunnerContainerRuntimePlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+  options: {
+    rewriteLoopbackUrlsForContainer?: boolean;
+  } = {},
+): Record<string, string> {
+  return {
+    ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
+    ...buildHostedRunnerChannelPlatformEnv(source, options),
+  };
+}
+
 export function buildHostedRunnerJobRuntimeConfig(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
@@ -119,7 +159,7 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   runnerSecrets: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerContainerRuntimePlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
   const localE2eParserToolchain =
@@ -144,7 +184,7 @@ export function buildHostedRunnerIdleCheckpointRuntimeConfig(input: {
   rewritePlatformUrlsForContainer?: boolean;
 }): HostedAssistantRuntimeConfig {
   const configSource = input.configSource ?? input.forwardedEnv;
-  const platformEnv = buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
+  const platformEnv = buildHostedRunnerContainerRuntimePlatformEnv(configSource, {
     rewriteLoopbackUrlsForContainer: input.rewritePlatformUrlsForContainer === true,
   });
 
@@ -172,4 +212,15 @@ function readHostedRunnerParserToolchain(
   }
 
   return parserToolchain;
+}
+
+function copyHostedChannelPlatformEnv(
+  source: Readonly<Record<string, string>>,
+  target: Record<string, string>,
+  key: string,
+): void {
+  const value = source[key];
+  if (value) {
+    target[key] = value;
+  }
 }
