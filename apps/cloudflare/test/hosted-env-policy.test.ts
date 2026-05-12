@@ -78,6 +78,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
         "CODEX_HOME",
+        "CODEX_CA_CERTIFICATE",
         "CURL_CA_BUNDLE",
         "HTTPS_PROXY",
         "NODE_EXTRA_CA_CERTS",
@@ -88,6 +89,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       ].join(","),
     };
 
+    expect(isHostedRunnerSecretKeyAllowed("CODEX_CA_CERTIFICATE", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("CODEX_HOME", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("CURL_CA_BUNDLE", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HTTPS_PROXY", source)).toBe(false);

@@ -220,6 +220,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
 test("hosted runtime child env does not project typed parser toolchain into process env", () => {
   const childEnv = projectHostedRuntimeToChildEnv({
     ambientEnv: {
+      CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       HOME: "/ambient/home",
       NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
@@ -242,6 +243,7 @@ test("hosted runtime child env does not project typed parser toolchain into proc
   });
 
   assert.deepEqual(childEnv, {
+    CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS: "1",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE: "/tmp/checkpoint-debug.json",
@@ -990,6 +992,7 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   const originalValues = new Map(
     [
       "AMBIENT_CHANNEL_SECRET",
+      "CODEX_CA_CERTIFICATE",
       "CURL_CA_BUNDLE",
       "CUSTOM_HOSTED_ENV",
       "HOSTED_ASSISTANT_BASE_URL",
@@ -1007,6 +1010,7 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
   );
 
   process.env.AMBIENT_CHANNEL_SECRET = "ambient-secret";
+  process.env.CODEX_CA_CERTIFICATE = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
   process.env.CURL_CA_BUNDLE = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
   process.env.HOSTED_ASSISTANT_BASE_URL = "https://legacy-provider.example.test/v1";
   process.env.HOSTED_ASSISTANT_PROVIDER_NAME = "legacy-provider";
@@ -1036,6 +1040,10 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         assert.equal(process.env.HOSTED_ASSISTANT_BASE_URL, undefined);
         assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
         assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, undefined);
+        assert.equal(
+          process.env.CODEX_CA_CERTIFICATE,
+          "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+        );
         assert.equal(
           process.env.CURL_CA_BUNDLE,
           "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
