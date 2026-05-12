@@ -503,7 +503,7 @@ describe("handleRunnerOutboundRequest", () => {
         HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
-      "member_123" ,
+      "member_123",
     );
 
     expect(response.status).toBe(200);
@@ -520,6 +520,55 @@ describe("handleRunnerOutboundRequest", () => {
           memberId: "member_123",
           reportingSecret: "usage-reporting-secret",
         }),
+      },
+    }));
+  });
+
+  it("clears hosted usage reporting attribution when the Worker secret is absent", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const usage = {
+      memberId: "member_child_controlled",
+      provider: "codex-cli",
+      reportingUserId: "musr_child_controlled",
+      schema: "murph.assistant-usage.v1",
+      usageId: "turn_123.attempt-1",
+    };
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
+        body: JSON.stringify({ usage }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the usage web-control fetch to run.");
+    }
+    const [, init] = firstCall;
+    expect(init?.body).toBe(JSON.stringify({
+      usage: {
+        ...usage,
+        reportingUserId: null,
       },
     }));
   });
