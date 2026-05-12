@@ -40,3 +40,15 @@ Planned:
 
 - `pnpm test:diff apps/web/src/lib/hosted-onboarding/webhook-workflows.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-steps.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-types.ts apps/web/test/hosted-onboarding-webhook-workflows.test.ts agent-docs/references/hosted-runtime-protocol.md`
 - `pnpm typecheck`
+
+Completed:
+
+- `pnpm test:diff apps/web/src/lib/hosted-onboarding/webhook-workflows.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-steps.ts apps/web/src/lib/hosted-onboarding/webhook-workflow-types.ts apps/web/test/hosted-onboarding-webhook-workflows.test.ts agent-docs/references/hosted-runtime-protocol.md` reached `apps/web verify`; app Vitest and Next build passed, but app lint failed on unrelated React hook lint findings outside this task.
+- `pnpm --dir apps/web test:prepared -- apps/web/test/hosted-onboarding-webhook-workflows.test.ts` passed.
+- `pnpm --dir apps/web typecheck` passed.
+- `pnpm typecheck` failed after `apps/web` completed, in unrelated dirty `packages/assistant-engine` files.
+- `git diff --check` for task files passed.
+- Required security/privacy, coverage/proof, and final review passes reported no findings.
+Status: completed
+Updated: 2026-05-13
+Completed: 2026-05-13
