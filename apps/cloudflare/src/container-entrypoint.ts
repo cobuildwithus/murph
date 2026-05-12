@@ -17,6 +17,7 @@ import {
 } from "./runner-job-transport.ts";
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -130,6 +131,7 @@ export async function startHostedContainerEntrypoint(input: {
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
+    let stopActiveJobDiagnostics: (() => void) | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       runtimeCallbackBaseUrl: null,
     };
@@ -206,6 +208,10 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "wake.running",
         userId: readHostedExecutionRunnerJobUserId(job),
       });
+      stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
+        job,
+        processApi: runtime.processApi,
+      });
 
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
         runtimeCallbackBaseUrl: localBridge.runtimeCallbackBaseUrl,
@@ -246,6 +252,7 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
+      stopActiveJobDiagnostics?.();
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
@@ -858,6 +865,92 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
       await enforceHostedContainerProcessIsolation(runtime.processApi, processBaseline);
     }
   }
+}
+
+function startHostedContainerActiveJobDiagnostics(input: {
+  job: HostedExecutionRunnerJobInput;
+  processApi: HostedContainerProcessApi;
+}): () => void {
+  let stopped = false;
+  const userId = readHostedExecutionRunnerJobUserId(input.job);
+  const emitSnapshot = (stage: string) => {
+    void emitHostedContainerActiveJobDiagnosticSnapshot({
+      job: input.job,
+      processApi: input.processApi,
+      stage,
+      userId,
+    });
+  };
+
+  emitSnapshot("active-job-started");
+  const interval = setInterval(() => {
+    emitSnapshot("active-job-heartbeat");
+  }, HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS);
+
+  return () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    clearInterval(interval);
+    emitSnapshot("active-job-finished");
+  };
+}
+
+async function emitHostedContainerActiveJobDiagnosticSnapshot(input: {
+  job: HostedExecutionRunnerJobInput;
+  processApi: HostedContainerProcessApi;
+  stage: string;
+  userId: string;
+}): Promise<void> {
+  const [memoryCurrentRaw, memoryMaxRaw] = await Promise.all([
+    readOptionalHostedContainerProcessText(input.processApi, "/sys/fs/cgroup/memory.current"),
+    readOptionalHostedContainerProcessText(input.processApi, "/sys/fs/cgroup/memory.max"),
+  ]);
+  const memoryUsage = process.memoryUsage();
+
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details: {
+      cgroupMemoryCurrentBytes: parseCgroupMemoryValue(memoryCurrentRaw),
+      cgroupMemoryMaxBytes: parseCgroupMemoryValue(memoryMaxRaw),
+      lifecycleStage: "entrypoint-active-job-diagnostic",
+      processHeapUsedBytes: memoryUsage.heapUsed,
+      processPid: process.pid,
+      processRssBytes: memoryUsage.rss,
+      stage: input.stage,
+      workspaceAttemptId:
+        input.job.kind === "workspace-invocation" ? input.job.request.attemptId : null,
+      workspaceReason:
+        input.job.kind === "workspace-invocation" ? input.job.request.reason : null,
+      workspaceVersion:
+        input.job.kind === "workspace-invocation" ? input.job.request.workspaceVersion : null,
+    },
+    message: "Hosted container entrypoint active job diagnostic.",
+    phase: "wake.running",
+    userId: input.userId,
+  });
+}
+
+async function readOptionalHostedContainerProcessText(
+  processApi: HostedContainerProcessApi,
+  filePath: string,
+): Promise<string | null> {
+  try {
+    return await processApi.readFile(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function parseCgroupMemoryValue(value: string | null): number | null {
+  const normalized = value?.trim();
+  if (!normalized || normalized === "max") {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function isHostedAssistantConfigurationError(
