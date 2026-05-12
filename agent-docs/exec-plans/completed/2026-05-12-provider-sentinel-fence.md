@@ -1,6 +1,6 @@
 # Fail closed for known provider egress without sentinel credentials
 
-Status: active
+Status: completed
 Created: 2026-05-12
 Updated: 2026-05-12
 
@@ -68,3 +68,4 @@ Updated: 2026-05-12
 - `pnpm typecheck`
 - Expected outcomes:
 - All commands pass, or any unrelated pre-existing failure is documented with evidence.
+Completed: 2026-05-12

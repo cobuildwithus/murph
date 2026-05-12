@@ -106,6 +106,11 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
+          cookie: "session=user-supplied-cookie",
+          "openai-organization": "org_user_supplied",
+          "openai-project": "proj_user_supplied",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+          "x-api-key": "user-supplied-api-key",
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
         method: "POST",
@@ -131,6 +136,11 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("openai-organization")).toBe(false);
+    expect(forwarded.headers.has("openai-project")).toBe(false);
+    expect(forwarded.headers.has("proxy-authorization")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
   it("rejects OpenAI sentinel credential injection without an active runtime fence", async () => {
@@ -288,7 +298,13 @@ describe("hostedRunnerIntercept", () => {
       new Request(
         `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         {
-          headers: BOUND_USER_WRITE_FENCE_HEADERS,
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            authorization: "Bearer user-supplied-mapbox-token",
+            cookie: "session=user-supplied-cookie",
+            "proxy-authorization": "Bearer user-supplied-proxy-token",
+            "x-api-key": "user-supplied-api-key",
+          },
           method: "GET",
         },
       ),
@@ -313,6 +329,10 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedUrl.searchParams.get("access_token")).toBe("mapbox-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("proxy-authorization")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
   it("rejects Mapbox sentinel credential injection without an active runtime fence", async () => {
@@ -535,6 +555,33 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
   });
 
+  it("rejects default Linq provider host egress while a custom Linq base is configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/chats/chat_1/messages", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_BASE_URL: "https://linq.example.test/custom/tenant/v3",
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects Linq provider egress without the sentinel bearer token", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -574,6 +621,60 @@ describe("hostedRunnerIntercept", () => {
       }),
       createInterceptEnv({
         LINQ_API_BASE_URL: "https://linq.example.test/custom/tenant/v3",
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid configured Linq HTTP base hosts instead of passing them through", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://linq.example.com/custom/tenant/v3/chats/chat_1/messages", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_BASE_URL: "http://linq.example.com/custom/tenant/v3",
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid configured Linq HTTP base hosts across trailing-dot variants", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://linq.example.com/custom/tenant/v3/chats/chat_1/messages", {
+        body: JSON.stringify({ text: "hello" }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_BASE_URL: "http://linq.example.com./custom/tenant/v3",
         LINQ_API_TOKEN: "linq-worker-secret",
         validateRuntimeWriteFence,
       }),
@@ -701,6 +802,29 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
   });
 
+  it("rejects invalid configured Telegram HTTP base hosts instead of passing them through", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://telegram.example.com/bot__cloudflare_injected__/sendMessage", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_API_BASE_URL: "http://telegram.example.com",
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("honors configured Telegram base URL pathname prefixes", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -762,7 +886,13 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
-        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: "Bearer user-supplied-telegram-token",
+          cookie: "session=user-supplied-cookie",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+          "x-api-key": "user-supplied-api-key",
+        },
         method: "POST",
       }),
       createInterceptEnv({
@@ -783,6 +913,33 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("proxy-authorization")).toBe(false);
+    expect(forwarded.headers.has("x-api-key")).toBe(false);
+  });
+
+  it("rejects default Telegram provider host egress while a custom Telegram base is configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_API_BASE_URL: "https://telegram.example.test",
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("requires the active write fence before rewriting Telegram getFile", async () => {
@@ -913,6 +1070,46 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
+  it("rejects WhatsApp provider egress without the sentinel phone id", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/phone_123/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects WhatsApp credential injection without an active runtime fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects WhatsApp credential injection outside the configured provider origin", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -962,6 +1159,54 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("http://127.0.0.1:4012/v25.0/phone_123/messages");
+  });
+
+  it("rejects invalid configured WhatsApp HTTP base hosts instead of passing them through", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://whatsapp.example.com/v25.0/__cloudflare_injected__/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_API_BASE_URL: "http://whatsapp.example.com",
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects default WhatsApp provider host egress while a custom WhatsApp base is configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        WHATSAPP_API_BASE_URL: "https://whatsapp.example.test",
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("honors configured WhatsApp base URL pathname prefixes", async () => {
