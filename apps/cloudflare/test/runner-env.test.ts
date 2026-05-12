@@ -398,13 +398,40 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
+      LINQ_API_TOKEN: "linq-user",
+      MAPBOX_ACCESS_TOKEN: "mapbox-user",
       OPENAI_API_KEY: "fixture-user-key",
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
+      WHATSAPP_ACCESS_TOKEN: "whatsapp-user",
+      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-user",
       XAI_API_KEY: "xai-user",
     })).toEqual({});
+  });
+
+  it("rejects intercept-injected provider credentials from runner secrets even when explicitly allowlisted", () => {
+    expect(filterHostedRunnerSecrets(
+      {
+        LINQ_API_TOKEN: "linq-user",
+        MAPBOX_ACCESS_TOKEN: "mapbox-user",
+        OPENAI_API_KEY: "openai-user",
+        TELEGRAM_BOT_TOKEN: "telegram-user",
+        WHATSAPP_ACCESS_TOKEN: "whatsapp-user",
+        WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-user",
+      },
+      {
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+          "LINQ_API_TOKEN",
+          "MAPBOX_ACCESS_TOKEN",
+          "OPENAI_API_KEY",
+          "TELEGRAM_BOT_TOKEN",
+          "WHATSAPP_ACCESS_TOKEN",
+          "WHATSAPP_PHONE_NUMBER_ID",
+        ].join(","),
+      },
+    )).toEqual({});
   });
 
   it("rejects ingress-only secrets from runner secrets even when explicitly allowlisted", () => {
