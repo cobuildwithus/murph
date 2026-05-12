@@ -19,11 +19,16 @@ vi.mock("@murphai/hosted-execution", async () => {
 import {
   destroyHostedExecutionContainer,
   HostedExecutionConfigurationError,
+  DeploySmokeRunnerContainer,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
   RunnerContainer,
 } from "../src/runner-container.ts";
+import {
+  handleHostedRunnerOpenInternetOutbound,
+  HOSTED_RUNNER_OUTBOUND_BY_HOST,
+} from "../src/runner-egress-intercept.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
 const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
@@ -52,6 +57,13 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
 describe("RunnerContainer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("registers outbound interception through Cloudflare Containers accessors", () => {
+    expect(RunnerContainer.outbound).toBe(handleHostedRunnerOpenInternetOutbound);
+    expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
+    expect(DeploySmokeRunnerContainer.outbound).toBe(handleHostedRunnerOpenInternetOutbound);
+    expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
   it("reuses a successful per-user shell for back-to-back invocations", async () => {

@@ -180,8 +180,6 @@ export class RunnerContainer extends Container {
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
-  static outbound = handleHostedRunnerOpenInternetOutbound;
-  static outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -1118,6 +1116,29 @@ export class RunnerContainer extends Container {
 }
 
 export class DeploySmokeRunnerContainer extends RunnerContainer {}
+
+registerHostedRunnerContainerOutboundInterception(RunnerContainer);
+registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
+
+function registerHostedRunnerContainerOutboundInterception(
+  containerClass: typeof RunnerContainer,
+): void {
+  const outboundSetter = Object.getOwnPropertyDescriptor(Container, "outbound")?.set;
+  const outboundByHostSetter = Object.getOwnPropertyDescriptor(Container, "outboundByHost")?.set;
+
+  if (outboundSetter && outboundByHostSetter) {
+    outboundSetter.call(containerClass, handleHostedRunnerOpenInternetOutbound);
+    outboundByHostSetter.call(containerClass, HOSTED_RUNNER_OUTBOUND_BY_HOST);
+    return;
+  }
+
+  const legacyContainerClass = containerClass as typeof RunnerContainer & {
+    outbound: typeof handleHostedRunnerOpenInternetOutbound;
+    outboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST;
+  };
+  legacyContainerClass.outbound = handleHostedRunnerOpenInternetOutbound;
+  legacyContainerClass.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
+}
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
