@@ -3,13 +3,13 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
   handleRunnerOutboundRequest,
 } from "./runner-outbound.ts";
 import {
-  requireRunnerRuntimeWriteFence,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
@@ -22,13 +22,18 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
-import { unauthorized } from "./json.ts";
 export {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
+
+type HostedRunnerOutboundHandler = (
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  ctx: HostedRunnerOutboundContext,
+) => Promise<Response>;
 
 const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -41,6 +46,19 @@ const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
+
+export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
+  artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
+  browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
+  effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  linq: "api.linqapp.com",
+  mapbox: "api.mapbox.com",
+  openAi: "api.openai.com",
+  runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
+  telegram: "api.telegram.org",
+  webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+  whatsApp: "graph.facebook.com",
+} as const;
 
 const OPENAI_EGRESS_POLICY = [
   {
@@ -81,36 +99,29 @@ interface HostedRunnerOutboundContext {
   containerId?: string;
 }
 
-export async function hostedRunnerIntercept(
+export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp]: handleHostedRunnerWhatsAppOutbound,
+};
+
+export async function handleHostedRunnerOpenInternetOutbound(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   ctx: HostedRunnerOutboundContext,
 ): Promise<Response> {
-  void ctx;
   const url = new URL(request.url);
   const userId = readHostedRunnerBoundUserId(request);
 
   if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-    if (!userId) {
-      return new Response("Missing hosted runner identity.", { status: 403 });
-    }
-    try {
-      await requireRunnerRuntimeWriteFence({
-        env,
-        request,
-        userId,
-      });
-    } catch (error) {
-      if (error instanceof RunnerRuntimeWriteFenceError) {
-        return unauthorized();
-      }
-      throw error;
-    }
-    return await handleRunnerOutboundRequest(
-      createHostedRunnerInternalRequest(request),
-      env,
-      userId,
-    );
+    return await handleHostedRunnerInternalOutbound(request, env, ctx);
   }
 
   const handled =
@@ -130,14 +141,123 @@ export async function hostedRunnerIntercept(
       host: url.hostname,
       method: request.method,
       path: url.pathname,
+      policy: "open_internet_passthrough",
       userId: userId ?? null,
     },
     level: "warn",
-    message: "Hosted runner egress passed through unclassified outbound request during migration.",
+    message: "Hosted runner open-internet passthrough forwarded outbound request.",
     phase: "wake.running",
     userId: userId ?? undefined,
   });
-  return await fetch(createHostedRunnerPassthroughRequest(request));
+  return await fetch(createHostedRunnerOpenInternetPassthroughRequest(request));
+}
+
+export const hostedRunnerIntercept = handleHostedRunnerOpenInternetOutbound;
+
+export async function handleHostedRunnerInternalOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
+    return disallowedProviderEgress();
+  }
+
+  const userId = readHostedRunnerBoundUserId(request);
+  if (!userId) {
+    return new Response("Missing hosted runner identity.", { status: 403 });
+  }
+
+  return await handleRunnerOutboundRequest(
+    createHostedRunnerInternalRequest(request),
+    env,
+    userId,
+  );
+}
+
+export async function handleHostedRunnerOpenAiOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleOpenAiRequest({
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerMapboxOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleMapboxRequest({
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerLinqOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleLinqRequest({
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerTelegramOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleTelegramRequest({
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerWhatsAppOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleWhatsAppRequest({
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+async function requireHandledProviderEgress(response: Response | null): Promise<Response> {
+  return response ?? disallowedProviderEgress();
 }
 
 async function maybeHandleOpenAiRequest(input: {
@@ -445,7 +565,7 @@ function createHostedRunnerInternalRequest(source: Request): Request {
   });
 }
 
-function createHostedRunnerPassthroughRequest(source: Request): Request {
+function createHostedRunnerOpenInternetPassthroughRequest(source: Request): Request {
   return new Request(source, {
     headers: stripHostedRuntimeAuthorityHeaders(source.headers),
   });

@@ -7,7 +7,6 @@ import {
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
-export type DeploymentMode = "direct";
 export type ContainerRolloutMode = "gradual" | "immediate";
 
 export interface DeploymentStatusPayload {
@@ -19,19 +18,11 @@ export interface DeploymentStatusPayload {
 }
 
 export interface HostedWorkerDeploymentResult {
-  candidateVersionId: string | null;
-  currentDeploymentVersions: Array<{
-    percentage: number;
-    versionId: string;
-  }> | null;
   finalDeploymentVersions: Array<{
     percentage: number;
     versionId: string;
   }>;
-  mode: DeploymentMode;
-  rolloutPercentage: number | null;
-  smokeVersionId: string | null;
-  uploadedVersionId: string | null;
+  smokeVersionId: string;
   workerName: string;
 }
 
@@ -70,18 +61,12 @@ export interface HostedWorkerDeploymentDependencies {
   ): Promise<void>;
 }
 
-interface HostedWorkerDeploymentSettingsBase {
+interface HostedWorkerDeploymentSettings {
   containerRolloutMode: ContainerRolloutMode;
   deploymentMessage: string;
   includeSecrets: boolean;
   versionTag: string;
 }
-
-interface HostedWorkerDirectDeploymentSettings extends HostedWorkerDeploymentSettingsBase {
-  mode: "direct";
-}
-
-type HostedWorkerDeploymentSettings = HostedWorkerDirectDeploymentSettings;
 
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
@@ -157,13 +142,8 @@ async function runDirectDeployment(input: {
   const smokeVersionId = requireSmokeVersionId(finalDeploymentVersions);
 
   return {
-    candidateVersionId: smokeVersionId,
-    currentDeploymentVersions: null,
     finalDeploymentVersions,
-    mode: "direct",
-    rolloutPercentage: null,
     smokeVersionId,
-    uploadedVersionId: null,
     workerName: input.workerName,
   };
 }
@@ -192,7 +172,6 @@ function resolveHostedWorkerDeploymentSettings(
   env: EnvSource,
   now: () => Date,
 ): HostedWorkerDeploymentSettings {
-  const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
   const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
     ?? normalizeOptionalString(env.GITHUB_REF_NAME)
@@ -205,7 +184,6 @@ function resolveHostedWorkerDeploymentSettings(
     containerRolloutMode: readContainerRolloutMode(env.HOSTED_EXECUTION_CONTAINER_ROLLOUT),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
-    mode,
     versionTag,
   };
 }
@@ -247,20 +225,6 @@ function mapDeploymentVersions(
   }));
 }
 
-function readDeploymentMode(value: string | undefined): DeploymentMode {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized) {
-    return "direct";
-  }
-
-  if (normalized === "direct") {
-    return normalized;
-  }
-
-  throw new Error("HOSTED_EXECUTION_DEPLOYMENT_MODE must be 'direct'.");
-}
-
 function buildDefaultVersionTag(
   env: EnvSource,
   now: () => Date,
@@ -286,11 +250,8 @@ async function writeGitHubOutputs(
   }
 
   const lines = [
-    `candidate_version_id=${result.candidateVersionId ?? ""}`,
-    `deployment_mode=${result.mode}`,
     `final_version_traffic=${JSON.stringify(result.finalDeploymentVersions)}`,
-    `smoke_version_id=${result.smokeVersionId ?? ""}`,
-    `uploaded_version_id=${result.uploadedVersionId ?? ""}`,
+    `smoke_version_id=${result.smokeVersionId}`,
   ];
 
   await dependencies.writeFile(outputPath, `${lines.join("\n")}\n`, {

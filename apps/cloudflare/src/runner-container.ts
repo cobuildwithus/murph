@@ -12,7 +12,8 @@ import {
 } from "@murphai/hosted-execution";
 import { methodNotAllowed } from "./json.ts";
 import {
-  hostedRunnerIntercept,
+  handleHostedRunnerOpenInternetOutbound,
+  HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "./runner-egress-intercept.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
@@ -179,7 +180,8 @@ export class RunnerContainer extends Container {
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
-  static outbound = hostedRunnerIntercept;
+  static outbound = handleHostedRunnerOpenInternetOutbound;
+  static outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
