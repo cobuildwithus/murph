@@ -204,6 +204,7 @@ export function mergeCloudflareLocalEnv(input: {
     env: resolvedExisting,
     overrides: normalizedOverrides,
   });
+  stripStaleHostedLocalInternalProxyEnv(resolvedExisting);
 
   assertLocalWorkerOidcEnvironment(resolvedExisting);
 
@@ -565,6 +566,13 @@ function stripStaleHostedLocalOidcJwksOverride(input: {
   }
 
   delete input.env[HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL_ENV];
+}
+
+function stripStaleHostedLocalInternalProxyEnv(
+  env: Record<string, string | undefined>,
+): void {
+  delete env.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL;
+  delete env.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN;
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

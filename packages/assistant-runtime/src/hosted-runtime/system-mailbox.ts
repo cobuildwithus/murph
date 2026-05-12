@@ -355,6 +355,7 @@ function buildHostedSystemMailboxExecutionContext(input: {
         effectsPort: input.runtime.platform.effectsPort,
         forwardedEnv: input.runtime.forwardedEnv,
         platformEnv: input.runtime.platformEnv,
+        providerFetch: input.runtime.platform.providerFetch ?? null,
         userEnv: input.runtime.userEnv,
       }),
       memberId: input.wake.userId,

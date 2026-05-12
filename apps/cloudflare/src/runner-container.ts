@@ -12,6 +12,9 @@ import {
 } from "@murphai/hosted-execution";
 import { methodNotAllowed } from "./json.ts";
 import {
+  hostedRunnerIntercept,
+} from "./runner-egress-intercept.ts";
+import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   parseHostedExecutionRunnerJobInput,
@@ -143,12 +146,15 @@ interface RunnerContainerUserRunnerStubLike {
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
+  enableInternet = true;
   envVars = {
     PORT: String(RUNNER_PORT),
   };
+  interceptHttps = true;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
+  static outbound = hostedRunnerIntercept;
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();

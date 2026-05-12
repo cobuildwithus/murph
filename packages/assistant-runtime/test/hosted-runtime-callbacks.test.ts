@@ -51,6 +51,16 @@ vi.mock("@murphai/assistant-engine", () => ({
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
 
+vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-channel-runtime")>(
+    "@murphai/assistant-engine/assistant-channel-runtime",
+  );
+  return {
+    ...actual,
+    sendLinqMessage: mocks.sendLinqMessage,
+  };
+});
+
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
@@ -1196,6 +1206,115 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         deliveryChannel: "linq",
         deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("uses providerFetch for hosted Linq deliveries when the runtime can intercept egress", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_direct_provider_fetch",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "ain_hashed_thread",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      transportIdempotent: true,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 204,
+    }));
+    const sendLinq = vi.fn(async () => ({
+      providerMessageId: "legacy_linq_message",
+      providerThreadId: "legacy_linq_thread",
+      target: "legacy_linq_thread",
+      targetKind: "thread" as const,
+    }));
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_materialized",
+      target: "linq_chat_materialized",
+      targetKind: "participant",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "ain_hashed_thread",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendLinq,
+      }),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(sendLinq).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      fromPhoneNumber: "+15559990000",
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      message: "hello from hosted",
+      replyToMessageId: "linq_message_current",
+      target: "+15550001",
+      targetKind: "participant",
+    }, {
+      env: {},
+      fetchImplementation: expect.any(Function),
+      signal: undefined,
+    });
+    const linqFetch = mocks.sendLinqMessage.mock.calls[0]?.[1]?.fetchImplementation;
+    assert.equal(typeof linqFetch, "function");
+    await linqFetch("https://api.linq.example/test", {
+      headers: {},
+      method: "POST",
+    });
+    expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/test", {
+      headers: {},
+      method: "POST",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_materialized",
+        target: "linq_chat_materialized",
       }),
     ]);
   });
