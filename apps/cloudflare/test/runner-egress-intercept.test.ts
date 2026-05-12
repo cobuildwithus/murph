@@ -4,11 +4,17 @@ import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import {
+  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
+} from "../src/runner-effects-contract.ts";
+import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import {
+  createHostedExecutionTestEnv,
+} from "./hosted-execution-fixtures.ts";
 
 const WRITE_FENCE_HEADERS = {
   "x-hosted-runtime-attempt-id": "attempt_1",
@@ -25,6 +31,54 @@ afterEach(() => {
 });
 
 describe("hostedRunnerIntercept", () => {
+  it("preserves runtime write-fence headers for internal intercepted requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      chat_id: "linq_chat_123",
+      message: {
+        id: "linq_message_123",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH}`, {
+        body: JSON.stringify({
+          message: "hello",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "7",
+          "x-hosted-runtime-workspace-version": "42",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "42",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects internal virtual-host requests without a runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -153,6 +207,7 @@ function createInterceptEnv(input: {
   }) => Promise<boolean>;
 }): RunnerOutboundEnvironmentSource {
   return {
+    ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
