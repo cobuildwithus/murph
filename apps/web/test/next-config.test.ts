@@ -22,6 +22,7 @@ import {
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
+  configureHostedWebWorkflowLocalDataDir,
   resolveHostedPrivyOrigin,
   resolveHostedPrivyOrigins,
   resolvePrivyBaseDomainOrigin,
@@ -96,6 +97,66 @@ test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", 
     ),
     `${HOSTED_WEB_SMOKE_DIST_DIR}-e2e-run`,
   );
+});
+
+test("next.config scopes Workflow local-world storage to the hosted web dist directory", () => {
+  const devEnvironment = createProcessEnv({
+    WORKFLOW_LOCAL_DATA_DIR: ".next/workflow-data",
+    WORKFLOW_TARGET_WORLD: "local",
+  });
+
+  configureHostedWebWorkflowLocalDataDir(PHASE_DEVELOPMENT_SERVER, devEnvironment);
+
+  assert.equal(
+    devEnvironment.WORKFLOW_LOCAL_DATA_DIR,
+    path.join(HOSTED_WEB_DEV_DIST_DIR, "workflow-data"),
+  );
+
+  const smokeEnvironment = createHostedWebSmokeEnvironment(createProcessEnv({
+    WORKFLOW_TARGET_WORLD: "local",
+  }));
+
+  configureHostedWebWorkflowLocalDataDir(PHASE_DEVELOPMENT_SERVER, smokeEnvironment);
+
+  assert.equal(
+    smokeEnvironment.WORKFLOW_LOCAL_DATA_DIR,
+    path.join(HOSTED_WEB_SMOKE_DIST_DIR, "workflow-data"),
+  );
+});
+
+test("next.config preserves explicit nonlocal Workflow world configuration", () => {
+  const explicitDataDirEnvironment = createProcessEnv({
+    WORKFLOW_LOCAL_DATA_DIR: "custom-workflow-data",
+    WORKFLOW_TARGET_WORLD: "local",
+  });
+
+  configureHostedWebWorkflowLocalDataDir(
+    PHASE_DEVELOPMENT_SERVER,
+    explicitDataDirEnvironment,
+  );
+
+  assert.equal(explicitDataDirEnvironment.WORKFLOW_LOCAL_DATA_DIR, "custom-workflow-data");
+
+  const nonLocalWorldEnvironment = createProcessEnv({
+    WORKFLOW_LOCAL_DATA_DIR: ".next/workflow-data",
+    WORKFLOW_TARGET_WORLD: "vercel",
+  });
+
+  configureHostedWebWorkflowLocalDataDir(
+    PHASE_DEVELOPMENT_SERVER,
+    nonLocalWorldEnvironment,
+  );
+
+  assert.equal(nonLocalWorldEnvironment.WORKFLOW_LOCAL_DATA_DIR, ".next/workflow-data");
+
+  const vercelEnvironment = createProcessEnv({
+    VERCEL_DEPLOYMENT_ID: "deployment_123",
+    WORKFLOW_LOCAL_DATA_DIR: ".next/workflow-data",
+  });
+
+  configureHostedWebWorkflowLocalDataDir(PHASE_DEVELOPMENT_SERVER, vercelEnvironment);
+
+  assert.equal(vercelEnvironment.WORKFLOW_LOCAL_DATA_DIR, ".next/workflow-data");
 });
 
 test("hosted web dev filesystem cache defaults off and allows explicit opt-in", () => {
