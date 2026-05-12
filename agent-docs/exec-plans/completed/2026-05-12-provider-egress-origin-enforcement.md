@@ -28,21 +28,24 @@ Success criteria:
 
 ## State
 
-Active.
+Complete; ready for scoped closeout.
 
 ## Done
 
 - Loaded required repo workflow, architecture, security, reliability, and Cloudflare guidance.
 - Inspected current runner egress intercept code and focused test file.
 - Added focused Telegram and WhatsApp regressions for configured path-prefixed base URLs and same-origin path-prefix misses.
+- Ran focused Cloudflare verification:
+  - `pnpm --dir apps/cloudflare test -- runner-egress-intercept.test.ts` passed.
+  - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts` passed.
 
 ## Now
 
-- Run focused Cloudflare egress tests for provider base matching.
+- Close the active plan with a scoped commit.
 
 ## Next
 
-- Run required verification/audits.
+- None.
 
 ## Open Questions
 
@@ -54,3 +57,6 @@ Active.
 - `apps/cloudflare/test/runner-egress-intercept.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `agent-docs/exec-plans/active/2026-05-12-provider-egress-origin-enforcement.md`
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
