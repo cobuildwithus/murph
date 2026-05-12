@@ -247,3 +247,6 @@ Third PR: test/model cleanup.
 Delete old control-token/authorization helper assertions, legacy outbound-handler tests, and stale `onStop` abort expectations. Keep tests focused on the actual model: `containerFetch()` sends only `{ job, runtimeCallbackBaseUrl }`, readiness uses native Container APIs, and active request failure is detected through the status watcher.
 
 Bottom line: **main has already made the important architectural move. The remaining win is to stop passing around configuration that the `Container` class already owns, then remove compatibility shims that keep reminding the codebase of the old token/proxy architecture.**
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
