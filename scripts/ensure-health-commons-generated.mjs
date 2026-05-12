@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
-const lockScriptPath = path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs");
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 if (process.env.MURPH_HEALTH_COMMONS_GENERATED_PREPARED === "1") {
@@ -15,12 +14,8 @@ if (process.env.MURPH_HEALTH_COMMONS_GENERATED_PREPARED === "1") {
 }
 
 const result = spawnSync(
-  process.execPath,
+  pnpmCommand,
   [
-    lockScriptPath,
-    "health-commons generated catalog",
-    "--",
-    pnpmCommand,
     "--filter",
     "@murphai/health-commons",
     "generate",
