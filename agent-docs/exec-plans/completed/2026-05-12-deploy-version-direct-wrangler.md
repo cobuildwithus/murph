@@ -1,6 +1,6 @@
 # Simplify Cloudflare deploy helper to direct Wrangler
 
-Status: active
+Status: completed
 Created: 2026-05-12
 Updated: 2026-05-12
 
@@ -30,6 +30,8 @@ Updated: 2026-05-12
   - focused deploy-helper tests
   - `.github/workflows/deploy-cloudflare-hosted.yml`
   - deploy architecture/docs references that mention the old split
+  - `apps/cloudflare/README.md`
+  - `agent-docs/operations/verification-and-runtime.md`
 - Out of scope:
   - switching to `wrangler versions upload/deploy`
   - changing deployed smoke semantics
@@ -80,3 +82,11 @@ Updated: 2026-05-12
   - `pnpm typecheck`
 - Expected outcomes:
   - Commands pass, or failures are attributable to unrelated existing work.
+- Results:
+  - `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts test/deploy-worker-version.test.ts test/deploy-worker-version-cli.test.ts test/deploy-worker-version-paths.test.ts --no-coverage` passed.
+  - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/test/deploy-worker-version.test.ts apps/cloudflare/test/deploy-worker-version-cli.test.ts apps/cloudflare/test/deploy-worker-version-paths.test.ts .github/workflows/deploy-cloudflare-hosted.yml apps/cloudflare/DEPLOY.md apps/cloudflare/README.md agent-docs/references/testing-ci-map.md agent-docs/operations/verification-and-runtime.md agent-docs/exec-plans/active/2026-05-12-deploy-version-direct-wrangler.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed after waiting for an unrelated workspace lock.
+  - `pnpm typecheck` passed.
+  - `security-privacy-review` found no findings.
+  - `coverage-write` made no changes and found no worthwhile test additions.
+  - `task-finish-review` found one stale verification-doc sentence; fixed in `agent-docs/operations/verification-and-runtime.md`.
+Completed: 2026-05-12
