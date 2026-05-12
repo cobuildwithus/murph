@@ -29,4 +29,13 @@ Created 2026-05-12T09:41:00Z.
 
 ## Verification
 
-Pending.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/runner-outbound.test.ts -t "hosted usage reporting"` passed.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/node-runner-hosted-assistant.test.ts apps/cloudflare/test/hosted-runner-static-secret-invariant.test.ts` passed.
+- `pnpm --dir packages/hosted-execution test -- assistant-usage.test.ts` passed.
+- `pnpm --dir packages/assistant-runtime test -- hosted-runtime-codex-config.test.ts` passed.
+- `pnpm typecheck` passed.
+- `git diff --check` passed.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound/web-control.ts apps/cloudflare/test/runner-outbound.test.ts` passed.
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
