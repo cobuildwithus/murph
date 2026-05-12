@@ -2736,7 +2736,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("writes browser-vault replicas after live lease validation", async () => {
+  it("rejects runtime browser-vault replica writes even with a live write fence", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
@@ -2760,19 +2760,12 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      replicaRef: expect.objectContaining({
-        replicaSchema: "murph.browser-vault-replica",
-        schema: "murph.hosted-browser-vault-replica-ref.v1",
-        sourceBundleHash,
-      }),
-    });
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects browser-vault replica writes when the workspace version does not match the write fence", async () => {
+  it("rejects runtime browser-vault replica writes without consulting the write fence", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
@@ -2796,7 +2789,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
@@ -3050,7 +3043,37 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("rejects browser-vault replica writes when the live invocation lease is stale", async () => {
+  it("rejects runtime proxy authority for browser-vault publish", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH}`, {
+        body: JSON.stringify({
+          replicaRef: createBrowserVaultReplicaRef("runtime-publish"),
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+      {
+        proxyAttemptId: "runtime:browser-vault-publish",
+        proxyLeaseGeneration: "9",
+        proxyScope: "runtime",
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects runtime browser-vault replica writes before stale lease checks", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const ownsActiveInvocationLease = vi.fn(async () => false);
@@ -3079,7 +3102,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(401);
     expect(bindUser).not.toHaveBeenCalled();
-    expect(ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
     expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 

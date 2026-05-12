@@ -51,13 +51,12 @@ export async function handleRunnerWebControlRequest(input: {
     return methodNotAllowed();
   }
 
-  if (
+  const isBrowserVaultBackgroundPublish =
     input.proxyContext?.proxyScope === "browser_vault_background"
-    && (
-      input.request.method !== "POST"
-      || input.url.pathname !== HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
-    )
-  ) {
+    && input.request.method === "POST"
+    && input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH;
+  if (input.proxyContext?.proxyScope === "browser_vault_background"
+    && !isBrowserVaultBackgroundPublish) {
     return notFound();
   }
 
@@ -70,7 +69,7 @@ export async function handleRunnerWebControlRequest(input: {
     });
   }
 
-  if (!isAllowedHostedRunnerWebControlRequest({
+  if (!isBrowserVaultBackgroundPublish && !isAllowedHostedRunnerWebControlRequest({
     method: input.request.method,
     path: input.url.pathname,
   })) {

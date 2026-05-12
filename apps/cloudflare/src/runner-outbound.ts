@@ -238,12 +238,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   request: Request;
   userId: string;
 }): Promise<Response> {
-  const authorized = await writeRequestOwnsRuntimeWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  }) || isBrowserVaultBackgroundProxy(input.proxyContext);
-  if (!authorized) {
+  if (!isBrowserVaultBackgroundProxy(input.proxyContext)) {
     return unauthorized();
   }
 
@@ -255,7 +250,7 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   }
 
   const expectedReplicaSourceHash = readOptionalExpectedReplicaSourceHash(body);
-  if (input.proxyContext.proxyScope === "browser_vault_background" && !expectedReplicaSourceHash) {
+  if (!expectedReplicaSourceHash) {
     return unauthorized();
   }
 

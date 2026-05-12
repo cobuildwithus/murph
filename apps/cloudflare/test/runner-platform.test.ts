@@ -22,7 +22,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedRuntimeFetch,
-  createHostedBrowserVaultReplicaWriteHeaders,
   isHostedRuntimeInternalAuthorityRejectedError,
 } from "../src/runtime-platform.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -93,20 +92,6 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     usageExtractionVersion: "test",
     usageId: "turn_usage.attempt-1",
   };
-}
-
-function createBrowserVaultReplicaRef(sourceBundleHash: string) {
-  return {
-    byteLength: 256,
-    dataVersion: "runner-platform-test",
-    generatedAt: "2026-04-26T00:00:00.000Z",
-    keyId: "browser-key-runner-platform",
-    objectKey: "browser-vault/member-test/replica.json",
-    replicaSchema: "murph.browser-vault-replica",
-    runtimeRootKeyId: "udrk:runtime:runner-platform",
-    schema: "murph.hosted-browser-vault-replica-ref.v1",
-    sourceBundleHash,
-  } as const;
 }
 
 describe("buildHostedExecutionRuntimePlatform", () => {
@@ -201,90 +186,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         message: "Hosted runtime control-plane response returned non-OK.",
         phase: "outbox",
         userId: "member_123",
-      }),
-    );
-  });
-
-  it("accepts missing workspace browser-vault publish responses as stale work", async () => {
-    const sourceBundleHash = "b".repeat(64);
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      published: false,
-      workspace: null,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 404,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "attempt_1",
-          leaseGeneration: "9",
-          userId: "member_123",
-          workspaceVersion: "5",
-        }),
-      },
-    });
-
-    const result = await platform.browserVaultReplicaPort!.publishRef!({
-      replicaRef,
-    });
-
-    expect(result).toEqual({
-      published: false,
-      workspace: null,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runtime control-plane response returned non-OK.",
-      }),
-    );
-  });
-
-  it("accepts conflicted workspace browser-vault publish responses as stale work", async () => {
-    const sourceBundleHash = "b".repeat(64);
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      published: false,
-      workspace: null,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 409,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "attempt_1",
-          leaseGeneration: "9",
-          userId: "member_123",
-          workspaceVersion: "5",
-        }),
-      },
-    });
-
-    const result = await platform.browserVaultReplicaPort!.publishRef!({
-      replicaRef,
-    });
-
-    expect(result).toEqual({
-      published: false,
-      workspace: null,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted runtime control-plane response returned non-OK.",
       }),
     );
   });
@@ -1548,23 +1449,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
-  it("writes browser-vault replicas through the Cloudflare internal store with active lease headers", async () => {
-    const sourceBundleHash = "b".repeat(64);
-    const replica = {
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      schema: "murph.browser-vault-replica",
-      source: {
-        dataVersion: "runner-platform-test",
-        sourceBundleHash,
-      },
-    };
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ replicaRef }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+  it("does not expose foreground browser-vault replica writes", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
@@ -1579,33 +1465,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    const result = await platform.browserVaultReplicaPort!.write({ replica });
-
-    expect(result).toEqual(replicaRef);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault replica write");
-    expect(request.url).toBe("http://browser-vault.worker/replicas");
-    expect(request.method).toBe("POST");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
-    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
-    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
-    await expect(request.json()).resolves.toEqual({ replica });
+    expect(platform.browserVaultReplicaPort).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("exposes callback-only browser-vault writes and provider effects", async () => {
-    const sourceBundleHash = "c".repeat(64);
-    const replica = {
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      schema: "murph.browser-vault-replica",
-      source: {
-        dataVersion: "runner-platform-callback-test",
-        sourceBundleHash,
-      },
-    };
-    const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);
+  it("keeps callback provider effects without exposing browser-vault writes", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.url.endsWith("/telegram/send")) {
@@ -1618,10 +1482,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
 
-      return new Response(JSON.stringify({ replicaRef }), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
+      return new Response(null, { status: 500 });
     });
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -1637,64 +1498,19 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     });
 
-    expect(platform.browserVaultReplicaPort).toBeDefined();
+    expect(platform.browserVaultReplicaPort).toBeUndefined();
     expect(platform.effectsPort.sendTelegram).toBeDefined();
-    await platform.browserVaultReplicaPort!.write({ replica });
     await platform.effectsPort.sendTelegram!({
       message: "hello",
       target: "telegram_chat_123",
     });
 
-    const replicaRequest = requireFetchRequest(fetchMock.mock.calls[0], "callback browser-vault write");
-    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[1], "callback telegram send");
-    expect(replicaRequest.url).toBe(
-      "https://worker.example.test/__murph/runtime-callback/users/member_123/browser-vault.worker/replicas",
-    );
+    const telegramRequest = requireFetchRequest(fetchMock.mock.calls[0], "callback telegram send");
     expect(telegramRequest.url).toBe(
       "https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/telegram/send",
     );
-    expect(replicaRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(telegramRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
-    expect(replicaRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(telegramRequest.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
-  });
-
-  it("rejects browser-vault replica write headers without an active runtime write fence", async () => {
-    await expect(
-      createHostedBrowserVaultReplicaWriteHeaders({
-        workspaceCheckpointBridge: null,
-      }),
-    ).rejects.toThrow(
-      "Hosted browser-vault replica write requires a runtime write fence.",
-    );
-  });
-
-  it("rejects browser-vault replica writes when the workspace bridge has no active lease", async () => {
-    const sourceBundleHash = "e".repeat(64);
-    const replica = {
-      generatedAt: "2026-04-26T00:00:00.000Z",
-      schema: "murph.browser-vault-replica",
-      source: {
-        dataVersion: "runner-platform-no-lease-test",
-        sourceBundleHash,
-      },
-    };
-    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => null,
-      },
-    });
-
-    await expect(
-      platform.browserVaultReplicaPort!.write({ replica }),
-    ).rejects.toThrow(
-      "Browser-vault replica write requires an active hosted runtime write fence.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("deduplicates successful artifact uploads by SHA within one platform instance", async () => {

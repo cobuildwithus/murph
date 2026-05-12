@@ -1,8 +1,8 @@
 # Browser Vault Refresh Foreground Guard
 
-Status: active
+Status: completed
 Created: 2026-05-11
-Updated: 2026-05-11
+Updated: 2026-05-12
 
 ## Goal
 
@@ -59,3 +59,4 @@ Updated: 2026-05-11
 - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts -t "defers a due browser-vault refresh alarm while foreground invocation lock is active" --no-coverage` passed.
 - `pnpm typecheck` passed.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-11-browser-vault-refresh-foreground-guard.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` failed in the `apps/cloudflare verify` lane because of unrelated active worktree failures in runner-state/idle-checkpoint tests and Health Commons runner-bundle staging.
+Completed: 2026-05-12

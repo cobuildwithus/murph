@@ -15,8 +15,6 @@ import {
 import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
-  parseHostedBrowserVaultReplicaRef,
-  parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeLogResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -26,7 +24,6 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
@@ -320,17 +317,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(hasHostedInternalProxyTransport && input.workspaceCheckpointBridge
-      ? {
-          browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport: hostedWebControlTransport,
-            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-          }),
-        }
-      : {}),
     effectsPort: {
       ...providerEffectsPort,
       async readRawEmailMessage(rawMessageKey) {
@@ -551,85 +537,6 @@ async function requireHostedRuntimeWriteFenceHeaders(
   }
   writeRunnerRuntimeWriteFenceHeaders(headers, lease);
   return headers;
-}
-
-function createCloudflareBrowserVaultReplicaPort(input: {
-  boundUserId: string;
-  fetchImpl: typeof fetch;
-  timeoutMs: number;
-  transport: HostedWebControlTransport | null;
-  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
-}) {
-  return {
-    ...(input.transport
-      ? {
-          async publishRef(publishInput: {
-            replicaRef: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>;
-          }) {
-            const payload = await fetchHostedWebControlPlaneJson({
-              body: publishInput,
-              boundUserId: input.boundUserId,
-              description: "Hosted browser-vault replica publish",
-              fetchImpl: input.fetchImpl,
-              path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
-              timeoutMs: input.timeoutMs,
-              transport: input.transport!,
-              acceptedStatuses: [404, 409],
-            });
-
-            return parseHostedBrowserVaultReplicaPublishResponse(payload);
-          },
-        }
-      : {}),
-    async write(writeInput: {
-      expectedReplicaSourceHash?: string | null;
-      replica: unknown;
-    }) {
-      const payload = await fetchHostedJson({
-        body: {
-          ...(writeInput.expectedReplicaSourceHash
-            ? { expectedReplicaSourceHash: writeInput.expectedReplicaSourceHash }
-            : {}),
-          replica: writeInput.replica,
-        },
-        description: "Hosted browser-vault replica write",
-        fetchImpl: input.fetchImpl,
-        headers: await createHostedBrowserVaultReplicaWriteHeaders({
-          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
-        }),
-        method: "POST",
-        timeoutMs: input.timeoutMs,
-        url: new URL(
-          "/replicas",
-          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.browserVaultReplicaStore}/`,
-        ),
-      });
-      const replicaRef = parseHostedBrowserVaultReplicaRef(
-        readRequiredField(payload, "replicaRef"),
-        "Hosted browser-vault replica write response.replicaRef",
-      );
-
-      if (!replicaRef) {
-        throw new TypeError(
-          "Hosted browser-vault replica write response.replicaRef must not be null.",
-        );
-      }
-
-      return replicaRef;
-    },
-  };
-}
-
-export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
-  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
-}): Promise<Headers> {
-  if (!input.workspaceCheckpointBridge) {
-    throw new Error("Hosted browser-vault replica write requires a runtime write fence.");
-  }
-  return await requireHostedRuntimeWriteFenceHeaders(
-    input.workspaceCheckpointBridge,
-    "Browser-vault replica write",
-  );
 }
 
 function resolveHostedWebControlTransport(input: {
@@ -1667,19 +1574,6 @@ function readOptionalStringField(value: unknown, field: string): string | null {
 
   if (typeof entry !== "string") {
     throw new TypeError(`Hosted runtime response.${field} must be a string.`);
-  }
-
-  return entry;
-}
-
-function readRequiredField(value: unknown, field: string): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime response must be an object.");
-  }
-
-  const entry = (value as Record<string, unknown>)[field];
-  if (entry === undefined) {
-    throw new TypeError(`Hosted runtime response.${field} is required.`);
   }
 
   return entry;
