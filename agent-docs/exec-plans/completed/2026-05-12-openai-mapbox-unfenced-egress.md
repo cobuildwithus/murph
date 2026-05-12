@@ -27,22 +27,25 @@ Success criteria:
 
 ## State
 
-Active.
+Complete; ready for scoped closeout.
 
 ## Done
 
 - Confirmed current OpenAI and Mapbox intercept paths require `requestOwnsRuntimeWriteFence`.
 - Confirmed focused tests currently expect 401 for unfenced OpenAI and Mapbox sentinel requests.
+- Removed the write-fence gate from OpenAI and Mapbox intercept handlers only.
+- Updated focused egress tests so OpenAI and Mapbox inject credentials without write-fence headers while Linq, Telegram, WhatsApp, and internal virtual-host routes remain fenced.
+- Ran focused verification:
+  - `pnpm exec vitest run apps/cloudflare/test/runner-egress-intercept.test.ts --config apps/cloudflare/vitest.node.workspace.ts --no-coverage -t "OpenAI|Mapbox|Linq|Telegram|WhatsApp"` passed.
+  - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts` passed.
 
 ## Now
 
-- Remove OpenAI and Mapbox write-fence checks.
-- Update focused tests to cover unfenced injection.
+- Close the active plan with a scoped commit.
 
 ## Next
 
-- Run focused Cloudflare egress verification and scoped diff verification.
-- Run required completion audits, then close with a scoped commit if safe.
+- None.
 
 ## Open questions
 
@@ -54,3 +57,6 @@ Active.
 - `apps/cloudflare/test/runner-egress-intercept.test.ts`
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `agent-docs/exec-plans/active/2026-05-12-openai-mapbox-unfenced-egress.md`
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
