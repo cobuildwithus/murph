@@ -49,6 +49,7 @@ import {
   assertHostedWebPortAvailable,
   cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
+  cleanupHostedRunnerImages,
   collectDockerDevDiagnostics,
   redactHostedLocalDiagnosticText,
   resolveHostedLocalWorkerPortMode,
@@ -450,6 +451,12 @@ export async function startHostedLocalDevStack(input: {
         env: workerProcessEnv ?? workerRuntimeEnv,
         scope: resolvePreStartHostedRunnerContainerCleanupScope(initialEnv),
       });
+      await cleanupHostedRunnerImages({
+        cwd: repoRoot,
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        ignoreErrors: true,
+        scope: resolvePreStartHostedRunnerContainerCleanupScope(initialEnv),
+      });
       await cleanupHostedRunnerContainerLocalState({
         env: workerProcessEnv ?? workerRuntimeEnv,
         persistDir: config.workerPersistDir,
@@ -636,6 +643,11 @@ export async function startHostedLocalDevStack(input: {
             env: workerProcessEnv ?? workerRuntimeEnv,
             ignoreErrors: true,
           });
+          await cleanupHostedRunnerImages({
+            cwd: repoRoot,
+            env: workerProcessEnv ?? workerRuntimeEnv,
+            ignoreErrors: true,
+          });
         }
         await cleanupTemporaryInputs();
         if (terminationFailure) {
@@ -751,6 +763,11 @@ export async function startHostedLocalDevStack(input: {
     }
     if (workerRuntimeEnv && workerPortMode === "start") {
       await cleanupHostedRunnerContainers({
+        cwd: repoRoot,
+        env: workerProcessEnv ?? workerRuntimeEnv,
+        ignoreErrors: true,
+      }).catch(() => {});
+      await cleanupHostedRunnerImages({
         cwd: repoRoot,
         env: workerProcessEnv ?? workerRuntimeEnv,
         ignoreErrors: true,

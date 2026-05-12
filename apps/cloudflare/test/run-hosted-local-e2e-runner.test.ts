@@ -13,7 +13,11 @@ type SpawnForTest = (
   command: string,
   args: string[],
   options: SpawnOptionsForTest,
-) => EventEmitter;
+) => SpawnedChildForTest;
+
+type SpawnedChildForTest = EventEmitter & {
+  kill?: (signal?: NodeJS.Signals) => boolean;
+};
 
 interface CleanupInputForTest {
   cwd: string;
@@ -32,6 +36,9 @@ const spawnSyncMock = vi.hoisted(() =>
 const cleanupHostedRunnerContainersMock = vi.hoisted(() =>
   vi.fn<(input: CleanupInputForTest) => Promise<void>>(async () => {}),
 );
+const cleanupHostedRunnerImagesMock = vi.hoisted(() =>
+  vi.fn<(input: CleanupInputForTest) => Promise<void>>(async () => {}),
+);
 const controlledEnvKeys = [
   "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
   "MURPH_DEV_LINQ_WEBHOOK_TUNNEL",
@@ -40,6 +47,7 @@ const controlledEnvKeys = [
   "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID",
 ] as const;
 const originalEnv = new Map<string, string | undefined>();
+let originalExitCode: typeof process.exitCode;
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
@@ -48,10 +56,13 @@ vi.mock("node:child_process", () => ({
 
 vi.mock("../../../scripts/dev-hosted-local/runtime.ts", () => ({
   cleanupHostedRunnerContainers: cleanupHostedRunnerContainersMock,
+  cleanupHostedRunnerImages: cleanupHostedRunnerImagesMock,
 }));
 
 describe("run-hosted-local-e2e", () => {
   beforeEach(() => {
+    originalExitCode = process.exitCode;
+    process.exitCode = undefined;
     originalEnv.clear();
     for (const key of controlledEnvKeys) {
       originalEnv.set(key, process.env[key]);
@@ -73,12 +84,20 @@ describe("run-hosted-local-e2e", () => {
         artifactDirs.add(artifactDir);
       }
     }
+    for (const [cleanupInput] of cleanupHostedRunnerImagesMock.mock.calls) {
+      const artifactDir = cleanupInput.env.MURPH_HOSTED_LOCAL_ARTIFACT_DIR;
+      if (artifactDir) {
+        artifactDirs.add(artifactDir);
+      }
+    }
 
     spawnMock.mockReset();
     spawnSyncMock.mockClear();
     cleanupHostedRunnerContainersMock.mockReset();
+    cleanupHostedRunnerImagesMock.mockReset();
     vi.resetModules();
     vi.restoreAllMocks();
+    process.exitCode = originalExitCode;
 
     await Promise.all(
       [...artifactDirs].map((artifactDir) =>
@@ -109,15 +128,85 @@ describe("run-hosted-local-e2e", () => {
     expectVitestSpawnCall();
     expectSingleCleanupCall();
   });
+
+  it("cleans up and preserves interrupt exit code when SIGINT stops hosted-local vitest", async () => {
+    const signalHandlers = new Map<NodeJS.Signals, Array<() => void>>();
+    const originalOnceMethod = process.once.bind(process);
+    const originalOffMethod = process.off.bind(process);
+    vi.spyOn(process, "once").mockImplementation((event, listener) => {
+      if (event === "SIGINT" || event === "SIGTERM") {
+        signalHandlers.set(event, [
+          ...(signalHandlers.get(event) ?? []),
+          listener as () => void,
+        ]);
+        return process;
+      }
+      return originalOnceMethod(event, listener);
+    });
+    vi.spyOn(process, "off").mockImplementation((event, listener) => {
+      if (event === "SIGINT" || event === "SIGTERM") {
+        signalHandlers.set(
+          event,
+          (signalHandlers.get(event) ?? []).filter((handler) => handler !== listener),
+        );
+        return process;
+      }
+      return originalOffMethod(event, listener);
+    });
+
+    const interruptedChild = createSignalControlledChild();
+    spawnMock
+      .mockImplementationOnce(() => createExitingChild(0))
+      .mockImplementationOnce(() => interruptedChild);
+
+    const runPromise = import("../scripts/run-hosted-local-e2e.ts");
+    await waitForSpawnCalls(2);
+    for (const handler of signalHandlers.get("SIGINT") ?? []) {
+      handler();
+    }
+
+    await expect(runPromise).resolves.toBeDefined();
+    expect(interruptedChild.kill).toHaveBeenCalledWith("SIGINT");
+    expect(process.exitCode).toBe(130);
+    expectVitestSpawnCall();
+    expectSingleCleanupCall();
+  });
 });
 
-function createExitingChild(exitCode: number): EventEmitter {
+function createExitingChild(exitCode: number): SpawnedChildForTest {
   const child = new EventEmitter();
   queueMicrotask(() => {
     child.emit("exit", exitCode, null);
   });
 
   return child;
+}
+
+function createSignalControlledChild(): SpawnedChildForTest & {
+  kill: ReturnType<typeof vi.fn<(signal?: NodeJS.Signals) => boolean>>;
+} {
+  const child = new EventEmitter() as SpawnedChildForTest & {
+    kill: ReturnType<typeof vi.fn<(signal?: NodeJS.Signals) => boolean>>;
+  };
+  child.kill = vi.fn((signal?: NodeJS.Signals) => {
+    queueMicrotask(() => {
+      child.emit("exit", null, signal ?? "SIGTERM");
+    });
+    return true;
+  });
+  return child;
+}
+
+async function waitForSpawnCalls(count: number): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (spawnMock.mock.calls.length >= count) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
+  expect(spawnMock).toHaveBeenCalledTimes(count);
 }
 
 function expectVitestSpawnCall(): void {
@@ -180,9 +269,14 @@ function restoreControlledEnv(): void {
 
 function expectSingleCleanupCall(): void {
   expect(cleanupHostedRunnerContainersMock).toHaveBeenCalledTimes(1);
+  expect(cleanupHostedRunnerImagesMock).toHaveBeenCalledTimes(1);
   const [cleanupInput] = cleanupHostedRunnerContainersMock.mock.calls[0] ?? [];
+  const [imageCleanupInput] = cleanupHostedRunnerImagesMock.mock.calls[0] ?? [];
   const [, , spawnOptions] = spawnMock.mock.calls[1] ?? [];
   expect(typeof cleanupInput?.cwd).toBe("string");
   expect(cleanupInput?.env).toBe(spawnOptions?.env);
   expect(cleanupInput?.ignoreErrors).toBe(true);
+  expect(imageCleanupInput?.cwd).toBe(cleanupInput?.cwd);
+  expect(imageCleanupInput?.env).toBe(spawnOptions?.env);
+  expect(imageCleanupInput?.ignoreErrors).toBe(true);
 }

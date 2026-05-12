@@ -130,6 +130,14 @@ const cleanupHostedRunnerContainers = vi.fn<
     scope?: "all-builds" | "current-build";
   }) => Promise<void>
 >(async () => {});
+const cleanupHostedRunnerImages = vi.fn<
+  (input: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    ignoreErrors?: boolean;
+    scope?: "all-builds" | "current-build";
+  }) => Promise<void>
+>(async () => {});
 const cleanupHostedRunnerContainerLocalState = vi.fn<
   (input: {
     env: NodeJS.ProcessEnv;
@@ -278,6 +286,7 @@ vi.mock("./runtime.ts", () => ({
   assertHostedWebPortAvailable: vi.fn(async () => {}),
   cleanupHostedRunnerContainerLocalState,
   cleanupHostedRunnerContainers,
+  cleanupHostedRunnerImages,
   collectDockerDevDiagnostics,
   redactHostedLocalDiagnosticText: (value: string) => value,
   resolveHostedLocalWorkerPortMode,
@@ -479,6 +488,14 @@ describe("hosted local dev stack", () => {
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
       scope: "all-builds",
     }));
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(2);
+    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      ignoreErrors: true,
+      scope: "all-builds",
+    }));
+    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      ignoreErrors: true,
+    }));
     expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
       expect.objectContaining({
         persistDir: ".wrangler/state/dev-root",
@@ -628,6 +645,10 @@ describe("hosted local dev stack", () => {
       expect.any(Object),
     );
     expect(cleanupHostedRunnerContainers).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      scope: "current-build",
+    }));
+    expect(cleanupHostedRunnerImages).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      ignoreErrors: true,
       scope: "current-build",
     }));
   });
@@ -1088,6 +1109,10 @@ describe("hosted local dev stack", () => {
       expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
       expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     }
+    for (const [cleanupInput] of cleanupHostedRunnerImages.mock.calls) {
+      expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
+      expect(cleanupInput.env.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
+    }
 
     const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
       .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
@@ -1369,6 +1394,7 @@ describe("hosted local dev stack", () => {
       expect.any(Object),
     );
     expect(cleanupHostedRunnerContainers).not.toHaveBeenCalled();
+    expect(cleanupHostedRunnerImages).not.toHaveBeenCalled();
     expect(vi.mocked(writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(rename)).not.toHaveBeenCalled();
     expect(vi.mocked(symlink)).not.toHaveBeenCalled();
@@ -1399,6 +1425,11 @@ describe("hosted local dev stack", () => {
     );
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(cleanupHostedRunnerContainers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ignoreErrors: true,
+      }),
+    );
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledWith(
       expect.objectContaining({
         ignoreErrors: true,
       }),

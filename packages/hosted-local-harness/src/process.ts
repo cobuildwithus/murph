@@ -5,31 +5,67 @@ export interface ForegroundCommandInput {
   command: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
+  forwardProcessSignals?: readonly NodeJS.Signals[];
   label: string;
+}
+
+export class ForegroundCommandSignalError extends Error {
+  readonly commandSignal: NodeJS.Signals;
+
+  constructor(label: string, signal: NodeJS.Signals) {
+    super(`${label} exited with signal ${signal}.`);
+    this.name = "ForegroundCommandSignalError";
+    this.commandSignal = signal;
+  }
 }
 
 export async function runForegroundCommand(
   input: ForegroundCommandInput,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const child = spawn(input.command, [...input.args], {
       cwd: input.cwd,
       env: input.env,
       stdio: "inherit",
     });
-    child.once("error", reject);
+
+    const signalHandlers = new Map<NodeJS.Signals, () => void>();
+    const cleanupSignalHandlers = (): void => {
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler);
+      }
+      signalHandlers.clear();
+    };
+    for (const signal of input.forwardProcessSignals ?? []) {
+      const handler = (): void => {
+        child.kill(signal);
+      };
+      signalHandlers.set(signal, handler);
+      process.once(signal, handler);
+    }
+
+    child.once("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupSignalHandlers();
+      reject(error);
+    });
     child.once("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupSignalHandlers();
       if (code === 0) {
         resolve();
         return;
       }
-      reject(
-        new Error(
-          signal
-            ? `${input.label} exited with signal ${signal}.`
-            : `${input.label} exited with code ${code ?? "unknown"}.`,
-        ),
-      );
+      reject(signal
+        ? new ForegroundCommandSignalError(input.label, signal)
+        : new Error(`${input.label} exited with code ${code ?? "unknown"}.`));
     });
   });
 }
