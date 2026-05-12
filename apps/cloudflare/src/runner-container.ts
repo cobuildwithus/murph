@@ -27,9 +27,7 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
-const DEFAULT_RUNNER_DESTROY_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
-const RUNNER_DESTROY_STATUS_SAMPLE_LIMIT = 8;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
@@ -92,12 +90,6 @@ type RunnerContainerNameSource = Readonly<Record<string, unknown>>;
 
 interface RunnerContainerLogContext {
   userId: string;
-}
-
-interface RunnerContainerStopWaitResult {
-  lastStatus: string | null;
-  observedStatuses: string[];
-  pollCount: number;
 }
 
 interface HostedExecutionContainerSmokeHealthResult {
@@ -181,6 +173,7 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
+    this.pendingIdleCheckpoint = null;
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.stopWarmContainer();
   }
@@ -891,7 +884,6 @@ export class RunnerContainer extends Container {
   } = {}): Promise<boolean> {
     const failClosed = Boolean(input.failClosed);
     const context = this.currentLogContext;
-    const destroyTimeoutMs = readRunnerDestroyTimeoutMs(this.environment);
     let statusBeforeDestroy: string | null = null;
 
     try {
@@ -902,7 +894,6 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: null,
-        destroyTimeoutMs,
         error,
         failClosed,
         context,
@@ -911,7 +902,7 @@ export class RunnerContainer extends Container {
         stage: "status",
       });
       if (failClosed) {
-        throw new Error("Hosted runner container failed to destroy cleanly.");
+        throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
       }
       return false;
     }
@@ -920,7 +911,6 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        destroyTimeoutMs,
         failClosed,
         lifecycleStage: "destroy-requested",
         statusBeforeDestroy,
@@ -931,14 +921,27 @@ export class RunnerContainer extends Container {
     });
 
     try {
+      this.pendingIdleCheckpoint = null;
       await this.destroy();
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          destroyLatencyMs: Date.now() - destroyStartedAt,
+          failClosed,
+          lifecycleStage: "destroyed",
+          statusBeforeDestroy,
+        },
+        message: "Hosted execution container destroy completed.",
+        phase: "container.ready",
+        userId: context?.userId,
+      });
+      return true;
     } catch (error) {
-      if (isMissingRunnerContainerError(error)) {
+      if (isSettledRunnerContainerDestroyRaceError(error)) {
         return true;
       }
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroyTimeoutMs,
         error,
         failClosed,
         context,
@@ -946,43 +949,8 @@ export class RunnerContainer extends Container {
         statusBeforeDestroy,
         stage: "destroy",
       });
-    }
-
-    try {
-      const stopWait = await waitForRunnerContainerStop(this, destroyTimeoutMs);
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          destroyLatencyMs: Date.now() - destroyStartedAt,
-          destroyPollCount: stopWait.pollCount,
-          destroyTimeoutMs,
-          failClosed,
-          lifecycleStage: "stopped",
-          observedStatuses: stopWait.observedStatuses,
-          statusAfterDestroy: stopWait.lastStatus,
-          statusBeforeDestroy,
-        },
-        message: "Hosted execution container destroy confirmed stopped.",
-        phase: "container.ready",
-        userId: context?.userId,
-      });
-      return true;
-    } catch (error) {
-      if (isMissingRunnerContainerError(error)) {
-        return true;
-      }
-      emitRunnerContainerLifecycleFailure({
-        destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroyTimeoutMs,
-        error,
-        failClosed,
-        context,
-        message: "Hosted execution container destroy did not stop the shell.",
-        statusBeforeDestroy,
-        stage: "wait-for-stop",
-      });
       if (failClosed) {
-        throw new Error("Hosted runner container failed to destroy cleanly.");
+        throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
       }
       return false;
     }
@@ -1483,18 +1451,16 @@ function ensureTrailingSlash(value: URL): URL {
 function emitRunnerContainerLifecycleFailure(input: {
   context: RunnerContainerLogContext | null;
   destroyLatencyMs: number | null;
-  destroyTimeoutMs: number;
   error: unknown;
   failClosed: boolean;
   message: string;
   statusBeforeDestroy: string | null;
-  stage: "destroy" | "status" | "wait-for-stop";
+  stage: "destroy" | "status";
 }): void {
   emitHostedExecutionStructuredLog({
     component: "container",
     details: {
       destroyLatencyMs: input.destroyLatencyMs,
-      destroyTimeoutMs: input.destroyTimeoutMs,
       failClosed: input.failClosed,
       lifecycleStage: input.stage,
       statusBeforeDestroy: input.statusBeforeDestroy,
@@ -1653,37 +1619,6 @@ function isRunnerContainerStopped(status: string | null): boolean {
   return status === "stopped" || status === "stopped_with_code";
 }
 
-async function waitForRunnerContainerStop(
-  container: RunnerContainer,
-  timeoutMs: number,
-): Promise<RunnerContainerStopWaitResult> {
-  const deadline = Date.now() + timeoutMs;
-  const observedStatuses: string[] = [];
-  let lastStatus: string | null = null;
-  let pollCount = 0;
-
-  while (Date.now() <= deadline) {
-    pollCount += 1;
-    lastStatus = await readRunnerContainerStatus(container);
-    appendObservedRunnerContainerStatus(observedStatuses, lastStatus);
-    if (isRunnerContainerStopped(lastStatus)) {
-      return {
-        lastStatus,
-        observedStatuses,
-        pollCount,
-      };
-    }
-    await sleep(RUNNER_WAIT_INTERVAL_MS);
-  }
-
-  throw new HostedRunnerContainerStopTimeoutError({
-    lastStatus,
-    observedStatuses,
-    pollCount,
-    timeoutMs,
-  });
-}
-
 async function watchWorkspaceRequestContainerStop(input: {
   container: RunnerContainer;
   operationAbortController: AbortController;
@@ -1742,23 +1677,6 @@ async function watchWorkspaceRequestContainerStop(input: {
   throw new DOMException("The container status watch was aborted.", "AbortError");
 }
 
-class HostedRunnerContainerStopTimeoutError extends Error {
-  readonly details: HostedExecutionStructuredLogDetails;
-
-  constructor(input: RunnerContainerStopWaitResult & {
-    timeoutMs: number;
-  }) {
-    super("Hosted runner container destroy did not stop the shell.");
-    this.name = "HostedRunnerContainerStopTimeoutError";
-    this.details = {
-      destroyPollCount: input.pollCount,
-      destroyTimeoutMs: input.timeoutMs,
-      observedStatuses: input.observedStatuses,
-      statusAfterDestroy: input.lastStatus,
-    };
-  }
-}
-
 function appendObservedRunnerContainerStatus(
   statuses: string[],
   status: string | null,
@@ -1768,9 +1686,6 @@ function appendObservedRunnerContainerStatus(
     return;
   }
 
-  if (statuses.length >= RUNNER_DESTROY_STATUS_SAMPLE_LIMIT) {
-    statuses.shift();
-  }
   statuses.push(normalized);
 }
 
@@ -1853,25 +1768,6 @@ function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): num
   return parsed;
 }
 
-function readRunnerDestroyTimeoutMs(source: RunnerContainerEnvironmentSource): number {
-  const raw = source.HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS;
-
-  if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_DESTROY_TIMEOUT_MS;
-  }
-
-  if (typeof raw !== "string") {
-    throw new TypeError("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS must be a string when configured.");
-  }
-
-  const parsed = readStrictPositiveIntegerEnv(raw);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS must be a positive integer.");
-  }
-
-  return parsed;
-}
-
 function readStrictPositiveIntegerEnv(raw: string): number {
   if (!/^[0-9]+$/u.test(raw)) {
     return Number.NaN;
@@ -1884,6 +1780,14 @@ function readStrictPositiveIntegerEnv(raw: string): number {
 function isMissingRunnerContainerError(error: unknown): boolean {
   const message = readErrorMessage(error);
   return message !== null && message.includes("No such container");
+}
+
+function isSettledRunnerContainerDestroyRaceError(error: unknown): boolean {
+  const message = readErrorMessage(error);
+  return message !== null && (
+    message.includes("No such container")
+    || message.includes("already stopping")
+  );
 }
 
 function readErrorMessage(error: unknown): string | null {

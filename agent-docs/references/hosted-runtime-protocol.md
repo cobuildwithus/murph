@@ -35,8 +35,8 @@ The live ownership split is:
   After a successful foreground runner invocation leaves a warm container
   quiet, the RunnerContainer keeps only in-memory knowledge that the warm
   workspace should be checkpointed before shutdown. UserRunner does not schedule
-  a separate idle checkpoint alarm, and foreground completion does not treat the
-  runtime's `deferredCheckpointRequired` compatibility flag as scheduler state.
+  a separate idle checkpoint alarm, and foreground completion does not consume a
+  runtime-reported deferred-checkpoint scheduler hint.
   When Cloudflare reports container activity expiry, the shell yields to any
   active foreground operation; otherwise, if a pending warm checkpoint exists, it
   takes one short Durable Object write-fence lease, posts checkpoint reason
@@ -44,7 +44,7 @@ The live ownership split is:
   workspace CAS/user fences, releases the fence with the returned next wake, and
   then tears down best-effort. Lease acquisition or checkpoint failure is logged
   and the shell still proceeds to cleanup; there is no retry loop and no durable
-  T-minus checkpoint scheduler. This intentionally favors lifecycle simplicity
+  idle-checkpoint scheduler. This intentionally favors lifecycle simplicity
   over maximum replay resistance: if the warm shell is lost before this
   best-effort checkpoint completes, the next wake may restore the prior
   checkpoint and rely on runtime/provider idempotency for duplicate-effect
@@ -229,15 +229,15 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime/checkpoint result carries the next fast mailbox
 retry wake so Cloudflare can promptly reinvoke the workspace.
-Cloudflare no longer treats runtime-reported deferred checkpoint state as
-scheduler state. Quiet successful foreground completion records pending warm
-checkpoint state in RunnerContainer memory regardless of whether runtime output
-includes a deprecated `deferredCheckpointRequired` compatibility flag. The next
-foreground wake uses the normal UserRunner write fence and outranks idle
-maintenance because activity expiry yields while a workspace invocation is
-active. Browser-vault refresh now enters through normal runtime work with the
-active write fence rather than a separate container refresh route, and failure
-or staleness cannot mutate runner checkpoint, reply, or wake state.
+Cloudflare does not treat runtime-reported deferred checkpoint state as scheduler
+state. Quiet successful foreground completion records pending warm checkpoint
+state in RunnerContainer memory, and the public runtime result contract does not
+carry a deferred-checkpoint scheduler hint. The next foreground wake uses the
+normal UserRunner write fence and outranks idle maintenance because activity
+expiry yields while a workspace invocation is active. Browser-vault refresh now
+enters through normal runtime work with the active write fence rather than a
+separate container refresh route, and failure or staleness cannot mutate runner
+checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence

@@ -223,15 +223,25 @@ async function waitForIdleShutdownCheckpoint(input: {
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
+  let activityExpiryAttempts = 0;
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 120_000) {
+    try {
+      await requireScenario().harness.expireRunnerActivityForTest(userId);
+      activityExpiryAttempts += 1;
+      lastActivityExpiryError = null;
+    } catch (error) {
+      lastActivityExpiryError = error;
+    }
+
     const status = await readHostedRunnerStatusWithLogLimit(50);
     lastStatus = status;
 
     if (
-      status.workspace
+      activityExpiryAttempts > 0
+      && status.workspace
       && status.workspace.version !== input.previousWorkspaceVersion
       && isWorkspaceBaseOnly(status)
       && !status.inFlight
@@ -241,17 +251,12 @@ async function waitForIdleShutdownCheckpoint(input: {
       return status;
     }
 
-    try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
-      lastActivityExpiryError = null;
-    } catch (error) {
-      lastActivityExpiryError = error;
-    }
     await sleep(250);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint after deferred progress.",
+    `activity expiry attempts: ${activityExpiryAttempts}`,
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]

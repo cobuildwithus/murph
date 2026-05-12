@@ -1003,7 +1003,6 @@ describe("buildWranglerVarArgs", () => {
           "http://127.0.0.1:4222/v1",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
         NODE_ENV: "test",
-        HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: "30000",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
       }),
@@ -1021,8 +1020,6 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
       "--var",
       "NODE_ENV:test",
-      "HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS:30000",
-      "--var",
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
       "--var",
       "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL:http://127.0.0.1:4010/.well-known/jwks",
@@ -1161,9 +1158,7 @@ describe("buildWranglerLocalDevConfig", () => {
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
-    expect(config.vars).toMatchObject({
-      HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: "30000",
-    });
+    expect(config.vars).not.toHaveProperty("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS");
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
