@@ -585,10 +585,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       hostedMailboxSystemImportedSeq:
         mailboxRedactedStatus["hostedMailboxSystemImportedSeq"],
     };
-    const deferredCheckpointRequired = foregroundRunRequiresDeferredCheckpoint(result);
-
     return {
-      ...(deferredCheckpointRequired ? { deferredCheckpointRequired: true } : {}),
       ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
       redactedStatus,
       status: resolveHostedWorkspaceInvocationStatus({
@@ -1001,12 +998,6 @@ function resolveHostedWorkspaceInvocationStatus(input: {
   }
 
   return "idle";
-}
-
-function foregroundRunRequiresDeferredCheckpoint(
-  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>,
-): boolean {
-  return result.deferredCheckpointRequired;
 }
 
 function resolveHostedWorkspaceRunNextWakeAt(input: {

@@ -178,7 +178,6 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
-      CF_RUNNER_DESTROY_TIMEOUT_MS: "30000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
@@ -323,7 +322,6 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
-    expect(config.vars.HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("600000");
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
@@ -496,7 +494,6 @@ describe("hosted deploy automation helpers", () => {
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
-      "CF_RUNNER_DESTROY_TIMEOUT_MS: ${{ vars.CF_RUNNER_DESTROY_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram,whatsapp' }}",

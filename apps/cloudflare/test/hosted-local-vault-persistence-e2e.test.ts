@@ -172,7 +172,6 @@ async function startVaultPersistenceScenario(input: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
-      HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS: "30000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,

@@ -927,12 +927,6 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
 
 export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWorkspaceInvocationResult {
   const record = requireObject(value, "Hosted workspace invocation result");
-  const deferredCheckpointRequired = record.deferredCheckpointRequired === undefined
-    ? undefined
-    : requireBoolean(
-        record.deferredCheckpointRequired,
-        "Hosted workspace invocation result deferredCheckpointRequired",
-      );
   const idleShutdownCheckpointed = record.idleShutdownCheckpointed === undefined
     ? undefined
     : requireBoolean(
@@ -969,7 +963,6 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
     );
   }
   return {
-    ...(deferredCheckpointRequired === undefined ? {} : { deferredCheckpointRequired }),
     ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
     ...(idleShutdownCheckpointSkipped === undefined ? {} : { idleShutdownCheckpointSkipped }),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),

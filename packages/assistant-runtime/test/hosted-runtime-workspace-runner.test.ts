@@ -258,7 +258,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "assistant",
       ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(logRequests, [
@@ -789,7 +788,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.latestWorkspace?.version, "0");
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
     } finally {
       await rm(vaultRoot, {
@@ -1354,7 +1352,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "1");
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests, []);
       assert.equal(createSnapshot.mock.calls.length, 0);
@@ -1530,7 +1527,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
@@ -2027,7 +2023,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.deferredCheckpointRequired, false);
       assert.equal(result.initialMailboxImport.stateChanged, false);
       assert.deepEqual(checkpointRequests, []);
     } finally {
@@ -2088,7 +2083,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint",
       ]);
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
     } finally {
@@ -2190,7 +2184,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint:done",
       ]);
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
       const effectLog = logRequests.flatMap((request) => request.entries)
@@ -2273,7 +2266,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
       const effectLog = logRequests.flatMap((request) => request.entries)
@@ -2670,7 +2662,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests, []);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.equal(result.latestWorkspace?.nextWakeAt, null);
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, null);
       assert.deepEqual(
         logRequests.flatMap((request) => request.entries)

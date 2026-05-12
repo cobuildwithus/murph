@@ -230,7 +230,6 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(result, {
-        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedMailboxBlockedCount: 0,
@@ -1325,7 +1324,6 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       assert.equal(result.status, "idle");
-      assert.equal(result.deferredCheckpointRequired, true);
       assert.deepEqual(checkpointRequests, []);
       expect(createCheckpointSnapshot).not.toHaveBeenCalled();
       expect(events).not.toContain("workspace.checkpoint");
@@ -3108,7 +3106,6 @@ describe("hosted workspace runtime entrypoint", () => {
         console.info("hosted pre-import local profile", stageSummary);
       }
       assert.deepEqual(result, {
-        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedMailboxBlockedCount: 0,
@@ -3328,7 +3325,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const mailboxRetryWakeAt = result.nextWakeAt;
       assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
       assert.deepEqual(result, {
-        deferredCheckpointRequired: true,
         nextWakeAt: mailboxRetryWakeAt,
         redactedStatus: {
           hostedMailboxBlockedCount: 1,
@@ -3585,7 +3581,6 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), []);
       assert.deepEqual(result, {
-        deferredCheckpointRequired: true,
         nextWakeAt: null,
         redactedStatus: {
           hostedAssistantNextWakeAt: null,

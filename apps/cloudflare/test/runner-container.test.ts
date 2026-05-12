@@ -689,7 +689,6 @@ describe("RunnerContainer", () => {
         component: "container",
         details: expect.objectContaining({
           destroyLatencyMs: expect.any(Number),
-          destroyTimeoutMs: 5_000,
           failClosed: false,
           lifecycleStage: "destroy",
           statusBeforeDestroy: "running",
@@ -1307,16 +1306,60 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("waits for explicit destroy to settle through the stopping state", async () => {
+  it("clears pending idle checkpoints before explicit destroy can later expire activity", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const destroy = vi.fn(async () => {});
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      initialStatus: "running",
+    });
+    Object.assign(container, {
+      pendingIdleCheckpoint: {
+        checkpointNextWakeAt: null,
+        runtime: {},
+        timeoutMs: 30_000,
+        userId: "member_123",
+        workspaceVersion: "7",
+      },
+    });
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(1);
+
+    containerFetch.mockClear();
+    destroy.mockClear();
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for explicit destroy to resolve through the native container lifecycle", async () => {
     vi.useFakeTimers();
 
     try {
-      let status: "running" | "stopping" | "stopped" = "running";
+      let status: "running" | "destroying" | "stopped" = "running";
       const destroy = vi.fn(async () => {
-        status = "stopping";
-        setTimeout(() => {
-          status = "stopped";
-        }, 250);
+        status = "destroying";
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        status = "stopped";
       });
       const getState = vi.fn(async () => ({
         lastChange: Date.now(),
@@ -1338,12 +1381,11 @@ describe("RunnerContainer", () => {
           component: "container",
           details: expect.objectContaining({
             destroyLatencyMs: expect.any(Number),
-            destroyTimeoutMs: 5_000,
             failClosed: true,
-            lifecycleStage: "stopped",
+            lifecycleStage: "destroyed",
             statusBeforeDestroy: "running",
           }),
-          message: "Hosted execution container destroy confirmed stopped.",
+          message: "Hosted execution container destroy completed.",
           phase: "container.ready",
         }),
       );
@@ -1352,17 +1394,14 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("accepts explicit destroy races when the shell is already stopping and still settles", async () => {
+  it("returns after destroy resolves without post-destroy status polling", async () => {
     vi.useFakeTimers();
 
     try {
-      let status: "running" | "stopping" | "stopped" = "running";
+      let status: "running" | "destroying" = "running";
       const destroy = vi.fn(async () => {
-        status = "stopping";
-        setTimeout(() => {
-          status = "stopped";
-        }, 250);
-        throw new Error("container is already stopping");
+        status = "destroying";
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
       });
       const getState = vi.fn(async () => ({
         lastChange: Date.now(),
@@ -1379,6 +1418,18 @@ describe("RunnerContainer", () => {
 
       await expect(destroyPromise).resolves.toBeUndefined();
       expect(destroy).toHaveBeenCalledTimes(1);
+      expect(getState).toHaveBeenCalledTimes(1);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({
+            lifecycleStage: "destroyed",
+            statusBeforeDestroy: "running",
+          }),
+          message: "Hosted execution container destroy completed.",
+          phase: "container.ready",
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1393,64 +1444,22 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
 
-    vi.useFakeTimers();
-    try {
-      const destroyResultPromise = container.destroyInstance().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(5_500);
-      const thrown = await destroyResultPromise;
-      expect(thrown).toBeInstanceOf(Error);
-      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
-    } finally {
-      vi.useRealTimers();
-    }
+    const thrown = await container.destroyInstance().catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
     expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("records status samples when a destroy request does not stop the shell", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const destroy = vi.fn(async () => {});
-      const getState = vi.fn(async () => ({
-        lastChange: Date.now(),
-        status: "running",
-      }));
-      const { container } = createContainerDouble({
-        destroy,
-        getState,
-        initialStatus: "running",
-      });
-
-      const destroyPromise = container.destroyInstance().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(5_500);
-
-      const thrown = await destroyPromise;
-      expect(thrown).toBeInstanceOf(Error);
-      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
-      expect(destroy).toHaveBeenCalledTimes(1);
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "container",
-          details: expect.objectContaining({
-            destroyTimeoutMs: 5_000,
-            failClosed: true,
-            lifecycleStage: "wait-for-stop",
-            statusBeforeDestroy: "running",
-          }),
-          error: expect.objectContaining({
-            details: expect.objectContaining({
-              destroyPollCount: expect.any(Number),
-              observedStatuses: ["running"],
-              statusAfterDestroy: "running",
-            }),
-          }),
-          message: "Hosted execution container destroy did not stop the shell.",
-          phase: "failed",
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          failClosed: true,
+          lifecycleStage: "destroy",
+          statusBeforeDestroy: "running",
         }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+        message: "Hosted execution container destroy request failed.",
+        phase: "failed",
+      }),
+    );
   });
 
   it("does best-effort cleanup on activity expiry when destroy throws", async () => {

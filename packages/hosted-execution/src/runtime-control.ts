@@ -827,7 +827,6 @@ export interface HostedWorkspaceInvocationRequest {
 }
 
 export interface HostedWorkspaceInvocationResult {
-  deferredCheckpointRequired?: boolean;
   idleShutdownCheckpointed?: boolean;
   idleShutdownCheckpointSkipped?: "container_not_warm" | "warm_workspace_unavailable";
   nextWakeAt?: string | null;

@@ -260,7 +260,6 @@ describe("hosted runtime control contracts", () => {
       })).toThrow(`Hosted workspace invocation request.${field} is no longer supported.`);
     }
     expect(parseHostedWorkspaceInvocationResult({
-      deferredCheckpointRequired: true,
       idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
@@ -268,7 +267,6 @@ describe("hosted runtime control contracts", () => {
       },
       status: "idle",
     })).toEqual({
-      deferredCheckpointRequired: true,
       idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
@@ -280,13 +278,6 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     })).toEqual({
       status: "scheduled",
-    });
-    expect(parseHostedWorkspaceInvocationResult({
-      deferredCheckpointRequired: false,
-      status: "idle",
-    })).toEqual({
-      deferredCheckpointRequired: false,
-      status: "idle",
     });
     expect(parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
@@ -304,10 +295,6 @@ describe("hosted runtime control contracts", () => {
       idleShutdownCheckpointSkipped: "container_not_warm",
       status: "idle",
     });
-    expect(() => parseHostedWorkspaceInvocationResult({
-      deferredCheckpointRequired: "true",
-      status: "idle",
-    })).toThrow("Hosted workspace invocation result deferredCheckpointRequired must be a boolean.");
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
       status: "scheduled",

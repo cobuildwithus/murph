@@ -15,7 +15,6 @@ import {
 import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
@@ -353,9 +352,6 @@ describe("hosted execution coverage gaps", () => {
       "x-hosted-execution-signing-key-id",
     );
     expect(HOSTED_EXECUTION_USER_ID_HEADER).toBe("x-hosted-execution-user-id");
-    expect(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER).toBe(
-      "x-hosted-execution-runner-proxy-token",
-    );
 
     const packageJsonPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
