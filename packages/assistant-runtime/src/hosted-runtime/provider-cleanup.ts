@@ -16,9 +16,6 @@ import type {
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
-import type {
-  HostedRuntimeEffectsPort,
-} from "./platform.ts";
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
@@ -66,7 +63,6 @@ export async function readHostedProviderCleanupCheckpoint(
 export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "deleteLinqMessages"> | null;
   env: NodeJS.ProcessEnv;
   fetchImplementation?: Parameters<typeof deleteHostedLinqMessages>[0]["fetchImplementation"];
   checkpoint: HostedProviderCleanupCheckpoint;
@@ -95,16 +91,12 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
 
   try {
     await assertHostedProviderCleanupLiveNow(input);
-    if (!input.fetchImplementation && input.effectsPort?.deleteLinqMessages) {
-      await input.effectsPort.deleteLinqMessages({ messageIds });
-    } else {
-      await deleteHostedLinqMessages({
-        env: input.env,
-        fetchImplementation: input.fetchImplementation,
-        messageIds,
-        signal: input.signal ?? undefined,
-      });
-    }
+    await deleteHostedLinqMessages({
+      env: input.env,
+      fetchImplementation: input.fetchImplementation,
+      messageIds,
+      signal: input.signal ?? undefined,
+    });
     await assertHostedProviderCleanupLiveNow(input);
   } catch (error) {
     const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();

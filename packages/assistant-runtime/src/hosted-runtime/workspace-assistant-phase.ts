@@ -254,7 +254,6 @@ export async function runHostedWorkspaceAssistantPhase(
     {
         hosted: {
           channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-            effectsPort: input.runtime.platform.effectsPort,
             forwardedEnv: input.runtime.forwardedEnv,
             platformEnv: input.runtime.platformEnv,
             providerFetch: input.runtime.platform.providerFetch ?? null,
@@ -1238,7 +1237,6 @@ async function drainHostedPostCheckpointDelivery(input: {
       checkpoint: input.providerCleanup.checkpoint ?? {
         nextWakeAt: null,
       },
-      effectsPort: input.input.runtime.platform.effectsPort,
       env: input.input.runtimeEnv,
       fetchImplementation: input.input.runtime.platform.providerFetch ?? undefined,
       signal: input.input.signal ?? null,

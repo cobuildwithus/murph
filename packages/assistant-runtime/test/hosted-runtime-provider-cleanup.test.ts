@@ -120,7 +120,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
   }
 });
 
-test("hosted provider cleanup prefers effectsPort.deleteLinqMessages", async () => {
+test("hosted provider cleanup uses direct provider cleanup with provider fetch", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
@@ -129,16 +129,14 @@ test("hosted provider cleanup prefers effectsPort.deleteLinqMessages", async () 
       checkpoint,
       vaultRoot,
     });
-    const deleteLinqMessages = vi.fn(async () => undefined);
+    const providerFetch = vi.fn() as unknown as typeof fetch;
 
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
-      effectsPort: {
-        deleteLinqMessages,
-      },
       env: {
         LINQ_API_TOKEN: "legacy-token",
       },
+      fetchImplementation: providerFetch,
       checkpoint,
       vaultRoot,
       wake,
@@ -150,10 +148,13 @@ test("hosted provider cleanup prefers effectsPort.deleteLinqMessages", async () 
       failedLinqMessageCount: 0,
       nextWakeAt: null,
     });
-    expect(deleteLinqMessages).toHaveBeenCalledWith({
+    expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledWith({
+      env: {
+        LINQ_API_TOKEN: "legacy-token",
+      },
+      fetchImplementation: providerFetch,
       messageIds: ["linq_inbound_1"],
     });
-    expect(mocks.deleteHostedLinqMessages).not.toHaveBeenCalled();
   } finally {
     await cleanup();
   }

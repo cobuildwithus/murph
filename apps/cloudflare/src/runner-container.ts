@@ -577,6 +577,14 @@ export class RunnerContainer extends Container {
     }
 
     let nextWakeAt = pending.checkpointNextWakeAt;
+    const idleAbortController = new AbortController();
+    const activeOperation: RunnerActiveOperationRecord = {
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.generation,
+      userId: pending.userId,
+    };
+    this.workspaceInvocationAbortController = idleAbortController;
+    this.workspaceInvocationActiveOperation = activeOperation;
     try {
       const result = await this.postRunnerRequest({
         job: {
@@ -591,6 +599,7 @@ export class RunnerContainer extends Container {
           },
           runtime: pending.runtime,
         },
+        signal: idleAbortController.signal,
         timeoutMs: pending.timeoutMs,
         userId: pending.userId,
       });
@@ -616,6 +625,12 @@ export class RunnerContainer extends Container {
         userId: pending.userId,
       });
     } finally {
+      if (this.workspaceInvocationAbortController === idleAbortController) {
+        this.workspaceInvocationAbortController = null;
+      }
+      if (this.workspaceInvocationActiveOperation === activeOperation) {
+        this.workspaceInvocationActiveOperation = null;
+      }
       this.pendingIdleCheckpoint = null;
       await this.finishIdleCheckpointLease({
         attemptId: lease.attemptId,
@@ -637,9 +652,14 @@ export class RunnerContainer extends Container {
 
   private async postRunnerRequest(input: {
     job: HostedExecutionRunnerJobInput;
+    signal?: AbortSignal;
     timeoutMs: number;
     userId: string;
   }): Promise<HostedExecutionRunnerJobResult> {
+    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+    const requestSignal = input.signal
+      ? combineRunnerContainerAbortSignals(input.signal, timeoutSignal)
+      : timeoutSignal;
     const response = await this.containerFetch(
       RUNNER_EXECUTE_URL,
       {
@@ -650,7 +670,7 @@ export class RunnerContainer extends Container {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-        signal: AbortSignal.timeout(input.timeoutMs),
+        signal: requestSignal,
       },
     );
     if (!response.ok) {

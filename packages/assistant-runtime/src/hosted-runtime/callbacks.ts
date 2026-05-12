@@ -407,18 +407,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendTelegram: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
-          const result = input.providerFetch === null && input.effectsPort.sendTelegram
-            ? await input.effectsPort.sendTelegram({
-                idempotencyKey: request.idempotencyKey ?? null,
-                message: request.message,
-                replyToMessageId: request.replyToMessageId ?? null,
-                target: request.target,
-              })
-            : await sendTelegramMessage(request, {
-                env: input.telegramEnv,
-                fetchImplementation: input.providerFetch ?? undefined,
-                signal: input.signal ?? undefined,
-              });
+          const result = await sendTelegramMessage(request, {
+            env: input.telegramEnv,
+            fetchImplementation: input.providerFetch ?? undefined,
+            signal: input.signal ?? undefined,
+          });
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -441,46 +434,30 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               wake: input.wake,
             });
           providerDispatchEntered = true;
-          const result = input.providerFetch === null && input.effectsPort.sendLinq
-            ? await input.effectsPort.sendLinq({
-                directRecipientPhoneNumber,
-                fromPhoneNumber,
-                idempotencyKey: request.idempotencyKey ?? null,
-                message: request.message,
-                replyToMessageId: request.replyToMessageId ?? null,
-                target: request.target,
-                targetKind: request.targetKind ?? null,
-              })
-            : await sendHostedProviderLinqMessage({
-                directRecipientPhoneNumber,
-                fromPhoneNumber,
-                idempotencyKey: request.idempotencyKey ?? null,
-                message: request.message,
-                replyToMessageId: request.replyToMessageId ?? null,
-                target: request.target,
-                targetKind: request.targetKind ?? null,
-              }, {
-                env: input.linqEnv,
-                fetchImplementation: input.providerFetch ?? undefined,
-                signal: input.signal ?? undefined,
-              });
+          const result = await sendHostedProviderLinqMessage({
+            directRecipientPhoneNumber,
+            fromPhoneNumber,
+            idempotencyKey: request.idempotencyKey ?? null,
+            message: request.message,
+            replyToMessageId: request.replyToMessageId ?? null,
+            target: request.target,
+            targetKind: request.targetKind ?? null,
+          }, {
+            env: input.linqEnv,
+            fetchImplementation: input.providerFetch ?? undefined,
+            signal: input.signal ?? undefined,
+          });
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
-          const result = input.providerFetch === null && input.effectsPort.sendWhatsApp
-            ? await input.effectsPort.sendWhatsApp({
-                message: request.message,
-                replyToMessageId: request.replyToMessageId ?? null,
-                target: request.target,
-              })
-            : await sendWhatsAppMessage(request, {
-                env: input.whatsAppEnv,
-                fetchImplementation: input.providerFetch ?? undefined,
-                signal: input.signal ?? undefined,
-              });
+          const result = await sendWhatsAppMessage(request, {
+            env: input.whatsAppEnv,
+            fetchImplementation: input.providerFetch ?? undefined,
+            signal: input.signal ?? undefined,
+          });
           await assertHostedDeliveryLiveNow(input);
           return result;
         },

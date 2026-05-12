@@ -161,38 +161,17 @@ type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;
-  deleteLinqMessages?(
-    request: HostedRuntimeLinqDeleteMessagesRequest,
-  ): Promise<void>;
   downloadTelegramFile?(
     request: HostedRuntimeTelegramDownloadFileRequest,
   ): Promise<HostedRuntimeProviderFileResponse | null>;
   getTelegramFile?(
     request: HostedRuntimeTelegramGetFileRequest,
   ): Promise<HostedRuntimeTelegramFile | null>;
-  markLinqRead?(
-    request: HostedRuntimeLinqMarkReadRequest,
-  ): Promise<void>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
-  sendLinq?(
-    request: HostedRuntimeLinqSendRequest,
-  ): Promise<HostedRuntimeLinqSendResponse | void>;
-  sendLinqChatAction?(
-    request: HostedRuntimeLinqChatActionRequest,
-  ): Promise<void>;
-  sendTelegram?(
-    request: HostedRuntimeTelegramSendRequest,
-  ): Promise<HostedRuntimeTelegramSendResponse | void>;
-  sendTelegramChatAction?(
-    request: HostedRuntimeTelegramChatActionRequest,
-  ): Promise<void>;
-  sendWhatsApp?(
-    request: HostedRuntimeWhatsAppSendRequest,
-  ): Promise<HostedRuntimeWhatsAppSendResponse | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;
