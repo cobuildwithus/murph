@@ -4,9 +4,6 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-} from "@murphai/hosted-execution/contracts";
-import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
@@ -120,7 +117,6 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        internalWorkerProxyToken: "proxy-token",
         job: {
           request: null,
         },
@@ -176,8 +172,6 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        internalWorkerProxyToken: "bridge-token",
-        localInternalProxyBaseUrl: "http://127.0.0.1:8787/__murph/local-internal-proxy/users/u_workspace",
         job: {
           kind: "workspace-invocation",
           request: {
@@ -230,7 +224,8 @@ describe("runHostedExecutionChild", () => {
       createCheckpointSnapshot: expect.any(Function),
       importItem: expect.any(Function),
       platform: expect.objectContaining({
-        workspacePort: expect.any(Object),
+        artifactStore: expect.any(Object),
+        effectsPort: expect.any(Object),
       }),
       vaultRoot: path.join(launcherRoot, "vault"),
     });
@@ -277,11 +272,9 @@ describe("runHostedExecutionChild", () => {
         ? requestInfo
         : new Request(requestInfo, init);
       expect(requestObject.url).toBe(
-        `http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
+        `https://worker.example.test/__murph/runtime-callback/users/u_workspace_decode/web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
       );
-      expect(requestObject.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER)).toBe(
-        "bridge-token",
-      );
+      expect(requestObject.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
       expect(requestObject.headers.get("x-hosted-runtime-attempt-id")).toBe(
         "attempt_workspace_child_decode",
       );
@@ -316,8 +309,7 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        internalWorkerProxyToken: "bridge-token",
-        localInternalProxyBaseUrl: null,
+        runtimeCallbackBaseUrl: "https://worker.example.test",
         job: {
           kind: "workspace-invocation",
           request: {
@@ -358,8 +350,6 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        internalWorkerProxyToken: "bridge-token",
-        localInternalProxyBaseUrl: null,
         job: {
           kind: "workspace-invocation",
           request: {
@@ -421,8 +411,6 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        internalWorkerProxyToken: "bridge-token",
-        localInternalProxyBaseUrl: null,
         job: {
           kind: "workspace-invocation",
           request: {

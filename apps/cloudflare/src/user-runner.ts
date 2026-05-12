@@ -50,7 +50,6 @@ import {
 import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
-  invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -369,24 +368,6 @@ export class HostedUserRunner {
     return { completed: result.completed };
   }
 
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
-   */
-  async ownsActiveInvocationLease(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion?: string | null;
-  }): Promise<boolean> {
-    return await this.validateRuntimeWriteFence({
-      attemptId: input.attemptId,
-      generation: input.leaseGeneration,
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    });
-  }
-
   async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
     attemptId: string;
     generation: string;
@@ -395,47 +376,6 @@ export class HostedUserRunner {
   }): Promise<{ recorded: boolean }> {
     const result = await this.stateStore.recordWriteFenceWorkspaceCheckpoint(input);
     return { recorded: result.recorded };
-  }
-
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use
-   * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
-   */
-  async recordActiveInvocationWorkspaceCheckpoint(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }> {
-    return await this.recordRuntimeWriteFenceWorkspaceCheckpoint({
-      attemptId: input.attemptId,
-      generation: input.leaseGeneration,
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    });
-  }
-
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; this path is intentionally inert.
-   */
-  async recordActiveInvocationHeartbeat(_input?: unknown): Promise<{
-    ok: false;
-    reason: "no_active_invocation";
-  }> {
-    return {
-      ok: false,
-      reason: "no_active_invocation",
-    };
-  }
-
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; this path is intentionally inert.
-   */
-  async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false }> {
-    return { recorded: false };
   }
 
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
@@ -599,11 +539,6 @@ export class HostedUserRunner {
         token,
       });
       await this.scheduleAfterRuntimeWake({ result });
-      this.scheduleDeferredIdleCheckpointIfNeeded({
-        result,
-        userId: initialRecord.userId,
-        workspaceVersion,
-      });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -665,121 +600,8 @@ export class HostedUserRunner {
     await this.syncAlarm(await this.stateStore.readState());
   }
 
-  private scheduleDeferredIdleCheckpointIfNeeded(input: {
-    result: HostedWorkspaceInvocationResult;
-    userId: string;
-    workspaceVersion: string;
-  }): void {
-    if (
-      input.result.deferredCheckpointRequired !== true
-      || input.result.status === "failed"
-    ) {
-      return;
-    }
-
-    const task = Promise.resolve()
-      .then(async () => {
-        await this.runDeferredIdleCheckpointBestEffort(input);
-      })
-      .catch((error: unknown) => {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-            checkpointNextWakePresent: input.result.nextWakeAt !== null,
-            workspaceVersion: input.workspaceVersion,
-          },
-          level: "warn",
-          message: "Hosted runner deferred idle-shutdown checkpoint failed best-effort.",
-          phase: "failed",
-          userId: input.userId,
-        });
-      });
-
-    try {
-      this.state.waitUntil?.(task);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner could not register deferred idle-shutdown checkpoint with waitUntil.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-    }
-  }
-
-  private async runDeferredIdleCheckpointBestEffort(input: {
-    result: HostedWorkspaceInvocationResult;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<void> {
-    let token: RunnerWriteFenceToken | null = null;
-    let nextWakeAt = input.result.nextWakeAt ?? null;
-
-    try {
-      token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "idle_checkpoint",
-        reason: "idle_shutdown_checkpoint",
-        userId: input.userId,
-      });
-      token = await this.stateStore.bindWriteFenceWorkspaceVersion({
-        token,
-        workspaceVersion: input.workspaceVersion,
-      });
-
-      const result = await this.invokeWorkspaceRunner({
-        checkpointNextWakeAt: nextWakeAt,
-        mode: "warm-idle-checkpoint",
-        reason: "idle_shutdown_checkpoint",
-        token,
-        userId: input.userId,
-        workspaceVersion: input.workspaceVersion,
-      });
-      nextWakeAt = result.nextWakeAt ?? nextWakeAt;
-
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          idleShutdownCheckpointed: Boolean(result.idleShutdownCheckpointed),
-          idleShutdownCheckpointSkipped: result.idleShutdownCheckpointSkipped ?? null,
-          workspaceAttemptId: token.attemptId,
-          workspaceVersion: input.workspaceVersion,
-        },
-        message: "Hosted runner completed deferred idle-shutdown checkpoint.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-    } finally {
-      if (!token) {
-        return;
-      }
-
-      await this.finishIdleCheckpointLease({
-        attemptId: token.attemptId,
-        generation: token.generation,
-        nextWakeAt,
-        userId: input.userId,
-      });
-    }
-  }
-
-  async finishIdleShutdownCheckpoint(input: {
-    nextWakeAt?: string | null;
-    preferredWakeAt?: string | null;
-    userId?: string | null;
-  }): Promise<void> {
-    await this.stateStore.scheduleNextWake({
-      nextWakeAt: input.preferredWakeAt ?? input.nextWakeAt ?? null,
-    });
-    await this.syncAlarm(await this.stateStore.readState());
-  }
-
   private async invokeWorkspaceRunner(input: {
     checkpointNextWakeAt?: string | null;
-    mode?: "warm-idle-checkpoint";
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -837,18 +659,13 @@ export class HostedUserRunner {
         workspaceWriteFenceGeneration: input.token.generation,
         workspaceReason: input.reason,
         workspaceVersion: input.workspaceVersion,
-        warmOnly: input.mode === "warm-idle-checkpoint",
       },
       message: "Hosted runner prepared workspace invocation.",
       phase: "wake.running",
       userId: input.userId,
     });
 
-    const invokeContainerRunner = input.mode === "warm-idle-checkpoint"
-      ? invokeHostedExecutionContainerRunnerIdleCheckpointIfWarm
-      : invokeHostedExecutionContainerRunner;
-
-    return await invokeContainerRunner({
+    return await invokeHostedExecutionContainerRunner({
       job,
       runnerContainerName,
       runnerContainerNamespace: this.runnerContainerNamespace,

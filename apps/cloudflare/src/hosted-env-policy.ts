@@ -93,8 +93,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "HOSTED_CRYPTO_ENV",
   "HOSTED_EXECUTION_CONTROL_TOKEN",
   "HOSTED_EXECUTION_CONTROL_TOKENS",
-  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
-  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
   "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
   "CODEX_HOME",
   "NODE_ENV",
@@ -225,21 +223,23 @@ export function rewriteHostedRunnerLoopbackUrlForContainer(
 }
 
 function readContainerReachableHost(source: UnknownEnvSource): string | null {
-  const localInternalProxyBaseUrl = normalizeStringEnvValue(
-    source.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL,
-  );
-  if (localInternalProxyBaseUrl) {
-    try {
-      const url = new URL(localInternalProxyBaseUrl);
-      if (!isLoopbackHostname(url.hostname)) {
-        return url.hostname;
-      }
-    } catch {
-      // Ignore invalid bridge URLs and fall back to the explicit host alias, if present.
-    }
+  const explicitAlias = normalizeStringEnvValue(source.HOSTED_EXECUTION_RUNNER_HOST_ALIAS);
+  if (explicitAlias) {
+    return explicitAlias;
   }
 
-  return normalizeStringEnvValue(source.HOSTED_EXECUTION_RUNNER_HOST_ALIAS);
+  const callbackBaseUrl = normalizeStringEnvValue(
+    source.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL,
+  );
+  if (!callbackBaseUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(callbackBaseUrl).hostname;
+  } catch {
+    return null;
+  }
 }
 export function filterHostedRunnerSecrets(
   env: Readonly<Record<string, string>>,

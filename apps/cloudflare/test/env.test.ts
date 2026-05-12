@@ -144,28 +144,14 @@ describe("readHostedExecutionEnvironment", () => {
     ).toBe("http://host.docker.internal:3000");
   });
 
-  it("allows the Docker bridge hosted web base url only in local proxy mode", () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-      HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
-    }));
-
-    expect(environment.hostedWebAllowHttpHosts).toEqual(["host.docker.internal"]);
-    expect(environment.hostedWebBaseUrl).toBe("http://host.docker.internal:3000");
-  });
-
-  it("rejects local proxy HTTP hosted web base urls in production", () => {
+  it("rejects HTTP hosted web base urls in production", () => {
     expect(() =>
       readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
         HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
         HOSTED_WEB_BASE_URL: "http://host.docker.internal:3000",
       })),
-    ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
+    ).toThrow(/Hosted execution base URLs must use HTTPS/u);
 
     expect(() =>
       readHostedExecutionWorkerEnvironment(
@@ -264,18 +250,6 @@ describe("readHostedExecutionEnvironment", () => {
     }));
 
     expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,CUSTOM_API_KEY");
-  });
-
-  it("hard-fails when the local internal proxy is configured outside development", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        ALLOW_LOCAL_INTERNAL_PROXY: "true",
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
-        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
-      })),
-    ).toThrow(
-      "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL and ALLOW_LOCAL_INTERNAL_PROXY are only supported when HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=development.",
-    );
   });
 
   it("rejects a missing hosted crypto authority public key", () => {

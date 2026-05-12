@@ -59,8 +59,6 @@ interface HostedExecutionChildDependencies {
 }
 
 interface HostedExecutionChildInput {
-  internalWorkerProxyToken: string | null;
-  localInternalProxyBaseUrl: string | null;
   runtimeCallbackBaseUrl: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
@@ -121,9 +119,7 @@ export async function runHostedExecutionChild(
       payload: childRunDiagnostics,
     });
     const result = await runWorkspaceChildJob({
-      internalWorkerProxyToken: input.internalWorkerProxyToken,
       job: input.job,
-      localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
       runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
       runWorkspaceInProcess,
     });
@@ -162,9 +158,7 @@ function sendHostedExecutionRunnerChildResult(
 }
 
 async function runWorkspaceChildJob(input: {
-  internalWorkerProxyToken: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
-  localInternalProxyBaseUrl: string | null;
   runtimeCallbackBaseUrl: string | null;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {
@@ -173,8 +167,6 @@ async function runWorkspaceChildJob(input: {
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
-    internalWorkerProxyToken: input.internalWorkerProxyToken,
-    localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
     runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,
@@ -186,11 +178,9 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
-  const webControlFetch = input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl
+  const webControlFetch = input.runtimeCallbackBaseUrl
     ? createCloudflareHostedRuntimeFetch(
         boundUserId,
-        input.internalWorkerProxyToken,
-        input.localInternalProxyBaseUrl ?? null,
         fetch,
         {
           readCurrentLease: () => currentLease,
@@ -211,7 +201,7 @@ async function runWorkspaceChildJob(input: {
     createHostedWorkspaceRuntimeBridgeJobOptions({
       ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
       platform,
-      requireMailboxPayloadDecoder: Boolean(input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl),
+      requireMailboxPayloadDecoder: Boolean(input.runtimeCallbackBaseUrl),
       request: input.job.request,
       runtime: input.job.runtime ?? {},
       vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
@@ -255,14 +245,6 @@ function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInp
   const record = value as Record<string, unknown>;
 
   return {
-    internalWorkerProxyToken: readNullableString(
-      record.internalWorkerProxyToken,
-      "Hosted node runner child input.internalWorkerProxyToken",
-    ),
-    localInternalProxyBaseUrl: readNullableString(
-      record.localInternalProxyBaseUrl,
-      "Hosted node runner child input.localInternalProxyBaseUrl",
-    ),
     runtimeCallbackBaseUrl: readNullableString(
       record.runtimeCallbackBaseUrl,
       "Hosted node runner child input.runtimeCallbackBaseUrl",
@@ -331,7 +313,6 @@ function buildHostedRunnerChildRuntimeDiagnostics(
       typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string",
     hostedAssistantOpenAiConfigured:
       isHostedRunnerOpenAiProvider(forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
-    hasLocalInternalProxyBaseUrl: Boolean(input.localInternalProxyBaseUrl),
     linqApiConfigured:
       typeof forwardedEnv.LINQ_API_TOKEN === "string",
     modelCredentialConfigured:

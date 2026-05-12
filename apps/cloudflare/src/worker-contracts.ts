@@ -1,8 +1,6 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
-export const LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER = "2026-05-25";
-
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
@@ -32,39 +30,9 @@ export interface WorkerUserRunnerStubLike {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use `validateRuntimeWriteFence`.
-   */
-  ownsActiveInvocationLease?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion?: string | null;
-  }): Promise<boolean>;
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; this path is intentionally inert.
-   */
-  recordActiveInvocationHeartbeat?(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-  }): Promise<unknown>;
   recordRuntimeWriteFenceWorkspaceCheckpoint?(input: {
     attemptId: string;
     generation: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }>;
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use
-   * `recordRuntimeWriteFenceWorkspaceCheckpoint`.
-   */
-  recordActiveInvocationWorkspaceCheckpoint?(input: {
-    attemptId: string;
-    leaseGeneration: string;
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }>;
@@ -92,7 +60,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID?: string;
   HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET?: string;
-  ALLOW_LOCAL_INTERNAL_PROXY?: string;
   HOSTED_ASSISTANT_APPROVAL_POLICY?: string;
   HOSTED_ASSISTANT_MODEL?: string;
   HOSTED_ASSISTANT_PROVIDER?: string;
@@ -106,7 +73,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
-  HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL?: string;
   HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL?: string;
   MURPH_HOSTED_LOCAL_TEST_ROUTES?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL?: string;

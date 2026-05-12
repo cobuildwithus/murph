@@ -39,7 +39,6 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -62,7 +61,6 @@ const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(TEST_DIR, "..");
 
-const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
 const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
 const TEST_VERCEL_OIDC_ISSUER = `https://oidc.vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
@@ -439,284 +437,6 @@ describe("cloudflare worker routes", () => {
       error: "Not found",
     });
     expect(upstreamFetch).not.toHaveBeenCalled();
-  });
-
-  it("routes local internal proxy requests onto the results.worker handler", async () => {
-    installOidcJwksFetch();
-    const env = createWorkerEnv(undefined, {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-    });
-
-    const missingProxyTokenResponse = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
-        {
-          method: "GET",
-        },
-      ),
-      env,
-    );
-
-    expect(missingProxyTokenResponse.status).toBe(401);
-    await expect(missingProxyTokenResponse.json()).resolves.toEqual({
-      error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
-    });
-
-    const readResponse = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
-        {
-          headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          },
-          method: "GET",
-        },
-      ),
-      env,
-    );
-
-    expect(readResponse.status).toBe(404);
-    await expect(readResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-  });
-
-  it("keeps the legacy active-invocation heartbeat unavailable through the local internal proxy", async () => {
-    installOidcJwksFetch();
-    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
-      inputAvailable: true,
-      nextAlarmAt: "2026-04-27T00:00:45.000Z",
-      ok: true as const,
-      pendingNudge: true,
-    }));
-    const env = createWorkerEnv(createUserRunnerStub({
-      recordActiveInvocationHeartbeat,
-    }), {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-    });
-
-    const response = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/runner-control.worker/internal/active-invocation/heartbeat",
-        {
-          headers: {
-            ...ACTIVE_INVOCATION_LEASE_HEADERS,
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          },
-          method: "POST",
-        },
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
-  });
-
-  it("checks local internal proxy tokens against the version-scoped runner container", async () => {
-    installOidcJwksFetch();
-    const getByName = vi.fn((_name: string) => ({
-      async destroyInstance() {},
-      async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-        throw new Error("Runner container should not be invoked by route tests.");
-      },
-      async ownsInternalWorkerProxyToken(input: {
-        leaseGeneration?: string;
-        token: string;
-      }): Promise<boolean> {
-        return input.token === RUNNER_PROXY_TOKEN && input.leaseGeneration === undefined;
-      },
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-    const env = createWorkerEnv(undefined, {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-      RUNNER_CONTAINER: {
-        getByName,
-      },
-    });
-
-    const response = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
-        {
-          headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          },
-          method: "GET",
-        },
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-    expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
-  });
-
-  it("rejects browser-vault refresh proxy tokens on general local internal proxy routes", async () => {
-    installOidcJwksFetch();
-    const getByName = vi.fn((_name: string) => ({
-      async destroyInstance() {},
-      async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-        throw new Error("Runner container should not be invoked by route tests.");
-      },
-      async ownsInternalWorkerProxyToken(input: {
-        leaseGeneration?: string;
-        token: string;
-      }): Promise<boolean> {
-        return input.token === RUNNER_PROXY_TOKEN
-          && input.leaseGeneration === RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION;
-      },
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-    const env = createWorkerEnv(undefined, {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-      RUNNER_CONTAINER: {
-        getByName,
-      },
-    });
-
-    const response = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
-        {
-          headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          },
-          method: "GET",
-        },
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(401);
-    expect(getByName).toHaveBeenCalledWith("member_123");
-  });
-
-  it("rejects local internal proxy requests when the proxy token is replayed against another user", async () => {
-    const env = createWorkerEnv(undefined, {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-    });
-
-    const response = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_456/results.worker/messages/raw_local_internal",
-        {
-          headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-          },
-          method: "GET",
-        },
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-  });
-
-  it("rejects local workspace checkpoints when the proxy token lease does not match", async () => {
-    const upstreamFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-      }),
-    );
-    const env = createWorkerEnv(undefined, {
-      ALLOW_LOCAL_INTERNAL_PROXY: "true",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-    });
-
-    const response = await worker.fetch(
-      new Request(
-        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/web-control.worker/api/internal/hosted-workspace/checkpoint",
-        {
-          body: JSON.stringify({
-            attemptId: "attempt_stale",
-            expectedWorkspaceVersion: "4",
-            leaseGeneration: "9",
-            reason: "import",
-            snapshotRef: null,
-          }),
-          headers: {
-            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      ),
-      env,
-    );
-
-    expect(response.status).toBe(401);
-    expect(upstreamFetch).not.toHaveBeenCalled();
-  });
-
-  it("hard-fails when the local internal proxy is configured outside development", async () => {
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/health"),
-      createWorkerEnv(undefined, {
-        ALLOW_LOCAL_INTERNAL_PROXY: "true",
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
-        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Invalid request.",
-    });
-  });
-
-  it("rejects public local internal proxy ingress hosts even in development", async () => {
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/health"),
-      createWorkerEnv(undefined, {
-        ALLOW_LOCAL_INTERNAL_PROXY: "true",
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
-        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Invalid request.",
-    });
   });
 
   it("does not expose the removed wake route", async () => {
@@ -2081,20 +1801,6 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
         async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
           throw new Error("Runner container should not be invoked by route tests.");
         },
-        async ownsInternalWorkerProxyToken(input: {
-          attemptId?: string;
-          leaseGeneration?: string;
-          token: string;
-        }): Promise<boolean> {
-          const tokenMatches = name === "member_123" && input.token === RUNNER_PROXY_TOKEN;
-          if (!tokenMatches) {
-            return false;
-          }
-          if (input.attemptId === undefined && input.leaseGeneration === undefined) {
-            return true;
-          }
-          return input.attemptId === "attempt_current" && input.leaseGeneration === "9";
-        },
         async smokeHealth() {
           return {
             ok: true,
@@ -2166,13 +1872,10 @@ function callRunnerOutbound(
   env: WorkerTestEnv,
   userId = "member_123",
 ): Promise<Response> {
-  const headers = new Headers(request.headers);
-  headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, RUNNER_PROXY_TOKEN);
   return handleRunnerOutboundRequest(
-    new Request(request, { headers }),
+    request,
     env,
-    userId,
-    RUNNER_PROXY_TOKEN,
+    userId ,
   );
 }
 
@@ -2338,19 +2041,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     nudgeHostedRunner,
     nudgeHostedRunnerForUser,
-    ownsActiveInvocationLease: vi.fn(async () => true),
-    recordActiveInvocationHeartbeat: vi.fn(async () => ({
-      instruction: {
-        kind: "continue" as const,
-      },
-      inputAvailable: false,
-      nextAlarmAt: null,
-      ok: true as const,
-      pendingNudge: false,
-    })),
-    recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
-      recorded: true,
-    })),
     runUntilIdleOrBudget: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
@@ -2376,6 +2066,8 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       scheduled: true as const,
       userId: input.userId,
     })),
+    validateRuntimeWriteFence: vi.fn(async () => true),
+    recordRuntimeWriteFenceWorkspaceCheckpoint: vi.fn(async () => ({ recorded: true })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
 }

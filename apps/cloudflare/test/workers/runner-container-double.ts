@@ -7,17 +7,12 @@ import {
 } from "./runner-e2e-control.ts";
 
 interface RunnerContainerInvokePayload {
-  internalWorkerProxyToken?: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
   userId: string;
 }
 
 export class RunnerContainerTestDouble extends DurableObject {
   async invoke(payload: RunnerContainerInvokePayload): Promise<HostedWorkspaceInvocationResult> {
-    if (payload.internalWorkerProxyToken === "") {
-      throw new Error("Expected a non-empty internal worker proxy token.");
-    }
-
     await recordRunnerInvocation({
       bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
       eventId: payload.job.request.attemptId,

@@ -21,18 +21,13 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedExecutionBundleRef,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedBrowserVaultReplicaRef,
-  parseHostedWorkspaceCheckpointRequest,
 } from "@murphai/hosted-execution/parsers";
-import {
-  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
-} from "@murphai/hosted-execution/routes";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
@@ -43,12 +38,6 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
-import {
-  assertHostedLocalInternalProxyEnvironment,
-  assertHostedLocalInternalProxyBaseUrl,
-  isLocalLoopbackProxyProtocol,
-  normalizeLocalInternalProxyHostname,
-} from "./local-loopback-proxy.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
@@ -66,7 +55,6 @@ import {
 } from "./json.ts";
 export { DeploySmokeRunnerContainer, RunnerContainer } from "./runner-container.ts";
 import {
-  resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
@@ -280,8 +268,6 @@ export default {
     env: WorkerEnvironmentSource,
   ): Promise<Response> {
     try {
-      assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
-
       const url = new URL(request.url);
       const runtimeCallbackResponse = await maybeHandleRuntimeCallbackRoute(
         request,
@@ -290,14 +276,6 @@ export default {
       );
       if (runtimeCallbackResponse) {
         return runtimeCallbackResponse;
-      }
-      const localInternalProxyResponse = await maybeHandleLocalInternalProxyRoute(
-        request,
-        url,
-        env,
-      );
-      if (localInternalProxyResponse) {
-        return localInternalProxyResponse;
       }
       const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { env, request, url });
       if (publicResponse) {
@@ -323,8 +301,6 @@ export default {
     env: WorkerEnvironmentSource,
     ctx?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<void> {
-    assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
-
     await handleHostedEmailIngress(message, env, ctx);
   },
 };
@@ -1293,210 +1269,13 @@ async function maybeHandleRuntimeCallbackRoute(
   const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
   internalUrl.search = url.search;
   return await handleRunnerOutboundRequest(
-    createLocalInternalProxyRequest(request, internalUrl),
+    createInternalCallbackRequest(request, internalUrl),
     env,
     boundUserId,
-    null,
-    { writeFenceAuthorized: true },
   );
 }
 
-async function maybeHandleLocalInternalProxyRoute(
-  request: Request,
-  url: URL,
-  env: WorkerEnvironmentSource,
-): Promise<Response | null> {
-  if (!readLocalHostedInternalProxyIngressHost(env)) {
-    return null;
-  }
-
-  const match =
-    /^\/__murph\/local-internal-proxy\/users\/(?<userId>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
-      url.pathname,
-    );
-  if (!match?.groups) {
-    return null;
-  }
-
-  if (!isTrustedLocalHostedInternalProxyIngress(url, env)) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "untrusted-local-internal-proxy-ingress",
-        routeName: "local-internal-proxy",
-      }, request),
-      level: "warn",
-      message: "Hosted worker rejected an untrusted local internal proxy ingress request.",
-      phase: "failed",
-    });
-    return unauthorized();
-  }
-
-  const boundUserId = decodeRouteParam(match.groups.userId);
-  const runnerProxyToken = readOptionalTrimmedHeader(
-    request,
-    HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  );
-  if (!runnerProxyToken) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "missing-runner-proxy-token",
-        routeName: "local-internal-proxy",
-      }, request, boundUserId),
-      level: "warn",
-      message: "Hosted worker rejected a local internal proxy request without the runner proxy token.",
-      phase: "failed",
-      userId: boundUserId,
-    });
-    return json({
-      error: `${HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER} header is required for local internal proxy requests.`,
-    }, 401);
-  }
-  const validRunnerProxyToken = await ownsLocalInternalProxyTokenForUser({
-    env,
-    token: runnerProxyToken,
-    userId: boundUserId,
-  });
-  if (!validRunnerProxyToken) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runner-proxy-token-verification-failed",
-        routeName: "local-internal-proxy",
-      }, request, boundUserId),
-      level: "warn",
-      message: "Hosted worker rejected a local internal proxy request after proxy-token verification failed.",
-      phase: "failed",
-      userId: boundUserId,
-    });
-    return unauthorized();
-  }
-
-  const targetHost = decodeRouteParam(match.groups.host);
-  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(targetHost)) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "local-internal-proxy-target-host-not-found",
-        routeName: "local-internal-proxy",
-        targetHost,
-      }, request, boundUserId),
-      level: "warn",
-      message: "Hosted worker rejected a local internal proxy request for an unknown internal host.",
-      phase: "failed",
-      userId: boundUserId,
-    });
-    return notFound();
-  }
-
-  const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
-  internalUrl.search = url.search;
-  if (
-    targetHost === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
-    && internalUrl.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
-  ) {
-    const checkpointRequest = parseHostedWorkspaceCheckpointRequest(
-      await readOptionalJsonObject(request.clone() as Request),
-    );
-    const validCheckpointLease = await ownsLocalInternalProxyTokenForUser({
-      attemptId: checkpointRequest.attemptId,
-      env,
-      leaseGeneration: checkpointRequest.leaseGeneration,
-      token: runnerProxyToken,
-      userId: boundUserId,
-    });
-    if (!validCheckpointLease) {
-      emitHostedExecutionStructuredLog({
-        component: "worker",
-        details: buildWorkerRouteLogDetails({
-          reason: "runner-proxy-token-lease-verification-failed",
-          routeName: "local-internal-proxy",
-        }, request, boundUserId),
-        level: "warn",
-        message: "Hosted worker rejected a local workspace checkpoint after lease-token verification failed.",
-        phase: "failed",
-        userId: boundUserId,
-      });
-      return unauthorized();
-    }
-  }
-  return await handleRunnerOutboundRequest(
-    createLocalInternalProxyRequest(request, internalUrl),
-    env,
-    boundUserId,
-    runnerProxyToken,
-  );
-}
-
-async function ownsLocalInternalProxyTokenForUser(input: {
-  attemptId?: string;
-  env: WorkerEnvironmentSource;
-  leaseGeneration?: string;
-  token: string;
-  userId: string;
-}): Promise<boolean> {
-  const stub = input.env.RUNNER_CONTAINER.getByName(
-    resolveHostedExecutionRunnerContainerName({
-      source: input.env,
-      userId: input.userId,
-    }),
-  );
-  return typeof stub.ownsInternalWorkerProxyToken === "function"
-    ? await stub.ownsInternalWorkerProxyToken({
-        ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
-        ...(input.leaseGeneration === undefined
-          ? {}
-          : { leaseGeneration: input.leaseGeneration }),
-        token: input.token,
-        userId: input.userId,
-      })
-    : false;
-}
-
-function isTrustedLocalHostedInternalProxyIngress(
-  url: URL,
-  env: WorkerEnvironmentSource,
-): boolean {
-  if (!isLocalLoopbackProxyProtocol(url.protocol)) {
-    return false;
-  }
-
-  return resolveLocalHostedInternalProxyIngressHosts(env).has(
-    normalizeLocalHostedProxyHostname(url.hostname),
-  );
-}
-
-function resolveLocalHostedInternalProxyIngressHosts(
-  env: WorkerEnvironmentSource,
-): ReadonlySet<string> {
-  const hosts = new Set<string>(["127.0.0.1", "localhost", "::1"]);
-  const configuredHost = readLocalHostedInternalProxyIngressHost(env);
-
-  if (configuredHost) {
-    hosts.add(configuredHost);
-  }
-
-  return hosts;
-}
-
-function readLocalHostedInternalProxyIngressHost(
-  env: WorkerEnvironmentSource,
-): string | null {
-  const value = env.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-
-  const url = assertHostedLocalInternalProxyBaseUrl(value);
-  return normalizeLocalInternalProxyHostname(url.hostname);
-}
-
-function normalizeLocalHostedProxyHostname(value: string): string {
-  return normalizeLocalInternalProxyHostname(value);
-}
-
-function createLocalInternalProxyRequest(
+function createInternalCallbackRequest(
   request: Request,
   internalUrl: URL,
 ): Request {
@@ -1512,16 +1291,6 @@ function createLocalInternalProxyRequest(
   }
 
   return new Request(internalUrl, init);
-}
-
-function readOptionalTrimmedHeader(request: Request, name: string): string | null {
-  const value = request.headers.get(name);
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {

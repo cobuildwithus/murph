@@ -21,38 +21,19 @@ import {
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
-  requireRunnerInternalProxyAuthorization,
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
-export interface RunnerOutboundProxyContext {
-  proxyAttemptId?: string | null;
-  proxyLeaseGeneration?: string | null;
-  writeFenceAuthorized?: boolean;
-}
-
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
-  internalWorkerProxyToken: string | null = null,
-  proxyContext: RunnerOutboundProxyContext = {},
 ): Promise<Response> {
   try {
     const url = new URL(request.url);
-    if (proxyContext.writeFenceAuthorized !== true) {
-      const authorizationError = requireRunnerInternalProxyAuthorization(
-        request,
-        url.hostname,
-        internalWorkerProxyToken,
-      );
-      if (authorizationError) {
-        return authorizationError;
-      }
-    }
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {

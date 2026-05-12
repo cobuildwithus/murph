@@ -415,28 +415,4 @@ describe("RunnerStateStore schema guard", () => {
       });
   });
 
-  it("keeps retired active-invocation compatibility APIs inert", async () => {
-    const { store } = createRunnerStateStoreHarness();
-    await store.bindUser("user-compat");
-
-    await expect(store.recordActiveInvocationHeartbeatInstruction({})).resolves.toEqual({
-      ok: false,
-      reason: "no_active_invocation",
-    });
-    await expect(store.recordActiveInvocationContainerStopped({})).resolves.toMatchObject({
-      recorded: false,
-      record: {
-        userId: "user-compat",
-        writeFence: null,
-      },
-    });
-    await expect(store.scheduleIdleCheckpoint({
-      dueAt: "2030-04-27T00:00:00.000Z",
-      workspaceVersion: "1",
-    })).resolves.toMatchObject({
-      idleCheckpoint: null,
-      userId: "user-compat",
-      writeFence: null,
-    });
-  });
 });

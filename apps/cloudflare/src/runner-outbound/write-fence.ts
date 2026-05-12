@@ -1,11 +1,7 @@
 import {
-  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
-import {
-  LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER,
-} from "../worker-contracts.ts";
 
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 const HOSTED_RUNTIME_LEASE_GENERATION_HEADER = "x-hosted-runtime-lease-generation";
@@ -22,9 +18,10 @@ export interface RunnerRuntimeWriteFenceWriteHeaders
   workspaceVersion: string;
 }
 
-export interface RunnerRuntimeWriteFenceLegacyWriteHeaders {
+export interface RunnerRuntimeWriteFenceToken {
   attemptId: string;
-  leaseGeneration: string;
+  generation?: string;
+  leaseGeneration?: string;
   workspaceVersion: string;
 }
 
@@ -64,7 +61,7 @@ export async function requireRunnerRuntimeWriteFence(input: {
   }
 
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFenceWithDeployFallback(stub, {
+  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
@@ -83,7 +80,7 @@ export async function requireRunnerRuntimeWriteFenceWrite(input: {
 }): Promise<RunnerRuntimeWriteFenceWriteHeaders> {
   const headers = requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const ownsWriteFence = await validateRunnerRuntimeWriteFenceWithDeployFallback(stub, {
+  const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
@@ -96,7 +93,7 @@ export async function requireRunnerRuntimeWriteFenceWrite(input: {
   return headers;
 }
 
-async function validateRunnerRuntimeWriteFenceWithDeployFallback(
+async function validateRunnerRuntimeWriteFence(
   stub: Awaited<ReturnType<typeof resolveRunnerOutboundUserRunnerStub>>,
   input: {
     attemptId: string;
@@ -105,36 +102,11 @@ async function validateRunnerRuntimeWriteFenceWithDeployFallback(
     workspaceVersion?: string | null;
   },
 ): Promise<boolean> {
-  try {
-    const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;
-    if (typeof validateRuntimeWriteFence === "function") {
-      return await validateRuntimeWriteFence(input);
-    }
-  } catch (error) {
-    if (!isMissingRuntimeWriteFenceRpcMethod(error)) {
-      throw error;
-    }
+  const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;
+  if (typeof validateRuntimeWriteFence !== "function") {
+    throw new TypeError("Hosted user runner does not implement validateRuntimeWriteFence.");
   }
-
-  // Legacy deployed-caller fallback. Delete after 2026-05-25.
-  const legacy = requireRunnerOutboundUserStubMethod(
-    stub,
-    "ownsActiveInvocationLease",
-  );
-  return await legacy({
-    attemptId: input.attemptId,
-    leaseGeneration: input.generation,
-    userId: input.userId,
-    ...(input.workspaceVersion === undefined
-      ? {}
-      : { workspaceVersion: input.workspaceVersion }),
-  });
-}
-
-function isMissingRuntimeWriteFenceRpcMethod(error: unknown): boolean {
-  return error instanceof TypeError
-    && error.message.includes("validateRuntimeWriteFence")
-    && error.message.includes("does not implement");
+  return await validateRuntimeWriteFence(input);
 }
 
 export function requireRunnerRuntimeWriteFenceHeaders(
@@ -164,110 +136,13 @@ export function requireRunnerRuntimeWriteFenceWriteHeaders(
 
 export function writeRunnerRuntimeWriteFenceHeaders(
   headers: Headers,
-  token: RunnerRuntimeWriteFenceWriteHeaders | RunnerRuntimeWriteFenceLegacyWriteHeaders,
+  token: RunnerRuntimeWriteFenceToken,
 ): void {
-  const generation = "generation" in token ? token.generation : token.leaseGeneration;
+  const generation = token.generation ?? token.leaseGeneration;
+  if (!generation) {
+    throw new RunnerRuntimeWriteFenceError("Hosted runner runtime write fence generation is missing.");
+  }
   headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, token.attemptId);
   headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, generation);
   headers.set(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER, token.workspaceVersion);
-}
-
-export { LEGACY_ACTIVE_INVOCATION_COMPATIBILITY_DELETE_AFTER };
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `RunnerRuntimeWriteFenceHeaders`.
- */
-export type RunnerActiveInvocationLeaseHeaders = RunnerRuntimeWriteFenceHeaders & {
-  leaseGeneration: string;
-};
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `RunnerRuntimeWriteFenceWriteHeaders`.
- */
-export type RunnerActiveInvocationLeaseWriteHeaders =
-  RunnerRuntimeWriteFenceWriteHeaders & { leaseGeneration: string };
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `RunnerRuntimeWriteFenceError`.
- */
-export const RunnerActiveInvocationLeaseError = RunnerRuntimeWriteFenceError;
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `readRunnerRuntimeWriteFenceHeaders`.
- */
-export function readRunnerActiveInvocationLeaseHeaders(
-  request: Request,
-): RunnerActiveInvocationLeaseHeaders | null {
-  const headers = readRunnerRuntimeWriteFenceHeaders(request);
-  return headers
-    ? {
-        ...headers,
-        leaseGeneration: headers.generation,
-      }
-    : null;
-}
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `requireRunnerRuntimeWriteFence`.
- */
-export async function requireRunnerActiveInvocationLease(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-}): Promise<RunnerActiveInvocationLeaseHeaders> {
-  const headers = await requireRunnerRuntimeWriteFence(input);
-  return {
-    ...headers,
-    leaseGeneration: headers.generation,
-  };
-}
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `requireRunnerRuntimeWriteFenceHeaders`.
- */
-export function requireRunnerActiveInvocationLeaseHeaders(
-  request: Request,
-): RunnerActiveInvocationLeaseHeaders {
-  const headers = requireRunnerRuntimeWriteFenceHeaders(request);
-  return {
-    ...headers,
-    leaseGeneration: headers.generation,
-  };
-}
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `requireRunnerRuntimeWriteFenceWriteHeaders`.
- */
-export function requireRunnerActiveInvocationLeaseWriteHeaders(
-  request: Request,
-): RunnerActiveInvocationLeaseWriteHeaders {
-  const headers = requireRunnerRuntimeWriteFenceWriteHeaders(request);
-  return {
-    ...headers,
-    leaseGeneration: headers.generation,
-  };
-}
-
-/**
- * Legacy active-invocation compatibility around the write fence.
- * Delete after 2026-05-25. Current runtime code should use
- * `writeRunnerRuntimeWriteFenceHeaders`.
- */
-export function writeRunnerActiveInvocationLeaseHeaders(
-  headers: Headers,
-  token: RunnerRuntimeWriteFenceWriteHeaders | RunnerRuntimeWriteFenceLegacyWriteHeaders,
-): void {
-  writeRunnerRuntimeWriteFenceHeaders(headers, token);
 }

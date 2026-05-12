@@ -33,7 +33,7 @@ Internal control routes:
 
 The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, the runtime callback route described below, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
-The runner container sends child-runtime internal Worker requests through `__murph/runtime-callback/users/:userId/:host/...`, using the runtime write-fence headers as authority. When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only for deployed-caller compatibility.
+The runner container sends child-runtime internal Worker requests through `__murph/runtime-callback/users/:userId/:host/...`, using the runtime write-fence headers as authority. The previous loopback local internal proxy transport has been removed; local hosted development uses the same runtime callback base URL as deployed runs.
 
 Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` through Worker secrets or encrypted runner secrets.
 

@@ -260,8 +260,6 @@ export async function startHostedLocalDevStack(input: {
       config,
       env: vercelEnv,
     });
-    const localInternalProxyBaseUrl = resolveContainerReachableWorkerOrigin(config, vercelEnv);
-
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
@@ -269,7 +267,10 @@ export async function startHostedLocalDevStack(input: {
       oidcIdentity,
       overrides: {
         ...vercelEnv,
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: localInternalProxyBaseUrl,
+        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: resolveContainerReachableWorkerOrigin(
+          config,
+          initialEnv,
+        ),
         ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
       },
     });

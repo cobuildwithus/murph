@@ -61,8 +61,8 @@ export {
   HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
   HOSTED_ASSISTANT_SANDBOX_ENV,
 }
-const HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV =
-  'HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL'
+const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
+  'HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL'
 
 const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
@@ -532,15 +532,15 @@ function normalizeHostedAssistantSeedBaseUrl(
 function readHostedAssistantContainerReachableHost(
   source: Readonly<Record<string, string | undefined>>,
 ): string | null {
-  const localInternalProxyBaseUrl = normalizeHostedAssistantString(
-    source[HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV],
+  const runnerCallbackBaseUrl = normalizeHostedAssistantString(
+    source[HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV],
   )
-  if (!localInternalProxyBaseUrl) {
+  if (!runnerCallbackBaseUrl) {
     return null
   }
 
   try {
-    return new URL(localInternalProxyBaseUrl).hostname
+    return new URL(runnerCallbackBaseUrl).hostname
   } catch {
     return null
   }

@@ -58,7 +58,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
     forwardedEnv: {
       FFMPEG_COMMAND: "/stale/ffmpeg",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",

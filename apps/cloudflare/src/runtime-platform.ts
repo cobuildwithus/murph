@@ -22,9 +22,6 @@ import {
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-} from "@murphai/hosted-execution/contracts";
-import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
@@ -75,14 +72,6 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
-import {
-  buildLocalInternalProxyRouteBaseUrl,
-  isScopedLocalInternalProxyBaseUrl,
-  readScopedLocalInternalProxyRouteUserId,
-} from "./local-internal-proxy-route.ts";
-import {
-  assertHostedLocalInternalProxyBaseUrl,
-} from "./local-loopback-proxy.ts";
 import {
   assertAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -172,8 +161,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
-  internalWorkerProxyToken?: string | null;
-  localInternalProxyBaseUrl?: string | null;
   runtimeCallbackBaseUrl?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
@@ -181,8 +168,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
     input.boundUserId,
-    input.internalWorkerProxyToken ?? null,
-    input.localInternalProxyBaseUrl ?? null,
     input.fetchImpl ?? fetch,
     {
       readCurrentLease: input.workspaceCheckpointBridge?.readCurrentLease,
@@ -191,13 +176,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
   const hostedWebControlTransport = resolveHostedWebControlTransport({
-    internalWorkerProxyToken: input.internalWorkerProxyToken ?? null,
     runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
   });
-  const hasHostedInternalProxyTransport =
-    Boolean(input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl);
+  const hasRuntimeCallbackAuthority = Boolean(input.runtimeCallbackBaseUrl);
   const hostedWebDeviceSyncPort = hostedWebControlTransport
     ? createHostedWebDeviceSyncPort({
         boundUserId: input.boundUserId,
@@ -268,7 +251,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     inFlightArtifactUploads.set(artifact.sha256, upload);
     await upload;
   };
-  const providerEffectsPort = hasHostedInternalProxyTransport && input.workspaceCheckpointBridge
+  const providerEffectsPort = hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
     ? createCloudflareRunnerProviderEffectsPort({
         fetchImpl,
         timeoutMs,
@@ -320,7 +303,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(hasHostedInternalProxyTransport && input.workspaceCheckpointBridge
+    ...(hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
@@ -629,12 +612,11 @@ export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
 }
 
 function resolveHostedWebControlTransport(input: {
-  internalWorkerProxyToken: string | null;
   runtimeCallbackBaseUrl: string | null;
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
 }): HostedWebControlTransport | null {
-  if (input.internalWorkerProxyToken || input.runtimeCallbackBaseUrl) {
+  if (input.runtimeCallbackBaseUrl) {
     return {
       mode: "proxy",
     };
@@ -653,8 +635,6 @@ function resolveHostedWebControlTransport(input: {
 
 export function createCloudflareHostedRuntimeFetch(
   boundUserId: string,
-  internalWorkerProxyToken: string | null,
-  localInternalProxyBaseUrl: string | null,
   fetchImpl: typeof fetch,
   options: {
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
@@ -669,35 +649,22 @@ export function createCloudflareHostedRuntimeFetch(
       return input instanceof Request ? fetchImpl(input) : fetchImpl(input, init);
     }
 
-    if (!internalWorkerProxyToken && !options.runtimeCallbackBaseUrl) {
+    if (!options.runtimeCallbackBaseUrl) {
       throw new Error(
         `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime callback authority.`,
       );
     }
 
     const headers = new Headers(request.headers);
-    if (internalWorkerProxyToken) {
-      headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, internalWorkerProxyToken);
+    const lease = await options.readCurrentLease?.() ?? null;
+    if (lease) {
+      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     }
-    if (options.runtimeCallbackBaseUrl) {
-      const lease = await options.readCurrentLease?.() ?? null;
-      if (lease) {
-        writeRunnerRuntimeWriteFenceHeaders(headers, lease);
-      }
-    }
-    const proxiedUrl = options.runtimeCallbackBaseUrl
-      ? createHostedRuntimeCallbackUrl(
+    const proxiedUrl = createHostedRuntimeCallbackUrl(
         options.runtimeCallbackBaseUrl,
         url,
         boundUserId,
-      )
-      : localInternalProxyBaseUrl
-      ? createHostedLocalInternalProxyUrl(
-        localInternalProxyBaseUrl,
-        url,
-        boundUserId,
-      )
-      : url;
+      );
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
     const shouldLogInternalRequest = true;
     const details = {
@@ -705,8 +672,7 @@ export function createCloudflareHostedRuntimeFetch(
       host: url.hostname,
       method: proxiedRequest.method,
       path: url.pathname,
-      proxiedViaLoopback: localInternalProxyBaseUrl ? "true" : "false",
-      proxiedViaRuntimeCallback: options.runtimeCallbackBaseUrl ? "true" : "false",
+      proxiedViaRuntimeCallback: "true",
       userId: boundUserId,
     };
 
@@ -777,32 +743,6 @@ export function createCloudflareHostedRuntimeFetch(
 
 function isInternalAuthorityRejectedStatus(status: number): boolean {
   return status === 401 || status === 403;
-}
-
-function createHostedLocalInternalProxyUrl(
-  baseUrl: string,
-  targetUrl: URL,
-  boundUserId: string,
-): URL {
-  const normalizedBaseUrl = assertHostedLocalInternalProxyBaseUrl(baseUrl);
-  const normalizedBasePath = ensureTrailingSlash(normalizedBaseUrl);
-  const scopedUserId = readScopedLocalInternalProxyRouteUserId(normalizedBasePath);
-  if (scopedUserId !== null && scopedUserId !== boundUserId) {
-    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL is scoped to a different user.");
-  }
-
-  const proxyBaseUrl = isScopedLocalInternalProxyBaseUrl(normalizedBasePath)
-    ? normalizedBasePath
-    : new URL(buildLocalInternalProxyRouteBaseUrl({
-      baseUrl: normalizedBasePath.toString(),
-      userId: boundUserId,
-    }));
-  const proxyUrl = new URL(
-    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
-    proxyBaseUrl,
-  );
-  proxyUrl.search = targetUrl.search;
-  return proxyUrl;
 }
 
 function createHostedRuntimeCallbackUrl(

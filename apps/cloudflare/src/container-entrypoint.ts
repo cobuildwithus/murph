@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,15 +11,11 @@ import {
   summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-} from "@murphai/hosted-execution/contracts";
-import {
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
 
-const HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV = "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN";
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 
 interface HostedContainerProcessDirectoryEntryLike {
@@ -78,7 +73,6 @@ interface HostedContainerRuntimeDependencies {
 }
 
 interface HostedExecutionLocalBridgeConfig {
-  localInternalProxyBaseUrl: string | null;
   runtimeCallbackBaseUrl: string | null;
 }
 
@@ -128,21 +122,17 @@ interface HostedContainerProcessSnapshot {
 }
 
 export async function startHostedContainerEntrypoint(input: {
-  controlToken: string | null;
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
-  const controlToken = normalizeOptionalString(input.controlToken);
   let activeHostedRunnerJobCount = 0;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
-    let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
-      localInternalProxyBaseUrl: null,
       runtimeCallbackBaseUrl: null,
     };
 
@@ -161,57 +151,15 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      const isControlHealthRequest =
-        request.method === "GET" && requestUrl.pathname === "/internal/control-health";
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
       const isBrowserVaultRefreshRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/browser-vault-refresh";
 
-      if (!isControlHealthRequest && !isWorkspaceInvocationRequest && !isBrowserVaultRefreshRequest) {
+      if (!isWorkspaceInvocationRequest && !isBrowserVaultRefreshRequest) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
-        return;
-      }
-
-      const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
-
-      if (!controlToken) {
-        discardUnreadRequestBody(request);
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          level: "error",
-          message: "Hosted container entrypoint is missing its startup control token.",
-          phase: "failed",
-        });
-        writeJsonResponse(response, 401, {
-          error: "Unauthorized",
-        });
-        return;
-      }
-
-      if (controlToken && (!bearerToken || !timingSafeEquals(bearerToken, controlToken))) {
-        discardUnreadRequestBody(request);
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          level: "warn",
-          message: "Hosted container entrypoint rejected an unauthorized request.",
-          phase: "failed",
-        });
-        writeJsonResponse(response, 401, {
-          error: "Unauthorized",
-        });
-        return;
-      }
-
-      if (isControlHealthRequest) {
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({
-          ok: true,
-          service: "cloudflare-hosted-runner-node",
-        }));
         return;
       }
 
@@ -253,7 +201,6 @@ export async function startHostedContainerEntrypoint(input: {
           runtime,
         );
         job = parsed.job;
-        internalWorkerProxyToken = parsed.internalWorkerProxyToken;
         localBridge = parsed.localBridge;
       } catch (error) {
         emitHostedExecutionStructuredLog({
@@ -280,8 +227,6 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
-        internalWorkerProxyToken,
-        localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
         runtimeCallbackBaseUrl: localBridge.runtimeCallbackBaseUrl,
         signal: requestAbort.signal,
       });
@@ -377,7 +322,6 @@ async function parseHostedExecutionContainerInvocationRequest(
   value: unknown,
   runtime: HostedContainerRuntimeDependencies,
 ): Promise<{
-  internalWorkerProxyToken: string | null;
   localBridge: HostedExecutionLocalBridgeConfig;
   job: HostedExecutionRunnerJobInput;
 }> {
@@ -389,15 +333,7 @@ async function parseHostedExecutionContainerInvocationRequest(
   const assistantRuntime = await runtime.loadRuntimeContracts();
 
   return {
-    internalWorkerProxyToken: readNullableString(
-      record.internalWorkerProxyToken,
-      "Hosted container runner request.internalWorkerProxyToken",
-    ),
     localBridge: {
-      localInternalProxyBaseUrl: readNullableString(
-        record.localInternalProxyBaseUrl,
-        "Hosted container runner request.localInternalProxyBaseUrl",
-      ),
       runtimeCallbackBaseUrl: readNullableString(
         record.runtimeCallbackBaseUrl,
         "Hosted container runner request.runtimeCallbackBaseUrl",
@@ -432,11 +368,8 @@ function isHostedContainerCliEntrypoint(): boolean {
 
 async function startHostedContainerEntrypointCli(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
-  const controlToken = process.env[HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV] ?? null;
-  delete process.env[HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV];
 
   await startHostedContainerEntrypoint({
-    controlToken,
     port,
     runtime: {
       processIsolation: true,
@@ -463,20 +396,6 @@ function readNullableString(value: unknown, label: string): string | null {
   }
 
   return normalizeOptionalString(value);
-}
-
-function readBearerAuthorizationToken(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = trimmed.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
 }
 
 async function readHostedContainerInvocationRequestBody(
@@ -520,17 +439,6 @@ function readContentLengthBytes(value: string | string[] | undefined): number | 
 
   const parsed = Number.parseInt(value, 10);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function timingSafeEquals(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left, "utf8");
-  const rightBuffer = Buffer.from(right, "utf8");
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function writeJsonResponse(
@@ -943,8 +851,6 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    internalWorkerProxyToken?: string | null;
-    localInternalProxyBaseUrl?: string | null;
     runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },
@@ -957,8 +863,6 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    internalWorkerProxyToken?: string | null;
-    localInternalProxyBaseUrl?: string | null;
     runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },

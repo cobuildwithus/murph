@@ -115,15 +115,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     });
   }
 
-  async ownsActiveInvocationLease(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion?: string | null;
-  }): Promise<boolean> {
-    return await this.runner.ownsActiveInvocationLease(input);
-  }
-
   async validateRuntimeWriteFence(input: {
     attemptId: string;
     generation: string;
@@ -391,12 +382,6 @@ function getUserRunnerStub(userId: string) {
             workspaceVersion?: string | null;
           }): Promise<RunnerInvocationLease>;
           bindUser(userId: string): Promise<{ userId: string }>;
-          ownsActiveInvocationLease(input: {
-            attemptId: string;
-            leaseGeneration: string;
-            userId: string;
-            workspaceVersion?: string | null;
-          }): Promise<boolean>;
           validateRuntimeWriteFence(input: {
             attemptId: string;
             generation: string;

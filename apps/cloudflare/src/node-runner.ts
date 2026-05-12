@@ -50,8 +50,6 @@ import {
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
 export interface HostedWorkspaceInvocationOptions {
-  internalWorkerProxyToken?: string | null;
-  localInternalProxyBaseUrl?: string | null;
   runtimeCallbackBaseUrl?: string | null;
   signal?: AbortSignal;
 }
@@ -152,8 +150,6 @@ export function createHostedWorkspaceInvocationRunner(
     options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
     onBeforeRun?.();
-    const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
-    const localInternalProxyBaseUrl = options?.localInternalProxyBaseUrl ?? null;
     const runtimeCallbackBaseUrl = options?.runtimeCallbackBaseUrl ?? null;
     const runtime = buildRuntime(input.runtime ?? {});
     const boundUserId = readHostedExecutionRunnerJobUserId(input);
@@ -165,17 +161,12 @@ export function createHostedWorkspaceInvocationRunner(
       const runtimePlatform = buildRuntimePlatform({
         boundUserId,
         commitTimeoutMs: runtime.commitTimeoutMs,
-        internalWorkerProxyToken,
-        localInternalProxyBaseUrl,
         runtimeCallbackBaseUrl,
         workspaceCheckpointBridge,
       });
-      const webControlFetch = internalWorkerProxyToken
-        || runtimeCallbackBaseUrl
+      const webControlFetch = runtimeCallbackBaseUrl
         ? createCloudflareHostedRuntimeFetch(
             boundUserId,
-            internalWorkerProxyToken,
-            localInternalProxyBaseUrl,
             fetch,
             {
               readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
@@ -194,7 +185,7 @@ export function createHostedWorkspaceInvocationRunner(
         ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
         platform: runtimePlatform,
         readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        requireMailboxPayloadDecoder: Boolean(internalWorkerProxyToken),
+        requireMailboxPayloadDecoder: Boolean(runtimeCallbackBaseUrl),
         request: input.request,
         runtime,
         vaultRoot: resolveHostedWorkspaceInProcessVaultRoot(),
@@ -217,8 +208,6 @@ export function createHostedWorkspaceInvocationRunner(
     }
 
     return await runIsolated({
-      internalWorkerProxyToken: options?.internalWorkerProxyToken ?? null,
-      localInternalProxyBaseUrl: options?.localInternalProxyBaseUrl ?? null,
       runtimeCallbackBaseUrl: options?.runtimeCallbackBaseUrl ?? null,
       job: {
         ...input,

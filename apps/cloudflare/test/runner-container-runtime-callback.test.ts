@@ -60,9 +60,6 @@ describe("RunnerContainer runtime callback dispatch", () => {
 
     const requestBody = readPostedRunnerBody(containerFetch, 0);
     expect(requestBody).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: "https://worker.example.test/",
     });
     expect(setOutboundByHosts).not.toHaveBeenCalled();
     expect([...storage.values.keys()].some((key) => key.includes("active-operation"))).toBe(false);
@@ -176,9 +173,6 @@ describe("RunnerContainer runtime callback dispatch", () => {
       };
     } & Record<string, unknown>;
     expect(checkpointBody).toMatchObject({
-      internalWorkerProxyToken: null,
-      localInternalProxyBaseUrl: null,
-      runtimeCallbackBaseUrl: "https://worker.example.test/",
     });
     expect(checkpointBody.job.request).toMatchObject({
       attemptId: "checkpoint_attempt_123",

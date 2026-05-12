@@ -25,15 +25,23 @@ import {
 
 export const R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION =
   "murph-age-r399-midus2-biomarker-increment.v1" as const;
+export const R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION =
+  "murph-age-r399-midus-refresher-biomarker-increment.v1" as const;
 const INCREMENT_EVALUATION_CARD_SCHEMA_VERSION = "murph.age.increment-evaluation-card.v1" as const;
 
 const MIDUS2_SURVEY_ZIP = "ICPSR_04652-V8.zip";
 const MIDUS2_BIOMARKER_ZIP = "ICPSR_29282-V11.zip";
 const MIDUS2_MORTALITY_ZIP = "ICPSR_37237-V6.zip";
+const MIDUS_REFRESHER_SURVEY_ZIP = "ICPSR_36532-V4.zip";
+const MIDUS_REFRESHER_BIOMARKER_ZIP = "ICPSR_36901-V6.zip";
+const MIDUS_REFRESHER_MORTALITY_ZIP = "ICPSR_38024-V3.zip";
 
 const MIDUS2_SURVEY_ENTRY = "ICPSR_04652/DS0001/04652-0001-Data.tsv";
 const MIDUS2_BIOMARKER_ENTRY = "ICPSR_29282/DS0001/29282-0001-Data.tsv";
 const MIDUS2_MORTALITY_ENTRY = "ICPSR_37237/DS0001/37237-0001-Data.tsv";
+const MIDUS_REFRESHER_SURVEY_ENTRY = "ICPSR_36532/DS0001/36532-0001-Data.tsv";
+const MIDUS_REFRESHER_BIOMARKER_ENTRY = "ICPSR_36901/DS0001/36901-0001-Data.tsv";
+const MIDUS_REFRESHER_MORTALITY_ENTRY = "ICPSR_38024/DS0001/38024-0001-Data.tsv";
 
 const DEFAULT_OUTPUT_DIR = path.join(
   ".runtime",
@@ -61,9 +69,9 @@ const R399_PROXY_FEATURE_KEYS = [
 ] as const;
 
 const BIOMARKER_FEATURE_DEFINITIONS = [
-  { column: "B4BHA1C", key: "hba1c", transform: (value: number) => value },
-  { column: "B4BTRIGL", key: "log-triglycerides", transform: (value: number) => value > 0 ? Math.log(value) : null },
-  { column: "B4BHDL", key: "hdl-c", transform: (value: number) => value },
+  { columnKey: "hba1cColumn", key: "hba1c", transform: (value: number) => value },
+  { columnKey: "triglyceridesColumn", key: "log-triglycerides", transform: (value: number) => value > 0 ? Math.log(value) : null },
+  { columnKey: "hdlColumn", key: "hdl-c", transform: (value: number) => value },
 ] as const;
 
 const MODEL_CANDIDATE_DEFINITIONS = {
@@ -101,7 +109,149 @@ const MODEL_CANDIDATE_DEFINITIONS = {
 
 const LAMBDAS = [0, 0.0001, 0.001, 0.01, 0.1, 1] as const;
 
+export type R399MidusCohortId = "midus-refresher" | "midus2";
+type R399MidusSchemaVersion =
+  | typeof R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION
+  | typeof R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION;
+
+interface R399MidusCohortConfig {
+  batchId: string;
+  benchmarkId: string;
+  biomarker: {
+    ageColumn: string;
+    bmiColumn: string;
+    hba1cColumn: string;
+    hdlColumn: string;
+    idColumn: string;
+    sexColumn: string;
+    triglyceridesColumn: string;
+  };
+  biomarkerEntry: string;
+  biomarkerZip: string;
+  candidateId: string;
+  cohortId: R399MidusCohortId;
+  endpoint: string;
+  label: string;
+  metricPointRecordId: string;
+  metricPointSourceLabel: string;
+  metricPointSourcePath: string;
+  outputFileName: string;
+  schemaVersion: R399MidusSchemaVersion;
+  splitSalt: string;
+  survey: {
+    baselineYearColumn: string;
+    diabetesColumn: string;
+    hypertensionColumn: string;
+    idColumn: string;
+    moderateActivityColumns: readonly string[];
+    selfRatedHealthColumn: string;
+    smokingEverColumn: string;
+    smokingNowColumn: string;
+    vigorousActivityColumns: readonly string[];
+  };
+  surveyEntry: string;
+  surveyZip: string;
+  mortality: {
+    deathYearColumn: string;
+    idColumn: string;
+  };
+  mortalityEntry: string;
+  mortalityZip: string;
+}
+
+const R399_MIDUS_COHORT_CONFIGS = {
+  midus2: {
+    batchId: "r399-midus2-first-biomarker-increment-batch",
+    benchmarkId: "r399-midus2-biomarker-increment-local-0",
+    biomarker: {
+      ageColumn: "B4ZAGE",
+      bmiColumn: "B4PBMI",
+      hba1cColumn: "B4BHA1C",
+      hdlColumn: "B4BHDL",
+      idColumn: "M2ID",
+      sexColumn: "B1PRSEX",
+      triglyceridesColumn: "B4BTRIGL",
+    },
+    biomarkerEntry: MIDUS2_BIOMARKER_ENTRY,
+    biomarkerZip: MIDUS2_BIOMARKER_ZIP,
+    candidateId: "r399-plus-lab3-bmi-increment",
+    cohortId: "midus2",
+    endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years",
+    label: "MIDUS 2",
+    metricPointRecordId: "midus2-local-research-row",
+    metricPointSourceLabel: "MIDUS 2 local research adapter",
+    metricPointSourcePath: "local://midus2-r399-adapter",
+    mortality: {
+      deathYearColumn: "DOD_Y",
+      idColumn: "M2ID",
+    },
+    mortalityEntry: MIDUS2_MORTALITY_ENTRY,
+    mortalityZip: MIDUS2_MORTALITY_ZIP,
+    outputFileName: OUTPUT_FILE_NAME,
+    schemaVersion: R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION,
+    splitSalt: "r399-midus2-increment-v0",
+    survey: {
+      baselineYearColumn: "B1PIDATE_YR",
+      diabetesColumn: "B1SA11X",
+      hypertensionColumn: "B1PA24",
+      idColumn: "M2ID",
+      moderateActivityColumns: ["B1SA31A", "B1SA31B", "B1SA31C", "B1SA31D", "B1SA31E", "B1SA31F"],
+      selfRatedHealthColumn: "B1PA1",
+      smokingEverColumn: "B1PA38A",
+      smokingNowColumn: "B1PA39",
+      vigorousActivityColumns: ["B1SA30A", "B1SA30B", "B1SA30C", "B1SA30D", "B1SA30E", "B1SA30F"],
+    },
+    surveyEntry: MIDUS2_SURVEY_ENTRY,
+    surveyZip: MIDUS2_SURVEY_ZIP,
+  },
+  "midus-refresher": {
+    batchId: "r399-midus-refresher-biomarker-increment-batch",
+    benchmarkId: "r399-midus-refresher-biomarker-increment-local-0",
+    biomarker: {
+      ageColumn: "RA4ZAGE",
+      bmiColumn: "RA4PBMI",
+      hba1cColumn: "RA4BHA1C",
+      hdlColumn: "RA4BHDL",
+      idColumn: "MRID",
+      sexColumn: "RA1PRSEX",
+      triglyceridesColumn: "RA4BTRIGL",
+    },
+    biomarkerEntry: MIDUS_REFRESHER_BIOMARKER_ENTRY,
+    biomarkerZip: MIDUS_REFRESHER_BIOMARKER_ZIP,
+    candidateId: "r399-plus-refresher-lab3-bmi-increment",
+    cohortId: "midus-refresher",
+    endpoint: "10-year all-cause mortality, MIDUS Refresher complete-window baseline years",
+    label: "MIDUS Refresher",
+    metricPointRecordId: "midus-refresher-local-research-row",
+    metricPointSourceLabel: "MIDUS Refresher local research adapter",
+    metricPointSourcePath: "local://midus-refresher-r399-adapter",
+    mortality: {
+      deathYearColumn: "DOD_Y",
+      idColumn: "MRID",
+    },
+    mortalityEntry: MIDUS_REFRESHER_MORTALITY_ENTRY,
+    mortalityZip: MIDUS_REFRESHER_MORTALITY_ZIP,
+    outputFileName: "r399-midus-refresher-biomarker-increment.latest.json",
+    schemaVersion: R399_MIDUS_REFRESHER_BIOMARKER_INCREMENT_SCHEMA_VERSION,
+    splitSalt: "r399-midus-refresher-increment-v0",
+    survey: {
+      baselineYearColumn: "RA1PIDATE_YR",
+      diabetesColumn: "RA1SA11X",
+      hypertensionColumn: "RA1PA24",
+      idColumn: "MRID",
+      moderateActivityColumns: ["RA1SA31"],
+      selfRatedHealthColumn: "RA1PA1",
+      smokingEverColumn: "RA1PA38A",
+      smokingNowColumn: "RA1PA39",
+      vigorousActivityColumns: ["RA1SA30A", "RA1SA30B", "RA1SA30C", "RA1SA30D", "RA1SA30E", "RA1SA30F"],
+    },
+    surveyEntry: MIDUS_REFRESHER_SURVEY_ENTRY,
+    surveyZip: MIDUS_REFRESHER_SURVEY_ZIP,
+  },
+} satisfies Record<R399MidusCohortId, R399MidusCohortConfig>;
+
 export interface R399Midus2BiomarkerIncrementOptions {
+  cohortId?: R399MidusCohortId;
   createdAt?: string;
   downloadsDir?: string;
   outputDir?: string;
@@ -128,9 +278,9 @@ export interface R399Midus2BiomarkerIncrementOutput {
     modelParametersStored: false;
     predictionsStored: false;
   };
-  benchmarkId: "r399-midus2-biomarker-increment-local-0";
+  benchmarkId: string;
   candidateBatch: {
-    batchId: "r399-midus2-first-biomarker-increment-batch";
+    batchId: string;
     candidateCount: number;
     exposureLabel: "diagnostic-only";
     hypothesisSources: Array<ModelCandidateDefinition["hypothesisSource"]>;
@@ -146,7 +296,7 @@ export interface R399Midus2BiomarkerIncrementOutput {
     r399ProxyFeatureObservedCounts: Record<typeof R399_PROXY_FEATURE_KEYS[number], number>;
     splitCounts: Record<"calibration" | "test" | "train", { events: number; n: number }>;
   };
-  endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years";
+  endpoint: string;
   incrementEvaluationCard: MurphAgeIncrementEvaluationCard;
   modelScoringPerformed: true;
   models: Record<string, {
@@ -165,7 +315,7 @@ export interface R399Midus2BiomarkerIncrementOutput {
   participantIdentifiersWritten: false;
   predictionsStored: false;
   rowValuesStored: false;
-  schemaVersion: typeof R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION;
+  schemaVersion: R399MidusSchemaVersion;
   sourceBodiesStored: false;
   splitMembershipStored: false;
   status: "research-local-aggregate-only";
@@ -192,10 +342,23 @@ interface TrainedModel {
 export async function runR399Midus2BiomarkerIncrement(
   options: R399Midus2BiomarkerIncrementOptions = {},
 ): Promise<{ output: R399Midus2BiomarkerIncrementOutput; outputPath: string }> {
+  return runR399MidusBiomarkerIncrement({ ...options, cohortId: "midus2" });
+}
+
+export async function runR399MidusRefresherBiomarkerIncrement(
+  options: Omit<R399Midus2BiomarkerIncrementOptions, "cohortId"> = {},
+): Promise<{ output: R399Midus2BiomarkerIncrementOutput; outputPath: string }> {
+  return runR399MidusBiomarkerIncrement({ ...options, cohortId: "midus-refresher" });
+}
+
+export async function runR399MidusBiomarkerIncrement(
+  options: R399Midus2BiomarkerIncrementOptions = {},
+): Promise<{ output: R399Midus2BiomarkerIncrementOutput; outputPath: string }> {
+  const config = R399_MIDUS_COHORT_CONFIGS[options.cohortId ?? "midus2"];
   const downloadsDir = options.downloadsDir ?? path.join(os.homedir(), "Downloads");
   const outputDir = options.outputDir ?? DEFAULT_OUTPUT_DIR;
   const r399Model = await readR399ModelCard(options.r399ModelCardPath ?? DEFAULT_R399_MODEL_CARD_PATH);
-  const rows = await buildBenchmarkRows({ downloadsDir, r399Model });
+  const rows = await buildBenchmarkRows({ config, downloadsDir, r399Model });
   const dataShape: R399Midus2BiomarkerIncrementOutput["dataShape"] = {
     eligibleRows: rows.length,
     events: rows.reduce((sum, row) => sum + row.y, 0),
@@ -209,8 +372,8 @@ export async function runR399Midus2BiomarkerIncrement(
       return [modelId, summarizeModel(rows, trained, candidate)];
     }),
   ) as R399Midus2BiomarkerIncrementOutput["models"];
-  const incrementEvaluationCard = buildIncrementEvaluationCard({ dataShape, models });
-  assertIncrementEvaluationCardBoundary(incrementEvaluationCard);
+  const incrementEvaluationCard = buildIncrementEvaluationCard({ config, dataShape, models });
+  assertIncrementEvaluationCardBoundary({ card: incrementEvaluationCard, config });
 
   const output: R399Midus2BiomarkerIncrementOutput = {
     anchor: {
@@ -222,9 +385,9 @@ export async function runR399Midus2BiomarkerIncrement(
       modelParametersStored: false,
       predictionsStored: false,
     },
-    benchmarkId: "r399-midus2-biomarker-increment-local-0",
+    benchmarkId: config.benchmarkId,
     candidateBatch: {
-      batchId: "r399-midus2-first-biomarker-increment-batch",
+      batchId: config.batchId,
       candidateCount: Object.keys(MODEL_CANDIDATE_DEFINITIONS).length,
       exposureLabel: "diagnostic-only",
       hypothesisSources: Array.from(new Set(
@@ -237,7 +400,7 @@ export async function runR399Midus2BiomarkerIncrement(
     coefficientsStored: false,
     createdAt: options.createdAt ?? new Date().toISOString(),
     dataShape,
-    endpoint: "10-year all-cause mortality, MIDUS 2 complete-window baseline years",
+    endpoint: config.endpoint,
     incrementEvaluationCard,
     modelScoringPerformed: true,
     models,
@@ -245,7 +408,7 @@ export async function runR399Midus2BiomarkerIncrement(
     participantIdentifiersWritten: false,
     predictionsStored: false,
     rowValuesStored: false,
-    schemaVersion: R399_MIDUS2_BIOMARKER_INCREMENT_SCHEMA_VERSION,
+    schemaVersion: config.schemaVersion,
     sourceBodiesStored: false,
     splitMembershipStored: false,
     status: "research-local-aggregate-only",
@@ -253,11 +416,11 @@ export async function runR399Midus2BiomarkerIncrement(
 
   const forbiddenFindings = findForbiddenAggregateEgress(output);
   if (forbiddenFindings.length > 0) {
-    throw new Error(`R399 MIDUS 2 biomarker increment output failed egress validation: ${forbiddenFindings.join("; ")}`);
+    throw new Error(`R399 ${config.label} biomarker increment output failed egress validation: ${forbiddenFindings.join("; ")}`);
   }
 
   await mkdir(outputDir, { recursive: true });
-  const outputPath = path.join(outputDir, OUTPUT_FILE_NAME);
+  const outputPath = path.join(outputDir, config.outputFileName);
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
   return { output, outputPath };
 }
@@ -279,74 +442,72 @@ async function readR399ModelCard(modelCardPath: string): Promise<MurphAgeRiskMod
 }
 
 async function buildBenchmarkRows(input: {
+  config: R399MidusCohortConfig;
   downloadsDir: string;
   r399Model: MurphAgeRiskModel;
 }): Promise<ParsedRow[]> {
+  const config = input.config;
   const surveyRows = await readZippedTsvColumns(
-    path.join(input.downloadsDir, MIDUS2_SURVEY_ZIP),
-    MIDUS2_SURVEY_ENTRY,
-    [
-      "M2ID",
-      "B1PIDATE_YR",
-      "B1PA1",
-      "B1PA24",
-      "B1PA38A",
-      "B1PA39",
-      "B1SA11X",
-      "B1SA30A",
-      "B1SA30B",
-      "B1SA30C",
-      "B1SA30D",
-      "B1SA30E",
-      "B1SA30F",
-      "B1SA31A",
-      "B1SA31B",
-      "B1SA31C",
-      "B1SA31D",
-      "B1SA31E",
-      "B1SA31F",
-    ],
+    path.join(input.downloadsDir, config.surveyZip),
+    config.surveyEntry,
+    uniqueColumns([
+      config.survey.idColumn,
+      config.survey.baselineYearColumn,
+      config.survey.selfRatedHealthColumn,
+      config.survey.hypertensionColumn,
+      config.survey.smokingEverColumn,
+      config.survey.smokingNowColumn,
+      config.survey.diabetesColumn,
+      ...config.survey.vigorousActivityColumns,
+      ...config.survey.moderateActivityColumns,
+    ]),
   );
   const biomarkerRows = await readZippedTsvColumns(
-    path.join(input.downloadsDir, MIDUS2_BIOMARKER_ZIP),
-    MIDUS2_BIOMARKER_ENTRY,
-    [
-      "M2ID",
-      "B4ZAGE",
-      "B1PRSEX",
-      "B4PBMI",
-      ...BIOMARKER_FEATURE_DEFINITIONS.map((feature) => feature.column),
-    ],
+    path.join(input.downloadsDir, config.biomarkerZip),
+    config.biomarkerEntry,
+    uniqueColumns([
+      config.biomarker.idColumn,
+      config.biomarker.ageColumn,
+      config.biomarker.sexColumn,
+      config.biomarker.bmiColumn,
+      ...BIOMARKER_FEATURE_DEFINITIONS.map((feature) => config.biomarker[feature.columnKey]),
+    ]),
   );
   const mortalityRows = await readZippedTsvColumns(
-    path.join(input.downloadsDir, MIDUS2_MORTALITY_ZIP),
-    MIDUS2_MORTALITY_ENTRY,
-    ["M2ID", "DOD_Y"],
+    path.join(input.downloadsDir, config.mortalityZip),
+    config.mortalityEntry,
+    [config.mortality.idColumn, config.mortality.deathYearColumn],
   );
 
-  const surveyById = new Map(surveyRows.filter((row) => row.M2ID).map((row) => [row.M2ID, row]));
-  const mortalityById = new Map(mortalityRows.filter((row) => row.M2ID).map((row) => [row.M2ID, row]));
+  const surveyById = new Map(
+    surveyRows.filter((row) => row[config.survey.idColumn]).map((row) => [row[config.survey.idColumn]!, row]),
+  );
+  const mortalityById = new Map(
+    mortalityRows
+      .filter((row) => row[config.mortality.idColumn])
+      .map((row) => [row[config.mortality.idColumn]!, row]),
+  );
   const rows: ParsedRow[] = [];
   for (const biomarkerRow of biomarkerRows) {
-    const id = biomarkerRow.M2ID;
+    const id = biomarkerRow[config.biomarker.idColumn];
     if (!id) continue;
     const surveyRow = surveyById.get(id);
     if (!surveyRow) continue;
-    const baselineYear = parseYear(surveyRow.B1PIDATE_YR);
+    const baselineYear = parseYear(surveyRow[config.survey.baselineYearColumn]);
     if (!baselineYear || baselineYear + 10 > 2023) continue;
-    const age = parseMetricValue(biomarkerRow.B4ZAGE);
-    const sex = parseMidusSex(biomarkerRow.B1PRSEX);
+    const age = parseMetricValue(biomarkerRow[config.biomarker.ageColumn]);
+    const sex = parseMidusSex(biomarkerRow[config.biomarker.sexColumn]);
     if (age === null || sex === null) continue;
 
-    const deathYear = parseYear(mortalityById.get(id)?.DOD_Y);
+    const deathYear = parseYear(mortalityById.get(id)?.[config.mortality.deathYearColumn]);
     const values: Record<string, number | null> = {
       age,
       female: sex === "female" ? 1 : 0,
       "r399-logit": null,
-      ...buildR399ProxyValues({ biomarkerRow, surveyRow }),
+      ...buildR399ProxyValues({ biomarkerRow, config, surveyRow }),
     };
     for (const definition of BIOMARKER_FEATURE_DEFINITIONS) {
-      const rawValue = parseMetricValue(biomarkerRow[definition.column]);
+      const rawValue = parseMetricValue(biomarkerRow[config.biomarker[definition.columnKey]]);
       values[definition.key] = rawValue === null ? null : definition.transform(rawValue);
     }
 
@@ -359,7 +520,7 @@ async function buildBenchmarkRows(input: {
     values["r399-logit"] = logit(r399Risk);
     rows.push({
       r399Risk,
-      split: stableSplit(id),
+      split: stableSplit(id, config),
       values,
       y: deathYear && deathYear - baselineYear > 0 && deathYear - baselineYear <= 10 ? 1 : 0,
     });
@@ -369,15 +530,16 @@ async function buildBenchmarkRows(input: {
 
 function buildR399ProxyValues(input: {
   biomarkerRow: TsvRow;
+  config: R399MidusCohortConfig;
   surveyRow: TsvRow;
 }): Record<typeof R399_PROXY_FEATURE_KEYS[number], number | null> {
   return {
-    bmi: parseMetricValue(input.biomarkerRow.B4PBMI),
-    "diabetes-history-proxy-yes": parseYesNo(input.surveyRow.B1SA11X),
-    "hypertension-history-proxy-yes": parseYesNo(input.surveyRow.B1PA24),
-    "physical-activity-proxy": parsePhysicalActivityProxy(input.surveyRow),
-    "self-rated-health": parseLikert(input.surveyRow.B1PA1, { max: 5, min: 1 }),
-    "smoking-status-proxy": parseSmokingStatusProxy(input.surveyRow),
+    bmi: parseMetricValue(input.biomarkerRow[input.config.biomarker.bmiColumn]),
+    "diabetes-history-proxy-yes": parseYesNo(input.surveyRow[input.config.survey.diabetesColumn]),
+    "hypertension-history-proxy-yes": parseYesNo(input.surveyRow[input.config.survey.hypertensionColumn]),
+    "physical-activity-proxy": parsePhysicalActivityProxy(input.surveyRow, input.config),
+    "self-rated-health": parseLikert(input.surveyRow[input.config.survey.selfRatedHealthColumn], { max: 5, min: 1 }),
+    "smoking-status-proxy": parseSmokingStatusProxy(input.surveyRow, input.config),
   };
 }
 
@@ -509,19 +671,20 @@ function summarizeModel(
 }
 
 function buildIncrementEvaluationCard(input: {
+  config: R399MidusCohortConfig;
   dataShape: R399Midus2BiomarkerIncrementOutput["dataShape"];
   models: R399Midus2BiomarkerIncrementOutput["models"];
 }): MurphAgeIncrementEvaluationCard {
   const anchorMetrics = input.models.r399_anchor_recalibrated?.splitMetrics.test;
   const candidateMetrics = input.models.r399_plus_lab3_bmi_increment?.splitMetrics.test;
   if (!anchorMetrics || !candidateMetrics) {
-    throw new Error("R399 MIDUS 2 biomarker increment card requires anchor and candidate test metrics.");
+    throw new Error(`R399 ${input.config.label} biomarker increment card requires anchor and candidate test metrics.`);
   }
   const testSplit = input.dataShape.splitCounts.test;
   return {
     anchorCardId: R399_RESEARCH_CARD_ID,
-    candidateBatchId: "r399-midus2-first-biomarker-increment-batch",
-    candidateId: "r399-plus-lab3-bmi-increment",
+    candidateBatchId: input.config.batchId,
+    candidateId: input.config.candidateId,
     evaluation: {
       aggregateMetricDeltas: {
         aucDelta: nullableMetricDelta(candidateMetrics.auc, anchorMetrics.auc),
@@ -564,14 +727,17 @@ function buildIncrementEvaluationCard(input: {
   };
 }
 
-function assertIncrementEvaluationCardBoundary(card: MurphAgeIncrementEvaluationCard): void {
-  const boundary = card.outputBoundary;
+function assertIncrementEvaluationCardBoundary(input: {
+  card: MurphAgeIncrementEvaluationCard;
+  config: R399MidusCohortConfig;
+}): void {
+  const boundary = input.card.outputBoundary;
   if (
-    card.productAuthorized !== false
-    || card.scoreBearing !== false
-    || card.scoreContributionAuthorized !== false
-    || card.flatteningAuthorized !== false
-    || card.evaluation.sameDenominator !== true
+    input.card.productAuthorized !== false
+    || input.card.scoreBearing !== false
+    || input.card.scoreContributionAuthorized !== false
+    || input.card.flatteningAuthorized !== false
+    || input.card.evaluation.sameDenominator !== true
     || boundary.aggregateOnly !== true
     || boundary.coefficientsExportAllowed !== false
     || boundary.localArtifactPathExportAllowed !== false
@@ -584,7 +750,7 @@ function assertIncrementEvaluationCardBoundary(card: MurphAgeIncrementEvaluation
     || boundary.sourceTextExportAllowed !== false
     || boundary.splitMembershipExportAllowed !== false
   ) {
-    throw new Error("R399 MIDUS 2 biomarker increment card must remain aggregate-only and research-only.");
+    throw new Error(`R399 ${input.config.label} biomarker increment card must remain aggregate-only and research-only.`);
   }
 }
 
@@ -733,24 +899,22 @@ function parseYesNo(value: string | undefined): 0 | 1 | null {
   return null;
 }
 
-function parseSmokingStatusProxy(row: TsvRow): number | null {
-  const everRegular = parseYesNo(row.B1PA38A);
-  const nowRegular = parseYesNo(row.B1PA39);
+function parseSmokingStatusProxy(row: TsvRow, config: R399MidusCohortConfig): number | null {
+  const everRegular = parseYesNo(row[config.survey.smokingEverColumn]);
+  const nowRegular = parseYesNo(row[config.survey.smokingNowColumn]);
   if (everRegular === 0) return 0;
   if (everRegular === 1 && nowRegular === 0) return 1;
   if (everRegular === 1 && nowRegular === 1) return 2;
   return null;
 }
 
-function parsePhysicalActivityProxy(row: TsvRow): number | null {
-  const vigorousKeys = ["B1SA30A", "B1SA30B", "B1SA30C", "B1SA30D", "B1SA30E", "B1SA30F"] as const;
-  const moderateKeys = ["B1SA31A", "B1SA31B", "B1SA31C", "B1SA31D", "B1SA31E", "B1SA31F"] as const;
+function parsePhysicalActivityProxy(row: TsvRow, config: R399MidusCohortConfig): number | null {
   const values: number[] = [];
-  for (const key of vigorousKeys) {
+  for (const key of config.survey.vigorousActivityColumns) {
     const parsed = parseActivityFrequency(row[key]);
     if (parsed !== null) values.push(parsed * 2);
   }
-  for (const key of moderateKeys) {
+  for (const key of config.survey.moderateActivityColumns) {
     const parsed = parseActivityFrequency(row[key]);
     if (parsed !== null) values.push(parsed);
   }

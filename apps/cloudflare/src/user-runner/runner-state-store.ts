@@ -3,7 +3,6 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedWorkspaceInvocationReason,
-  HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
@@ -400,17 +399,6 @@ export class RunnerStateStore {
     });
   }
 
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; this path is intentionally inert.
-   */
-  async recordActiveInvocationContainerStopped(_input?: unknown): Promise<{ recorded: false; record: RunnerStateRecord }> {
-    return {
-      recorded: false,
-      record: this.readStateFromMetaSync(this.requireMetaRowSync()),
-    };
-  }
-
   async clearStaleInvocationIfExpired(_input?: unknown): Promise<RunnerExpiredActiveRunResult> {
     return await this.clearExpiredWriteFence(Date.now());
   }
@@ -425,28 +413,6 @@ export class RunnerStateStore {
 
   async consumeDueRunnerAlarmAndDecide(_input?: unknown): Promise<RunnerDueWork> {
     return await this.readDueWork(Date.now());
-  }
-
-  async scheduleIdleShutdownCheckpointIfStillQuiet(input: {
-    checkpointNextWakeAt?: string | null;
-    dueAt: string;
-    workspaceVersion: string;
-  }): Promise<RunnerStateRecord> {
-    return await this.scheduleIdleCheckpoint(input);
-  }
-
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; this path is intentionally inert.
-   */
-  async recordActiveInvocationHeartbeatInstruction(_input?: unknown): Promise<{
-    ok: false;
-    reason: "no_active_invocation";
-  }> {
-    return {
-      ok: false,
-      reason: "no_active_invocation",
-    };
   }
 
   async clearWriteFenceForUserDeletion(userId: string): Promise<{
@@ -504,30 +470,6 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async scheduleIdleCheckpoint(input: {
-    checkpointNextWakeAt?: string | null;
-    dueAt: string;
-    workspaceVersion: string;
-  }): Promise<RunnerStateRecord> {
-    void input;
-    return this.readStateFromMetaSync(this.requireMetaRowSync());
-  }
-
-  async clearIdleCheckpoint(): Promise<RunnerStateRecord> {
-    return this.readStateFromMetaSync(this.requireMetaRowSync());
-  }
-
-  async markDeferredCheckpointRequired(input: {
-    redactedStatus: HostedRuntimeRedactedJson | null;
-  }): Promise<RunnerStateRecord> {
-    void input;
-    return this.readStateFromMetaSync(this.requireMetaRowSync());
-  }
-
-  async clearDeferredCheckpointRequired(): Promise<RunnerStateRecord> {
-    return this.readStateFromMetaSync(this.requireMetaRowSync());
-  }
-
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {
     return this.readWriteFenceTokenSync(this.requireMetaRowSync());
   }
@@ -564,28 +506,6 @@ export class RunnerStateStore {
     };
   }
 
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use `validateWriteFenceToken`.
-   */
-  async ownsActiveInvocationLease(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion?: string | null;
-  }): Promise<RunnerWriteFenceValidationResult & { clearedOrphanObservation: false }> {
-    const result = await this.validateWriteFenceToken({
-      attemptId: input.attemptId,
-      generation: input.leaseGeneration,
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    });
-    return {
-      ...result,
-      clearedOrphanObservation: false,
-    };
-  }
-
   async recordWriteFenceWorkspaceCheckpoint(input: {
     attemptId: string;
     generation: string;
@@ -612,25 +532,6 @@ export class RunnerStateStore {
       recorded: true,
       record: this.readStateFromMetaSync(meta),
     };
-  }
-
-  /**
-   * Legacy active-invocation compatibility around the write fence.
-   * Delete after 2026-05-25; live code must use
-   * `recordWriteFenceWorkspaceCheckpoint`.
-   */
-  async recordActiveInvocationWorkspaceCheckpoint(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean; record: RunnerStateRecord }> {
-    return await this.recordWriteFenceWorkspaceCheckpoint({
-      attemptId: input.attemptId,
-      generation: input.leaseGeneration,
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    });
   }
 
   private clearExpiredActiveRunSync(meta: RunnerMetaBundleRow, nowMs: number): boolean {
