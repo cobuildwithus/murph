@@ -16,7 +16,7 @@ import {
 } from "../hosted-email.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
-  requireRunnerRuntimeWriteFence,
+  requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
 import {
@@ -121,7 +121,7 @@ async function handleRunnerEmailSendRequest(input: {
   userId: string;
 }): Promise<Response> {
   try {
-    const ownsWriteFence = await requestOwnsRuntimeWriteFence({
+    const ownsWriteFence = await requestOwnsRuntimeWriteFenceWrite({
       env: input.env,
       request: input.request,
       userId: input.userId,
@@ -160,13 +160,13 @@ async function handleRunnerEmailSendRequest(input: {
   }
 }
 
-async function requestOwnsRuntimeWriteFence(input: {
+async function requestOwnsRuntimeWriteFenceWrite(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
 }): Promise<boolean> {
   try {
-    await requireRunnerRuntimeWriteFence({
+    await requireRunnerRuntimeWriteFenceWrite({
       env: input.env,
       request: input.request,
       userId: input.userId,

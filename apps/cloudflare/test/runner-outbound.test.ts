@@ -1241,7 +1241,7 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("authorizes email sends after live lease validation", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
+      activeWorkspaceVersion: "4",
     });
     const emailSendMock = vi.fn(async () => undefined);
 
@@ -1272,7 +1272,55 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
     expect(emailSendMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects email sends when the workspace version does not match the write fence", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      activeWorkspaceVersion: "5",
+    });
+    const emailSendMock = vi.fn(async () => undefined);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          identityId: "assistant@mail.example.test",
+          message: "hello",
+          target: "assistant@example.com",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: {
+          send: emailSendMock,
+        },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(emailSendMock).not.toHaveBeenCalled();
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {
