@@ -8,6 +8,9 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import type {
@@ -18,9 +21,9 @@ import {
 } from "./hosted-execution-fixtures.ts";
 
 const WRITE_FENCE_HEADERS = {
-  "x-hosted-runtime-attempt-id": "attempt_1",
-  "x-hosted-runtime-lease-generation": "7",
-  "x-hosted-runtime-workspace-version": "4",
+  [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
+  [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "7",
+  [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "4",
 } as const;
 const BOUND_USER_WRITE_FENCE_HEADERS = {
   ...WRITE_FENCE_HEADERS,
@@ -290,18 +293,17 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects Mapbox access tokens only for allowed GET path families", async () => {
+  it("injects Mapbox access tokens only for allowed GET path families with a valid runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("Mapbox credential injection must not require a runtime write fence.");
-    });
+    const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       new Request(
         `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         {
           headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
             authorization: "Bearer user-supplied-mapbox-token",
             cookie: "session=user-supplied-cookie",
             "proxy-authorization": "Bearer user-supplied-proxy-token",
@@ -318,7 +320,12 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
     const forwarded = readForwardedRequest(fetchMock);
     const forwardedUrl = new URL(forwarded.url);
     expect(forwardedUrl.origin).toBe("https://api.mapbox.com");
@@ -332,7 +339,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("injects Mapbox access tokens without an active runtime write fence", async () => {
+  it("rejects Mapbox token injection without a valid runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -349,10 +356,8 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(200);
-    const forwarded = readForwardedRequest(fetchMock);
-    const forwardedUrl = new URL(forwarded.url);
-    expect(forwardedUrl.searchParams.get("access_token")).toBe("mapbox-worker-secret");
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects Mapbox token injection outside the canonical HTTPS origin", async () => {

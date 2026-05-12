@@ -427,6 +427,23 @@ describe("runSmokeHostedDeploy", () => {
     );
   });
 
+  it("requires a smoke user before running the OpenAI intercept smoke", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => {
+        throw new Error("OpenAI intercept user precondition should fail before deploy smoke requests.");
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
+        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_USER_ID.",
+    );
+  });
+
   it("requires status auth before running the OpenAI intercept smoke", async () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: async () => {
@@ -441,6 +458,44 @@ describe("runSmokeHostedDeploy", () => {
       },
     })).rejects.toThrow(
       "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN.",
+    );
+  });
+
+  it("checks authenticated status before running the OpenAI intercept smoke", async () => {
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/status")) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
+        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("Hosted execution status check failed with HTTP 401.");
+    expect(fetchCalls).not.toContain(
+      "https://worker.example.test/internal/deploy/container-smoke?openAiIntercept=1",
     );
   });
 
