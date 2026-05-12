@@ -36,6 +36,9 @@ import type {
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
+import {
+  HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+} from "../src/runner-outbound/headers.ts";
 
 const cleanupPaths: string[] = [];
 
@@ -280,6 +283,9 @@ describe("runHostedExecutionChild", () => {
       );
       expect(requestObject.headers.get("x-hosted-runtime-lease-generation")).toBe("7");
       expect(requestObject.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+      expect(requestObject.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
+        "u_workspace_decode",
+      );
 
       return new Response(JSON.stringify({
         status: "decoded",

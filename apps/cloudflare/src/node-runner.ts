@@ -1,13 +1,7 @@
-import path from "node:path";
-
 import {
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import {
-  readHostedRunnerCommitTimeoutMs,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
   buildHostedRunnerAmbientEnv,
@@ -23,31 +17,8 @@ import {
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
-  buildHostedExecutionRuntimePlatform,
-  createCloudflareHostedProviderFetch,
-  type HostedWorkspaceCheckpointBridgeAuthority,
-} from "./runtime-platform.ts";
-import {
-  createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
-  createHostedWorkspaceRuntimeBridgeJobOptions,
-} from "./runtime-bridge-workspace.ts";
-import {
-  createCloudflareHostedMailboxPayloadDecoder,
-} from "./runtime-bridge-mailbox-payload-decode.ts";
-import type { HostedRuntimeBridgeCheckpointLease } from "./runtime-bridge-checkpoint.ts";
-import {
-  readHostedExecutionRunnerJobUserId,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
-import {
-  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
-  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
-} from "./internal-hosts.ts";
-import {
-  LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-} from "./web-control-plane.ts";
-
-export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
 export interface HostedWorkspaceInvocationOptions {
   signal?: AbortSignal;
@@ -55,20 +26,11 @@ export interface HostedWorkspaceInvocationOptions {
 
 export interface HostedWorkspaceInvocationRunnerDependencies {
   buildRuntime?: typeof buildHostedExecutionJobRuntime;
-  buildRuntimePlatform?: typeof buildHostedExecutionRuntimePlatform;
   onBeforeRun?: () => void;
-  runWorkspaceInProcess?: typeof runHostedWorkspaceRuntimeJobInProcess;
   runIsolated?: (
     input: HostedExecutionIsolatedRunnerInput,
     options?: { signal?: AbortSignal },
   ) => Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-  runMode?: HostedWorkspaceInvocationMode;
-  readWorkspaceBridgeLease?: (
-    input: HostedExecutionWorkspaceInvocationJobInput,
-  ) =>
-    | HostedRuntimeBridgeCheckpointLease
-    | null
-    | Promise<HostedRuntimeBridgeCheckpointLease | null>;
 }
 
 export interface HostedWorkspaceInvocationRunner {
@@ -131,14 +93,9 @@ export function createHostedWorkspaceInvocationRunner(
   dependencies: HostedWorkspaceInvocationRunnerDependencies = {},
 ) {
   const buildRuntime = dependencies.buildRuntime ?? buildHostedExecutionJobRuntime;
-  const buildRuntimePlatform =
-    dependencies.buildRuntimePlatform ?? buildHostedExecutionRuntimePlatform;
   const onBeforeRun = dependencies.onBeforeRun;
-  const runWorkspaceInProcess =
-    dependencies.runWorkspaceInProcess ?? runHostedWorkspaceRuntimeJobInProcess;
   const runIsolated =
     dependencies.runIsolated ?? runHostedWorkspaceInvocationIsolatedDetailed;
-  const runMode = dependencies.runMode ?? "isolated";
 
   async function runHostedWorkspaceInvocation(
     input: HostedExecutionWorkspaceInvocationJobInput,
@@ -150,50 +107,6 @@ export function createHostedWorkspaceInvocationRunner(
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
     onBeforeRun?.();
     const runtime = buildRuntime(input.runtime ?? {});
-    const boundUserId = readHostedExecutionRunnerJobUserId(input);
-    if (runMode === "in-process") {
-      const workspaceCheckpointBridge = createHostedWorkspaceCheckpointBridgeAuthority({
-        input,
-        readWorkspaceBridgeLease: dependencies.readWorkspaceBridgeLease,
-      });
-      const runtimePlatform = buildRuntimePlatform({
-        boundUserId,
-        commitTimeoutMs: runtime.commitTimeoutMs,
-        workspaceCheckpointBridge,
-      });
-      const webControlFetch = createCloudflareHostedProviderFetch(
-        boundUserId,
-        fetch,
-        {
-          readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        },
-      );
-      const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
-        fetchImpl: webControlFetch,
-        readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        timeoutMs: readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs ?? null),
-      });
-      const runtimeBridgeJobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
-        decodeMailboxPayload,
-        platform: runtimePlatform,
-        readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        requireMailboxPayloadDecoder: true,
-        request: input.request,
-        runtime,
-        vaultRoot: resolveHostedWorkspaceInProcessVaultRoot(),
-        webControlAllowHttpHosts: [
-          CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-          ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-        ],
-        webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-        webControlFetch,
-      });
-
-      return await runWorkspaceInProcess({
-        request: input.request,
-        runtime,
-      }, runtimeBridgeJobOptions);
-    }
 
     return await runIsolated({
       job: {
@@ -206,35 +119,3 @@ export function createHostedWorkspaceInvocationRunner(
 }
 
 export const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
-
-function resolveHostedWorkspaceInProcessVaultRoot(): string {
-  const vaultRoot = process.env.VAULT?.trim();
-  if (!vaultRoot) {
-    throw new TypeError("Hosted workspace in-process runner requires an explicit VAULT path.");
-  }
-
-  if (!path.isAbsolute(vaultRoot)) {
-    throw new TypeError("Hosted workspace in-process runner VAULT path must be absolute.");
-  }
-
-  return vaultRoot;
-}
-
-function createHostedWorkspaceCheckpointBridgeAuthority(input: {
-  input: HostedExecutionWorkspaceInvocationJobInput;
-  readWorkspaceBridgeLease: HostedWorkspaceInvocationRunnerDependencies["readWorkspaceBridgeLease"];
-}): HostedWorkspaceCheckpointBridgeAuthority {
-  let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.input.request);
-  return {
-    readCurrentLease: async () =>
-      await (input.readWorkspaceBridgeLease
-        ? input.readWorkspaceBridgeLease(input.input)
-        : currentLease),
-    recordCheckpoint: ({ workspaceVersion }) => {
-      currentLease = {
-        ...currentLease,
-        workspaceVersion,
-      };
-    },
-  };
-}
