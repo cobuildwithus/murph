@@ -40,6 +40,7 @@ import {
   normalizeExperimentMeasurementAnchorFlagOption,
   normalizeExperimentPlannedMeasurementFlagOption,
   normalizeRepeatableFlagOption,
+  normalizeRepeatableTextFlagOption,
 } from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
@@ -1270,10 +1271,7 @@ export function registerExperimentCommands(
             options.confounderField,
             'confounder-field',
           ),
-          stopCondition: normalizeRepeatableFlagOption(
-            options.stopCondition,
-            'stop-condition',
-          ),
+          stopCondition: normalizeRepeatableTextFlagOption(options.stopCondition),
           secondaryBiomarkerKey: normalizeRepeatableFlagOption(
             options.secondaryBiomarkerKey,
             'secondary-biomarker-key',
@@ -1284,10 +1282,7 @@ export function registerExperimentCommands(
           ),
           analysisAnchor: options.analysisAnchor,
           plannedMeasurement: options.plannedMeasurement,
-          analysisNote: normalizeRepeatableFlagOption(
-            options.analysisNote,
-            'analysis-note',
-          ),
+          analysisNote: normalizeRepeatableTextFlagOption(options.analysisNote),
         },
       })
 
@@ -1700,10 +1695,7 @@ export function registerExperimentCommands(
           options.confounderField,
           'confounder-field',
         ),
-        stopCondition: normalizeRepeatableFlagOption(
-          options.stopCondition,
-          'stop-condition',
-        ),
+        stopCondition: normalizeRepeatableTextFlagOption(options.stopCondition),
         primaryBiomarkerKey: options.primaryBiomarkerKey,
         secondaryBiomarkerKey: normalizeRepeatableFlagOption(
           options.secondaryBiomarkerKey,
@@ -1716,10 +1708,7 @@ export function registerExperimentCommands(
         ),
         analysisAnchor: options.analysisAnchor,
         plannedMeasurement: options.plannedMeasurement,
-        analysisNote: normalizeRepeatableFlagOption(
-          options.analysisNote,
-          'analysis-note',
-        ),
+        analysisNote: normalizeRepeatableTextFlagOption(options.analysisNote),
         onboardingCompletedAt: options.onboardingCompletedAt,
         setupAnswer: normalizeSetupAnswerOptions(options.setupAnswer),
         safetyCautionLevel: options.safetyCautionLevel,
@@ -1728,8 +1717,8 @@ export function registerExperimentCommands(
           options.positiveQuestionId,
           'positive-question-id',
         ),
-        safetyNote: normalizeRepeatableFlagOption(options.safetyNote, 'safety-note'),
-        contextNote: normalizeRepeatableFlagOption(options.contextNote, 'context-note'),
+        safetyNote: normalizeRepeatableTextFlagOption(options.safetyNote),
+        contextNote: normalizeRepeatableTextFlagOption(options.contextNote),
         reminderPolicy: options.reminderPolicy,
         reminderOptionId: options.reminderOptionId,
         remindersEnabled: options.remindersEnabled,

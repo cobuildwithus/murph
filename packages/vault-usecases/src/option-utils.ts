@@ -54,6 +54,12 @@ export function normalizeRepeatableFlagOption(
   return normalizeRepeatedOption(value)
 }
 
+export function normalizeRepeatableTextFlagOption(
+  value: readonly string[] | undefined,
+): string[] | undefined {
+  return normalizeRepeatedOption(value)
+}
+
 export function normalizeRepeatableEnumFlagOption<TValue extends string>(
   value: readonly string[] | undefined,
   optionName: string,
