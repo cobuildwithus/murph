@@ -197,6 +197,8 @@ interface HostedMailboxPostCheckpointEffectsResult {
   succeeded: number;
 }
 
+const HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS = 15_000;
+
 export interface HostedWorkspaceRunnerResult {
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -489,6 +491,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           input: input.input,
           phase: "active_turn_input",
+          signal: controller.signal,
         });
         await notifyHostedActiveTurnInputForMailboxImport({
           input: input.input,
@@ -528,6 +531,10 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   }
 
   const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
+  const conversationsByKey = new Map<
+    string,
+    ReturnType<typeof conversationRefFromAssistantInputConversation>
+  >();
   for (const inputId of inputIds) {
     const event = await readAssistantInputEvent({
       inputId,
@@ -537,8 +544,16 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
       continue;
     }
 
+    const conversation = conversationRefFromAssistantInputConversation(event.conversation);
+    conversationsByKey.set(
+      formatHostedActiveTurnConversationNotificationKey(conversation),
+      conversation,
+    );
+  }
+
+  for (const conversation of conversationsByKey.values()) {
     await notifyAssistantActiveTurnInputAvailable({
-      conversation: conversationRefFromAssistantInputConversation(event.conversation),
+      conversation,
       signal: input.signal,
       vault: input.input.vaultRoot,
     }).catch((error: unknown) => {
@@ -548,6 +563,20 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
       });
     });
   }
+}
+
+function formatHostedActiveTurnConversationNotificationKey(
+  conversation: ReturnType<typeof conversationRefFromAssistantInputConversation>,
+): string {
+  return [
+    conversation.alias ?? "",
+    conversation.channel ?? "",
+    conversation.directness ?? "",
+    conversation.identityId ?? "",
+    conversation.participantId ?? "",
+    conversation.sessionId ?? "",
+    conversation.threadId ?? "",
+  ].join("\u0000");
 }
 
 export async function importHostedMailboxForWorkspaceRunner(input: {
@@ -828,6 +857,10 @@ function createHostedWorkspaceCheckpointRequestSession(
 
 async function runHostedMailboxPostCheckpointEffectsBestEffort(
   effects: readonly HostedMailboxPostCheckpointEffect[],
+  input: {
+    signal?: AbortSignal | null;
+    timeoutMs?: number | null;
+  } = {},
 ): Promise<HostedMailboxPostCheckpointEffectsResult> {
   const effectAttachmentEvidenceUpdated: Array<boolean | null> = [];
   const effectKinds: Array<HostedMailboxPostCheckpointEffectResult["kind"]> = [];
@@ -843,7 +876,7 @@ async function runHostedMailboxPostCheckpointEffectsBestEffort(
   let succeeded = 0;
   for (const effect of effects) {
     try {
-      const result = await effect();
+      const result = await runHostedMailboxPostCheckpointEffectBestEffort(effect, input);
       effectAttachmentEvidenceUpdated.push(result.attachmentEvidenceUpdated);
       effectKinds.push(result.kind);
       effectProjectionUpdated.push(result.projectionUpdated);
@@ -891,6 +924,60 @@ async function runHostedMailboxPostCheckpointEffectsBestEffort(
     partial,
     succeeded,
   };
+}
+
+async function runHostedMailboxPostCheckpointEffectBestEffort(
+  effect: HostedMailboxPostCheckpointEffect,
+  input: {
+    signal?: AbortSignal | null;
+    timeoutMs?: number | null;
+  },
+): Promise<HostedMailboxPostCheckpointEffectResult> {
+  const signal = input.signal ?? null;
+  const timeoutMs = input.timeoutMs ?? null;
+  if (!signal && !timeoutMs) {
+    return await effect();
+  }
+  if (signal?.aborted) {
+    throw readHostedForegroundRuntimeWakeAbortReason(signal);
+  }
+
+  return await new Promise<HostedMailboxPostCheckpointEffectResult>((resolve, reject) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      signal?.removeEventListener("abort", abort);
+    };
+    const settle = (finish: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      finish();
+    };
+    const abort = () => {
+      settle(() => reject(readHostedForegroundRuntimeWakeAbortReason(signal)));
+    };
+    if (timeoutMs && timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        settle(() =>
+          reject(Object.assign(
+            new Error("Hosted mailbox post-checkpoint effect timed out."),
+            { code: "HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT" },
+          ))
+        );
+      }, timeoutMs);
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    effect().then(
+      (result) => settle(() => resolve(result)),
+      (error) => settle(() => reject(error)),
+    );
+  });
 }
 
 function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
@@ -990,12 +1077,17 @@ async function runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffo
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
   phase: "active_turn_input" | "import";
+  signal?: AbortSignal | null;
 }): Promise<void> {
   const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
   await runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
     effects,
     input: input.input,
     phase: input.phase,
+    signal: input.signal ?? input.input.signal ?? null,
+    timeoutMs: input.phase === "active_turn_input"
+      ? HOSTED_FOREGROUND_PROMPT_PREP_EFFECT_TIMEOUT_MS
+      : null,
   });
 }
 
@@ -1003,13 +1095,18 @@ async function runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort(input:
   effects: readonly HostedMailboxPostCheckpointEffect[];
   input: HostedWorkspaceRunnerInput;
   phase: "active_turn_input" | "import";
+  signal?: AbortSignal | null;
+  timeoutMs?: number | null;
 }): Promise<void> {
   const effects = input.effects;
   if (effects.length === 0) {
     return;
   }
 
-  const result = await runHostedMailboxPostCheckpointEffectsBestEffort(effects);
+  const result = await runHostedMailboxPostCheckpointEffectsBestEffort(effects, {
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
   if (!result.attempted) {
     return;
   }

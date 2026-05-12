@@ -579,7 +579,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
       await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
     }
-    const mailboxImportRetryAt = result.initialMailboxImport.importResult.nextRetryAt ?? null;
+    const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
     const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
       assistantPhaseResult: result.assistantPhaseResult,
       committedWorkspace,

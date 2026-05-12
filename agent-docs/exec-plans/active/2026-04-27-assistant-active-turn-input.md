@@ -15,9 +15,9 @@ Success criteria:
 - OpenAI Responses-backed providers can continue the same logical turn through
   provider state (`previousResponseId`) when allowed, or explicit history when
   provider state is disabled.
-- Hosted Cloudflare execution supports the same primitive by refreshing and
-  checkpointing mailbox input at active-turn boundaries, not only before
-  delivery.
+- Hosted Cloudflare execution supports the same primitive by importing late
+  conversation mailbox input inside the active foreground runtime and notifying
+  active-turn admission, not only before delivery.
 - The old `before_delivery` revision hook and revision exception are removed
   from the intended path after the hosted mailbox/checkpoint hard cut is stable.
 
@@ -140,11 +140,11 @@ hard cut, not as a blocker for it:
 - Move usage persistence to each successful provider request and add
   `providerRequestOrdinal` to canonical usage ids/records so same logical turns
   can bill/audit multiple successful provider calls without id collisions.
-- Rename hosted mailbox refresh from a before-delivery hook to the neutral
-  `refreshMailboxForActiveTurnInput` port. Hosted runtime now imports and
-  checkpoints conversation mailbox input at the assistant engine
-  `after_provider` request-boundary refresh, with checkpoint/log reason
-  `active_turn_input`.
+- Superseded the interim hosted active-turn refresh/checkpoint port with the
+  foreground hosted runtime wake path: Cloudflare only sends a payloadless wake,
+  the active workspace runner imports the conversation mailbox lane with log
+  reason `active_turn_input`, and assistant-engine admits staged input through
+  the normal store-backed source.
 - Keep Cloudflare/web as thin mailbox/workspace/control-plane adapters. No
   Cloudflare-local active-turn queue, peek/adopt protocol, or provider-specific
   steering semantics were added.

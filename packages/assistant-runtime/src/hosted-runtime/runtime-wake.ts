@@ -5,22 +5,36 @@ export interface RuntimeWakeSignal {
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let pending = false;
+  let flushScheduled = false;
   const waiters = new Set<() => void>();
+  const flushWaiters = () => {
+    flushScheduled = false;
+    if (!pending) {
+      return;
+    }
+
+    pending = false;
+    const ready = [...waiters];
+    waiters.clear();
+    for (const wake of ready) {
+      wake();
+    }
+  };
 
   return {
     notify() {
       pending = true;
-      const ready = [...waiters];
-      waiters.clear();
-      for (const wake of ready) {
-        wake();
+      if (waiters.size > 0 && !flushScheduled) {
+        flushScheduled = true;
+        // Collapse same-tick wake bursts into one foreground mailbox import.
+        queueMicrotask(flushWaiters);
       }
     },
     wait(signal?: AbortSignal | null) {
       if (signal?.aborted) {
         return Promise.reject(readRuntimeWakeAbortReason(signal));
       }
-      if (pending) {
+      if (pending && waiters.size === 0) {
         pending = false;
         return Promise.resolve();
       }
@@ -40,7 +54,6 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
           finish();
         };
         const resolveWake = () => {
-          pending = false;
           settle(resolve);
         };
         const abort = () => {

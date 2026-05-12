@@ -10,7 +10,9 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
+  createAssistantActiveTurnInputController,
   createAssistantOutboxIntent,
+  upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import type {
   HostedMailboxFetchRequest,
@@ -1369,6 +1371,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const admissions: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -1389,7 +1392,27 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem(item) {
           importedSeqs.push(item.item.laneSeq);
           events.push(`import:${item.item.laneSeq}`);
-          return { status: "imported" };
+          if (item.item.laneSeq === "1") {
+            return { status: "imported" };
+          }
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `late same-conversation input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            afterCheckpoint: item.item.laneSeq === "2"
+              ? async () => {
+                throw Object.assign(new Error("projection failed before active-turn notification"), {
+                  code: "PROJECTION_UNAVAILABLE",
+                });
+              }
+              : null,
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
         },
         limitPerLane: 10,
         platform: createPlatform({
@@ -1406,17 +1429,40 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase() {
           events.push("assistant:start");
+          const controller = createAssistantActiveTurnInputController({
+            admissionHook: async (input) => {
+              admissions.push(input.phase);
+              return {
+                kind: "no-new-input",
+              };
+            },
+            conversationKeys: ["channel:linq|identity:acct_1|thread:thread_1"],
+            sessionId: "session-runner-active-turn",
+            turnId: "turn-runner-active-turn",
+            vault: vaultRoot,
+          });
           items.push(createMailboxItem({
             id: "mailbox_item_runner_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
-          runtimeWakeSignal.notify();
-          await waitForCondition(() => importedSeqs.includes("2"));
-          return {
-            checkpointReason: "canonical_runtime_commit",
-            progressed: true,
-          };
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_second",
+            laneSeq: "3",
+            occurredAt: "2026-04-26T00:00:03.000Z",
+          }));
+          try {
+            runtimeWakeSignal.notify();
+            runtimeWakeSignal.notify();
+            await waitForCondition(() => importedSeqs.includes("3"));
+            await waitForCondition(() => admissions.length === 1);
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          } finally {
+            controller.close();
+          }
         },
         vaultRoot,
         workspace: createWorkspaceState({ version: "0" }),
@@ -1427,10 +1473,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "import:1",
         "assistant:start",
         "import:2",
+        "import:3",
       ]);
-      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(importedSeqs, ["1", "2", "3"]);
+      assert.deepEqual(admissions, ["input_available"]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
@@ -1454,7 +1502,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         leaseGeneration: "4",
         level: "info",
         mailboxLane: "conversation",
-        mailboxSeqEnd: "2",
+        mailboxSeqEnd: "3",
         mailboxSeqStart: "1",
         phase: "active_turn_input",
         redactedJson: {
@@ -1462,10 +1510,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           blockedCount: 0,
           checkpointDeferred: true,
           checkpointed: false,
-          conversationSeqEnd: "2",
+          conversationSeqEnd: "3",
           conversationSeqStart: "1",
-          fetchedCount: 1,
-          importedCount: 1,
+          fetchedCount: 2,
+          importedCount: 2,
           laneCount: 1,
           retryableBlockedCount: 0,
           stateChanged: true,
@@ -2870,6 +2918,48 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
     updatedAt: TEST_NOW,
     userId: TEST_USER_ID,
     ...overrides,
+  };
+}
+
+function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, text: string) {
+  return {
+    content: {
+      text,
+      transcriptText: text,
+      userMessageContent: [
+        {
+          text,
+          type: "text" as const,
+        },
+      ],
+    },
+    conversation: {
+      accountId: "acct_1",
+      actorId: "actor_1",
+      actorIsSelf: false,
+      source: "linq",
+      threadId: "thread_1",
+      threadIsDirect: true,
+    },
+    occurredAt: item.occurredAt,
+    receivedAt: item.createdAt,
+    replyTarget: {
+      channel: "linq",
+      messageId: `msg_${item.id}`,
+      threadId: "thread_1",
+    },
+    sourceRef: {
+      dedupeKey: item.dedupeKey,
+      eventId: item.dedupeKey,
+      itemId: item.id,
+      kind: "hosted-mailbox" as const,
+      lane: "conversation" as const,
+      laneSeq: item.laneSeq,
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadSource: item.payloadInlineCiphertext ? "inline" as const : "sidecar" as const,
+      source: "hosted-mailbox" as const,
+      wakeSchema: "murph.hosted-execution-wake.v1",
+    },
   };
 }
 
