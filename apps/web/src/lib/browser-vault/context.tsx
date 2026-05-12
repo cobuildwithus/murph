@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { type BrowserVaultQueryClient } from "@murphai/query/browser";
+import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";

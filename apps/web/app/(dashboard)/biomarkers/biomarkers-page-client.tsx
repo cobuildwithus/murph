@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type {
   BrowserVaultMetricSelectionRow,
   BrowserVaultQueryClient,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-biomarkers";
 
 import {
   BiomarkerBrowseCard,

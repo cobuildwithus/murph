@@ -5,7 +5,7 @@ import {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   isActiveOverviewExperimentStatus,
   selectBrowserVaultOverview,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-overview";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";

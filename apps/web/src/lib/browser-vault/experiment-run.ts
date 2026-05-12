@@ -7,7 +7,7 @@ import {
   type BrowserVaultExperimentResultsView,
   type BrowserVaultExperimentScheduleResult,
   type BrowserVaultQueryClient,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-experiments";
 
 import type {
   ExperimentCommonsReference,
@@ -20,7 +20,7 @@ import type {
   TimelineEvent,
   TrendData,
 } from "@/src/types/experiments";
-import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-projections";
+import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
 import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
 
 const FINISHED_EXPERIMENT_STATUSES = new Set([

@@ -55,6 +55,13 @@ interface SmokeRunnerBundleManifest {
   sourceFingerprint?: string;
 }
 
+interface SmokeOpenAiInterceptResult {
+  client?: unknown;
+  model?: unknown;
+  stderrBytes?: unknown;
+  stdoutBytes?: unknown;
+}
+
 interface SmokeRunnerRetryPolicy {
   maxAttempts: number;
   retryDelayMs: number;
@@ -125,6 +132,10 @@ export async function runSmokeHostedDeploy(input: {
     source.HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER,
     false,
   );
+  const shouldSmokeOpenAiIntercept = readBooleanEnv(
+    source.HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT,
+    false,
+  );
   const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
@@ -147,8 +158,12 @@ export async function runSmokeHostedDeploy(input: {
       fetchImpl,
       log,
       source,
-      url: new URL("/internal/deploy/container-smoke", smokeBaseUrl).toString(),
+      url: buildRunnerContainerSmokeUrl({
+        openAiIntercept: shouldSmokeOpenAiIntercept,
+        smokeBaseUrl,
+      }),
       versionOverrideHeaders,
+      expectOpenAiIntercept: shouldSmokeOpenAiIntercept,
     });
   }
 
@@ -180,6 +195,7 @@ export async function runSmokeHostedDeploy(input: {
 }
 
 async function assertRunnerContainerSmoke(input: {
+  expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   log: (message: string) => void;
   source: EnvSource;
@@ -214,6 +230,7 @@ async function assertRunnerContainerSmoke(input: {
 }
 
 async function readRunnerContainerSmoke(input: {
+  expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   source: EnvSource;
   url: string;
@@ -247,6 +264,7 @@ async function readRunnerContainerSmoke(input: {
     ok?: unknown;
     runnerContainer?: {
       ok?: unknown;
+      openAiIntercept?: SmokeOpenAiInterceptResult | null;
       runnerBundle?: SmokeRunnerBundleManifest | null;
       service?: unknown;
     };
@@ -260,7 +278,42 @@ async function readRunnerContainerSmoke(input: {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
+  if (input.expectOpenAiIntercept) {
+    assertSmokeOpenAiInterceptResult(responsePayload.runnerContainer.openAiIntercept);
+  }
+
   return responsePayload.runnerContainer.runnerBundle ?? null;
+}
+
+function buildRunnerContainerSmokeUrl(input: {
+  openAiIntercept: boolean;
+  smokeBaseUrl: string;
+}): string {
+  const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
+  if (input.openAiIntercept) {
+    url.searchParams.set("openAiIntercept", "1");
+  }
+  return url.toString();
+}
+
+function assertSmokeOpenAiInterceptResult(
+  value: SmokeOpenAiInterceptResult | null | undefined,
+): void {
+  if (!value || typeof value !== "object") {
+    throw new Error("runner container smoke did not return OpenAI intercept metadata.");
+  }
+  if (value.client !== "codex") {
+    throw new Error("runner container OpenAI intercept smoke did not use the Codex client.");
+  }
+  if (typeof value.model !== "string" || value.model.length === 0) {
+    throw new Error("runner container OpenAI intercept smoke did not report a model.");
+  }
+  if (typeof value.stdoutBytes !== "number" || value.stdoutBytes <= 0) {
+    throw new Error("runner container OpenAI intercept smoke did not report Codex output.");
+  }
+  if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
+    throw new Error("runner container OpenAI intercept smoke reported invalid stderr bytes.");
+  }
 }
 
 async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<SmokeRunnerBundleManifest> {

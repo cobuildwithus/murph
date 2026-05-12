@@ -1,4 +1,4 @@
-import type { BrowserVaultMetricRow } from "@murphai/query/browser";
+import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
 

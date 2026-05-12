@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { BrowserVaultMetricRow } from "@murphai/query/browser";
+import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";

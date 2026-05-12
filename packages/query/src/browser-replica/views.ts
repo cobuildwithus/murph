@@ -3,13 +3,12 @@ import {
   buildOverviewMetrics,
   type OverviewExperiment,
   summarizeRecentOverviewJournals,
-  summarizeOverviewExperiments,
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
+import { selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica } from "./tracked-experiments.ts";
 import {
   RECENT_JOURNAL_LIMIT,
   TIMELINE_LIMIT,
-  TRACKED_EXPERIMENT_LIMIT,
   type BrowserVaultEntity,
   type BrowserVaultOverviewView,
   type BrowserVaultQueryClient,
@@ -22,7 +21,7 @@ export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): Bro
   return {
     metrics: buildOverviewMetrics(vault),
     recentJournals: summarizeRecentOverviewJournals(vault, RECENT_JOURNAL_LIMIT),
-    trackedExperiments: summarizeOverviewExperiments(vault, TRACKED_EXPERIMENT_LIMIT),
+    trackedExperiments: selectTrackedExperimentsFromReplica(client),
     weeklySampleSummaries: client.replica.weeklySampleSummaries.slice(),
   };
 }
@@ -32,7 +31,7 @@ export function selectBrowserVaultHistory(client: BrowserVaultQueryClient): { ti
 }
 
 export function selectBrowserVaultTrackedExperiments(client: BrowserVaultQueryClient): OverviewExperiment[] {
-  return selectBrowserVaultOverview(client).trackedExperiments;
+  return selectTrackedExperimentsFromReplica(client);
 }
 
 function vaultViewFromReplica(replica: BrowserVaultReplica): VaultReadModel {

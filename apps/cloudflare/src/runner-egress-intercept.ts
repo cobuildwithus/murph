@@ -156,11 +156,6 @@ async function maybeHandleOpenAiRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
@@ -187,11 +182,6 @@ async function maybeHandleMapboxRequest(input: {
   }
   if (!hasQueryCredentialSentinel(input.url, "access_token")) {
     return disallowedProviderEgress();
-  }
-
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");

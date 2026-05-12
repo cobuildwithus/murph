@@ -28,6 +28,8 @@ const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
+const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
+  "http://container/internal/deploy-openai-intercept-smoke";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
@@ -81,7 +83,7 @@ export interface HostedExecutionContainerStubLike {
   destroyInstance(): Promise<void>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
-  smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult>;
+  smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -97,6 +99,12 @@ interface RunnerContainerLogContext {
 
 interface HostedExecutionContainerSmokeHealthResult {
   ok: boolean;
+  openAiIntercept?: {
+    client: string | null;
+    model: string | null;
+    stderrBytes: number | null;
+    stdoutBytes: number | null;
+  } | null;
   runnerBundle: {
     buildSkipped?: boolean;
     bundleFingerprint?: string;
@@ -106,6 +114,10 @@ interface HostedExecutionContainerSmokeHealthResult {
   } | null;
   service: string | null;
   status: number;
+}
+
+interface HostedExecutionContainerSmokeHealthInput {
+  openAiIntercept?: boolean;
 }
 
 interface RunnerActivityTimeoutRenewable {
@@ -209,7 +221,7 @@ export class RunnerContainer extends Container {
     return { ok: true };
   }
 
-  async smokeHealth(): Promise<HostedExecutionContainerSmokeHealthResult> {
+  async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
 
@@ -232,8 +244,13 @@ export class RunnerContainer extends Container {
           throw new Error(`Hosted runner container smoke health failed with HTTP ${response.status}.`);
         }
 
+        const openAiIntercept = input.openAiIntercept === true
+          ? await this.smokeOpenAiIntercept(readyTimeoutMs)
+          : undefined;
+
         return {
           ok: true,
+          ...(openAiIntercept === undefined ? {} : { openAiIntercept }),
           runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
@@ -242,6 +259,42 @@ export class RunnerContainer extends Container {
         await this.stopWarmContainer({ failClosed: false });
       }
     });
+  }
+
+  private async smokeOpenAiIntercept(
+    readyTimeoutMs: number,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["openAiIntercept"]>> {
+    const response = await this.containerFetch(
+      RUNNER_OPENAI_INTERCEPT_SMOKE_URL,
+      {
+        method: "POST",
+        signal: AbortSignal.timeout(Math.max(
+          readyTimeoutMs,
+          130_000,
+        )),
+      },
+    );
+    const payload = await response.json() as {
+      ok?: unknown;
+      openAiIntercept?: {
+        client?: unknown;
+        model?: unknown;
+        stderrBytes?: unknown;
+        stdoutBytes?: unknown;
+      };
+    };
+
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(`Hosted runner OpenAI intercept smoke failed with HTTP ${response.status}.`);
+    }
+
+    const result = payload.openAiIntercept ?? {};
+    return {
+      client: typeof result.client === "string" ? result.client : null,
+      model: typeof result.model === "string" ? result.model : null,
+      stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : null,
+      stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
+    };
   }
 
   override async onActivityExpired(): Promise<void> {

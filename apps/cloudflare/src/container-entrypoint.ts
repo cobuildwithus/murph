@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readdir, readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -18,6 +20,12 @@ import {
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
+const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH =
+  "/internal/deploy-openai-intercept-smoke";
+const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
+const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
+const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL =
+  "__cloudflare_injected__";
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -60,6 +68,9 @@ interface HostedContainerRuntimeOptions {
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi?: Partial<HostedContainerProcessApi>;
   processIsolation?: boolean;
+  runOpenAiInterceptSmoke?: (
+    options: { signal: AbortSignal },
+  ) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
 }
 
 interface HostedContainerRuntimeDependencies {
@@ -69,6 +80,15 @@ interface HostedContainerRuntimeDependencies {
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi: HostedContainerProcessApi;
   processIsolation: boolean;
+  runOpenAiInterceptSmoke:
+    (options: { signal: AbortSignal }) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
+}
+
+interface HostedContainerOpenAiInterceptSmokeResult {
+  client: "codex";
+  model: string;
+  stderrBytes: number;
+  stdoutBytes: number;
 }
 
 interface HostedRunnerBundleManifestSummary {
@@ -144,13 +164,36 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      const isOpenAiInterceptSmokeRequest =
+        request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH;
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
 
-      if (!isWorkspaceInvocationRequest) {
+      if (!isWorkspaceInvocationRequest && !isOpenAiInterceptSmokeRequest) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
+        return;
+      }
+
+      if (isOpenAiInterceptSmokeRequest) {
+        if (activeHostedRunnerJobCount > 0) {
+          discardUnreadRequestBody(request);
+          writeJsonResponse(response, 409, {
+            error: "Hosted runner is busy.",
+          });
+          return;
+        }
+        activeHostedRunnerJobCount += 1;
+        claimedRunnerSlot = true;
+        discardUnreadRequestBody(request);
+        const result = await runtime.runOpenAiInterceptSmoke({
+          signal: requestAbort.signal,
+        });
+        writeJsonResponse(response, 200, {
+          ok: true,
+          openAiIntercept: result,
+        });
         return;
       }
 
@@ -435,7 +478,151 @@ function resolveHostedContainerRuntimeDependencies(
       }
       : defaultHostedContainerProcessApi,
     processIsolation: runtime?.processIsolation ?? false,
+    runOpenAiInterceptSmoke:
+      runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
+}
+
+async function runHostedContainerOpenAiInterceptSmoke(input: {
+  signal: AbortSignal;
+}): Promise<HostedContainerOpenAiInterceptSmokeResult> {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-openai-intercept-smoke-"));
+  try {
+    const codexHome = path.join(workspaceRoot, ".codex-smoke");
+    await mkdir(codexHome, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await writeFile(
+      path.join(workspaceRoot, "README.md"),
+      "Hosted OpenAI intercept smoke workspace.\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(codexHome, "config.toml"),
+      buildHostedContainerOpenAiInterceptSmokeCodexConfig(),
+      "utf8",
+    );
+    const result = await runHostedContainerOpenAiInterceptCodexProbe({
+      codexHome,
+      signal: input.signal,
+      workspaceRoot,
+    });
+    return {
+      client: "codex",
+      model: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL,
+      stderrBytes: result.stderrBytes,
+      stdoutBytes: result.stdoutBytes,
+    };
+  } finally {
+    await rm(workspaceRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}
+
+function buildHostedContainerOpenAiInterceptSmokeCodexConfig(): string {
+  return [
+    `model = ${JSON.stringify(HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL)}`,
+    'model_provider = "hosted-openai"',
+    'model_reasoning_effort = "low"',
+    'approval_policy = "never"',
+    'sandbox_mode = "read-only"',
+    "",
+    '[model_providers."hosted-openai"]',
+    'name = "OpenAI"',
+    'base_url = "https://api.openai.com/v1"',
+    'env_key = "OPENAI_API_KEY"',
+    'wire_api = "responses"',
+    'requires_openai_auth = false',
+    "request_max_retries = 0",
+    "stream_max_retries = 0",
+    "",
+    "[skills]",
+    "include_instructions = false",
+    "",
+    "[skills.bundled]",
+    "enabled = false",
+    "",
+    "[history]",
+    'persistence = "none"',
+    "",
+  ].join("\n");
+}
+
+async function runHostedContainerOpenAiInterceptCodexProbe(input: {
+  codexHome: string;
+  signal: AbortSignal;
+  workspaceRoot: string;
+}): Promise<{ stderrBytes: number; stdoutBytes: number }> {
+  return await new Promise((resolve, reject) => {
+    let stderrBytes = 0;
+    let stdoutBytes = 0;
+    let settled = false;
+    const child = spawn("codex", [
+      "exec",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--skip-git-repo-check",
+      "--ephemeral",
+      "--json",
+      "-C",
+      input.workspaceRoot,
+      "-a",
+      "never",
+      "-s",
+      "read-only",
+      "Reply exactly OK. Do not run tools or inspect files.",
+    ], {
+      env: {
+        ...process.env,
+        CODEX_HOME: input.codexHome,
+        OPENAI_API_KEY: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const abort = (): void => {
+      finish(new Error("Hosted OpenAI intercept smoke aborted."));
+    };
+    const timeout = setTimeout(() => {
+      finish(new Error("Hosted OpenAI intercept smoke timed out."));
+    }, HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS);
+    const finish = (error?: Error, result?: { stderrBytes: number; stdoutBytes: number }): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      input.signal.removeEventListener("abort", abort);
+      if (error) {
+        child.kill();
+        reject(error);
+        return;
+      }
+      resolve(result ?? { stderrBytes, stdoutBytes });
+    };
+
+    input.signal.addEventListener("abort", abort, { once: true });
+    child.stdout?.on("data", (chunk) => {
+      stdoutBytes += Buffer.byteLength(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderrBytes += Buffer.byteLength(chunk);
+    });
+    child.once("error", finish);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        finish(undefined, { stderrBytes, stdoutBytes });
+        return;
+      }
+      finish(new Error(
+        `Hosted OpenAI intercept smoke Codex probe exited with ${code ?? signal ?? "unknown"}. `
+          + `stdoutBytes=${stdoutBytes} stderrBytes=${stderrBytes}`,
+      ));
+    });
+  });
 }
 
 async function enforceHostedContainerProcessIsolation(

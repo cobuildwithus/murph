@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { selectBrowserVaultHistory } from "@murphai/query/browser";
+import { selectBrowserVaultHistory } from "@murphai/query/browser-overview";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
