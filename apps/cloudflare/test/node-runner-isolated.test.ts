@@ -306,6 +306,65 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     expect(stdoutWriteSpy).toHaveBeenCalled();
   });
 
+  it("includes redacted child close diagnostics when no IPC result is emitted", async () => {
+    const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const module = await import("../src/node-runner-isolated.ts");
+    const controller = new AbortController();
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChildProcess(4247);
+
+      queueMicrotask(() => {
+        child.stdout.write("Bearer stdout-token\n");
+        child.stderr.write("OPENAI_API_KEY=secret-value /tmp/hosted-runner/private-file\n");
+        controller.abort(new Error("Hosted runner response closed before completion at /tmp/hosted-runner/private-file."));
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", null, "SIGKILL");
+      });
+
+      return child;
+    });
+
+    let thrown: Error | null = null;
+    try {
+      await module.runHostedWorkspaceInvocationIsolatedDetailed({
+        job: createWorkspaceJob("evt_child_missing_result_diagnostics"),
+      }, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        thrown = error;
+      }
+    }
+
+    if (!thrown) {
+      throw new Error("Expected isolated child missing-result failure to throw.");
+    }
+
+    expect(thrown.message).toContain("code unknown");
+    expect(thrown.message).toContain("signal SIGKILL");
+    expect(thrown.message).toContain("after parent abort");
+
+    const childProcess = readChildProcessDiagnostics(thrown);
+    expect(childProcess).toMatchObject({
+      abortedByParent: true,
+      abortReasonName: "Error",
+      exitCode: null,
+      signal: "SIGKILL",
+    });
+    expect(String(childProcess.abortReasonMessage)).toContain("Hosted runner response closed before completion");
+    expect(String(childProcess.abortReasonMessage)).toContain("<redacted-path>");
+    expect(String(childProcess.stderrTail)).toContain("OPENAI_API_KEY=<redacted>");
+    expect(String(childProcess.stderrTail)).toContain("<redacted-path>");
+    expect(String(childProcess.stdoutTail)).toContain("Bearer <redacted>");
+    expect(JSON.stringify(childProcess)).not.toContain("stdout-token");
+    expect(JSON.stringify(childProcess)).not.toContain("secret-value");
+    expect(JSON.stringify(childProcess)).not.toContain("/tmp/hosted-runner/private-file");
+    expect(processKillSpy).toHaveBeenCalledWith(-4247, "SIGKILL");
+  });
+
   it("ignores stdout result spoofing and trusts only the IPC child result", async () => {
     const stdoutWriteSpy = vi
       .spyOn(process.stdout, "write")
@@ -629,6 +688,19 @@ function resolveWarmBrowserVaultMarkerPath(vaultRoot: string): string {
     "cache",
     "hosted-browser-vault-source-state.json",
   );
+}
+
+function readChildProcessDiagnostics(error: Error): Record<string, unknown> {
+  const details = (error as Error & { details?: unknown }).details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    throw new Error("Expected error details object.");
+  }
+  const detailRecord = details as Record<string, unknown>;
+  const childProcess = detailRecord.childProcess;
+  if (!childProcess || typeof childProcess !== "object" || Array.isArray(childProcess)) {
+    throw new Error("Expected child process diagnostics object.");
+  }
+  return childProcess as Record<string, unknown>;
 }
 
 function createMockChildProcess(pid: number) {
