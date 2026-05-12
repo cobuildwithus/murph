@@ -150,7 +150,7 @@ async function maybeHandleOpenAiRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeFence(input);
+  const authorized = await requestOwnsRuntimeWriteFence(input);
   if (!authorized) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -182,7 +182,7 @@ async function maybeHandleMapboxRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeFence(input);
+  const authorized = await requestOwnsRuntimeWriteFence(input);
   if (!authorized) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -358,30 +358,6 @@ function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
     return true;
   }
   return method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix);
-}
-
-async function requestOwnsRuntimeFence(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string | null;
-}): Promise<boolean> {
-  if (!input.userId) {
-    return false;
-  }
-
-  try {
-    await requireRunnerRuntimeWriteFenceWrite({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return false;
-    }
-    throw error;
-  }
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {
