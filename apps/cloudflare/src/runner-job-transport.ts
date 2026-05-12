@@ -163,7 +163,7 @@ function isHostedExecutionRunnerChildMessageOfType(
   type: string,
 ): boolean {
   return (
-    Boolean(value)
+    value !== null
     && typeof value === "object"
     && !Array.isArray(value)
     && Reflect.get(value, "type") === type
