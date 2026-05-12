@@ -25,6 +25,10 @@ unit: "0–10 score"
 interpretationFrame:
   principle: "Use the same context and timing when possible, such as evening after a standing day or within two hours after training."
   caveat: "Unexplained, one-sided, warm, red, painful, or worsening swelling is a safety signal, not a wellness metric."
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Lower scores mean less leg heaviness, which is the goal.
 ---
 
 Leg Heaviness Score is included so the pneumatic compression pants test can track a practical, user-reportable signal without turning mixed recovery evidence into a stronger clinical claim.

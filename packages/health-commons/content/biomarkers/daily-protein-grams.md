@@ -18,6 +18,10 @@ unit: g/day
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: higher_or_stable
+    label: Meeting the planned daily protein target is the goal.
 ---
 
 Daily total protein intake used to check whether the declared target was reached.

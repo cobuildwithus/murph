@@ -18,6 +18,10 @@ unit: g/day
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Lower or stable saturated-fat intake within the planned range is generally preferred.
 ---
 
 Source-quality guardrail marker when protein-source changes affect saturated-fat intake.

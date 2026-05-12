@@ -18,6 +18,10 @@ unit: mmHg
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Lower or stable within a healthy range is generally preferred.
 ---
 
 Optional home or clinical blood-pressure marker for cardiovascular and source-quality context.

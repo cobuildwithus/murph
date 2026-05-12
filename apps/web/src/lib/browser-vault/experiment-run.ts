@@ -2,7 +2,6 @@ import {
   isActiveOverviewExperimentStatus,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
-  type BrowserVaultExperimentExpectedDirection,
   type BrowserVaultExperimentExpectedRange,
   type BrowserVaultExperimentResultsLookup,
   type BrowserVaultExperimentResultsView,
@@ -21,6 +20,8 @@ import type {
   TimelineEvent,
   TrendData,
 } from "@/src/types/experiments";
+import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-projections";
+import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
 
 const FINISHED_EXPERIMENT_STATUSES = new Set([
   "complete",
@@ -254,7 +255,10 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
         unit,
         delta: formatDelta(biomarker.deltaAbs, unit),
         direction,
-        sentiment: resolveSignalSentiment(direction, biomarker.expectedEffect.direction),
+        sentiment: resolveSignalSentiment(
+          direction,
+          resolveBiomarkerDesiredDirection(biomarker.biomarkerKey),
+        ),
         baseline: biomarker.baseline.mean !== null
           ? formatValueWithUnit(biomarker.baseline.mean, unit)
           : undefined,
@@ -1140,17 +1144,21 @@ function resolveSignalDirection(
 
 function resolveSignalSentiment(
   direction: "up" | "down" | "neutral",
-  expectedDirection: BrowserVaultExperimentExpectedDirection | null,
+  desiredDirection: HealthCommonsBiomarkerDesiredDirection | null,
 ): "positive" | "negative" | "neutral" {
-  if (direction === "neutral" || !expectedDirection) {
+  if (direction === "neutral" || !desiredDirection) {
     return "neutral";
   }
 
-  const movingAsExpected =
-    (direction === "down" && (expectedDirection === "decrease" || expectedDirection === "stabilize")) ||
-    (direction === "up" && (expectedDirection === "increase" || expectedDirection === "stabilize"));
+  if (desiredDirection === "mixed_or_contextual" || desiredDirection === "stable") {
+    return "neutral";
+  }
 
-  return movingAsExpected ? "positive" : "negative";
+  const movingInDesiredDirection =
+    (direction === "up" && (desiredDirection === "higher" || desiredDirection === "higher_or_stable")) ||
+    (direction === "down" && (desiredDirection === "lower" || desiredDirection === "lower_or_stable"));
+
+  return movingInDesiredDirection ? "positive" : "negative";
 }
 
 function formatDelta(value: number, unit: string | null | undefined): string {

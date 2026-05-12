@@ -18,6 +18,10 @@ unit: clinical lab
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: stable
+    label: Stay within the lab reference range; large excursions should be reviewed with a clinician.
 ---
 
 Optional kidney and protein-metabolism context lab interpreted clinically when relevant.

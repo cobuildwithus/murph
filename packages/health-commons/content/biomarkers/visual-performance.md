@@ -26,6 +26,10 @@ unit: "task-specific assessment"
 interpretationFrame:
   principle: "Reduced visual performance is a reason to remove glasses before driving, cooking, stairs, tools, cycling, or unfamiliar low-light navigation."
   caveat: "This endpoint is not a home diagnostic measure; it is a safety boundary for tasks where tinted lenses may impair perception."
+biomarker:
+  direction:
+    desired: higher_or_stable
+    label: Better or stable visual performance is the goal.
 ---
 
 Visual Performance keeps evening-light protocols explicit about tasks where red or amber eyewear may make the user less safe.

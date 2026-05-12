@@ -26,6 +26,10 @@ unit: "claim boundary"
 interpretationFrame:
   principle: "Use this endpoint to keep red-light-glasses pages from implying retinal protection, macular-disease prevention, or eye-care treatment."
   caveat: "Consumer bedtime eyewear experiments cannot establish macular-health benefit or safety for eye disease."
+biomarker:
+  direction:
+    desired: stable
+    label: Stable macular-health status with no worsening is the safety target.
 ---
 
 Macular Health Safety is a guardrail endpoint for evening-light-reduction research. It supports conservative claim language rather than a user-run outcome target.

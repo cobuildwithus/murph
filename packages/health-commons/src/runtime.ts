@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
   healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
@@ -1947,6 +1948,7 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     typeof value["bundlePath"] === "string" &&
     Array.isArray(value["categories"]) &&
     value["categories"].every(isString) &&
+    isGeneratedWebBiomarkerDesiredDirection(value["desiredDirection"]) &&
     typeof value["hidden"] === "boolean" &&
     typeof value["key"] === "string" &&
     typeof value["published"] === "boolean" &&
@@ -2335,6 +2337,12 @@ function isGeneratedWebExperimentCommons(value: unknown): boolean {
 
 function isGeneratedWebResearchConfidenceLabel(value: unknown): boolean {
   return typeof value === "string" && GENERATED_WEB_RESEARCH_CONFIDENCE_LABELS.has(value);
+}
+
+function isGeneratedWebBiomarkerDesiredDirection(value: unknown): boolean {
+  return value === null
+    || (typeof value === "string"
+      && (HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS as readonly string[]).includes(value));
 }
 
 function isGeneratedWebSignalDirection(value: unknown): boolean {

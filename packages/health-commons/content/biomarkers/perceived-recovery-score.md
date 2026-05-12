@@ -25,6 +25,10 @@ unit: "0–10 score"
 interpretationFrame:
   principle: "Track trend across repeated sessions instead of one especially good or bad day."
   caveat: "Readiness can improve even when objective performance does not, and it can be confounded by mood, sleep, stress, and training load."
+biomarker:
+  direction:
+    desired: higher_or_stable
+    label: Feeling more recovered or ready is the goal.
 ---
 
 Perceived Recovery Score is included so the pneumatic compression pants test can track a practical, user-reportable signal without turning mixed recovery evidence into a stronger clinical claim.

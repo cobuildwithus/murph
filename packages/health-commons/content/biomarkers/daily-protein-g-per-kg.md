@@ -18,6 +18,10 @@ unit: g/kg/day
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: higher_or_stable
+    label: Meeting the planned protein floor each day is the goal.
 ---
 
 Primary achieved-exposure marker for total daily protein relative to the chosen denominator.
