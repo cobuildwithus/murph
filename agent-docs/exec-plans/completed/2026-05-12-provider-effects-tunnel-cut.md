@@ -1,6 +1,6 @@
 # Delete legacy Worker provider-effect delivery routes
 
-Status: active
+Status: completed
 Created: 2026-05-12
 Updated: 2026-05-12
 
@@ -47,3 +47,4 @@ Updated: 2026-05-12
 
 - Commands to run: focused `apps/cloudflare` Vitest for runtime platform/outbound provider effects, plus `pnpm typecheck` and `pnpm test:diff` when scoped verification is stable.
 - Expected outcomes: removed methods/routes fail closed without affecting remaining Worker-owned effects.
+Completed: 2026-05-12
