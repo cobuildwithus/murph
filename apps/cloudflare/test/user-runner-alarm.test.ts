@@ -373,6 +373,101 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
+  it("does not invoke or recreate state when deletion wins the pre-container drain window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceRead = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      destroyInstance,
+      onWorkspaceRead: async () => {
+        await workspaceRead.promise;
+      },
+      workspace: createWorkspaceState({ version: "15" }),
+    });
+
+    const drain = runner.runUntilIdleForTest({
+      reason: "manual",
+      userId: "member_123",
+    });
+
+    await vi.waitFor(() => {
+      expect(readRunnerMeta(sql).active_attempt_id).toEqual(expect.any(String));
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      userId: "member_123",
+    });
+
+    workspaceRead.resolve();
+
+    await expect(drain).rejects.toThrow("Hosted runner user is not initialized.");
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(alarms).toHaveLength(2);
+    expect(alarms[1]).toBe("deleted");
+    expect(alarms).not.toContain(RETRY_AT);
+  });
+
+  it("does not recreate state from detached retry handling after pre-container deletion", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const workspaceRead = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      destroyInstance,
+      onWorkspaceRead: async () => {
+        await workspaceRead.promise;
+      },
+      workspace: createWorkspaceState({ version: "16" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(readRunnerMeta(sql).active_attempt_id).toEqual(expect.any(String));
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      userId: "member_123",
+    });
+
+    workspaceRead.resolve();
+
+    await expect(flushWaitUntil()).rejects.toThrow("Hosted runner user is not initialized.");
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted runner retry scheduling failed.",
+          userId: null,
+        }),
+      );
+    });
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(alarms).toHaveLength(2);
+    expect(alarms[1]).toBe("deleted");
+    expect(alarms).not.toContain(RETRY_AT);
+  });
+
   it("does not sweep R2 when active runner container teardown fails during user deletion", async () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const bundleKey = `${await hostedBundleUserPrefix({ userId: "member_123" })}bundle.bundle.json`;
@@ -422,6 +517,7 @@ function createRunnerHarness(input: {
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
+  onWorkspaceRead?: () => Promise<void> | void;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState();
@@ -453,7 +549,9 @@ function createRunnerHarness(input: {
     },
   };
 
-  installWebControlResponses(input.workspace ?? createWorkspaceState());
+  installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    onWorkspaceRead: input.onWorkspaceRead,
+  });
 
   const runner = new HostedUserRunner(
     durable.state,
@@ -549,13 +647,19 @@ function createDurableObjectState(): {
   };
 }
 
-function installWebControlResponses(workspace: HostedWorkspaceState | null): void {
+function installWebControlResponses(
+  workspace: HostedWorkspaceState | null,
+  hooks: {
+    onWorkspaceRead?: () => Promise<void> | void;
+  } = {},
+): void {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
     async (input: {
       boundUserId: string;
       path: string;
     }) => {
       if (input.path === HOSTED_RUNTIME_WORKSPACE_PATH) {
+        await hooks.onWorkspaceRead?.();
         return jsonResponse({
           fetchedAt: FIXED_NOW,
           workspace,
