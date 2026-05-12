@@ -61,8 +61,8 @@ export {
   HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
   HOSTED_ASSISTANT_SANDBOX_ENV,
 }
-const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
-  'HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL'
+const HOSTED_EXECUTION_RUNNER_HOST_ALIAS_ENV =
+  'HOSTED_EXECUTION_RUNNER_HOST_ALIAS'
 
 const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
@@ -532,17 +532,17 @@ function normalizeHostedAssistantSeedBaseUrl(
 function readHostedAssistantContainerReachableHost(
   source: Readonly<Record<string, string | undefined>>,
 ): string | null {
-  const runnerCallbackBaseUrl = normalizeHostedAssistantString(
-    source[HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV],
+  const runnerHostAlias = normalizeHostedAssistantString(
+    source[HOSTED_EXECUTION_RUNNER_HOST_ALIAS_ENV],
   )
-  if (!runnerCallbackBaseUrl) {
+  if (!runnerHostAlias) {
     return null
   }
 
   try {
-    return new URL(runnerCallbackBaseUrl).hostname
+    return new URL(runnerHostAlias).hostname
   } catch {
-    return null
+    return runnerHostAlias
   }
 }
 

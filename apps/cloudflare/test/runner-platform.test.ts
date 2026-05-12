@@ -27,7 +27,7 @@ import {
 } from "../src/runtime-platform.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
-} from "../src/runner-egress-intercept.ts";
+} from "../src/runner-outbound/headers.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
