@@ -153,6 +153,50 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("can extend deploy smoke to run a Codex OpenAI intercept probe", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        expect(url).toBe("http://container/internal/deploy-openai-intercept-smoke");
+        return new Response(JSON.stringify({
+          ok: true,
+          openAiIntercept: {
+            client: "codex",
+            model: "gpt-5.4-mini",
+            stderrBytes: 0,
+            stdoutBytes: 256,
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.smokeHealth({ openAiIntercept: true });
+
+    expect(result.openAiIntercept).toEqual({
+      client: "codex",
+      model: "gpt-5.4-mini",
+      stderrBytes: 0,
+      stdoutBytes: 256,
+    });
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+  });
+
   it("recycles any warm deploy smoke shell before checking container health", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",
