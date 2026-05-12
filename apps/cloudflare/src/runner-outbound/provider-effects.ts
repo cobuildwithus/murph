@@ -107,36 +107,11 @@ async function dispatchRunnerProviderEffectsRequest(input: {
 function createProviderEffectDependencies(input: {
   env: RunnerOutboundEnvironmentSource;
   requestSignal: AbortSignal;
-  timeoutMs?: number;
 }): HostedProviderEffectDependencies {
   return {
     env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
-    signal: typeof input.timeoutMs === "number"
-      ? combineProviderEffectAbortSignals(input.requestSignal, AbortSignal.timeout(input.timeoutMs))
-      : input.requestSignal,
+    signal: input.requestSignal,
   };
-}
-
-function combineProviderEffectAbortSignals(
-  requestSignal: AbortSignal,
-  timeoutSignal: AbortSignal,
-): AbortSignal {
-  if (requestSignal.aborted) {
-    return requestSignal;
-  }
-  if (timeoutSignal.aborted) {
-    return timeoutSignal;
-  }
-
-  const controller = new AbortController();
-  const abort = (signal: AbortSignal) => {
-    if (!controller.signal.aborted) {
-      controller.abort(signal.reason);
-    }
-  };
-  requestSignal.addEventListener("abort", () => abort(requestSignal), { once: true });
-  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal), { once: true });
-  return controller.signal;
 }
 
 async function handleTelegramDownloadFileEffect(
