@@ -5,7 +5,7 @@ import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
@@ -34,9 +34,9 @@ afterEach(() => {
 describe("hostedRunnerIntercept", () => {
   it("preserves runtime write-fence headers for internal intercepted requests", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      chat_id: "linq_chat_123",
-      message: {
-        id: "linq_message_123",
+      ok: true,
+      result: {
+        file_id: "telegram_file_123",
       },
     }), {
       headers: {
@@ -48,11 +48,9 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         body: JSON.stringify({
-          message: "hello",
-          target: "linq_chat_123",
-          targetKind: "thread",
+          fileId: "telegram_file_123",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -64,7 +62,7 @@ describe("hostedRunnerIntercept", () => {
         method: "POST",
       }),
       createInterceptEnv({
-        LINQ_API_TOKEN: "linq-worker-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
         validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
