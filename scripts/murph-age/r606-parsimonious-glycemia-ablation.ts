@@ -212,8 +212,8 @@ function summarizeLocalBenchmark(sourceId: SourceId, artifact: string, value: un
     endpoint: requiredString(root.endpoint, `${sourceId} endpoint`),
     parsimoniousCandidates: [
       reference,
-      unsupportedCandidate("age_sex_plus_bmi", "BMI-only aggregate ablation is not present on this local benchmark artifact."),
-      unsupportedCandidate("age_sex_plus_glycemia", "Glycemia-only aggregate ablation is not present on this local benchmark artifact."),
+      summarizeAvailableCandidate("age_sex_plus_bmi", "body_only_no_crp", models, reference.metrics),
+      summarizeAvailableCandidate("age_sex_plus_glycemia", "glycemia_only_no_crp", models, reference.metrics),
       summarizeAvailableCandidate("age_sex_plus_glycemia_body", "glycemia_body_no_crp", models, reference.metrics),
     ],
     schemaVersion: requiredString(root.schemaVersion, `${sourceId} schema version`),

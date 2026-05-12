@@ -12,12 +12,18 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  AssistantTurnInputRefreshResult,
+import {
+  conversationRefFromAssistantInputConversation,
+  notifyAssistantActiveTurnInputAvailable,
+  readAssistantInputEvent,
+  warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
+import type {
+  RuntimeWakeSignal,
+} from "./runtime-wake.ts";
 
 import {
   buildHostedMailboxImportRedactedStatus,
@@ -164,6 +170,8 @@ export interface HostedWorkspaceRunnerInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  runtimeWakeSignal?: RuntimeWakeSignal | null;
+  signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
     input: HostedWorkspaceRunnerAssistantPhaseInput,
@@ -307,17 +315,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
-  const platform = withActiveTurnInputWorkspacePorts({
-    initialMailboxImport,
-    checkpointRequestBuilder: checkpointRequestSession,
-    input,
-    platform: input.platform,
-  });
+  const foregroundMailboxImportLoop =
+    startHostedForegroundConversationMailboxImportLoop({
+      checkpointRequestBuilder: checkpointRequestSession,
+      input,
+    });
   const assistantPhaseInput = {
     initialMailboxImport,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
-    platform,
+    platform: input.platform,
     workspace: input.workspace,
   };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
@@ -397,6 +404,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       phase: "import",
     });
     throw error;
+  } finally {
+    await foregroundMailboxImportLoop.stop();
   }
 
   return {
@@ -423,52 +432,122 @@ function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): voi
   }
 }
 
-function withActiveTurnInputWorkspacePorts(input: {
+function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
-  platform: HostedWorkspaceRunnerPlatform;
-}): HostedRuntimePlatform {
+}): {
+  stop(): Promise<void>;
+} {
+  const runtimeWakeSignal = input.input.runtimeWakeSignal ?? null;
+  if (!runtimeWakeSignal) {
+    return {
+      stop: async () => undefined,
+    };
+  }
+
+  const controller = new AbortController();
+  const outerSignal = input.input.signal ?? null;
+  const abort = () => {
+    controller.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
+  };
+  outerSignal?.addEventListener("abort", abort, { once: true });
+  let wakeOrdinal = 0;
+
+  const loop = (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        await runtimeWakeSignal.wait(controller.signal);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          break;
+        }
+        await writeHostedForegroundMailboxImportFailureRuntimeLog({
+          error,
+          input: input.input,
+        });
+        continue;
+      }
+      if (controller.signal.aborted) {
+        break;
+      }
+
+      wakeOrdinal += 1;
+      const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
+      try {
+        const result = await importHostedMailboxForWorkspaceRunner({
+          checkpointRequestBuilder: input.checkpointRequestBuilder,
+          checkpointReason: "active_turn_input",
+          deferCheckpoint: true,
+          input: input.input,
+          lanes: ["conversation"],
+          requestId,
+        });
+        if (shouldRecordHostedForegroundMailboxImportResult(result)) {
+          input.checkpointRequestBuilder.recordCheckpointResult(result);
+        }
+        await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+          checkpointRequestBuilder: input.checkpointRequestBuilder,
+          input: input.input,
+          phase: "active_turn_input",
+        });
+        await notifyHostedActiveTurnInputForMailboxImport({
+          input: input.input,
+          result,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          break;
+        }
+        await writeHostedForegroundMailboxImportFailureRuntimeLog({
+          error,
+          input: input.input,
+        });
+      }
+    }
+  })();
+
   return {
-    ...input.platform,
-    checkpointActiveTurnInput: async (checkpointInput) => {
-      void checkpointInput;
-      await writeHostedForegroundCheckpointDeferredLog({
-        checkpointPhase: "active_turn_input",
-        now: input.input.now,
-        platform: input.input.platform,
-        reason: "active_turn_acceptance",
-        runtimeLogContext: input.input.runtimeLogContext,
-      });
-    },
-    refreshMailboxForActiveTurnInput: async ({ requestId }) => {
-      if (input.initialMailboxImport.importResult.nextRetryAt) {
-        return {
-          progressed: false,
-          reason: "source_unavailable",
-        };
+    async stop() {
+      outerSignal?.removeEventListener("abort", abort);
+      if (!controller.signal.aborted) {
+        controller.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
-
-      const result = await importHostedMailboxForWorkspaceRunner({
-        checkpointRequestBuilder: input.checkpointRequestBuilder,
-        checkpointReason: "active_turn_input",
-        deferCheckpoint: true,
-        input: input.input,
-        lanes: ["conversation"],
-        requestId,
-      });
-      if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
-        input.checkpointRequestBuilder.recordCheckpointResult(result);
-      }
-      await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
-        checkpointRequestBuilder: input.checkpointRequestBuilder,
-        input: input.input,
-        phase: "active_turn_input",
-      });
-
-      return summarizeMailboxRefreshResult(result);
+      await loop.catch(() => undefined);
     },
   };
+}
+
+async function notifyHostedActiveTurnInputForMailboxImport(input: {
+  input: HostedWorkspaceRunnerInput;
+  result: HostedMailboxImportCheckpointResult;
+  signal: AbortSignal;
+}): Promise<void> {
+  if (input.result.importResult.blocked.length > 0) {
+    return;
+  }
+
+  const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.input.vaultRoot,
+    });
+    if (!event?.conversation) {
+      continue;
+    }
+
+    await notifyAssistantActiveTurnInputAvailable({
+      conversation: conversationRefFromAssistantInputConversation(event.conversation),
+      signal: input.signal,
+      vault: input.input.vaultRoot,
+    }).catch((error: unknown) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: "hosted active-turn input notification",
+      });
+    });
+  }
 }
 
 export async function importHostedMailboxForWorkspaceRunner(input: {
@@ -533,7 +612,7 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   const retryableBlockedCount = blocked.filter((item) => item.retryable).length;
   if (
     input.checkpointReason === "active_turn_input"
-    && !shouldRecordHostedActiveTurnMailboxRefreshResult(input.result)
+    && !shouldRecordHostedForegroundMailboxImportResult(input.result)
   ) {
     return;
   }
@@ -603,7 +682,42 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(cont
   });
 }
 
-function shouldRecordHostedActiveTurnMailboxRefreshResult(
+async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {
+  error: unknown;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
+  console.warn("Hosted foreground mailbox import failed.", {
+    errorCode: failure.errorCode,
+    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+      component: "mailbox",
+      errorCode: "foreground_mailbox_import_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "active_turn_input",
+      redactedJson: {
+        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+        failureNames: failure.name ? [failure.name] : [],
+        failureSummaries: failure.summary ? [failure.summary] : [],
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    now: context.input.now,
+    platform: context.input.platform,
+  });
+}
+
+function readHostedForegroundRuntimeWakeAbortReason(signal: AbortSignal | null): unknown {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new DOMException("Foreground mailbox import loop was aborted.", "AbortError");
+}
+
+function shouldRecordHostedForegroundMailboxImportResult(
   result: HostedMailboxImportCheckpointResult,
 ): boolean {
   return (
@@ -1018,36 +1132,6 @@ function applyExpectedWorkspaceVersionOverride(input: {
   return {
     ...input.request,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-  };
-}
-
-function summarizeMailboxRefreshResult(
-  result: HostedMailboxImportCheckpointResult,
-): AssistantTurnInputRefreshResult {
-  if (result.importResult.importedCount > 0) {
-    return {
-      progressed: true,
-      reason: "ingested_input",
-    };
-  }
-
-  if (result.importResult.blocked.some((item) => item.retryable)) {
-    return {
-      progressed: false,
-      reason: "source_unavailable",
-    };
-  }
-
-  if (result.stateChanged) {
-    return {
-      progressed: true,
-      reason: "ingested_input",
-    };
-  }
-
-  return {
-    progressed: false,
-    reason: "no_new_input",
   };
 }
 

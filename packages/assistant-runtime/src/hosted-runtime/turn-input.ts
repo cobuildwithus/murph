@@ -1,6 +1,4 @@
 import {
-  AssistantActiveTurnInputCheckpointRejectedError,
-  AssistantActiveTurnInputUnavailableError,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   createStoreBackedAssistantInputSource,
@@ -9,37 +7,14 @@ import {
   type AssistantInputCandidate,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
-  type AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
-import {
-  emitHostedExecutionStructuredLog,
-  type HostedRuntimeEvent,
-} from "@murphai/hosted-execution";
-
-import type {
-  NormalizedHostedAssistantRuntimeConfig,
-} from "./models.ts";
-import {
-  HostedMailboxImportCheckpointConflictError,
-  HostedMailboxImportCheckpointUserMismatchError,
-} from "./mailbox-checkpoint.ts";
 
 export function createHostedAssistantInputSource(input: {
   foregroundReplayPromptInputIds?: readonly string[] | null;
-  onActiveTurnMailboxRefresh?: ((result: AssistantTurnInputRefreshResult) => void) | null;
   foregroundReplayInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
-  requestId: string;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
-  skipActiveTurnMailboxRefresh?: boolean;
-  skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
-  wake: HostedRuntimeEvent;
 }): AssistantInputSource {
-  const refreshMailboxForActiveTurnInput =
-    input.runtime.platform.refreshMailboxForActiveTurnInput ?? null;
-  const checkpointActiveTurnInput =
-    input.runtime.platform.checkpointActiveTurnInput ?? null;
   const baseSource = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
@@ -47,86 +22,6 @@ export function createHostedAssistantInputSource(input: {
   const foregroundReplayPromptInputIds = new Set(input.foregroundReplayPromptInputIds ?? []);
   const preferredInputIds = [...new Set(input.preferredInputIds ?? [])];
   let source: AssistantInputSource = baseSource;
-
-  if (
-    (refreshMailboxForActiveTurnInput && !checkpointActiveTurnInput)
-    || (!refreshMailboxForActiveTurnInput && checkpointActiveTurnInput)
-  ) {
-    throw new TypeError(
-      "Hosted active-turn input requires both mailbox refresh and acceptance checkpoint ports.",
-    );
-  }
-
-  if (refreshMailboxForActiveTurnInput && checkpointActiveTurnInput) {
-    let skippedInitialMailboxRefresh = false;
-    source = {
-      async checkpointAcceptedInput(checkpointInput) {
-        try {
-          await checkpointActiveTurnInput({
-            ...checkpointInput,
-            requestId: input.requestId,
-          });
-        } catch (error) {
-          throw normalizeHostedActiveTurnInputUnavailableError(error) ?? error;
-        }
-      },
-      async refresh(refreshInput) {
-        let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
-
-        const shouldRefreshMailbox =
-          refreshInput.phase === "input_available"
-          || refreshInput.phase === "request_boundary"
-          || refreshInput.phase === "commit_barrier";
-        const shouldSkipInitialMailboxRefresh =
-          refreshInput.phase === "input_available"
-          && !skippedInitialMailboxRefresh
-          && (
-            input.skipInitialMailboxRefresh === true
-            || preferredInputIds.length > 0
-          );
-        skippedInitialMailboxRefresh =
-          skippedInitialMailboxRefresh || shouldSkipInitialMailboxRefresh;
-
-        if (
-          shouldRefreshMailbox
-          && input.skipActiveTurnMailboxRefresh !== true
-          && !shouldSkipInitialMailboxRefresh
-        ) {
-          try {
-            mailboxRefresh = await refreshMailboxForActiveTurnInput({
-              requestId: input.requestId,
-            });
-            input.onActiveTurnMailboxRefresh?.(mailboxRefresh);
-          } catch (error) {
-            emitHostedExecutionStructuredLog({
-              component: "runtime",
-              details: {
-                requestId: input.requestId,
-              },
-              error,
-              level: "warn",
-              message: "Hosted assistant mailbox refresh failed during active turn input admission.",
-              phase: "wake.running",
-              wake: input.wake,
-            });
-            throw normalizeHostedActiveTurnInputUnavailableError(error) ?? error;
-          }
-        }
-
-        const baseResult = await baseSource.refresh(refreshInput);
-        return mergeHostedTurnInputRefreshResult({
-          baseResult,
-          mailboxRefresh,
-        });
-      },
-      listInputCandidates(query) {
-        return baseSource.listInputCandidates(query);
-      },
-      listNewConversationInputs(query) {
-        return baseSource.listNewConversationInputs(query);
-      },
-    };
-  }
 
   if (preferredInputIds.length > 0) {
     const preferredBaseSource = source;
@@ -396,46 +291,4 @@ function normalizePreferredAssistantInputLimit(value: number | undefined): numbe
     return 100;
   }
   return Math.max(1, Math.trunc(value));
-}
-
-function normalizeHostedActiveTurnInputUnavailableError(
-  error: unknown,
-): AssistantActiveTurnInputUnavailableError | null {
-  if (error instanceof AssistantActiveTurnInputUnavailableError) {
-    return error;
-  }
-
-  if (
-    error instanceof HostedMailboxImportCheckpointConflictError ||
-    error instanceof HostedMailboxImportCheckpointUserMismatchError
-  ) {
-    return new AssistantActiveTurnInputCheckpointRejectedError(
-      "Active turn input checkpoint was rejected; aborting this workspace phase so it can retry from durable state.",
-    );
-  }
-
-  return null;
-}
-
-function mergeHostedTurnInputRefreshResult(input: {
-  baseResult: AssistantTurnInputRefreshResult;
-  mailboxRefresh: AssistantTurnInputRefreshResult | null;
-}): AssistantTurnInputRefreshResult {
-  if (input.baseResult.progressed) {
-    return input.baseResult;
-  }
-
-  if (input.mailboxRefresh?.progressed) {
-    return input.mailboxRefresh;
-  }
-
-  if (
-    input.mailboxRefresh
-    && input.mailboxRefresh.reason !== "no_new_input"
-    && input.mailboxRefresh.reason !== "no_port"
-  ) {
-    return input.mailboxRefresh;
-  }
-
-  return input.baseResult;
 }

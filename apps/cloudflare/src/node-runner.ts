@@ -21,6 +21,7 @@ import {
 } from "./runner-job-transport.ts";
 
 export interface HostedWorkspaceInvocationOptions {
+  onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
   signal?: AbortSignal;
 }
 
@@ -29,7 +30,10 @@ export interface HostedWorkspaceInvocationRunnerDependencies {
   onBeforeRun?: () => void;
   runIsolated?: (
     input: HostedExecutionIsolatedRunnerInput,
-    options?: { signal?: AbortSignal },
+    options?: {
+      onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+      signal?: AbortSignal;
+    },
   ) => Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 }
 

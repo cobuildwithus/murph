@@ -313,8 +313,8 @@ export async function sendAssistantMessageLocal(
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
           ].filter((key): key is string => key !== null),
-          pollAvailableInput:
-            shouldPollActiveTurnInputForMessage(input, executionContext),
+          livePollEnabled:
+            shouldLivePollActiveTurnInputForMessage(input, executionContext),
           sessionId: resolved.session.sessionId,
           turnId: receipt.turnId,
           vault: input.vault,
@@ -348,15 +348,149 @@ export async function sendAssistantMessageLocal(
         let providerResult: ExecutedAssistantProviderTurnResult | null = null
         let activeTurnRouteLock: ExecutedAssistantProviderTurnResult['route'] | null = null
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
+        let acceptedInputIdsForNextProviderRequest: readonly string[] =
+          initialAcceptedInputJournal.inputIds
+        const acceptActiveTurnInput = async (acceptanceInput: {
+          activeTurnInput: Extract<
+            AssistantActiveTurnInputAdmissionResult,
+            { kind: 'accepted' }
+          >
+          providerRequestAcceptedInputIds: readonly string[]
+          providerRequestOrdinal: number
+          sessionId: string
+        }) => {
+          const previousInput = currentInput
+          if (!userPromptPersistedToTranscript) {
+            const persisted = await appendUserTranscriptEntryForTurn({
+              createdAt: currentUserTurn.turnCreatedAt,
+              detail:
+                'user prompt persisted before active-turn continuation',
+              sessionId: resolved.session.sessionId,
+              text: previousInput.prompt,
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
+            currentUserTurn = {
+              ...currentUserTurn,
+              turnCreatedAt: persisted.createdAt,
+              userTranscriptRef: persisted.transcriptRef,
+              userPersisted: true,
+            }
+            userTurn = currentUserTurn
+            userPromptPersistedToTranscript = true
+            if (initialUserPromptInputId) {
+              await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+                refs: [
+                  {
+                    inputId: initialUserPromptInputId,
+                    transcriptRef: persisted.transcriptRef,
+                  },
+                ],
+                turnId: currentUserTurn.turnId,
+              })
+            }
+          }
+          const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
+            acceptedInput: acceptanceInput.activeTurnInput,
+            input: currentInput,
+            providerRequestOrdinal: acceptanceInput.providerRequestOrdinal,
+          })
+          assertAcceptedActiveTurnInputItemsAreNew({
+            acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
+            inputs: acceptedInputItems,
+          })
+          let acceptedInputJournal =
+            await runtimeState.turns.acceptedInputs.append({
+              inputs: acceptedInputItems,
+              sessionId: resolved.session.sessionId,
+              turnId: currentUserTurn.turnId,
+            })
+          await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+            journal: acceptedInputJournal,
+            vault: currentInput.vault,
+          })
+          const transcriptRefsByInputId =
+            await appendAcceptedActiveTurnInputTranscriptEntries({
+              acceptedInput: acceptanceInput.activeTurnInput,
+              acceptedInputItems,
+              sessionId: resolved.session.sessionId,
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
+          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
+            inputs: acceptedInputItems,
+            transcriptRefsByInputId,
+          })
+          if (transcriptRefUpdates.length > 0) {
+            acceptedInputJournal =
+              await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+                refs: transcriptRefUpdates,
+                turnId: currentUserTurn.turnId,
+              }) ?? acceptedInputJournal
+          }
+          await appendAssistantTurnReceiptEvent({
+            vault: currentInput.vault,
+            turnId: currentUserTurn.turnId,
+            kind: 'turn.input.accepted',
+            detail: null,
+            metadata: acceptanceInput.activeTurnInput.receiptMetadata ?? {},
+          })
+          if (acceptedInputJournal.inputIds.length > 0) {
+            await currentInput.activeTurnCheckpoint?.({
+              acceptedInputIds: acceptedInputJournal.inputIds,
+              providerRequestOrdinal: acceptanceInput.providerRequestOrdinal,
+              sessionId: acceptanceInput.sessionId,
+              signal: currentInput.abortSignal,
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
+          }
+          const nextInput = buildActiveTurnContinuationInput({
+            acceptedInput: acceptanceInput.activeTurnInput,
+            input: previousInput,
+          })
+          currentInput = nextInput
+          acceptedInputIdsForNextProviderRequest = acceptedInputJournal.inputIds
+          return {
+            acceptedInputJournal,
+            acceptedInputItems,
+            previousInput,
+          }
+        }
         providerLoop: for (
           let providerRequestOrdinal = 0;
           providerRequestOrdinal <= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS;
           providerRequestOrdinal += 1
         ) {
+          let preProviderAdmissionCount = 0
+          while (true) {
+            const activeTurnInput =
+              await resolveAssistantActiveTurnInputAdmission({
+                activeTurnInputController,
+                currentInput,
+                phase: 'request_boundary',
+                sessionId: currentSession.sessionId,
+                userTurn: currentUserTurn,
+              })
+            if (activeTurnInput?.kind !== 'accepted') {
+              break
+            }
+            preProviderAdmissionCount += 1
+            if (preProviderAdmissionCount > MAX_ACTIVE_TURN_INPUT_CONTINUATIONS) {
+              throw new AssistantActiveTurnInputBudgetExceededError()
+            }
+            await acceptActiveTurnInput({
+              activeTurnInput,
+              providerRequestAcceptedInputIds: acceptedInputIdsForNextProviderRequest,
+              providerRequestOrdinal,
+              sessionId: currentSession.sessionId,
+            })
+          }
           let providerRequestJournal: Awaited<
             ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
           > = null
-          let providerRequestAcceptedInputIds: readonly string[] = []
+          let providerRequestAcceptedInputIds: readonly string[] =
+            acceptedInputIdsForNextProviderRequest
           const providerOutcome = await executeProviderTurnWithRecovery({
             activeTurnHistory,
             activeTurnSteering: activeTurnInputController,
@@ -369,7 +503,9 @@ export async function sendAssistantMessageLocal(
                   providerAttemptId: event.providerAttemptId,
                   turnId: currentUserTurn.turnId,
                 })
-              providerRequestAcceptedInputIds = providerRequestJournal?.inputIds ?? []
+              providerRequestAcceptedInputIds =
+                providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
+              acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
             },
             route: activeTurnRouteLock ?? route,
             plan: sharedPlan,
@@ -424,7 +560,9 @@ export async function sendAssistantMessageLocal(
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               })
-            providerRequestAcceptedInputIds = providerRequestJournal?.inputIds ?? []
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForNextProviderRequest
+            acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
           } else {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
@@ -433,6 +571,9 @@ export async function sendAssistantMessageLocal(
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
           }
           currentSession = resolveActiveTurnProviderLoopSession({
             providerResult,
@@ -455,10 +596,9 @@ export async function sendAssistantMessageLocal(
                 activeTurnInputController,
                 currentInput,
                 phase,
-                providerRequestOrdinal,
-                providerResult,
+                sessionId: providerResult.session.sessionId,
                 userTurn: currentUserTurn,
-            })
+              })
             if (activeTurnInput?.kind !== 'accepted') {
               if (activeTurnInput && phase === 'commit_barrier') {
                 activeTurnInputController.close()
@@ -468,119 +608,34 @@ export async function sendAssistantMessageLocal(
             if (providerRequestOrdinal >= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS) {
               throw new AssistantActiveTurnInputBudgetExceededError()
             }
-            const previousInput = currentInput
-            if (!userPromptPersistedToTranscript) {
-              const persisted = await appendUserTranscriptEntryForTurn({
-                createdAt: currentUserTurn.turnCreatedAt,
-                detail:
-                  'user prompt persisted before active-turn continuation',
-                sessionId: resolved.session.sessionId,
-                text: previousInput.prompt,
-                turnId: currentUserTurn.turnId,
-                vault: currentInput.vault,
-              })
-              currentUserTurn = {
-                ...currentUserTurn,
-                turnCreatedAt: persisted.createdAt,
-                userTranscriptRef: persisted.transcriptRef,
-                userPersisted: true,
-              }
-              userTurn = currentUserTurn
-              userPromptPersistedToTranscript = true
-              if (initialUserPromptInputId) {
-                await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-                  refs: [
-                    {
-                      inputId: initialUserPromptInputId,
-                      transcriptRef: persisted.transcriptRef,
-                    },
-                  ],
-                  turnId: currentUserTurn.turnId,
-                })
-              }
-            }
-            const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
-              acceptedInput: activeTurnInput,
-              input: currentInput,
+            const accepted = await acceptActiveTurnInput({
+              activeTurnInput,
+              providerRequestAcceptedInputIds,
               providerRequestOrdinal,
-            })
-            assertAcceptedActiveTurnInputItemsAreNew({
-              acceptedInputIds: providerRequestAcceptedInputIds,
-              inputs: acceptedInputItems,
-            })
-            let acceptedInputJournal =
-              await runtimeState.turns.acceptedInputs.append({
-                inputs: acceptedInputItems,
-                sessionId: resolved.session.sessionId,
-                turnId: currentUserTurn.turnId,
-              })
-            await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-              journal: acceptedInputJournal,
-              vault: currentInput.vault,
-            })
-            const transcriptRefsByInputId =
-              await appendAcceptedActiveTurnInputTranscriptEntries({
-                acceptedInput: activeTurnInput,
-                acceptedInputItems,
-                sessionId: resolved.session.sessionId,
-                turnId: currentUserTurn.turnId,
-                vault: currentInput.vault,
-              })
-            const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
-              inputs: acceptedInputItems,
-              transcriptRefsByInputId,
-            })
-            if (transcriptRefUpdates.length > 0) {
-              acceptedInputJournal =
-                await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-                  refs: transcriptRefUpdates,
-                  turnId: currentUserTurn.turnId,
-                }) ?? acceptedInputJournal
-            }
-            await appendAssistantTurnReceiptEvent({
-              vault: currentInput.vault,
-              turnId: currentUserTurn.turnId,
-              kind: 'turn.input.accepted',
-              detail: null,
-              metadata: activeTurnInput.receiptMetadata ?? {},
-            })
-            if (acceptedInputJournal.inputIds.length > 0) {
-              await currentInput.activeTurnCheckpoint?.({
-                acceptedInputIds: acceptedInputJournal.inputIds,
-                providerRequestOrdinal,
-                sessionId: providerResult.session.sessionId,
-                signal: currentInput.abortSignal,
-                turnId: currentUserTurn.turnId,
-                vault: currentInput.vault,
-              })
-            }
-            const nextInput = buildActiveTurnContinuationInput({
-              acceptedInput: activeTurnInput,
-              input: previousInput,
+              sessionId: providerResult.session.sessionId,
             })
             if (activeTurnInput.providerAlreadySteered === true) {
-              currentInput = nextInput
               providerRequestJournal =
                 await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  acceptedInputIds: acceptedInputJournal.inputIds,
+                  acceptedInputIds: accepted.acceptedInputJournal.inputIds,
                   continuation: providerResult.providerContinuation,
                   ordinal: providerRequestOrdinal,
                   providerAttemptId: null,
                   turnId: currentUserTurn.turnId,
                 }) ?? providerRequestJournal
               providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? acceptedInputJournal.inputIds
+                providerRequestJournal?.inputIds ?? accepted.acceptedInputJournal.inputIds
+              acceptedInputIdsForNextProviderRequest = providerRequestAcceptedInputIds
               continue
             }
-            currentInput = nextInput
             activeTurnHistory = appendAssistantActiveTurnProviderExchange({
               acceptedInputIds: providerRequestAcceptedInputIds,
               assistantResponse: providerResult.response,
               history: activeTurnHistory,
               nonReplayableProviderWork:
                 providerResult.nonReplayableProviderWork === true,
-              userMessageContent: previousInput.userMessageContent ?? null,
-              userPrompt: previousInput.prompt,
+              userMessageContent: accepted.previousInput.userMessageContent ?? null,
+              userPrompt: accepted.previousInput.prompt,
             })
             continue providerLoop
           }
@@ -839,14 +894,13 @@ async function resolveAssistantActiveTurnInputAdmission(input: {
   > | null
   currentInput: AssistantMessageInput
   phase: 'request_boundary' | 'commit_barrier'
-  providerRequestOrdinal: number
-  providerResult: ExecutedAssistantProviderTurnResult
+  sessionId: string
   userTurn: PersistedUserTurn
 }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
   return input.activeTurnInputController?.admit({
     phase: input.phase,
     signal: input.currentInput.abortSignal,
-    sessionId: input.providerResult.session.sessionId,
+    sessionId: input.sessionId,
     turnId: input.userTurn.turnId,
     vault: input.currentInput.vault,
   })
@@ -894,7 +948,7 @@ function resolveInitialUserPromptAcceptedTurnInputId(
     : DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID
 }
 
-function shouldPollActiveTurnInputForMessage(
+function shouldLivePollActiveTurnInputForMessage(
   input: AssistantMessageInput,
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>,
 ): boolean {

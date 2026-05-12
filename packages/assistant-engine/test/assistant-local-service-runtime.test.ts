@@ -2585,10 +2585,11 @@ test('active-turn controller can rely on input-available notifications instead o
           },
         ],
       }
-    },
-    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-    pollAvailableInput: false,
-    sessionId: 'session-test',
+	    },
+	    boundaryAdmissionEnabled: false,
+	    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+	    livePollEnabled: false,
+	    sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
   })

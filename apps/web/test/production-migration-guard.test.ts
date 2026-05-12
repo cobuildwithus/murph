@@ -223,4 +223,22 @@ describe("hosted web production migration guard", () => {
       "deploy",
     ]);
   });
+
+  test("generates Prisma before direct local Next dev starts", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(appRoot, "package.json"), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+    };
+
+    const devLocalEnvScript = packageJson.scripts?.["dev:local-env"] ?? "";
+
+    assert.match(devLocalEnvScript, /pnpm prisma:generate/u);
+    assert.match(devLocalEnvScript, /apps\/web\/scripts\/dev-local\.ts/u);
+    assert.ok(
+      devLocalEnvScript.indexOf("pnpm prisma:generate")
+        < devLocalEnvScript.indexOf("apps/web/scripts/dev-local.ts"),
+      "Prisma client generation must finish before Next dev evaluates route modules",
+    );
+  });
 });

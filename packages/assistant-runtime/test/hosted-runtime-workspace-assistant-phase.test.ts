@@ -1512,14 +1512,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         includeBackgroundDueIntents: true,
       }),
     );
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        preferredInputIds: ["ain_00000000000000000000000000000001"],
-        skipActiveTurnMailboxRefresh: false,
-        skipDeviceSync: true,
-        skipInitialMailboxRefresh: true,
-      }),
-    );
+	    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        preferredInputIds: ["ain_00000000000000000000000000000001"],
+	        skipDeviceSync: true,
+	      }),
+	    );
     expect(result.nextWakeAt).toBe("2026-04-27T00:12:00.000Z");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
       hostedAssistantNextWakeAt: "2026-04-27T00:12:00.000Z",
@@ -1555,15 +1553,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const foregroundReplayInputIds = assistantInputIds.slice(-5);
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        foregroundReplayInputIds,
-        foregroundReplayPromptInputIds: foregroundReplayInputIds,
-        preferredInputIds: foregroundReplayInputIds,
-        skipActiveTurnMailboxRefresh: false,
-        skipInitialMailboxRefresh: true,
-      }),
-    );
+	    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        foregroundReplayInputIds,
+	        foregroundReplayPromptInputIds: foregroundReplayInputIds,
+	        preferredInputIds: foregroundReplayInputIds,
+	      }),
+	    );
   });
 
   it("treats imported assistant input ids as fresh even when no new mailbox rows were imported", async () => {
@@ -1575,15 +1571,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        foregroundReplayInputIds: ["ain_00000000000000000000000000000007"],
-        foregroundReplayPromptInputIds: ["ain_00000000000000000000000000000007"],
-        preferredInputIds: ["ain_00000000000000000000000000000007"],
-        skipActiveTurnMailboxRefresh: false,
-        skipInitialMailboxRefresh: true,
-      }),
-    );
+	    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        foregroundReplayInputIds: ["ain_00000000000000000000000000000007"],
+	        foregroundReplayPromptInputIds: ["ain_00000000000000000000000000000007"],
+	        preferredInputIds: ["ain_00000000000000000000000000000007"],
+	      }),
+	    );
   });
 
   it("does not treat system-only mailbox imports as foreground conversation input", async () => {
@@ -1593,15 +1587,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
-    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        foregroundReplayInputIds: [],
-        foregroundReplayPromptInputIds: [],
-        preferredInputIds: [],
-        skipActiveTurnMailboxRefresh: false,
-        skipInitialMailboxRefresh: false,
-      }),
-    );
+	    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        foregroundReplayInputIds: [],
+	        foregroundReplayPromptInputIds: [],
+	        preferredInputIds: [],
+	      }),
+	    );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],

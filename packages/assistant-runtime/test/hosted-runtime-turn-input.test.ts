@@ -1,55 +1,19 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  emitHostedExecutionStructuredLog: vi.fn(),
-}));
-
-vi.mock("@murphai/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
-    "@murphai/hosted-execution",
-  );
-  return {
-    ...actual,
-    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
-  };
-});
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  AssistantActiveTurnInputCheckpointRejectedError,
   upsertAssistantInputEvent,
-  type AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
-import type {
-  HostedRuntimeEvent,
-} from "@murphai/hosted-execution";
 
 import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
-import {
-  HostedMailboxImportCheckpointConflictError,
-  HostedMailboxImportCheckpointUserMismatchError,
-} from "../src/hosted-runtime/mailbox-checkpoint.ts";
-import type {
-  HostedRuntimeActiveTurnInputCheckpoint,
-  HostedRuntimeActiveTurnInputMailboxRefresh,
-} from "../src/hosted-runtime/platform.ts";
-
-const TIMER_WAKE = {
-  eventId: "evt_timer",
-  kind: "runtime.timer",
-  occurredAt: "2026-04-23T00:00:00.000Z",
-  triggerKind: "runtime_timer",
-  userId: "member_123",
-} satisfies HostedRuntimeEvent;
 
 const tempRoots: string[] = [];
 
 afterEach(async () => {
-  vi.clearAllMocks();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
       rm(root, {
@@ -61,13 +25,10 @@ afterEach(async () => {
 });
 
 describe("createHostedAssistantInputSource", () => {
-  it("returns a store-backed source when the hosted platform has no active-turn input ports", async () => {
+  it("uses the store-backed source for hosted active-turn input", async () => {
     const vaultRoot = await createTempVault();
     const source = createHostedAssistantInputSource({
-      requestId: "req_no_port",
-      runtime: createRuntime(),
       vaultRoot,
-      wake: TIMER_WAKE,
     });
 
     await expect(source.refresh({ phase: "request_boundary" })).resolves.toEqual({
@@ -80,156 +41,29 @@ describe("createHostedAssistantInputSource", () => {
     });
   });
 
-  it("fails closed when only one hosted active-turn input hook is configured", () => {
-    expect(() =>
-      createHostedAssistantInputSource({
-        requestId: "req_refresh_only",
-        runtime: createRuntime({
-          refreshMailboxForActiveTurnInput:
-            vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-            progressed: false,
-            reason: "no_new_input",
-          })),
-        }),
-        vaultRoot: "/tmp/vault-root",
-        wake: TIMER_WAKE,
-      }),
-    ).toThrow(/requires both mailbox refresh and acceptance checkpoint ports/u);
-
-    expect(() =>
-      createHostedAssistantInputSource({
-        requestId: "req_checkpoint_only",
-        runtime: createRuntime({
-          checkpointActiveTurnInput: vi.fn(async () => undefined),
-        }),
-        vaultRoot: "/tmp/vault-root",
-        wake: TIMER_WAKE,
-      }),
-    ).toThrow(/requires both mailbox refresh and acceptance checkpoint ports/u);
-  });
-
-  it("forwards accepted input checkpoints with the hosted request id", async () => {
-    const checkpointActiveTurnInput = vi.fn(async () => undefined);
-    const source = createHostedAssistantInputSource({
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput,
-        refreshMailboxForActiveTurnInput:
-          vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-          progressed: false,
-          reason: "no_new_input",
-        })),
-      }),
-      vaultRoot: "/tmp/vault-root",
-      wake: TIMER_WAKE,
-    });
-
-    await source?.checkpointAcceptedInput?.({
-      acceptedInputIds: ["ain_00000000000000000000000000000000"],
-      providerRequestOrdinal: 0,
-      sessionId: "session_123",
-      turnId: "turn_123",
-      vault: "/tmp/vault-root",
-    });
-
-    expect(checkpointActiveTurnInput).toHaveBeenCalledWith({
-      acceptedInputIds: ["ain_00000000000000000000000000000000"],
-      providerRequestOrdinal: 0,
-      requestId: "req_turn_input",
-      sessionId: "session_123",
-      turnId: "turn_123",
-      vault: "/tmp/vault-root",
-    });
-  });
-
-  it("normalizes hosted checkpoint rejection errors", async () => {
-    for (const error of [
-      new HostedMailboxImportCheckpointUserMismatchError({
-        actualUserId: "member_other",
-        expectedUserId: "member_123",
-      }),
-      new HostedMailboxImportCheckpointConflictError({
-        checkpointed: false,
-        workspace: {
-          createdAt: "2026-04-23T00:00:00.000Z",
-          checkpointedAt: "2026-04-23T00:00:01.000Z",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          redactedStatus: null,
-          snapshotRef: null,
-          updatedAt: "2026-04-23T00:00:01.000Z",
-          userId: "member_123",
-          version: "2",
-        },
-      }),
-    ]) {
-      const source = createHostedAssistantInputSource({
-        requestId: "req_turn_input",
-        runtime: createRuntime({
-          checkpointActiveTurnInput: vi.fn(async () => {
-            throw error;
-          }),
-          refreshMailboxForActiveTurnInput:
-            vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-            progressed: false,
-            reason: "no_new_input",
-          })),
-        }),
-        vaultRoot: "/tmp/vault-root",
-        wake: TIMER_WAKE,
-      });
-
-      await expect(
-        source?.checkpointAcceptedInput?.({
-          acceptedInputIds: ["ain_00000000000000000000000000000000"],
-          providerRequestOrdinal: 0,
-          sessionId: "session_123",
-          turnId: "turn_123",
-          vault: "/tmp/vault-root",
-        }),
-      ).rejects.toBeInstanceOf(AssistantActiveTurnInputCheckpointRejectedError);
-    }
-  });
-
-  it("refreshes hosted mailbox input and reads staged assistant input events", async () => {
+  it("reads conversation input that the foreground mailbox import staged", async () => {
     const vaultRoot = await createTempVault();
-    const events: string[] = [];
-    const refreshMailboxForActiveTurnInput =
-      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => {
-        events.push("mailbox");
-        await upsertAssistantInputEvent({
-          vault: vaultRoot,
-          event: createAssistantInputEvent(),
-        });
-        return {
-          progressed: true,
-          reason: "ingested_input",
-        };
-      });
+    const staged = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
+    });
     const source = createHostedAssistantInputSource({
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput: vi.fn(async () => undefined),
-        refreshMailboxForActiveTurnInput,
-      }),
       vaultRoot,
-      wake: TIMER_WAKE,
     });
 
-    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
-      progressed: true,
-      reason: "ingested_input",
+    await expect(source.refresh({ phase: "input_available" })).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
     });
-    const listed = await source?.listInputCandidates({
+    const listed = await source.listInputCandidates({
       sourceId: "linq",
     });
-
-    expect(events).toEqual(["mailbox"]);
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
-      requestId: "req_turn_input",
+    const conversation = await source.listNewConversationInputs({
+      conversation: staged.conversation!,
     });
-    expect(listed?.inputs).toHaveLength(1);
-    expect(listed?.inputs[0]).toMatchObject({
+
+    expect(listed.inputs).toHaveLength(1);
+    expect(listed.inputs[0]).toMatchObject({
       acceptedInput: {
         source: "assistant-input",
         contentRef: {
@@ -245,110 +79,9 @@ describe("createHostedAssistantInputSource", () => {
         status: "not_attempted",
       },
     });
-  });
-
-  it("skips the first hosted mailbox refresh when initial import already staged preferred input", async () => {
-    const vaultRoot = await createTempVault();
-    const staged = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent(),
-    });
-    const refreshMailboxForActiveTurnInput =
-      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-        progressed: false,
-        reason: "no_new_input",
-      }));
-    const source = createHostedAssistantInputSource({
-      preferredInputIds: [staged.inputId],
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput: vi.fn(async () => undefined),
-        refreshMailboxForActiveTurnInput,
-      }),
-      vaultRoot,
-      wake: TIMER_WAKE,
-    });
-
-    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledTimes(1);
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
-      requestId: "req_turn_input",
-    });
-  });
-
-  it("skips the first hosted mailbox refresh when initial import already progressed", async () => {
-    const vaultRoot = await createTempVault();
-    const refreshMailboxForActiveTurnInput =
-      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-        progressed: false,
-        reason: "no_new_input",
-      }));
-    const source = createHostedAssistantInputSource({
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput: vi.fn(async () => undefined),
-        refreshMailboxForActiveTurnInput,
-      }),
-      skipInitialMailboxRefresh: true,
-      vaultRoot,
-      wake: TIMER_WAKE,
-    });
-
-    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledTimes(1);
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
-      requestId: "req_turn_input",
-    });
-  });
-
-  it("honors explicit active-turn mailbox refresh suppression", async () => {
-    const vaultRoot = await createTempVault();
-    const refreshMailboxForActiveTurnInput =
-      vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
-        progressed: false,
-        reason: "no_new_input",
-      }));
-    const source = createHostedAssistantInputSource({
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput: vi.fn(async () => undefined),
-        refreshMailboxForActiveTurnInput,
-      }),
-      skipActiveTurnMailboxRefresh: true,
-      vaultRoot,
-      wake: TIMER_WAKE,
-    });
-
-    await expect(source?.refresh({ phase: "input_available" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-    await expect(source?.refresh({ phase: "request_boundary" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-    await expect(source?.refresh({ phase: "commit_barrier" })).resolves.toEqual({
-      progressed: false,
-      reason: "no_new_input",
-    });
-
-    expect(refreshMailboxForActiveTurnInput).not.toHaveBeenCalled();
+    expect(conversation.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      staged.inputId,
+    ]);
   });
 
   it("does not let newer preferred input skip older unprocessed input", async () => {
@@ -381,10 +114,7 @@ describe("createHostedAssistantInputSource", () => {
     });
     const source = createHostedAssistantInputSource({
       preferredInputIds: [preferred.inputId],
-      requestId: "req_preferred",
-      runtime: createRuntime(),
       vaultRoot,
-      wake: TIMER_WAKE,
     });
 
     const fullPage = await source.listInputCandidates({
@@ -455,10 +185,7 @@ describe("createHostedAssistantInputSource", () => {
       foregroundReplayInputIds: [older.inputId, latest.inputId],
       foregroundReplayPromptInputIds: [latest.inputId],
       preferredInputIds: [latest.inputId],
-      requestId: "req_foreground_replay",
-      runtime: createRuntime(),
       vaultRoot,
-      wake: TIMER_WAKE,
     });
 
     const listed = await source.listInputCandidates({
@@ -492,57 +219,6 @@ describe("createHostedAssistantInputSource", () => {
     ]);
     expect(afterLatest.inputs[0]?.event.text).toBe("latest foreground note");
     expect(afterLatest.nextCursor).toEqual(latest.cursor);
-  });
-
-  it("keeps older base candidates ahead of foreground replay candidates", async () => {
-    const vaultRoot = await createTempVault();
-    const older = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_older_base",
-        eventId: "evt_older_base",
-        itemId: "item_older_base",
-        laneSeq: "10",
-        messageId: "msg_older_base",
-        occurredAt: "2026-04-23T00:00:01.000Z",
-        receivedAt: "2026-04-23T00:00:02.000Z",
-        text: "older base note",
-      }),
-    });
-    const latest = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_latest_replay",
-        eventId: "evt_latest_replay",
-        itemId: "item_latest_replay",
-        laneSeq: "20",
-        messageId: "msg_latest_replay",
-        occurredAt: "2026-04-23T00:00:03.000Z",
-        receivedAt: "2026-04-23T00:00:04.000Z",
-        text: "latest replay note",
-      }),
-    });
-    const source = createHostedAssistantInputSource({
-      foregroundReplayInputIds: [latest.inputId],
-      foregroundReplayPromptInputIds: [latest.inputId],
-      requestId: "req_foreground_replay_with_base",
-      runtime: createRuntime(),
-      vaultRoot,
-      wake: TIMER_WAKE,
-    });
-
-    const listed = await source.listInputCandidates({
-      limit: 2,
-      sourceId: "linq",
-    });
-
-    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
-      older.inputId,
-      latest.inputId,
-    ]);
-    expect(listed.inputs[0]?.event.text).toBe("older base note");
-    expect(listed.inputs[1]?.event.text).toBe("latest replay note");
-    expect(listed.nextCursor).toEqual(latest.cursor);
   });
 
   it("reserves foreground replay slots when old base candidates would fill the scan page", async () => {
@@ -589,10 +265,7 @@ describe("createHostedAssistantInputSource", () => {
     const source = createHostedAssistantInputSource({
       foregroundReplayInputIds: [replay.inputId],
       foregroundReplayPromptInputIds: [replay.inputId],
-      requestId: "req_foreground_replay_reserved",
-      runtime: createRuntime(),
       vaultRoot,
-      wake: TIMER_WAKE,
     });
 
     const listed = await source.listInputCandidates({
@@ -615,107 +288,12 @@ describe("createHostedAssistantInputSource", () => {
       .not.toContain(older.inputId);
     expect(listed.nextCursor).toEqual(replay.cursor);
   });
-
-  it("masks replay prompt content when no prompt-visible replay ids are provided", async () => {
-    const vaultRoot = await createTempVault();
-    const replay = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_replay_masked",
-        eventId: "evt_replay_masked",
-        itemId: "item_replay_masked",
-        laneSeq: "30",
-        messageId: "msg_replay_masked",
-        occurredAt: "2026-04-23T00:00:05.000Z",
-        receivedAt: "2026-04-23T00:00:06.000Z",
-        text: "replay note should be masked",
-      }),
-    });
-    const source = createHostedAssistantInputSource({
-      foregroundReplayInputIds: [replay.inputId],
-      requestId: "req_foreground_replay_masked",
-      runtime: createRuntime(),
-      vaultRoot,
-      wake: TIMER_WAKE,
-    });
-
-    const listed = await source.listInputCandidates({
-      limit: 1,
-      sourceId: "linq",
-    });
-
-    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
-      replay.inputId,
-    ]);
-    expect(listed.inputs[0]?.event.text).toBeNull();
-    expect(listed.inputs[0]?.event.transcriptText).toBeNull();
-    expect(listed.inputs[0]?.event.userMessageContent).toBeNull();
-    expect(listed.nextCursor).toEqual(replay.cursor);
-  });
-
-  it("logs and rethrows hosted mailbox refresh failures", async () => {
-    const hostedError = new Error("hosted mailbox refresh failed");
-    const source = createHostedAssistantInputSource({
-      requestId: "req_turn_input",
-      runtime: createRuntime({
-        checkpointActiveTurnInput: vi.fn(async () => undefined),
-        refreshMailboxForActiveTurnInput: vi
-          .fn<HostedRuntimeActiveTurnInputMailboxRefresh>()
-          .mockRejectedValueOnce(hostedError),
-      }),
-      vaultRoot: "/tmp/vault-root",
-      wake: TIMER_WAKE,
-    });
-
-    await expect(source?.refresh({ phase: "request_boundary" })).rejects.toThrow(
-      "hosted mailbox refresh failed",
-    );
-
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
-      component: "runtime",
-      details: {
-        requestId: "req_turn_input",
-      },
-      error: hostedError,
-      level: "warn",
-      message:
-        "Hosted assistant mailbox refresh failed during active turn input admission.",
-      phase: "wake.running",
-      wake: TIMER_WAKE,
-    });
-  });
 });
 
 async function createTempVault(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-source-"));
   tempRoots.push(root);
   return path.join(root, "vault");
-}
-
-function createRuntime(input: {
-  checkpointActiveTurnInput?: HostedRuntimeActiveTurnInputCheckpoint;
-  refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh;
-} = {}) {
-  return {
-    forwardedEnv: {},
-    platform: {
-      artifactStore: {
-        get: vi.fn(async () => null),
-        put: vi.fn(async () => undefined),
-      },
-      effectsPort: {
-        readRawEmailMessage: vi.fn(async () => null),
-        sendEmail: vi.fn(async () => undefined),
-      },
-      ...(input.checkpointActiveTurnInput
-        ? { checkpointActiveTurnInput: input.checkpointActiveTurnInput }
-        : {}),
-      ...(input.refreshMailboxForActiveTurnInput
-        ? { refreshMailboxForActiveTurnInput: input.refreshMailboxForActiveTurnInput }
-        : {}),
-    },
-    platformEnv: {},
-  };
 }
 
 function createAssistantInputEvent(input: {

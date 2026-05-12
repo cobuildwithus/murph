@@ -83,6 +83,15 @@ import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 export {
+  createCoalescingRuntimeWakeSignal,
+} from "./hosted-runtime/runtime-wake.ts";
+export type {
+  RuntimeWakeSignal,
+} from "./hosted-runtime/runtime-wake.ts";
+import type {
+  RuntimeWakeSignal,
+} from "./hosted-runtime/runtime-wake.ts";
+export {
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
 } from "./hosted-runtime/child-result.ts";
@@ -112,10 +121,6 @@ export type {
 } from "./hosted-runtime/models.ts";
 export type {
   HostedRuntimeArtifactStore,
-  HostedRuntimeActiveTurnInputCheckpoint,
-  HostedRuntimeActiveTurnInputCheckpointInput,
-  HostedRuntimeActiveTurnInputMailboxRefresh,
-  HostedRuntimeActiveTurnInputMailboxRefreshInput,
   HostedRuntimeBrowserVaultReplicaPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
@@ -223,6 +228,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
+  runtimeWakeSignal?: RuntimeWakeSignal | null;
   vaultRoot: string;
 }
 
@@ -472,6 +478,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
       platform: runnerPlatform,
       requestId,
+      runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+      signal: runtimeAbortController.signal,
       runtimeLogContext,
       vaultRoot: restored.vaultRoot,
       workspace: workspaceRead.workspace,
@@ -797,12 +805,6 @@ function createAbortGuardedHostedRuntimePlatform(
       get: platform.artifactStore.get,
       put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
     },
-    ...(platform.checkpointActiveTurnInput
-      ? {
-          checkpointActiveTurnInput: (checkpointInput) =>
-            guard(() => platform.checkpointActiveTurnInput!(checkpointInput)),
-        }
-      : {}),
     ...(platform.browserVaultReplicaPort
       ? {
           browserVaultReplicaPort: {
@@ -874,12 +876,6 @@ function createAbortGuardedHostedRuntimePlatform(
             fetch: platform.mailboxPort.fetch,
             fetchPayload: platform.mailboxPort.fetchPayload,
           },
-        }
-      : {}),
-    ...(platform.refreshMailboxForActiveTurnInput
-      ? {
-          refreshMailboxForActiveTurnInput: (refreshInput) =>
-            guard(() => platform.refreshMailboxForActiveTurnInput!(refreshInput)),
         }
       : {}),
     ...(platform.usageRecordPort

@@ -2,7 +2,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  createCoalescingRuntimeWakeSignal,
   runHostedWorkspaceRuntimeJobInProcess,
+  type RuntimeWakeSignal,
 } from "@murphai/assistant-runtime";
 import {
   readHostedRunnerCommitTimeoutMs,
@@ -28,6 +30,8 @@ import {
 } from "./runtime-bridge-mailbox-payload-decode.js";
 import {
   createHostedExecutionRunnerChildResultMessage,
+  createHostedExecutionRunnerChildRuntimeWakeReadyMessage,
+  isHostedExecutionRunnerChildRuntimeWakeMessage,
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerChildResult,
@@ -55,6 +59,7 @@ interface HostedExecutionChildDependencies {
   readStandardInput?: () => Promise<string>;
   runWorkspaceInProcess?: typeof runHostedWorkspaceRuntimeJobInProcess;
   sendResult?: (payload: HostedExecutionRunnerChildResult) => void;
+  sendRuntimeWakeReady?: () => void;
   setExitCode?: (value: number) => void;
 }
 
@@ -70,6 +75,8 @@ export async function runHostedExecutionChild(
   const runWorkspaceInProcess =
     dependencies.runWorkspaceInProcess ?? runHostedWorkspaceRuntimeJobInProcess;
   const sendResult = dependencies.sendResult ?? sendHostedExecutionRunnerChildResult;
+  const sendRuntimeWakeReady =
+    dependencies.sendRuntimeWakeReady ?? sendHostedExecutionRunnerChildRuntimeWakeReady;
   const setExitCode = dependencies.setExitCode ?? ((value: number) => {
     process.exitCode = value;
   });
@@ -98,6 +105,11 @@ export async function runHostedExecutionChild(
     return;
   }
 
+  const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+  const removeRuntimeWakeListener =
+    addHostedExecutionRunnerChildRuntimeWakeListener(runtimeWakeSignal);
+  sendRuntimeWakeReady();
+
   try {
     const childRunDiagnostics = buildHostedRunnerChildRuntimeDiagnostics(input);
     assertNoHostedRunnerDeprecatedCodexAppServerProxyEnv(
@@ -120,6 +132,7 @@ export async function runHostedExecutionChild(
     const result = await runWorkspaceChildJob({
       job: input.job,
       runWorkspaceInProcess,
+      runtimeWakeSignal,
     });
     emitHostedRunnerChildDebug({
       stage: "after-run",
@@ -142,6 +155,8 @@ export async function runHostedExecutionChild(
       ok: false,
       error: serializedError,
     });
+  } finally {
+    removeRuntimeWakeListener();
   }
 }
 
@@ -155,9 +170,30 @@ function sendHostedExecutionRunnerChildResult(
   process.send(createHostedExecutionRunnerChildResultMessage(payload));
 }
 
+function sendHostedExecutionRunnerChildRuntimeWakeReady(): void {
+  if (typeof process.send !== "function") {
+    throw new Error("Hosted node runner child requires an IPC runtime wake channel.");
+  }
+
+  process.send(createHostedExecutionRunnerChildRuntimeWakeReadyMessage());
+}
+
+function addHostedExecutionRunnerChildRuntimeWakeListener(
+  runtimeWakeSignal: RuntimeWakeSignal,
+): () => void {
+  const listener = (message: unknown) => {
+    if (isHostedExecutionRunnerChildRuntimeWakeMessage(message)) {
+      runtimeWakeSignal.notify();
+    }
+  };
+  process.on("message", listener);
+  return () => process.off("message", listener);
+}
+
 async function runWorkspaceChildJob(input: {
   job: HostedExecutionWorkspaceInvocationJobInput;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
+  runtimeWakeSignal: RuntimeWakeSignal;
 }) {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
   const boundUserId = readHostedExecutionRunnerJobUserId(input.job);
@@ -189,23 +225,25 @@ async function runWorkspaceChildJob(input: {
     timeoutMs: readHostedRunnerCommitTimeoutMs(input.job.runtime?.commitTimeoutMs ?? null),
   });
 
-  return await input.runWorkspaceInProcess(
-    input.job,
-    createHostedWorkspaceRuntimeBridgeJobOptions({
-      decodeMailboxPayload,
-      platform,
-      requireMailboxPayloadDecoder: true,
-      request: input.job.request,
-      runtime: input.job.runtime ?? {},
-      vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
-      webControlAllowHttpHosts: [
-        CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-        ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-      ],
-      webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-      webControlFetch,
-    }),
-  );
+  const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+    decodeMailboxPayload,
+    platform,
+    requireMailboxPayloadDecoder: true,
+    request: input.job.request,
+    runtime: input.job.runtime ?? {},
+    vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
+    webControlAllowHttpHosts: [
+      CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+      ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+    ],
+    webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+    webControlFetch,
+  });
+
+  return await input.runWorkspaceInProcess(input.job, {
+    ...jobOptions,
+    runtimeWakeSignal: input.runtimeWakeSignal,
+  });
 }
 
 function resolveHostedWorkspaceChildVaultRoot(): string {

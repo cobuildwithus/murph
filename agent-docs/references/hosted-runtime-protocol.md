@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-05-11
+Last verified: 2026-05-13
 
 ## Decision
 
@@ -140,8 +140,8 @@ Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
 drains any local non-mailbox side effects, and attempts to start a Vercel Workflow
-with only `{ mailboxItemId, source }` to supervise checkpointed import of that
-mailbox item through the per-user Cloudflare runner.
+with only `{ mailboxItemId, source }` to retry the per-user Cloudflare runner
+nudge until the runner accepts the handoff.
 Cloudflare Email ingress verifies either a signed reply alias for an active
 member or the fixed public sender route plus a trusted authenticated-sender
 verdict, stores the encrypted raw message, appends the canonical encrypted
@@ -153,21 +153,22 @@ address, but settings should only present the alias after web has persisted the
 matching reply-alias lookup key for route resolution.
 Raw provider bodies, raw email messages, message content, verification headers,
 provider secrets, and decrypted mailbox payloads must not be Vercel Workflow
-inputs or outputs. The pointer workflow may wake the runner and poll checkpoint
-progress; it must not decrypt mailbox payloads or perform provider-visible
-cleanup/read acknowledgement. If the pointer workflow cannot be accepted after
-the mailbox row exists, the failure is logged as a post-commit best-effort
-handoff failure and does not make provider ingress fail. Web may still attempt a
-latency-only direct runner nudge on that failure path, but the handoff remains a
-workflow-start failure until the pointer workflow supervises checkpoint progress.
-This avoids duplicate provider retries after the durable append. The minute
+inputs or outputs. The pointer workflow may wake the runner; it must not poll
+checkpoint progress, decrypt mailbox payloads, or perform provider-visible
+cleanup/read acknowledgement. Once the runner nudge is accepted, the workflow is
+complete. If the pointer workflow cannot be accepted after the mailbox row
+exists, the failure is logged as a post-commit best-effort handoff failure and
+does not make provider ingress fail. Web may still attempt a latency-only direct
+runner nudge on that failure path, but the durable handoff retry boundary remains
+runner nudge acceptance rather than workspace checkpoint publication. This avoids
+duplicate provider retries after the durable append. The minute
 hosted mailbox lag sweeper is the bounded recovery backstop for missed workflow
 starts and missed direct nudges: it compares mailbox high-water rows with
 checkpointed import status, finds the oldest uncheckpointed row for each lagged
 lane, and nudges lagged runners by opaque user/work pointer only after a
 freshness grace period so normal workflow-driven imports can reach their quiet
 checkpoint. Redacted runtime logs remain diagnostic evidence only; they must not
-be merged into checkpointed import status for workflow progress, status
+be merged into checkpointed import status for workflow completion, status
 projection, or sweeper decisions. A DB-backed pending-handoff reconciler remains
 future hardening for exact workflow-start failure journaling.
 Duplicate provider retries, duplicate email delivery attempts, or duplicate
@@ -408,13 +409,14 @@ durable queue history.
 - accepted pointer-only nudge workflow run state for Linq, Telegram, and Cloudflare Email ingress handoff
 - Stripe event-id reconciliation workflow run state after local Stripe signature verification and receipt recording
 - workflow event logs for opaque mailbox item ids, Stripe event ids, channel/source labels, retry status, and step errors
-- runner nudge handoff and retry state after web-owned verification and mailbox append have committed and the workflow start is accepted
+- runner nudge handoff and retry state after web-owned verification and mailbox append have committed and the workflow start is accepted; accepted runner nudges complete the pointer workflow
 
 Vercel Workflow does not own raw webhook payloads, provider verification
 headers, Stripe request bodies, provider secrets, canonical product facts,
-mailbox payload content, mailbox state after Postgres commit, message-processing
-completion, outbox truth, or per-user runner coordination. Treat workflow state
-as durable execution state, not as queryable product truth.
+mailbox payload content, mailbox state after Postgres commit, workspace
+checkpoint progress, message-processing completion, outbox truth, or per-user
+runner coordination. Treat workflow state as durable execution state, not as
+queryable product truth.
 
 ## Runtime Timers
 

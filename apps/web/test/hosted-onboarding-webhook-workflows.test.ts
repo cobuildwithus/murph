@@ -52,7 +52,6 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 import { startHostedWebhookNudgeWorkflow } from "@/src/lib/hosted-onboarding/webhook-workflow-start";
 import {
   nudgeHostedWebhookMailboxItemStep,
-  waitHostedWebhookMailboxItemCheckpointStep,
 } from "@/src/lib/hosted-onboarding/webhook-workflow-steps";
 import { hostedWebhookNudgeWorkflow } from "@/src/lib/hosted-onboarding/webhook-workflows";
 
@@ -131,8 +130,8 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
   });
 
-  it("nudges once, then waits for checkpoint progress in the pointer workflow", async () => {
-    mockMailboxProgressBehindThenCaughtUp();
+  it("completes the pointer workflow after an accepted runner nudge", async () => {
+    mockMailboxProgressBehind();
 
     await expect(hostedWebhookNudgeWorkflow({
       mailboxItemId: "mailbox_123",
@@ -147,19 +146,13 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.readHostedMailboxItemCheckpointById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the durable nudge retry window long enough for short outages", () => {
     expect(
       Object.getOwnPropertyDescriptor(nudgeHostedWebhookMailboxItemStep, "maxRetries")?.value,
     ).toBe(120);
-    expect(
-      Object.getOwnPropertyDescriptor(
-        waitHostedWebhookMailboxItemCheckpointStep,
-        "maxRetries",
-      )?.value,
-    ).toBe(720);
   });
 
   it("uses the device-sync wake context for device-sync workflow nudges", async () => {
@@ -264,49 +257,7 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("re-nudges while the latest mailbox pointer is still uncheckpointed", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
-      hostedMailboxConversationImportedSeq: "0",
-      hostedMailboxSystemImportedSeq: "0",
-    }));
-
-    await expect(waitHostedWebhookMailboxItemCheckpointStep({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    })).rejects.toBeInstanceOf(RetryableError);
-
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "webhook:linq:workflow",
-      timeoutMs: 5_000,
-      userId: "member_123",
-    });
-    expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits without re-nudging when an older mailbox pointer is still uncheckpointed", async () => {
-    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(
-      buildHostedMailboxItemCheckpoint({
-        laneSeq: "4",
-      }),
-    );
-    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
-      hostedMailboxConversationImportedSeq: "0",
-      hostedMailboxSystemImportedSeq: "0",
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([{
-      lane: "conversation",
-      maxSeq: "5",
-    }]);
-
-    await expect(waitHostedWebhookMailboxItemCheckpointStep({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    })).rejects.toBeInstanceOf(RetryableError);
-
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-  });
-
-  it("uses the mailbox item's lane when checking checkpoint progress", async () => {
+  it("uses the mailbox item's lane for nudge preflight checks", async () => {
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
       lane: "system",
       laneSeq: "2",
@@ -315,11 +266,15 @@ describe("hosted onboarding webhook workflows", () => {
       hostedMailboxConversationImportedSeq: "99",
       hostedMailboxSystemImportedSeq: "1",
     }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([{
+      lane: "system",
+      maxSeq: "2",
+    }]);
 
-    await expect(waitHostedWebhookMailboxItemCheckpointStep({
+    await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "device-sync",
-    })).rejects.toBeInstanceOf(RetryableError);
+    })).resolves.toBeUndefined();
 
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "device-sync.wake:workflow",
@@ -330,21 +285,6 @@ describe("hosted onboarding webhook workflows", () => {
       lanes: ["system"],
       userId: "member_123",
     });
-
-    vi.clearAllMocks();
-    mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
-      lane: "system",
-      laneSeq: "2",
-    }));
-    mocks.readHostedWorkspace.mockResolvedValue(buildHostedWorkspace({
-      hostedMailboxConversationImportedSeq: "99",
-      hostedMailboxSystemImportedSeq: "2",
-    }));
-
-    await expect(waitHostedWebhookMailboxItemCheckpointStep({
-      mailboxItemId: "mailbox_123",
-      source: "device-sync",
-    })).resolves.toBeUndefined();
   });
 });
 
@@ -380,16 +320,4 @@ function mockMailboxProgressBehind() {
     hostedMailboxConversationImportedSeq: "0",
     hostedMailboxSystemImportedSeq: "0",
   }));
-}
-
-function mockMailboxProgressBehindThenCaughtUp() {
-  mocks.readHostedWorkspace
-    .mockResolvedValueOnce(buildHostedWorkspace({
-      hostedMailboxConversationImportedSeq: "0",
-      hostedMailboxSystemImportedSeq: "0",
-    }))
-    .mockResolvedValueOnce(buildHostedWorkspace({
-      hostedMailboxConversationImportedSeq: "1",
-      hostedMailboxSystemImportedSeq: "0",
-    }));
 }

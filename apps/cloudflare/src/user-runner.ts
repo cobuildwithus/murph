@@ -258,6 +258,9 @@ export class HostedUserRunner {
       preferredWakeAt: new Date().toISOString(),
     });
     await this.syncAlarm(record);
+    const runtimeWakeAccepted = alreadyRunning
+      ? await this.wakeActiveRuntimeBestEffort(record.userId)
+      : false;
     const due = await this.stateStore.readDueWork(Date.now());
     const immediateDriveStarted = due.kind === "runtime"
       ? this.kickDrain({
@@ -272,6 +275,7 @@ export class HostedUserRunner {
       details: {
         alreadyRunning,
         immediateDriveStarted,
+        runtimeWakeAccepted,
         wakePending: record.wakePending,
       },
       message: "Hosted runner nudge accepted.",
@@ -714,6 +718,36 @@ export class HostedUserRunner {
     }
 
     await this.state.storage.setAlarm(new Date(nextAlarmAt));
+  }
+
+  private async wakeActiveRuntimeBestEffort(userId: string): Promise<boolean> {
+    if (!this.runnerContainerNamespace) {
+      return false;
+    }
+
+    const container = this.runnerContainerNamespace.getByName(
+      resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId,
+      }),
+    );
+    if (!container.wakeRuntime) {
+      return false;
+    }
+
+    try {
+      return (await container.wakeRuntime({ userId })).accepted;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        level: "warn",
+        message: "Hosted runner could not wake an active runtime best-effort.",
+        phase: "scheduled",
+        userId,
+      });
+      return false;
+    }
   }
 
   private async scheduleRetryAfterFailure(error: unknown): Promise<void> {

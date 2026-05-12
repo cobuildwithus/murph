@@ -60,7 +60,7 @@ describe("CRELES local benchmark runner", () => {
       ]);
       expect(output.candidateBatch).toEqual({
         batchId: "creles-wave3-no-crp-candidate-batch",
-        candidateCount: 5,
+        candidateCount: 7,
         exposureLabel: "diagnostic-only",
         hypothesisSources: [
           "literature or mechanistic rationale",
@@ -104,18 +104,28 @@ describe("CRELES local benchmark runner", () => {
       expect(reference?.candidateRole).toBe("reference");
       expect(reference?.featureKeys).toEqual(["age", "male"]);
 
-      const lab5 = output.models.lab5_lipid_body_no_crp;
-      expect(lab5?.candidateRole).toBe("proposal");
-      expect(lab5?.featureKeys).toEqual([
-        "age",
-        "male",
-        "bmi",
-        "hba1c",
-        "log-triglycerides",
-        "hdl-c",
-      ]);
-      expect(lab5?.coefficientsStored).toBe(false);
-      expect(lab5?.predictionsStored).toBe(false);
+      expect(output.models.body_only_no_crp?.candidateRole).toBe("proposal");
+      expect(output.models.body_only_no_crp?.featureKeys).toEqual(["age", "male", "bmi"]);
+      expect(output.models.glycemia_only_no_crp?.candidateRole).toBe("proposal");
+      expect(output.models.glycemia_only_no_crp?.featureKeys).toEqual(["age", "male", "hba1c", "glucose"]);
+      expect(output.models.glycemia_body_no_crp?.candidateRole).toBe("proposal");
+      expect(output.models.glycemia_body_no_crp?.featureKeys).toEqual(["age", "male", "bmi", "hba1c", "glucose"]);
+
+      const parsimoniousModelIds = ["body_only_no_crp", "glycemia_only_no_crp", "glycemia_body_no_crp"] as const;
+      for (const modelId of parsimoniousModelIds) {
+        const model = output.models[modelId];
+        expect(model?.coefficientsStored).toBe(false);
+        expect(model?.predictionsStored).toBe(false);
+        expect(model?.featureKeys).not.toContain("total-cholesterol");
+        expect(model?.featureKeys).not.toContain("log-triglycerides");
+        expect(model?.featureKeys).not.toContain("hdl-c");
+        expect(model?.featureKeys).not.toContain("ldl-c");
+        expect(model?.featureKeys).not.toContain("systolic-blood-pressure");
+        expect(model?.featureKeys).not.toContain("diastolic-blood-pressure");
+        expect(model?.featureKeys).not.toContain("log-crp");
+        expect(Number.isFinite(model?.splitMetrics.test.logLoss)).toBe(true);
+        expect(Number.isFinite(model?.splitMetrics.test.brier)).toBe(true);
+      }
 
       const extended = output.models.extended_clinical_no_crp;
       expect(extended?.featureKeys).toContain("systolic-blood-pressure");
@@ -157,6 +167,10 @@ describe("CRELES local benchmark runner", () => {
       expect(parsed.status).toBe("research-local-aggregate-only");
       expect(parsed.artifact).toBe("creles-local-benchmark.latest.json");
       expect(parsed.dataShape.eligibleRows).toBe(324);
+      expect(parsed.candidateBatch.candidateCount).toBe(7);
+      expect(parsed.models.body_only_no_crp.candidateRole).toBe("proposal");
+      expect(parsed.models.glycemia_only_no_crp.candidateRole).toBe("proposal");
+      expect(parsed.models.glycemia_body_no_crp.candidateRole).toBe("proposal");
       expect(stdout).not.toContain(outputDir);
       expect(stdout).not.toContain(tmp);
       expect(stdout).not.toContain("C0001");
