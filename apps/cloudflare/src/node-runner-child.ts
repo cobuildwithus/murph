@@ -164,6 +164,7 @@ async function runWorkspaceChildJob(input: {
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
+    proxyBoundUserIdHeader: true,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,
       recordCheckpoint: ({ workspaceVersion }) => {
@@ -178,6 +179,7 @@ async function runWorkspaceChildJob(input: {
     boundUserId,
     fetch,
     {
+      injectBoundUserIdHeader: true,
       readCurrentLease: () => currentLease,
     },
   );

@@ -23,7 +23,6 @@ import {
   type HostedExecutionRunnerJobResult,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
-import { hostedRunnerIntercept } from "./runner-egress-intercept.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
