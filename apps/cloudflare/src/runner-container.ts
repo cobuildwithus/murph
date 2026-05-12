@@ -1783,11 +1783,7 @@ function isMissingRunnerContainerError(error: unknown): boolean {
 }
 
 function isSettledRunnerContainerDestroyRaceError(error: unknown): boolean {
-  const message = readErrorMessage(error);
-  return message !== null && (
-    message.includes("No such container")
-    || message.includes("already stopping")
-  );
+  return isMissingRunnerContainerError(error);
 }
 
 function readErrorMessage(error: unknown): string | null {
