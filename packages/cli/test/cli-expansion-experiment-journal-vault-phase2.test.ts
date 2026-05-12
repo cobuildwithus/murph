@@ -1163,6 +1163,110 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
   }
 })
 
+test.sequential('experiment prose flags accept commas inside prose values', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-stop-condition-'))
+
+  try {
+    await runSliceCli([
+      'init',
+      '--vault',
+      vaultRoot,
+      '--timezone',
+      'America/Los_Angeles',
+    ])
+
+    const stopCondition =
+      'Stop if symptoms get worse during driving, cycling, cooking, tools, or sleep.'
+    const startAnalysisNote =
+      'Compare driving, cycling, cooking, tools, and sleep against the baseline.'
+    const started = await runSliceCli([
+      'experiment',
+      'start',
+      'mobility-guardrails',
+      '--from-protocol',
+      'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+      '--intervention-start',
+      '2026-05-01',
+      '--stop-condition',
+      stopCondition,
+      '--analysis-note',
+      startAnalysisNote,
+      '--vault',
+      vaultRoot,
+    ])
+    const shown = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'mobility-guardrails',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(started.ok, true, started.ok ? undefined : started.error.message)
+    assert.equal(shown.ok, true)
+
+    const experimentData = requireData(shown).entity.data
+    const runPlan = requireRecord(experimentData.runPlan, 'runPlan')
+    const analysisPlan = requireRecord(experimentData.analysisPlan, 'analysisPlan')
+    assert.deepEqual(runPlan.stopConditions, [stopCondition])
+    assert.deepEqual(analysisPlan.notes, [startAnalysisNote])
+
+    const safetyNote =
+      'No dizziness, chest pain, or unusual symptoms reported during setup.'
+    const contextNote =
+      'Keep work, travel, caffeine, and bedtime as stable as practical.'
+    const editAnalysisNote =
+      'Review mobility, sleep, and symptom notes before judging the run.'
+    const editStopCondition =
+      'Stop if driving, cycling, cooking, or tools feel unsafe.'
+    const edited = await runSliceCli([
+      'experiment',
+      'edit',
+      'mobility-guardrails',
+      '--stop-condition',
+      editStopCondition,
+      '--analysis-note',
+      editAnalysisNote,
+      '--safety-note',
+      safetyNote,
+      '--context-note',
+      contextNote,
+      '--vault',
+      vaultRoot,
+    ])
+    const shownAfterEdit = await runSliceCli<{
+      entity: {
+        data: Record<string, unknown>
+      }
+    }>([
+      'experiment',
+      'show',
+      'mobility-guardrails',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(edited.ok, true, edited.ok ? undefined : edited.error.message)
+    assert.equal(shownAfterEdit.ok, true)
+
+    const editedData = requireData(shownAfterEdit).entity.data
+    const editedRunPlan = requireRecord(editedData.runPlan, 'runPlan')
+    const editedAnalysisPlan = requireRecord(editedData.analysisPlan, 'analysisPlan')
+    const onboarding = requireRecord(editedData.onboarding, 'onboarding')
+    const safety = requireRecord(onboarding.safety, 'onboarding.safety')
+    assert.deepEqual(editedRunPlan.stopConditions, [editStopCondition])
+    assert.deepEqual(editedAnalysisPlan.notes, [editAnalysisNote])
+    assert.deepEqual(safety.notes, [safetyNote])
+    assert.deepEqual(onboarding.contextNotes, [contextNote])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential(
   'experiment session/context log can write typed event records without JSON payloads',
   async () => {

@@ -6,6 +6,7 @@ import {
   normalizeRepeatedOption,
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
+  normalizeRepeatableTextFlagOption,
 } from "../src/option-utils.ts";
 
 test("normalizeRepeatedOption trims, deduplicates, and drops empty entries", () => {
@@ -27,6 +28,16 @@ test("normalizeRepeatableFlagOption rejects comma-delimited values", () => {
           error.message ===
             "Comma-delimited values are not supported for --kind. Repeat the flag instead.",
       ),
+  );
+});
+
+test("normalizeRepeatableTextFlagOption preserves commas inside prose values", () => {
+  assert.deepEqual(
+    normalizeRepeatableTextFlagOption([
+      " Stop during driving, cycling, cooking, tools, or sleep. ",
+      "Stop during driving, cycling, cooking, tools, or sleep.",
+    ]),
+    ["Stop during driving, cycling, cooking, tools, or sleep."],
   );
 });
 
