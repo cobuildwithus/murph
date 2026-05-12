@@ -1,5 +1,4 @@
 import { DurableObject } from "cloudflare:workers";
-export { ContainerProxy } from "@cloudflare/containers";
 
 import {
   emitHostedExecutionStructuredLog,
@@ -56,6 +55,7 @@ import {
 export { DeploySmokeRunnerContainer, RunnerContainer } from "./runner-container.ts";
 import {
   type HostedExecutionContainerNamespaceLike,
+  resolveHostedExecutionRunnerContainerName,
 } from "./runner-container.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
@@ -164,6 +164,19 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     match: matchTestUserRoute("/__test/users/", "/alarm"),
     methods: ["POST"],
     name: "test-run-alarm",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context, params) {
+      return handleTestContainerActivityExpiredRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/container-activity-expired"),
+    methods: ["POST"],
+    name: "test-container-activity-expired",
     wrongMethodResponse: "not-found",
   },
   {
@@ -840,6 +853,37 @@ async function handleTestRunAlarmRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId);
   return json(await stub.runAlarmForTest({ userId }));
+}
+
+async function handleTestContainerActivityExpiredRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-container-activity-expired",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (typeof stub.expireActivityForTest !== "function") {
+    throw new Error("Hosted runner container test activity-expiry RPC is unavailable.");
+  }
+  return json(await stub.expireActivityForTest({ userId }));
 }
 
 async function handleTestStartStuckInvocationRoute(

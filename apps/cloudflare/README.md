@@ -92,10 +92,9 @@ path also runs it inside the apply step before artifact validation and upload.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
-- `HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS=60000`
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the Durable
-  Object-owned idle checkpoint window; the native container shell uses the same
-  idle lifecycle for its own activity expiry and normal teardown
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the native container shell
+  activity-expiry lifecycle that owns the best-effort idle-shutdown checkpoint
+  and normal teardown
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`

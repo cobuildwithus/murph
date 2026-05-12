@@ -267,7 +267,6 @@ function buildWorkspaceJobBody() {
 describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: null,
       port: 0,
     });
     servers.push(server);
@@ -291,7 +290,6 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: null,
       port: 0,
       runtime: {
         processApi: {
@@ -336,7 +334,6 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("rejects the removed legacy internal run alias", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -355,7 +352,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       })),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -365,7 +361,7 @@ describe("startHostedContainerEntrypoint", () => {
     await expect(response.text()).resolves.toBe("Not found");
   });
 
-  it("returns gone for the removed browser-vault refresh side path after auth without loading the runner", async () => {
+  it("does not expose the removed browser-vault refresh side path", async () => {
     const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const nodeRunnerModule = {
       ...nodeRunner,
@@ -373,7 +369,6 @@ describe("startHostedContainerEntrypoint", () => {
     };
     const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         loadNodeRunner,
@@ -392,87 +387,19 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/browser-vault-refresh`, {
       body: "{]",
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
     });
 
-    expect(response.status).toBe(410);
-    await expect(response.json()).resolves.toEqual({
-      code: "browser_vault_refresh_removed",
-      error: "Browser-vault refresh side path removed.",
-    });
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe("Not found");
     expect(loadNodeRunner).not.toHaveBeenCalled();
     expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        level: "info",
-        message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
-        phase: "failed",
-      }),
-    );
   });
 
-  it("rejects unauthorized removed browser-vault refresh requests without route details", async () => {
-    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
-    const nodeRunnerModule = {
-      ...nodeRunner,
-      runHostedWorkspaceInvocation,
-    };
-    const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
+  it("does not expose the removed warm-shell health side route", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
-      port: 0,
-      runtime: {
-        loadNodeRunner,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    await vi.waitFor(() => expect(loadNodeRunner).toHaveBeenCalledTimes(1));
-    loadNodeRunner.mockClear();
-    mocks.emitHostedExecutionStructuredLog.mockClear();
-
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/browser-vault-refresh`, {
-      body: "{]",
-      headers: {
-        authorization: "Bearer stale-token",
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    });
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-    expect(loadNodeRunner).not.toHaveBeenCalled();
-    expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        level: "warn",
-        message: "Hosted container entrypoint rejected an unauthorized request.",
-        phase: "failed",
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
-      }),
-    );
-  });
-
-  it("fails closed when the initial runner control token header is missing", async () => {
-    const server = await startHostedContainerEntrypoint({
-      controlToken: null,
       port: 0,
     });
     servers.push(server);
@@ -482,94 +409,13 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
-      body: JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_missing_token",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    });
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-  });
-
-  it("rejects a first run bearer token when no startup control token exists", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
-      buildWorkspaceRunnerResult(),
-    );
-    const server = await startHostedContainerEntrypoint({
-      controlToken: null,
-      port: 0,
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const rejected = await sendHostedContainerJsonRequest({
-      authorization: "Bearer first-runner-token",
-      body: JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_first_control_token",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      })),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-
-    expect(rejected.status).toBe(401);
-    expect(rejected.json).toEqual({ error: "Unauthorized" });
-    expect(runnerSpy).not.toHaveBeenCalled();
-  });
-
-  it("requires the startup control token for control-health probes", async () => {
-    const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
-      port: 0,
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const rejected = await fetch(`http://127.0.0.1:${address.port}/internal/control-health`, {
-      headers: {
-        authorization: "Bearer stale-token",
-      },
-    });
-    expect(rejected.status).toBe(401);
-    await expect(rejected.json()).resolves.toEqual({ error: "Unauthorized" });
-
-    const accepted = await fetch(`http://127.0.0.1:${address.port}/internal/control-health`, {
-      headers: {
-        authorization: "Bearer runner-token",
-      },
-    });
-    expect(accepted.status).toBe(200);
-    await expect(accepted.json()).resolves.toMatchObject({
-      ok: true,
-      service: "cloudflare-hosted-runner-node",
-    });
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/control-health`);
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe("Not found");
   });
 
   it("logs a structured listen failure when the container cannot start", async () => {
     await expect(startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: -1,
     })).rejects.toThrow();
 
@@ -588,7 +434,6 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("returns a stable invalid JSON error for malformed invocation requests", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -601,7 +446,6 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: "{]",
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -623,7 +467,6 @@ describe("startHostedContainerEntrypoint", () => {
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -634,7 +477,6 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerDeclaredLengthRequest({
-      authorization: "Bearer runner-token",
       contentLength: hostedContainerRunRequestBodyLimitBytes + 1,
       path: "/internal/workspace-invocation",
       port: address.port,
@@ -653,7 +495,6 @@ describe("startHostedContainerEntrypoint", () => {
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -664,7 +505,6 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await sendHostedContainerChunkedRequest({
-      authorization: "Bearer runner-token",
       chunks: [
         " ".repeat(hostedContainerRunRequestBodyLimitBytes),
         " ",
@@ -681,9 +521,8 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects unauthorized invocation requests before decoding the body", async () => {
+  it("decodes invocation requests without bearer-token auth", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -696,15 +535,15 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: "{]",
       headers: {
-        authorization: "Bearer runner-tokez",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
     });
 
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unauthorized",
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "syntax_error",
+      error: "Invalid JSON.",
     });
   });
 
@@ -736,7 +575,6 @@ describe("startHostedContainerEntrypoint", () => {
     const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         loadNodeRunner,
@@ -757,7 +595,6 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(requestBody),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -796,7 +633,6 @@ describe("startHostedContainerEntrypoint", () => {
       runHostedWorkspaceInvocation,
     };
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         loadNodeRunner: vi.fn(async () => nodeRunnerModule),
@@ -813,7 +649,6 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(requestBody),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -837,7 +672,6 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         loadNodeRunner,
@@ -881,7 +715,6 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
         port: 0,
       });
       servers.push(server);
@@ -900,7 +733,6 @@ describe("startHostedContainerEntrypoint", () => {
           },
         })),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -919,7 +751,6 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("returns a stable invalid request error when the run body is not an object", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -932,7 +763,6 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(["not-an-object"]),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -951,7 +781,6 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("surfaces the failing nested request field when the hosted runtime job payload is malformed", async () => {
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
     });
     servers.push(server);
@@ -1002,7 +831,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       }),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -1026,7 +854,6 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
         port: 0,
       });
       servers.push(server);
@@ -1045,7 +872,6 @@ describe("startHostedContainerEntrypoint", () => {
           },
         })),
         headers: {
-          Authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -1074,7 +900,6 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
         port: 0,
       });
       servers.push(server);
@@ -1093,7 +918,6 @@ describe("startHostedContainerEntrypoint", () => {
           },
         })),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -1125,7 +949,6 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
         port: 0,
       });
       servers.push(server);
@@ -1144,7 +967,6 @@ describe("startHostedContainerEntrypoint", () => {
           },
         })),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -1172,7 +994,6 @@ describe("startHostedContainerEntrypoint", () => {
 
     try {
       const server = await startHostedContainerEntrypoint({
-        controlToken: "runner-token",
         port: 0,
       });
       servers.push(server);
@@ -1186,7 +1007,6 @@ describe("startHostedContainerEntrypoint", () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(requestBody),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
@@ -1212,17 +1032,13 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects concurrent invocation requests inside one warm container shell", async () => {
-    const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
     servers.push(server);
     const address = server.address();
 
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
-
-    const headers = {
-      authorization: "Bearer runner-token",
-    };
 
     const firstRequest: {
       finish: () => void;
@@ -1232,7 +1048,6 @@ describe("startHostedContainerEntrypoint", () => {
       const responsePromise = new Promise<{ json: unknown; status: number }>((resolve, reject) => {
         const initializedRequest = httpRequest({
           headers: {
-            authorization: headers.authorization,
             connection: "close",
             "content-type": "application/json; charset=utf-8",
           },
@@ -1266,7 +1081,6 @@ describe("startHostedContainerEntrypoint", () => {
     })();
 
     const secondResponse = await sendHostedContainerJsonRequest({
-      authorization: headers.authorization,
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -1341,7 +1155,6 @@ describe("startHostedContainerEntrypoint", () => {
     );
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         processApi: { readFile, readdir },
@@ -1364,7 +1177,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       })),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -1400,7 +1212,6 @@ describe("startHostedContainerEntrypoint", () => {
     );
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         exitScheduler: exit,
@@ -1424,7 +1235,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       })),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -1480,7 +1290,6 @@ describe("startHostedContainerEntrypoint", () => {
     );
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         processApi: { kill, readFile, readdir },
@@ -1503,7 +1312,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       })),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -1534,7 +1342,6 @@ describe("startHostedContainerEntrypoint", () => {
     vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
-      controlToken: "runner-token",
       port: 0,
       runtime: {
         exitScheduler: exit,
@@ -1558,7 +1365,6 @@ describe("startHostedContainerEntrypoint", () => {
         },
       })),
       headers: {
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",

@@ -153,28 +153,11 @@ export async function startHostedContainerEntrypoint(input: {
 
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
-      const isBrowserVaultRefreshRequest =
-        request.method === "POST" && requestUrl.pathname === "/internal/browser-vault-refresh";
 
-      if (!isWorkspaceInvocationRequest && !isBrowserVaultRefreshRequest) {
+      if (!isWorkspaceInvocationRequest) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
-        return;
-      }
-
-      if (isBrowserVaultRefreshRequest) {
-        discardUnreadRequestBody(request);
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          level: "info",
-          message: "Hosted container entrypoint rejected removed browser-vault refresh side path.",
-          phase: "failed",
-        });
-        writeJsonResponse(response, 410, {
-          code: "browser_vault_refresh_removed",
-          error: "Browser-vault refresh side path removed.",
-        });
         return;
       }
 

@@ -201,47 +201,10 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerReadyTimeoutMs).toBe(45_000);
   });
 
-  it("allows idle-shutdown checkpoint safety margin to be zero outside production", () => {
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
-    }));
-
-    expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(0);
-  });
-
-  it("requires the T-minus-60 idle-shutdown checkpoint margin in production", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_CRYPTO_ENV: "production",
-        HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
-      })),
-    ).toThrow(
-      "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS must be 60000 in production.",
-    );
-  });
-
-  it("rejects idle-shutdown checkpoint windows that cannot run before container sleep", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "60000",
-        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "60000",
-      })),
-    ).toThrow(
-      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be greater than HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS.",
-    );
-  });
-
-  it("defaults idle-shutdown checkpoints to T-minus-60 of the five-minute quiet window", () => {
+  it("defaults the runner idle lifecycle to five minutes", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
 
     expect(environment.runnerIdleTtlMs).toBe(300_000);
-    expect(environment.idleShutdownCheckpointSafetyMarginMs).toBe(60_000);
-  });
-
-  it("enables idle-shutdown checkpoints by default in worker env", () => {
-    const environment = readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv());
-
-    expect(environment.idleShutdownCheckpointsEnabled).toBe(true);
   });
 
   it("reads optional runner-secret allowlist extensions", () => {

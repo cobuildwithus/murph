@@ -17,9 +17,7 @@ export interface HostedExecutionWorkerEnvironment {
   hostedCryptoEnv: string;
   hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
-  idleShutdownCheckpointsEnabled: boolean;
   maxEventAttempts: number;
-  idleShutdownCheckpointSafetyMarginMs: number;
   retryDelayMs: number;
   runnerReadyTimeoutMs: number;
   runnerIdleTtlMs: number;
@@ -52,21 +50,11 @@ export function readHostedExecutionWorkerEnvironment(
     "HOSTED_CRYPTO_ENV",
   );
   const isProduction = isHostedWorkerProductionEnvironment(source, hostedCryptoEnv);
-  const idleShutdownCheckpointSafetyMarginMs = parseNonNegativeInteger(
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS),
-    60_000,
-    "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS",
-  );
   const runnerIdleTtlMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS),
     300_000,
     "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   );
-  assertHostedIdleShutdownCheckpointLifecycle({
-    idleShutdownCheckpointSafetyMarginMs,
-    isProduction,
-    runnerIdleTtlMs,
-  });
 
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
@@ -111,13 +99,11 @@ export function readHostedExecutionWorkerEnvironment(
         rejectHttpLoopbackInProduction: isProduction,
       },
     ),
-    idleShutdownCheckpointsEnabled: true,
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
       3,
       "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
     ),
-    idleShutdownCheckpointSafetyMarginMs,
     retryDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RETRY_DELAY_MS),
       30_000,
@@ -140,27 +126,6 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
     ),
   };
-}
-
-function assertHostedIdleShutdownCheckpointLifecycle(input: {
-  idleShutdownCheckpointSafetyMarginMs: number;
-  isProduction: boolean;
-  runnerIdleTtlMs: number;
-}): void {
-  if (
-    input.isProduction
-    && input.idleShutdownCheckpointSafetyMarginMs !== 60_000
-  ) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS must be 60000 in production.",
-    );
-  }
-
-  if (input.idleShutdownCheckpointSafetyMarginMs >= input.runnerIdleTtlMs) {
-    throw new TypeError(
-      "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be greater than HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS.",
-    );
-  }
 }
 
 function requireHostedExecutionString(
@@ -214,20 +179,6 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
 
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new TypeError(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeInteger(value: string | null, fallback: number, label: string): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
   }
 
   return parsed;

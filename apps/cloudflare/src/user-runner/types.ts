@@ -1,5 +1,4 @@
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
-import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
@@ -48,12 +47,6 @@ export interface RunnerWriteFenceRecord {
   workspaceVersion: string | null;
 }
 
-export interface RunnerIdleCheckpointRecord {
-  checkpointNextWakeAt: string | null;
-  dueAt: string;
-  workspaceVersion: string;
-}
-
 export interface RunnerRetryRecord {
   at: string | null;
   count: number;
@@ -78,9 +71,6 @@ export interface RunnerStateRecord {
     workspaceVersion: string | null;
   } | null;
   bundleRef: HostedExecutionBundleRef | null;
-  deferredCheckpointRequired: boolean;
-  deferredCheckpointMailboxStatus: HostedRuntimeRedactedJson | null;
-  idleCheckpoint: RunnerIdleCheckpointRecord | null;
   /** Legacy write-fence projection. Delete after 2026-05-25; live code uses `writeFence`. */
   inFlight: boolean;
   lastError: string | null;

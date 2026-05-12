@@ -158,7 +158,6 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2000",
       MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
@@ -183,7 +182,7 @@ async function waitForIdleShutdownCheckpoint(input: {
   baselineCleanupCount: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
-  let lastAlarmError: unknown = null;
+  let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 120_000) {
@@ -207,18 +206,11 @@ async function waitForIdleShutdownCheckpoint(input: {
       return status;
     }
 
-    const alarmDelayMs = status.nextAlarmAt
-      ? Math.max(0, Date.parse(status.nextAlarmAt) - Date.now())
-      : 250;
-    if (alarmDelayMs > 0) {
-      await sleep(Math.min(alarmDelayMs + 100, 1_000));
-    }
-
     try {
-      await requireScenario().harness.runHostedAlarmForTest(userId);
-      lastAlarmError = null;
+      await requireScenario().harness.expireRunnerActivityForTest(userId);
+      lastActivityExpiryError = null;
     } catch (error) {
-      lastAlarmError = error;
+      lastActivityExpiryError = error;
     }
     await sleep(250);
   }
@@ -226,7 +218,9 @@ async function waitForIdleShutdownCheckpoint(input: {
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
-    ...(lastAlarmError ? [`last alarm error: ${formatErrorMessage(lastAlarmError)}`] : []),
+    ...(lastActivityExpiryError
+      ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
   ]));
 }
 

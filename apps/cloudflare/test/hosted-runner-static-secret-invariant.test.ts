@@ -320,7 +320,6 @@ async function serializeContainerRequestBody(
       lastChange: Date.now(),
       status: running ? "running" : "stopped",
     })),
-    setOutboundByHosts: vi.fn(async () => {}),
     startAndWaitForPorts: vi.fn(async () => {
       running = true;
     }),

@@ -14,7 +14,6 @@ export class Container {
   requiredPorts?: number[];
   envVars: Record<string, string> = {};
   entrypoint?: string[];
-  enableInternet = true;
   pingEndpoint = "ping";
 
   constructor(ctx?: { storage?: TestContainerStorage }) {
@@ -44,12 +43,9 @@ export class Container {
     };
   }
 
-  async setOutboundByHosts(..._args: unknown[]): Promise<void> {}
-
   async startAndWaitForPorts(..._args: unknown[]): Promise<void> {}
 }
 
-export class ContainerProxy {}
 
 export function getContainer(): never {
   throw new Error("Test stub getContainer is not implemented.");
