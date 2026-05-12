@@ -1,6 +1,6 @@
 # Remove non-provider hosted secrets from runner env
 
-Status: implementation
+Status: completed
 Created: 2026-05-12
 Updated: 2026-05-12
 
@@ -77,3 +77,4 @@ Updated: 2026-05-12
   hosted-runner edits removed provider-effect exports still imported elsewhere.
 - Blocked/unrelated: path-scoped `scripts/workspace-verify.sh test:diff ...`
   failed in `packages/cli/test/stdin-input.test.ts` timeout, outside this diff.
+Completed: 2026-05-12
