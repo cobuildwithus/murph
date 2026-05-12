@@ -52,6 +52,11 @@ interface BoundedCommandResult {
 }
 
 const HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL = "murph.hosted.local-build-id";
+const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
+  "cloudflare-dev/runnercontainer",
+  "cloudflare-dev/deploysmokerunnercontainer",
+] as const;
+const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
 const HOSTED_WORKER_REUSE_HEALTH_MAX_BYTES = 16 * 1024;
 const HOSTED_WORKER_REUSE_HEALTH_TIMEOUT_MS = 2_000;
 const HOSTED_WORKER_SERVICE_NAME = "cloudflare-hosted-runner";
@@ -780,6 +785,61 @@ export async function cleanupHostedRunnerContainers(input: {
   }
 }
 
+export async function cleanupHostedRunnerImages(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  ignoreErrors?: boolean;
+  scope?: HostedRunnerContainerCleanupScope;
+  timeoutMs?: number;
+}): Promise<void> {
+  const timeoutMs = input.timeoutMs ?? 30_000;
+  const listed = await listHostedRunnerImageRefs({
+    cwd: input.cwd,
+    env: input.env,
+    scope: input.scope,
+    timeoutMs,
+  });
+
+  if (listed.result.timedOut || listed.result.exitCode !== 0) {
+    if (input.ignoreErrors) {
+      return;
+    }
+    throw new Error(
+      [
+        "Failed to inspect local Cloudflare runner images.",
+        formatBoundedCommandResult("docker images", listed.result),
+      ].join("\n"),
+    );
+  }
+
+  const imageRefs = listed.imageRefs;
+  if (imageRefs.length === 0) {
+    return;
+  }
+
+  for (const batch of chunk(imageRefs, HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE)) {
+    const removed = await runBoundedCommand({
+      args: ["image", "rm", "-f", ...batch],
+      command: "docker",
+      cwd: input.cwd,
+      env: input.env,
+      timeoutMs,
+    });
+
+    if (removed.timedOut || removed.exitCode !== 0) {
+      if (input.ignoreErrors) {
+        return;
+      }
+      throw new Error(
+        [
+          "Failed to remove local Cloudflare runner images.",
+          formatBoundedCommandResult(`docker image rm (${batch.length})`, removed),
+        ].join("\n"),
+      );
+    }
+  }
+}
+
 export async function cleanupHostedRunnerContainerLocalState(input: {
   env?: NodeJS.ProcessEnv;
   ignoreErrors?: boolean;
@@ -806,6 +866,58 @@ export async function cleanupHostedRunnerContainerLocalState(input: {
   }
 }
 
+async function listHostedRunnerImageRefs(input: {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  scope?: HostedRunnerContainerCleanupScope;
+  timeoutMs: number;
+}): Promise<{
+  imageRefs: string[];
+  result: BoundedCommandResult;
+}> {
+  const localBuildId = input.scope === "all-builds"
+    ? null
+    : resolveHostedRunnerCleanupLocalBuildId(input.env);
+
+  if (!localBuildId && input.scope !== "all-builds") {
+    return {
+      imageRefs: [],
+      result: {
+        exitCode: 0,
+        stderr: "",
+        stdout: "",
+        timedOut: false,
+      },
+    };
+  }
+
+  const result = await runBoundedCommand({
+    args: [
+      "images",
+      "--format",
+      "{{.Repository}}:{{.Tag}}",
+      ...(localBuildId
+        ? [
+          "--filter",
+          `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
+        ]
+        : ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]),
+    ],
+    command: "docker",
+    cwd: input.cwd,
+    env: input.env,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return {
+    imageRefs: uniqueStrings(result.stdout
+      .split(/\s+/)
+      .map((value) => value.trim())
+      .filter(isHostedRunnerLocalImageRef)),
+    result,
+  };
+}
+
 async function listHostedRunnerContainerIds(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
@@ -830,7 +942,7 @@ async function listHostedRunnerContainerIds(input: {
           "--filter",
           `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
         ]
-        : []),
+        : ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]),
     ],
     command: "docker",
     cwd: input.cwd,
@@ -845,6 +957,24 @@ async function listHostedRunnerContainerIds(input: {
       .filter((value) => value.length > 0),
     result,
   };
+}
+
+function isHostedRunnerLocalImageRef(value: string): boolean {
+  return HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES.some((repository) =>
+    value.startsWith(`${repository}:`)
+  ) && !value.endsWith(":<none>");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function chunk<T>(values: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function resolveHostedRunnerContainerNamePrefix(env: NodeJS.ProcessEnv | undefined): string {

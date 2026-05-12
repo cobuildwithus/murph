@@ -5,8 +5,14 @@ import {
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
 } from "../../../scripts/dev-hosted-local/constants.ts";
-import { cleanupHostedRunnerContainers } from "../../../scripts/dev-hosted-local/runtime.ts";
-import { runForegroundCommand } from "./process.ts";
+import {
+  cleanupHostedRunnerContainers,
+  cleanupHostedRunnerImages,
+} from "../../../scripts/dev-hosted-local/runtime.ts";
+import {
+  ForegroundCommandSignalError,
+  runForegroundCommand,
+} from "./process.ts";
 
 export type HostedLocalE2eScenarioName =
   | "all"
@@ -122,6 +128,10 @@ export interface HostedLocalE2eSuiteInput {
   scenario?: HostedLocalE2eScenarioName | string;
 }
 
+export interface HostedLocalE2eSuiteResult {
+  terminationSignal: NodeJS.Signals | null;
+}
+
 export function resolveHostedLocalE2eScenarios(
   scenarioName: HostedLocalE2eScenarioName | string | null | undefined,
 ): readonly HostedLocalE2eScenario[] {
@@ -151,7 +161,7 @@ export function listHostedLocalE2eScenarios(): readonly HostedLocalE2eScenario[]
 
 export async function runHostedLocalE2eSuite(
   input: HostedLocalE2eSuiteInput = {},
-): Promise<void> {
+): Promise<HostedLocalE2eSuiteResult> {
   const env = input.env ?? process.env;
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
@@ -160,20 +170,54 @@ export async function runHostedLocalE2eSuite(
     env,
     injectSkipRunnerBundleEnv,
   });
+  let terminationSignal: NodeJS.Signals | null = null;
+  const onSigint = (): void => {
+    terminationSignal ??= "SIGINT";
+  };
+  const onSigterm = (): void => {
+    terminationSignal ??= "SIGTERM";
+  };
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
 
   try {
-    if (prepareRunnerBundle) {
-      await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
+    try {
+      if (prepareRunnerBundle) {
+        await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
+      }
+      await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
+      await runHostedLocalVitest({ env: suiteEnv, scenarios });
+    } catch (error) {
+      if (
+        !terminationSignal
+        || !(error instanceof ForegroundCommandSignalError)
+        || error.commandSignal !== terminationSignal
+      ) {
+        throw error;
+      }
     }
-    await prepareHostedLocalRunnerBaseImage({ env: suiteEnv });
-    await runHostedLocalVitest({ env: suiteEnv, scenarios });
   } finally {
-    await cleanupHostedRunnerContainers({
-      cwd: repoRoot,
-      env: suiteEnv,
-      ignoreErrors: true,
-    });
+    try {
+      await cleanupHostedRunnerContainers({
+        cwd: repoRoot,
+        env: suiteEnv,
+        ignoreErrors: true,
+      });
+      await cleanupHostedRunnerImages({
+        cwd: repoRoot,
+        env: suiteEnv,
+        ignoreErrors: true,
+      });
+      if (terminationSignal) {
+        process.exitCode = terminationSignal === "SIGINT" ? 130 : 143;
+      }
+    } finally {
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigterm);
+    }
   }
+
+  return { terminationSignal };
 }
 
 async function prepareHostedLocalRunnerBundle(input: {
@@ -194,6 +238,7 @@ async function prepareHostedLocalRunnerBundle(input: {
     command: "pnpm",
     cwd: repoRoot,
     env,
+    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner bundle preparation",
   });
 }
@@ -206,6 +251,7 @@ async function prepareHostedLocalRunnerBaseImage(input: {
     command: "pnpm",
     cwd: repoRoot,
     env: input.env,
+    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner base image preparation",
   });
   input.env.MURPH_DEV_SKIP_RUNNER_DOCKER_BASE = "1";
@@ -228,6 +274,7 @@ async function runHostedLocalVitest(input: {
     command: "pnpm",
     cwd: repoRoot,
     env: input.env,
+    forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local full-stack e2e suite",
   });
 }

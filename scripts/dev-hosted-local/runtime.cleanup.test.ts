@@ -73,6 +73,7 @@ async function importRuntimeWithSpawnSequence(sequence: SpawnResult[]) {
   return {
     cleanupHostedRunnerContainerLocalState: runtime.cleanupHostedRunnerContainerLocalState,
     cleanupHostedRunnerContainers: runtime.cleanupHostedRunnerContainers,
+    cleanupHostedRunnerImages: runtime.cleanupHostedRunnerImages,
     spawn,
   };
 }
@@ -150,6 +151,8 @@ describe("cleanupHostedRunnerContainers", () => {
       "-aq",
       "--filter",
       "name=workerd-murph-hosted-",
+      "--filter",
+      "label=murph.hosted.local-build-id",
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual(["rm", "-f", "abc123"]);
   });
@@ -178,6 +181,8 @@ describe("cleanupHostedRunnerContainers", () => {
       "-aq",
       "--filter",
       "name=workerd-murph-hosted-",
+      "--filter",
+      "label=murph.hosted.local-build-id",
     ]);
   });
 
@@ -301,5 +306,95 @@ describe("cleanupHostedRunnerContainers", () => {
       cwd: "/tmp",
       timeoutMs: 50,
     })).rejects.toThrow("Failed to remove stale local Cloudflare runner containers.");
+  });
+});
+
+describe("cleanupHostedRunnerImages", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    vi.doUnmock("node:child_process");
+  });
+
+  it("removes generated runner images for the current hosted-local build id", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
+      {
+        exitCode: 0,
+        stdout: [
+          "cloudflare-dev/runnercontainer:abc123",
+          "cloudflare-dev/deploysmokerunnercontainer:abc123",
+          "postgres:15",
+          "cloudflare-dev/runnercontainer:<none>",
+        ].join("\n"),
+      },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      env: {
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "dev-build",
+      },
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "images",
+      "--format",
+      "{{.Repository}}:{{.Tag}}",
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
+      ),
+    ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "image",
+      "rm",
+      "-f",
+      "cloudflare-dev/runnercontainer:abc123",
+      "cloudflare-dev/deploysmokerunnercontainer:abc123",
+    ]);
+  });
+
+  it("does not remove all runner images when current-build cleanup has no build id", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("can sweep generated runner images across all local builds", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
+      {
+        exitCode: 0,
+        stdout: "cloudflare-dev/runnercontainer:old\n",
+      },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      scope: "all-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "images",
+      "--format",
+      "{{.Repository}}:{{.Tag}}",
+      "--filter",
+      "label=murph.hosted.local-build-id",
+    ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "image",
+      "rm",
+      "-f",
+      "cloudflare-dev/runnercontainer:old",
+    ]);
   });
 });

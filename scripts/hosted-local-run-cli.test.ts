@@ -3,6 +3,9 @@ import { Writable } from "node:stream";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const runForegroundCommand = vi.hoisted(() => vi.fn(async () => undefined));
+const runHostedLocalE2eSuite = vi.hoisted(() =>
+  vi.fn(async () => ({ terminationSignal: null as NodeJS.Signals | null })),
+);
 const createHostedLocalHarnessState = vi.hoisted(() =>
   vi.fn(async () => ({
     statePath: ".artifacts/hosted-local/test/state.json",
@@ -20,6 +23,14 @@ vi.mock("../packages/hosted-local-harness/src/process.ts", () => ({
   runDoctorCommand: vi.fn(),
   runForegroundCommand,
 }));
+
+vi.mock("../packages/hosted-local-harness/src/e2e.ts", async (importActual) => {
+  const actual = await importActual<typeof import("../packages/hosted-local-harness/src/e2e.ts")>();
+  return {
+    ...actual,
+    runHostedLocalE2eSuite,
+  };
+});
 
 vi.mock("../packages/hosted-local-harness/src/state.ts", () => ({
   applyHostedLocalStateEnv: ({ env }: { env: NodeJS.ProcessEnv }) => ({
@@ -50,6 +61,7 @@ function createBufferedStdout(): { stdout: Writable; text: () => string } {
 describe("hosted-local run CLI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runHostedLocalE2eSuite.mockResolvedValue({ terminationSignal: null });
   });
 
   test("passes child command flags after the separator through unchanged", async () => {
@@ -83,5 +95,28 @@ describe("hosted-local run CLI", () => {
       }),
     );
     expect(output.text()).toContain("Hosted-local command complete: .artifacts/hosted-local/test/state.json");
+  });
+
+  test("marks interrupted hosted-local e2e runs as stopped", async () => {
+    runHostedLocalE2eSuite.mockResolvedValueOnce({ terminationSignal: "SIGINT" });
+    const output = createBufferedStdout();
+
+    await runHostedLocalCli(["e2e", "linq-webhook", "--no-bundle"], {
+      env: {},
+      stdout: output.stdout,
+    });
+
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      scenario: "linq-webhook",
+    }));
+    expect(updateHostedLocalHarnessState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "running" }),
+      { status: "stopped" },
+    );
+    expect(output.text()).toContain(
+      "Hosted-local E2E stopped (SIGINT): .artifacts/hosted-local/test/state.json",
+    );
+    expect(output.text()).not.toContain("Hosted-local E2E complete");
   });
 });

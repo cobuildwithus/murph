@@ -231,11 +231,18 @@ async function runE2e(args: readonly string[], io: HostedLocalCliIo): Promise<vo
   });
   const env = applyHostedLocalStateEnv({ env: profiled.env, state });
   try {
-    await runHostedLocalE2eSuite({
+    const result = await runHostedLocalE2eSuite({
       env,
       prepareRunnerBundle,
       scenario,
     });
+    if (result.terminationSignal) {
+      state = await updateHostedLocalHarnessState(state, { status: "stopped" });
+      (io.stdout ?? process.stdout).write(
+        `Hosted-local E2E stopped (${result.terminationSignal}): ${state.statePath}\n`,
+      );
+      return;
+    }
     state = await updateHostedLocalHarnessState(state, { status: "complete" });
     (io.stdout ?? process.stdout).write(`Hosted-local E2E complete: ${state.statePath}\n`);
   } catch (error) {
