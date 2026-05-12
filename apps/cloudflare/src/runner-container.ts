@@ -38,6 +38,7 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
   "http://container/internal/deploy-openai-intercept-smoke";
+const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
@@ -92,6 +93,7 @@ export interface HostedExecutionContainerStubLike {
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
+  wakeRuntime?(input: { userId: string }): Promise<{ accepted: boolean }>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -244,6 +246,52 @@ export class RunnerContainer extends Container {
     }
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
+    }
+  }
+
+  async wakeRuntime(input: { userId: string }): Promise<{ accepted: boolean }> {
+    const active = this.workspaceInvocationActiveOperation;
+    if (!active || active.userId !== input.userId) {
+      return { accepted: false };
+    }
+
+    this.noteRunnerActivity("runtime-wake");
+    try {
+      const response = await this.containerFetch(
+        RUNNER_RUNTIME_WAKE_URL,
+        {
+          method: "POST",
+        },
+      );
+      const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      if (!response.ok || !accepted) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            runtimeWakeAccepted: accepted,
+            runtimeWakeStatus: response.status,
+            workspaceAttemptId: active.attemptId,
+          },
+          level: "warn",
+          message: "Hosted execution container runtime wake was not accepted by the active child.",
+          phase: "scheduled",
+          userId: input.userId,
+        });
+      }
+      return { accepted };
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          workspaceAttemptId: active.attemptId,
+        },
+        error,
+        level: "warn",
+        message: "Hosted execution container runtime wake failed best-effort.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
+      return { accepted: false };
     }
   }
 

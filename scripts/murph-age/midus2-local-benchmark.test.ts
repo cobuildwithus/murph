@@ -40,7 +40,7 @@ describe("MIDUS 2 local benchmark runner", () => {
       expect(output.status).toBe("research-local-aggregate-only");
       expect(output.candidateBatch).toEqual({
         batchId: "midus2-first-no-crp-candidate-batch",
-        candidateCount: 5,
+        candidateCount: 7,
         exposureLabel: "diagnostic-only",
         hypothesisSources: [
           "literature or mechanistic rationale",
@@ -77,6 +77,20 @@ describe("MIDUS 2 local benchmark runner", () => {
       expect(reference?.featureKeys).toEqual(["age", "male"]);
       expect(reference?.hypothesis).toContain("reference");
       expect(reference?.hypothesisSource).toBe("literature or mechanistic rationale");
+
+      const bodyOnly = output.models.body_only_no_crp;
+      expect(bodyOnly?.candidateRole).toBe("proposal");
+      expect(bodyOnly?.featureKeys).toEqual(["age", "male", "bmi"]);
+      expect(bodyOnly?.coefficientsStored).toBe(false);
+      expect(bodyOnly?.predictionsStored).toBe(false);
+      expect(bodyOnly?.splitMetrics.test.n).toBe(output.dataShape.splitCounts.test.n);
+
+      const glycemiaOnly = output.models.glycemia_only_no_crp;
+      expect(glycemiaOnly?.candidateRole).toBe("proposal");
+      expect(glycemiaOnly?.featureKeys).toEqual(["age", "male", "hba1c"]);
+      expect(glycemiaOnly?.coefficientsStored).toBe(false);
+      expect(glycemiaOnly?.predictionsStored).toBe(false);
+      expect(glycemiaOnly?.splitMetrics.test.n).toBe(output.dataShape.splitCounts.test.n);
 
       const glycemiaBody = output.models.glycemia_body_no_crp;
       expect(glycemiaBody?.candidateRole).toBe("proposal");
@@ -165,7 +179,7 @@ describe("MIDUS 2 local benchmark runner", () => {
       expect(parsed.status).toBe("research-local-aggregate-only");
       expect(parsed.candidateBatch).toEqual({
         batchId: "midus2-first-no-crp-candidate-batch",
-        candidateCount: 5,
+        candidateCount: 7,
         exposureLabel: "diagnostic-only",
         hypothesisSources: [
           "literature or mechanistic rationale",
@@ -204,6 +218,18 @@ describe("MIDUS 2 local benchmark runner", () => {
     ]);
     expect(findForbiddenAggregateEgress({ nested: { coefficients: [1, 2, 3] } })).toEqual([
       "forbidden key nested.coefficients",
+    ]);
+    expect(findForbiddenAggregateEgress({ localPathsStored: true })).toEqual([
+      "boundary flag localPathsStored must be false",
+    ]);
+    expect(findForbiddenAggregateEgress({ nested: { modelParameters: { lambda: 0.1 } } })).toEqual([
+      "forbidden key nested.modelParameters",
+    ]);
+    expect(findForbiddenAggregateEgress({ productClaimsIncluded: true })).toEqual([
+      "boundary flag productClaimsIncluded must be false",
+    ]);
+    expect(findForbiddenAggregateEgress({ nested: { smallCells: [{ n: 3 }] } })).toEqual([
+      "forbidden key nested.smallCells",
     ]);
   });
 

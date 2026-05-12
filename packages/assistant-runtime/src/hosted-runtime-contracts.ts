@@ -13,10 +13,6 @@ export type {
 } from "./hosted-runtime/models.ts";
 export type {
   HostedRuntimeArtifactStore,
-  HostedRuntimeActiveTurnInputCheckpoint,
-  HostedRuntimeActiveTurnInputCheckpointInput,
-  HostedRuntimeActiveTurnInputMailboxRefresh,
-  HostedRuntimeActiveTurnInputMailboxRefreshInput,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,

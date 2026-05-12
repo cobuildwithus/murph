@@ -7,6 +7,7 @@ import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
   type AssistantExecutionContext,
+  type AssistantInputSource,
   type AssistantRunEvent,
   readAssistantAutomationState,
   runAssistantAutomationPass,
@@ -134,9 +135,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   deferReceiptRecovery?: boolean;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
-  skipActiveTurnMailboxRefresh?: boolean;
   skipDeviceSync?: boolean;
-  skipInitialMailboxRefresh?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const startedAt = Date.now();
@@ -183,8 +182,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.wake,
         input.runtime,
         input.preferredInputIds ?? [],
-        input.skipInitialMailboxRefresh === true,
-        input.skipActiveTurnMailboxRefresh === true,
         input.deferReceiptRecovery === true,
         input.signal,
         input.foregroundReplayInputIds ?? [],
@@ -246,8 +243,6 @@ export async function runHostedAssistantAutomation(
   wake: HostedRuntimeEvent,
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   preferredInputIds: readonly string[] = [],
-  skipInitialMailboxRefresh = false,
-  skipActiveTurnMailboxRefresh = false,
   deferReceiptRecovery = false,
   signal?: AbortSignal,
   foregroundReplayInputIds: readonly string[] = [],
@@ -267,6 +262,7 @@ export async function runHostedAssistantAutomation(
     totalElapsedMs: number;
   };
 }> {
+  void runtime;
   const startedAt = Date.now();
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices();
@@ -274,22 +270,22 @@ export async function runHostedAssistantAutomation(
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
   let activeTurnInputIngested = false;
-  const inputSource = createHostedAssistantInputSource({
+  const baseInputSource = createHostedAssistantInputSource({
     foregroundReplayInputIds,
     foregroundReplayPromptInputIds,
-    onActiveTurnMailboxRefresh(result) {
-      if (result.progressed && result.reason === "ingested_input") {
+    preferredInputIds,
+    vaultRoot,
+  });
+  const inputSource: AssistantInputSource = {
+    ...baseInputSource,
+    async listNewConversationInputs(query) {
+      const result = await baseInputSource.listNewConversationInputs(query);
+      if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
       }
+      return result;
     },
-    preferredInputIds,
-    requestId,
-    runtime,
-    skipActiveTurnMailboxRefresh,
-    skipInitialMailboxRefresh,
-    vaultRoot,
-    wake,
-  });
+  };
   const beforeStateStartedAt = Date.now();
   const beforeState = await readAssistantAutomationState(vaultRoot);
   const beforeStateElapsedMs = elapsedSince(beforeStateStartedAt);

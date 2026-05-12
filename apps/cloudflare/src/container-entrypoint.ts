@@ -31,6 +31,7 @@ const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH =
   "/internal/deploy-openai-intercept-smoke";
+const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL =
@@ -168,6 +169,7 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   let activeHostedRunnerJobCount = 0;
+  let activeRuntimeWake: (() => void) | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
@@ -187,6 +189,20 @@ export async function startHostedContainerEntrypoint(input: {
           service: "cloudflare-hosted-runner-node",
           ...(runnerBundle ? { runnerBundle } : {}),
         }));
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
+        discardUnreadRequestBody(request);
+        const wake = activeRuntimeWake;
+        if (wake) {
+          wake();
+          response.setHeader("x-runtime-wake-accepted", "1");
+        } else {
+          response.setHeader("x-runtime-wake-accepted", "0");
+        }
+        response.statusCode = 204;
+        response.end();
         return;
       }
 
@@ -283,6 +299,9 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
+        onChildReadyForRuntimeWake(sendWake) {
+          activeRuntimeWake = sendWake;
+        },
         signal: requestAbort.signal,
       });
 
@@ -321,6 +340,7 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       stopActiveJobDiagnostics?.();
+      activeRuntimeWake = null;
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
@@ -1118,6 +1138,7 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
@@ -1129,6 +1150,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
+    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {

@@ -46,6 +46,18 @@ const MODEL_CANDIDATE_DEFINITIONS = {
     hypothesis: "Age and sex reference model for CRELES wave-3 mortality-status comparison.",
     hypothesisSource: "literature or mechanistic rationale",
   },
+  body_only_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: ["age", "male", "bmi"],
+    hypothesis: "BMI-only body-size ablation tests whether the parsimonious body signal adds aggregate CRELES mortality-status signal over demographics.",
+    hypothesisSource: "transport stress test",
+  },
+  glycemia_only_no_crp: {
+    candidateRole: "proposal",
+    featureKeys: ["age", "male", "hba1c", "glucose"],
+    hypothesis: "Glycemia-only ablation tests whether CRELES glucose and HbA1c add aggregate mortality-status signal over demographics without body, lipids, blood pressure, or CRP.",
+    hypothesisSource: "transport stress test",
+  },
   glycemia_body_no_crp: {
     candidateRole: "proposal",
     featureKeys: ["age", "male", "bmi", "hba1c", "glucose"],

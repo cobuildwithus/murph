@@ -44,10 +44,22 @@ export type HostedExecutionRunnerChildResult =
 
 export const HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE =
   "murph.hosted-execution.runner-child-result.v1";
+export const HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE =
+  "murph.hosted-execution.runner-child-runtime-wake-ready.v1";
+export const HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE =
+  "murph.hosted-execution.runner-child-runtime-wake.v1";
 
 export interface HostedExecutionRunnerChildResultMessage {
   result: HostedExecutionRunnerChildResult;
   type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RESULT_MESSAGE_TYPE;
+}
+
+export interface HostedExecutionRunnerChildRuntimeWakeReadyMessage {
+  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE;
+}
+
+export interface HostedExecutionRunnerChildRuntimeWakeMessage {
+  type: typeof HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE;
 }
 
 export function parseHostedExecutionRunnerJobInput(
@@ -93,6 +105,36 @@ export function createHostedExecutionRunnerChildResultMessage(
   };
 }
 
+export function createHostedExecutionRunnerChildRuntimeWakeReadyMessage(): HostedExecutionRunnerChildRuntimeWakeReadyMessage {
+  return {
+    type: HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE,
+  };
+}
+
+export function createHostedExecutionRunnerChildRuntimeWakeMessage(): HostedExecutionRunnerChildRuntimeWakeMessage {
+  return {
+    type: HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE,
+  };
+}
+
+export function isHostedExecutionRunnerChildRuntimeWakeReadyMessage(
+  value: unknown,
+): value is HostedExecutionRunnerChildRuntimeWakeReadyMessage {
+  return isHostedExecutionRunnerChildMessageOfType(
+    value,
+    HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_READY_MESSAGE_TYPE,
+  );
+}
+
+export function isHostedExecutionRunnerChildRuntimeWakeMessage(
+  value: unknown,
+): value is HostedExecutionRunnerChildRuntimeWakeMessage {
+  return isHostedExecutionRunnerChildMessageOfType(
+    value,
+    HOSTED_EXECUTION_RUNNER_CHILD_RUNTIME_WAKE_MESSAGE_TYPE,
+  );
+}
+
 export function parseHostedExecutionRunnerChildResultMessage(
   value: unknown,
 ): HostedExecutionRunnerChildResult {
@@ -114,6 +156,18 @@ function requireHostedExecutionWorkspaceJobKind(
   }
 
   throw new TypeError("Hosted execution runner job input.kind must be workspace-invocation.");
+}
+
+function isHostedExecutionRunnerChildMessageOfType(
+  value: unknown,
+  type: string,
+): boolean {
+  return (
+    Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Reflect.get(value, "type") === type
+  );
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

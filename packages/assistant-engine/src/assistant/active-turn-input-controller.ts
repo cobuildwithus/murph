@@ -71,7 +71,9 @@ class AssistantActiveTurnInputController {
       acceptedInputValidator?: (input: {
         acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       }) => Promise<void>
-      pollAvailableInput?: boolean
+      boundaryAdmissionEnabled?: boolean
+      eventAdmissionEnabled?: boolean
+      livePollEnabled?: boolean
       sessionId: string
       turnId: string
       vault: string
@@ -109,6 +111,10 @@ class AssistantActiveTurnInputController {
   notifyInputAvailable(input?: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    if (this.input.eventAdmissionEnabled === false) {
+      return Promise.resolve(undefined)
+    }
+
     return this.admitAvailableInput({
       phase: 'input_available',
       signal: input?.signal,
@@ -160,7 +166,7 @@ class AssistantActiveTurnInputController {
       return inputAvailableAdmission
     }
 
-    if (this.input.pollAvailableInput === false) {
+    if (this.input.boundaryAdmissionEnabled === false) {
       return undefined
     }
 
@@ -397,7 +403,7 @@ class AssistantActiveTurnInputController {
     if (
       this.livePump ||
       !this.input.admissionHook ||
-      this.input.pollAvailableInput === false
+      this.input.livePollEnabled === false
     ) {
       return
     }
@@ -439,8 +445,10 @@ export function createAssistantActiveTurnInputController(input: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
   }) => Promise<void>
   admissionHook?: AssistantActiveTurnInputAdmissionHook | null
+  boundaryAdmissionEnabled?: boolean
   conversationKeys?: readonly string[] | null
-  pollAvailableInput?: boolean
+  eventAdmissionEnabled?: boolean
+  livePollEnabled?: boolean
   sessionId: string
   turnId: string
   vault: string
@@ -460,7 +468,9 @@ export function createAssistantActiveTurnInputController(input: {
   const controller = new AssistantActiveTurnInputController({
     acceptedInputValidator: input.acceptedInputValidator,
     admissionHook: input.admissionHook,
-    pollAvailableInput: input.pollAvailableInput,
+    boundaryAdmissionEnabled: input.boundaryAdmissionEnabled,
+    eventAdmissionEnabled: input.eventAdmissionEnabled,
+    livePollEnabled: input.livePollEnabled,
     sessionId: input.sessionId,
     turnId: input.turnId,
     vault: input.vault,

@@ -275,22 +275,42 @@ describe("runHostedAssistantAutomation", () => {
     );
   });
 
-  it("wraps hosted mailbox refreshes through the assistant input source", async () => {
-    const checkpointActiveTurnInput = vi.fn(async () => undefined);
-    const refreshMailboxForActiveTurnInput = vi.fn(async () => ({
-      progressed: true,
-      reason: "ingested_input" as const,
+  it("reports active-turn ingestion when automation reads staged conversation input", async () => {
+    const listNewConversationInputs = vi.fn(async (query) => ({
+      inputs: [
+        {
+          acceptedInput: {
+            id: "request-1",
+            source: "assistant-input",
+          },
+          event: {
+            inputId: "request-1",
+          },
+        },
+      ],
+      nextCursor: query.afterCursor ?? null,
     }));
+    mocks.createStoreBackedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs,
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      })),
+    });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await input.inputSource?.refresh({
-        phase: "request_boundary",
-      });
-      await input.inputSource?.checkpointAcceptedInput?.({
-        acceptedInputIds: ["request-1"],
-        providerRequestOrdinal: 0,
-        sessionId: "session_123",
-        turnId: "turn_123",
-        vault: "/tmp/vault-root",
+      await input.inputSource?.listNewConversationInputs({
+        conversation: {
+          accountId: "acct_1",
+          actorId: "actor_1",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "thread_1",
+          threadIsDirect: true,
+        },
       });
       return {
         nextWakeAt: null,
@@ -327,8 +347,6 @@ describe("runHostedAssistantAutomation", () => {
               readRawEmailMessage: vi.fn(async () => null),
               sendEmail: vi.fn(async () => undefined),
             },
-            checkpointActiveTurnInput,
-            refreshMailboxForActiveTurnInput,
           },
           platformEnv: {},
         },
@@ -337,19 +355,12 @@ describe("runHostedAssistantAutomation", () => {
       nextWakeAt: null,
       progressed: true,
       redactedLogEntries: expect.any(Array),
+      timings: expect.objectContaining({
+        activeTurnInputIngested: true,
+      }),
     }));
 
-    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
-      requestId: "req_turn_input",
-    });
-    expect(checkpointActiveTurnInput).toHaveBeenCalledWith({
-      acceptedInputIds: ["request-1"],
-      providerRequestOrdinal: 0,
-      requestId: "req_turn_input",
-      sessionId: "session_123",
-      turnId: "turn_123",
-      vault: "/tmp/vault-root",
-    });
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1);
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
         inputSource: expect.any(Object),

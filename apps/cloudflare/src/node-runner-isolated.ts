@@ -24,6 +24,8 @@ import {
 } from "./runner-child-launcher.ts";
 import {
   assertHostedExecutionRunnerJobResult,
+  createHostedExecutionRunnerChildRuntimeWakeMessage,
+  isHostedExecutionRunnerChildRuntimeWakeReadyMessage,
   parseHostedExecutionRunnerChildResultMessage,
   type HostedExecutionRunnerChildResult,
   type HostedExecutionWorkspaceInvocationJobInput,
@@ -46,18 +48,21 @@ const hostedRunnerWarmLauncherRoots = new Map<string, string>();
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
   options?: {
+    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
+    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export async function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
+    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
@@ -110,7 +115,9 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
   let stderrRemainder = "";
   const stdoutTail = createHostedRunnerOutputTailBuffer();
   const stderrTail = createHostedRunnerOutputTailBuffer();
-  const childResultState = createHostedRunnerChildResultState(child);
+  const childResultState = createHostedRunnerChildResultState(child, {
+    onRuntimeWakeReady: options?.onChildReadyForRuntimeWake ?? null,
+  });
   child.stdout.on("data", (chunk: string) => {
     stdoutTail.append(chunk);
     stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
@@ -398,14 +405,36 @@ interface HostedRunnerChildExitDiagnostics {
   stdoutTail?: string;
 }
 
-function createHostedRunnerChildResultState(child: ChildProcess): HostedRunnerChildResultState {
+function createHostedRunnerChildResultState(
+  child: ChildProcess,
+  input: {
+    onRuntimeWakeReady?: ((sendWake: () => void) => void) | null;
+  } = {},
+): HostedRunnerChildResultState {
   const state: HostedRunnerChildResultState = {
     errors: [],
     results: [],
   };
+  let runtimeWakeReady = false;
 
   child.on("message", (message: unknown) => {
     try {
+      if (isHostedExecutionRunnerChildRuntimeWakeReadyMessage(message)) {
+        if (!runtimeWakeReady) {
+          runtimeWakeReady = true;
+          input.onRuntimeWakeReady?.(() => {
+            if (!child.connected || child.killed) {
+              return;
+            }
+            try {
+              child.send(createHostedExecutionRunnerChildRuntimeWakeMessage());
+            } catch {
+              // Best-effort wake only; durable runner wake state remains pending.
+            }
+          });
+        }
+        return;
+      }
       state.results.push(parseHostedExecutionRunnerChildResultMessage(message));
     } catch (error) {
       state.errors.push(error instanceof Error ? error : new Error(String(error)));

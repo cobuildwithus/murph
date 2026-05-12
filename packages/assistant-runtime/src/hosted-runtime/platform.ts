@@ -33,10 +33,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  AssistantActiveTurnInputCheckpointInput,
-  AssistantTurnInputRefreshResult,
-} from "@murphai/assistant-engine";
-import type {
   HostedEmailSendRequest,
 } from "../hosted-email.ts";
 import type {
@@ -229,23 +225,6 @@ export interface HostedRuntimeLogPort {
   write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
 }
 
-export interface HostedRuntimeActiveTurnInputMailboxRefreshInput {
-  requestId: string;
-}
-
-export type HostedRuntimeActiveTurnInputMailboxRefresh = (
-  input: HostedRuntimeActiveTurnInputMailboxRefreshInput,
-) => Promise<AssistantTurnInputRefreshResult>;
-
-export interface HostedRuntimeActiveTurnInputCheckpointInput
-  extends AssistantActiveTurnInputCheckpointInput {
-  requestId: string;
-}
-
-export type HostedRuntimeActiveTurnInputCheckpoint = (
-  input: HostedRuntimeActiveTurnInputCheckpointInput,
-) => Promise<void>;
-
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
@@ -255,8 +234,6 @@ export interface HostedRuntimePlatform {
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
-  checkpointActiveTurnInput?: HostedRuntimeActiveTurnInputCheckpoint | null;
-  refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;

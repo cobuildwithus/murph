@@ -320,9 +320,7 @@ export async function runHostedWorkspaceAssistantPhase(
         resolvedConfig: input.runtime.resolvedConfig,
       },
       signal: input.signal ?? undefined,
-      skipActiveTurnMailboxRefresh: false,
       skipDeviceSync,
-      skipInitialMailboxRefresh: hasFreshConversationInput,
       vaultRoot: input.restored.vaultRoot,
       wake,
     });

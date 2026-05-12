@@ -2334,16 +2334,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(retryOutcome.status, "imported");
 
     const source = createHostedAssistantInputSource({
-      requestId: "req_rapid_inputs",
-      runtime: createRuntime(),
       vaultRoot,
-      wake: {
-        eventId: "evt_timer",
-        kind: "runtime.timer",
-        occurredAt: TEST_NOW,
-        triggerKind: "runtime_timer",
-        userId: TEST_USER_ID,
-      },
     });
     const scannerInputs = await source.listInputCandidates({
       sourceId: "linq",
