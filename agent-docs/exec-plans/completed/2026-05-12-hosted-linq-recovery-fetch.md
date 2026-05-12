@@ -1,6 +1,6 @@
 # Hosted Linq recovery fetch wrapper
 
-Status: active
+Status: completed
 Created: 2026-05-12
 Updated: 2026-05-12
 
@@ -46,3 +46,4 @@ Updated: 2026-05-12
 
 - Commands to run: assistant-runtime focused test, `pnpm typecheck`, diff-aware verification if truthful, and required completion audits.
 - Expected outcomes: the recovery probe uses the dependency fetch wrapper, does not call raw global fetch, and still materializes the direct Linq thread.
+Completed: 2026-05-12
