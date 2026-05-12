@@ -268,10 +268,10 @@ export async function startHostedLocalDevStack(input: {
       oidcIdentity,
       overrides: {
         ...vercelEnv,
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: resolveContainerReachableWorkerOrigin(
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: new URL(resolveContainerReachableWorkerOrigin(
           config,
           initialEnv,
-        ),
+        )).hostname,
         ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
       },
     });

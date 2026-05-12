@@ -202,7 +202,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         OPENAI_API_KEY: "vercel-key",
       });
       expect(options?.env?.CODEX_HOME).toBeUndefined();
-      expect(options?.env?.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL).toBeUndefined();
+      expect(options?.env?.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBeUndefined();
       expect(options?.env?.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL).toBeUndefined();
@@ -245,7 +245,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
           forwardedEnv: {
             CODEX_HOME: "/tmp/forwarded-codex-home",
             HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-            HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
+            HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
             HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
             HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',

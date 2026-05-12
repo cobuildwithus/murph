@@ -272,7 +272,7 @@ describe("runHostedExecutionChild", () => {
         ? requestInfo
         : new Request(requestInfo, init);
       expect(requestObject.url).toBe(
-        `https://worker.example.test/__murph/runtime-callback/users/u_workspace_decode/web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
+        `http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
       );
       expect(requestObject.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
       expect(requestObject.headers.get("x-hosted-runtime-attempt-id")).toBe(
@@ -309,7 +309,6 @@ describe("runHostedExecutionChild", () => {
 
     await runHostedExecutionChild({
       readStandardInput: async () => JSON.stringify({
-        runtimeCallbackBaseUrl: "https://worker.example.test",
         job: {
           kind: "workspace-invocation",
           request: {

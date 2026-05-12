@@ -244,9 +244,9 @@ vi.mock("./environment.ts", () => ({
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
-      input.overrides?.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL
-      ?? "http://127.0.0.1:8787",
+    HOSTED_EXECUTION_RUNNER_HOST_ALIAS:
+      input.overrides?.HOSTED_EXECUTION_RUNNER_HOST_ALIAS
+      ?? "127.0.0.1",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/cryptoKeyVersions/1",
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
       "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
@@ -381,7 +381,7 @@ describe("hosted local dev stack", () => {
         "HOSTED_WEB_BASE_URL:http://localhost:3000",
       ],
       expect.objectContaining({
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
@@ -835,7 +835,7 @@ describe("hosted local dev stack", () => {
 
     const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
     expect(resolveInput?.overrides).toMatchObject({
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
     });
     expect(resolveInput?.overrides?.HOSTED_CRYPTO_ENV).toBeUndefined();
     expect(resolveInput?.overrides?.HOSTED_CRYPTO_GCP_ACCESS_TOKEN).toBeUndefined();
@@ -1245,7 +1245,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://172.17.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",
       }),
       expect.any(Object),
     );

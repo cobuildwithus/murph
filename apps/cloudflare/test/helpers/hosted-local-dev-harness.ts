@@ -7,8 +7,12 @@ import { buildCloudflareHostedControlUserStatusPath } from "@murphai/cloudflare-
 import { parseHostedRunnerStatusResponse } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
+  HostedWorkspaceInvocationResult,
   HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
 
 import { repoRoot } from "../../vitest.shared.js";
 import { resolveHostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/config.ts";
@@ -20,6 +24,9 @@ import {
 const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusPollIntervalMs = 250;
 const hostedLocalNudgeTimeoutMs = 2_000;
+const hostedLocalIdleCheckpointTimeoutMs = 15_000;
+const hostedLocalIdleCheckpointRetryMs = 1_000;
+const hostedLocalRunUntilIdleCheckpointTimeoutMs = 30_000;
 const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
 
 export interface HostedLocalDevHarness {
@@ -31,6 +38,7 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
+  runHostedIdleCheckpointForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
     reason?: HostedWorkspaceInvocationReason;
@@ -161,15 +169,8 @@ export async function startHostedLocalDevHarness(input: {
         });
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
-      expireRunnerActivityForTest: async (userId: string): Promise<{ ok: true }> => {
-        return await requestJsonForRuntime<{ ok: true }>(
-          `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
-          {
-            headers: statusHeaders(userId),
-            method: "POST",
-          },
-        );
-      },
+      expireRunnerActivityForTest,
+      runHostedIdleCheckpointForTest,
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
@@ -222,6 +223,7 @@ export async function startHostedLocalDevHarness(input: {
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
         let nextRecoveryNudgeAt = startedAt;
+        let nextIdleCheckpointAttemptAt = startedAt;
         let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
 
@@ -241,13 +243,9 @@ export async function startHostedLocalDevHarness(input: {
             ], stack?.stdoutTail() ?? "", stack?.stderrTail() ?? ""));
           }
 
-          if (
-            !status.inFlight
-            && status.mailboxLag.every((lane) => lane.lag === "0")
-            && status.workspace !== null
-            && !status.lastErrorCode
-          ) {
-            return status;
+          const completedStatus = resolveHostedCompletionStatus(status);
+          if (completedStatus) {
+            return completedStatus;
           }
 
           const now = Date.now();
@@ -255,6 +253,19 @@ export async function startHostedLocalDevHarness(input: {
           mailboxLagFirstObservedAt = hasMailboxLag
             ? mailboxLagFirstObservedAt ?? now
             : null;
+          if (
+            hasMailboxLag
+            && !status.inFlight
+            && !status.lastErrorCode
+            && now >= nextIdleCheckpointAttemptAt
+            && resolveLocallyDrainedMailboxLag(status) !== null
+          ) {
+            nextIdleCheckpointAttemptAt = now + hostedLocalIdleCheckpointRetryMs;
+            await runHostedIdleCheckpointForTest(userId)
+              .catch(() => expireRunnerActivityForTest(userId).catch(() => {}));
+            await sleep(pollIntervalMs);
+            continue;
+          }
           if (
             now >= nextRecoveryNudgeAt
             && (
@@ -409,6 +420,36 @@ export async function startHostedLocalDevHarness(input: {
       signal: AbortSignal.timeout(hostedLocalNudgeTimeoutMs),
     }).catch(() => {});
   }
+
+  async function expireRunnerActivityForTest(userId: string): Promise<{ ok: true }> {
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalIdleCheckpointTimeoutMs),
+      },
+    );
+  }
+
+  async function runHostedIdleCheckpointForTest(
+    userId: string,
+  ): Promise<HostedWorkspaceInvocationResult> {
+    return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
+      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=idle_shutdown_checkpoint`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalRunUntilIdleCheckpointTimeoutMs),
+      },
+    );
+  }
 }
 
 function resolveLocalHarnessBaseHost(host: string): string {
@@ -423,6 +464,110 @@ function hostedStatusHasMailboxLag(status: HostedRunnerStatusResponse): boolean 
       return lane.lag !== "0";
     }
   });
+}
+
+function resolveHostedCompletionStatus(
+  status: HostedRunnerStatusResponse,
+): HostedRunnerStatusResponse | null {
+  if (status.inFlight || status.lastErrorCode) {
+    return null;
+  }
+
+  if (status.mailboxLag.every((lane) => lane.lag === "0")) {
+    return status.workspace !== null ? status : null;
+  }
+
+  if (!hasDurableHostedWorkspaceCheckpoint(status.workspace)) {
+    return null;
+  }
+
+  const locallyDrainedLag = resolveLocallyDrainedMailboxLag(status);
+  return locallyDrainedLag ? {
+    ...status,
+    mailboxLag: locallyDrainedLag,
+  } : null;
+}
+
+function resolveLocallyDrainedMailboxLag(
+  status: HostedRunnerStatusResponse,
+): HostedRunnerStatusResponse["mailboxLag"] | null {
+  const resolved: HostedRunnerStatusResponse["mailboxLag"] = [];
+  const importedLogIndices: number[] = [];
+
+  for (const lane of status.mailboxLag) {
+    if (lane.lag === "0") {
+      resolved.push(lane);
+      continue;
+    }
+
+    const imported = readRecentMailboxImportedSeq(status, lane.lane);
+    if (!imported || compareMailboxSeq(imported.seq, lane.maxSeq) < 0) {
+      return null;
+    }
+    importedLogIndices.push(imported.index);
+
+    resolved.push({
+      ...lane,
+      importedSeq: lane.maxSeq,
+      lag: "0",
+    });
+  }
+
+  if (!hasAssistantPassAfterMailboxImports(status, importedLogIndices)) {
+    return null;
+  }
+
+  return resolved;
+}
+
+function hasDurableHostedWorkspaceCheckpoint(
+  workspace: HostedRunnerStatusResponse["workspace"],
+): boolean {
+  return workspace !== null && compareMailboxSeq(workspace.version, "0") > 0;
+}
+
+function readRecentMailboxImportedSeq(
+  status: HostedRunnerStatusResponse,
+  lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"],
+): { index: number; seq: string } | null {
+  const logs = status.recentLogs ?? [];
+  for (const [index, log] of logs.entries()) {
+    if (log.eventCode !== "mailbox.imported") {
+      continue;
+    }
+    const value = lane === "system"
+      ? log.redactedJson?.systemSeqEnd
+      : log.redactedJson?.conversationSeqEnd;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return { index, seq: value };
+    }
+  }
+
+  return null;
+}
+
+function hasAssistantPassAfterMailboxImports(
+  status: HostedRunnerStatusResponse,
+  importIndices: readonly number[],
+): boolean {
+  if (importIndices.length === 0) {
+    return true;
+  }
+
+  const logs = status.recentLogs ?? [];
+  return importIndices.every((importIndex) => logs.some((log, logIndex) => {
+    return logIndex < importIndex && log.eventCode === "assistant.pass_finished";
+  }));
+}
+
+function compareMailboxSeq(left: string, right: string): number {
+  try {
+    const leftSeq = BigInt(left);
+    const rightSeq = BigInt(right);
+    return leftSeq === rightSeq ? 0 : leftSeq > rightSeq ? 1 : -1;
+  } catch {
+    return left.localeCompare(right);
+  }
 }
 
 function hostedStatusHasRecoverableMailboxLag(input: {

@@ -228,18 +228,7 @@ function readContainerReachableHost(source: UnknownEnvSource): string | null {
     return explicitAlias;
   }
 
-  const callbackBaseUrl = normalizeStringEnvValue(
-    source.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL,
-  );
-  if (!callbackBaseUrl) {
-    return null;
-  }
-
-  try {
-    return new URL(callbackBaseUrl).hostname;
-  } catch {
-    return null;
-  }
+  return null;
 }
 export function filterHostedRunnerSecrets(
   env: Readonly<Record<string, string>>,

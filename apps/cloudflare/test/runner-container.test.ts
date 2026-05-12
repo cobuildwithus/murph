@@ -100,8 +100,8 @@ describe("RunnerContainer", () => {
 
     const firstBody = JSON.parse(executeCalls[0]?.[1]?.body as string);
     const secondBody = JSON.parse(executeCalls[1]?.[1]?.body as string);
-    expect(Object.keys(firstBody).sort()).toEqual(["job", "runtimeCallbackBaseUrl"]);
-    expect(Object.keys(secondBody).sort()).toEqual(["job", "runtimeCallbackBaseUrl"]);
+    expect(Object.keys(firstBody).sort()).toEqual(["job"]);
+    expect(Object.keys(secondBody).sort()).toEqual(["job"]);
   });
 
   it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
@@ -197,7 +197,7 @@ describe("RunnerContainer", () => {
   it("uses callback transport for container runtime requests", async () => {
     const { container, containerFetch } = createContainerDouble({
       env: {
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
       },
     });
 
@@ -258,7 +258,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
-    expect(observedTopLevelKeys).toEqual(["job", "runtimeCallbackBaseUrl"]);
+    expect(observedTopLevelKeys).toEqual(["job"]);
   });
 
   it("uses activity expiry as fallback cleanup after warm reuse and cold-starts the next run", async () => {
@@ -2305,7 +2305,6 @@ function createContainerDouble(input: {
     storage: createContainerStorageDouble(),
     ...(input.state ?? {}),
   } as never, {
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: RUNNER_CALLBACK_BASE_URL,
     ...(input.env ?? {}),
   } as never);
   const containerFetch = input.containerFetch ?? vi.fn(async (url: string) => {

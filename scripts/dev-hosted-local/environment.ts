@@ -306,9 +306,12 @@ export function mergeCloudflareLocalEnv(input: {
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: input.oidcIdentity.environment,
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
-      normalizedOverrides.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL?.trim()
-      ?? workerOrigin,
+    ...(normalizedOverrides.HOSTED_EXECUTION_RUNNER_HOST_ALIAS?.trim()
+      ? {
+          HOSTED_EXECUTION_RUNNER_HOST_ALIAS:
+            normalizedOverrides.HOSTED_EXECUTION_RUNNER_HOST_ALIAS.trim(),
+        }
+      : {}),
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: callbackSigningPrivateJwkJson,
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackSigningKeyId,
     HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: callbackSigningPublicKeyringJson,

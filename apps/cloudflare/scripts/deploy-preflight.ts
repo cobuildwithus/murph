@@ -68,7 +68,6 @@ const JUNCTION_RUNTIME_REQUIRED_ENV_NAMES = [
 
 const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
   "CF_PUBLIC_BASE_URL",
-  "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL",
   "HOSTED_WEB_BASE_URL",
   "HOSTED_WEB_PRODUCTION_BASE_URL",
 ] as const;
@@ -309,13 +308,6 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;
   const productionWebBaseUrl = productionUrls.get("HOSTED_WEB_PRODUCTION_BASE_URL")?.normalized;
-  const publicWorkerBaseUrl = productionUrls.get("CF_PUBLIC_BASE_URL")?.normalized;
-  const runnerCallbackBaseUrl = productionUrls.get("HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL")?.normalized;
-  if (publicWorkerBaseUrl && runnerCallbackBaseUrl && publicWorkerBaseUrl !== runnerCallbackBaseUrl) {
-    errors.push(
-      "production deploys must set HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL to CF_PUBLIC_BASE_URL.",
-    );
-  }
   if (hostedWebBaseUrl && productionWebBaseUrl && hostedWebBaseUrl !== productionWebBaseUrl) {
     errors.push(
       "production deploys must set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",

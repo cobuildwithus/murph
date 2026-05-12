@@ -71,10 +71,6 @@ interface HostedContainerRuntimeDependencies {
   processIsolation: boolean;
 }
 
-interface HostedExecutionLocalBridgeConfig {
-  runtimeCallbackBaseUrl: string | null;
-}
-
 interface HostedRunnerBundleManifestSummary {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
@@ -132,9 +128,6 @@ export async function startHostedContainerEntrypoint(input: {
     let claimedRunnerSlot = false;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
-    let localBridge: HostedExecutionLocalBridgeConfig = {
-      runtimeCallbackBaseUrl: null,
-    };
 
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -184,7 +177,6 @@ export async function startHostedContainerEntrypoint(input: {
           runtime,
         );
         job = parsed.job;
-        localBridge = parsed.localBridge;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -214,7 +206,6 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
-        runtimeCallbackBaseUrl: localBridge.runtimeCallbackBaseUrl,
         signal: requestAbort.signal,
       });
 
@@ -310,7 +301,6 @@ async function parseHostedExecutionContainerInvocationRequest(
   value: unknown,
   runtime: HostedContainerRuntimeDependencies,
 ): Promise<{
-  localBridge: HostedExecutionLocalBridgeConfig;
   job: HostedExecutionRunnerJobInput;
 }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -321,12 +311,6 @@ async function parseHostedExecutionContainerInvocationRequest(
   const assistantRuntime = await runtime.loadRuntimeContracts();
 
   return {
-    localBridge: {
-      runtimeCallbackBaseUrl: readNullableString(
-        record.runtimeCallbackBaseUrl,
-        "Hosted container runner request.runtimeCallbackBaseUrl",
-      ),
-    },
     job: parseHostedExecutionRunnerJobInput(record.job, {
       parseWorkspaceJobInput: assistantRuntime.parseHostedAssistantWorkspaceRuntimeJobInput,
     }),
@@ -363,27 +347,6 @@ async function startHostedContainerEntrypointCli(): Promise<void> {
       processIsolation: true,
     },
   });
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
-  }
-
-  return normalizeOptionalString(value);
 }
 
 async function readHostedContainerInvocationRequestBody(
@@ -838,7 +801,6 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
@@ -850,7 +812,6 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    runtimeCallbackBaseUrl?: string | null;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {

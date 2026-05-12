@@ -20,6 +20,7 @@ import {
   type HostedExecutionRunnerJobResult,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
+import { hostedRunnerIntercept } from "./runner-egress-intercept.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -32,8 +33,6 @@ const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
-const HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV =
-  "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL";
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -143,12 +142,15 @@ interface RunnerContainerUserRunnerStubLike {
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
+  enableInternet = true;
   envVars = {
     PORT: String(RUNNER_PORT),
   };
+  interceptHttps = true;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
+  static outbound = hostedRunnerIntercept;
 
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -345,10 +347,6 @@ export class RunnerContainer extends Container {
     input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedExecutionRunnerJobResult> {
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
-    const runtimeCallbackBaseUrl = requireRunnerRuntimeCallbackBaseUrl(
-      this.environment,
-      routeUserId,
-    );
     const logContext: RunnerContainerLogContext = {
       userId: routeUserId,
     };
@@ -371,7 +369,6 @@ export class RunnerContainer extends Container {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          hasRuntimeCallbackBaseUrl: runtimeCallbackBaseUrl !== null,
           readyTimeoutMs: readRunnerReadyTimeoutMs(this.environment),
           workspaceAttemptId: input.job.request.attemptId,
           workspaceLeaseGeneration: input.job.request.leaseGeneration,
@@ -413,7 +410,6 @@ export class RunnerContainer extends Container {
         {
           body: JSON.stringify({
             job: input.job,
-            runtimeCallbackBaseUrl,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -637,16 +633,11 @@ export class RunnerContainer extends Container {
     timeoutMs: number;
     userId: string;
   }): Promise<HostedExecutionRunnerJobResult> {
-    const runtimeCallbackBaseUrl = requireRunnerRuntimeCallbackBaseUrl(
-      this.environment,
-      input.userId,
-    );
     const response = await this.containerFetch(
       RUNNER_EXECUTE_URL,
       {
         body: JSON.stringify({
           job: input.job,
-          runtimeCallbackBaseUrl,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -1394,49 +1385,6 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
-function readOptionalRunnerContainerEnvString(
-  env: RunnerContainerEnvironmentSource,
-  key: string,
-): string | null {
-  const value = env[key];
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readRunnerRuntimeCallbackBaseUrl(
-  env: RunnerContainerEnvironmentSource,
-  _userId: string,
-): string | null {
-  const configured = readOptionalRunnerContainerEnvString(
-    env,
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV,
-  );
-  if (configured) {
-    return ensureTrailingSlash(new URL(configured)).toString();
-  }
-
-  return null;
-}
-
-function requireRunnerRuntimeCallbackBaseUrl(
-  env: RunnerContainerEnvironmentSource,
-  userId: string,
-): string {
-  const configured = readRunnerRuntimeCallbackBaseUrl(env, userId);
-  if (configured) {
-    return configured;
-  }
-
-  throw new HostedExecutionConfigurationError(
-    `${HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL_ENV} must be configured for hosted runner callback transport.`,
-    "missing_runner_callback_base_url",
-  );
-}
-
 function readRunnerContainerUserRunnerStub(
   env: RunnerContainerEnvironmentSource,
   userId: string,
@@ -1453,15 +1401,6 @@ function readRunnerContainerUserRunnerStub(
   return (namespace as {
     getByName(name: string): RunnerContainerUserRunnerStubLike;
   }).getByName(userId);
-}
-
-function ensureTrailingSlash(value: URL): URL {
-  if (value.pathname.endsWith("/")) {
-    return value;
-  }
-  const next = new URL(value.toString());
-  next.pathname = `${next.pathname}/`;
-  return next;
 }
 
 function emitRunnerContainerLifecycleFailure(input: {
@@ -1531,6 +1470,17 @@ export function resolveHostedExecutionRunnerContainerName(input: {
   return workerVersionSegment
     ? `${input.userId}--v-${workerVersionSegment}`
     : input.userId;
+}
+
+export function resolveHostedExecutionRunnerUserIdFromContainerName(input: {
+  containerName: string;
+  source: RunnerContainerNameSource;
+}): string {
+  const workerVersionSegment = readRunnerContainerWorkerVersionSegment(input.source);
+  const versionSuffix = workerVersionSegment ? `--v-${workerVersionSegment}` : null;
+  return versionSuffix && input.containerName.endsWith(versionSuffix)
+    ? input.containerName.slice(0, -versionSuffix.length)
+    : input.containerName;
 }
 
 function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {

@@ -17,7 +17,7 @@ import {
 
 import {
   buildHostedExecutionRuntimePlatform,
-  createCloudflareHostedRuntimeFetch,
+  createCloudflareHostedProviderFetch,
 } from "./runtime-platform.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
@@ -59,7 +59,6 @@ interface HostedExecutionChildDependencies {
 }
 
 interface HostedExecutionChildInput {
-  runtimeCallbackBaseUrl: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
@@ -120,7 +119,6 @@ export async function runHostedExecutionChild(
     });
     const result = await runWorkspaceChildJob({
       job: input.job,
-      runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
       runWorkspaceInProcess,
     });
     emitHostedRunnerChildDebug({
@@ -159,7 +157,6 @@ function sendHostedExecutionRunnerChildResult(
 
 async function runWorkspaceChildJob(input: {
   job: HostedExecutionWorkspaceInvocationJobInput;
-  runtimeCallbackBaseUrl: string | null;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
@@ -167,7 +164,6 @@ async function runWorkspaceChildJob(input: {
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
-    runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
     workspaceCheckpointBridge: {
       readCurrentLease: () => currentLease,
       recordCheckpoint: ({ workspaceVersion }) => {
@@ -178,43 +174,34 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
-  const webControlFetch = input.runtimeCallbackBaseUrl
-    ? createCloudflareHostedRuntimeFetch(
-        boundUserId,
-        fetch,
-        {
-          readCurrentLease: () => currentLease,
-          runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl,
-        },
-      )
-    : undefined;
-  const decodeMailboxPayload = webControlFetch
-    ? createCloudflareHostedMailboxPayloadDecoder({
-      fetchImpl: webControlFetch,
+  const webControlFetch = createCloudflareHostedProviderFetch(
+    boundUserId,
+    fetch,
+    {
       readCurrentLease: () => currentLease,
-      timeoutMs: readHostedRunnerCommitTimeoutMs(input.job.runtime?.commitTimeoutMs ?? null),
-    })
-    : undefined;
+    },
+  );
+  const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
+    fetchImpl: webControlFetch,
+    readCurrentLease: () => currentLease,
+    timeoutMs: readHostedRunnerCommitTimeoutMs(input.job.runtime?.commitTimeoutMs ?? null),
+  });
 
   return await input.runWorkspaceInProcess(
     input.job,
     createHostedWorkspaceRuntimeBridgeJobOptions({
-      ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
+      decodeMailboxPayload,
       platform,
-      requireMailboxPayloadDecoder: Boolean(input.runtimeCallbackBaseUrl),
+      requireMailboxPayloadDecoder: true,
       request: input.job.request,
       runtime: input.job.runtime ?? {},
       vaultRoot: resolveHostedWorkspaceChildVaultRoot(),
-      ...(webControlFetch
-        ? {
-            webControlAllowHttpHosts: [
-              CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-              ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-            ],
-            webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-            webControlFetch,
-          }
-        : {}),
+      webControlAllowHttpHosts: [
+        CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+        ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+      ],
+      webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+      webControlFetch,
     }),
   );
 }
@@ -245,10 +232,6 @@ function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInp
   const record = value as Record<string, unknown>;
 
   return {
-    runtimeCallbackBaseUrl: readNullableString(
-      record.runtimeCallbackBaseUrl,
-      "Hosted node runner child input.runtimeCallbackBaseUrl",
-    ),
     job: parseHostedExecutionRunnerJobInput(record.job),
   };
 }
@@ -324,18 +307,6 @@ function buildHostedRunnerChildRuntimeDiagnostics(
       typeof forwardedEnv.NODE_ENV === "string"
       && forwardedEnv.NODE_ENV.length > 0,
   };
-}
-
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function emitHostedRunnerChildDebug(input: {
