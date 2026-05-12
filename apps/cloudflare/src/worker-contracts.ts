@@ -90,6 +90,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_SIGNING_SECRET?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
+  MAPBOX_ACCESS_TOKEN?: string;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

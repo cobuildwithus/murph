@@ -928,12 +928,16 @@ function parseActivityFrequency(value: string | undefined): number | null {
   return 6 - parsed;
 }
 
-function stableSplit(id: string): Split {
-  const digest = createHash("sha256").update(`r399-midus2-increment-v0:${id}`).digest();
+function stableSplit(id: string, config: R399MidusCohortConfig): Split {
+  const digest = createHash("sha256").update(`${config.splitSalt}:${id}`).digest();
   const bucket = digest.readUInt32BE(0) / 0xffffffff;
   if (bucket < 0.6) return "train";
   if (bucket < 0.8) return "calibration";
   return "test";
+}
+
+function uniqueColumns(columns: readonly string[]): string[] {
+  return [...new Set(columns)];
 }
 
 function splitCounts(rows: readonly ParsedRow[]): Record<Split, { events: number; n: number }> {

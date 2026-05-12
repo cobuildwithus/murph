@@ -9,6 +9,7 @@ import {
   probeLinqApi,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
+  type LinqFetch,
 } from "@murphai/operator-config/linq-runtime";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
@@ -36,6 +37,7 @@ import type {
 
 export interface HostedProviderEffectDependencies {
   env: NodeJS.ProcessEnv;
+  fetchImplementation?: typeof fetch;
   signal?: AbortSignal;
 }
 
@@ -197,8 +199,19 @@ async function sendHostedProviderLinqMessageDirect(
       : { targetKind: request.targetKind }),
   }, {
     env: dependencies.env,
+    fetchImplementation: adaptHostedProviderFetchForLinq(dependencies.fetchImplementation),
     signal: dependencies.signal,
   });
+}
+
+function adaptHostedProviderFetchForLinq(
+  fetchImplementation: typeof fetch | undefined,
+): LinqFetch | undefined {
+  if (!fetchImplementation) {
+    return undefined;
+  }
+
+  return async (input, init) => fetchImplementation(input, init);
 }
 
 async function maybeRecoverHostedProviderMissingLinqThread(input: {

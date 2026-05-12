@@ -94,12 +94,13 @@ export function createHostedAssistantChannelTypingDependencies(input: {
   > | null;
   forwardedEnv: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
+  providerFetch?: typeof fetch | null;
   signal?: AbortSignal;
   userEnv: Readonly<Record<string, string>>;
 }): AssistantChannelTypingDependencies {
   return {
     startLinqTyping: async (request) => {
-      const sendLinqChatAction = input.effectsPort?.sendLinqChatAction;
+      const sendLinqChatAction = input.providerFetch ? undefined : input.effectsPort?.sendLinqChatAction;
       if (sendLinqChatAction) {
         return startHostedLinqEffectsPortTypingSession({
           sendLinqChatAction,
@@ -113,11 +114,12 @@ export function createHostedAssistantChannelTypingDependencies(input: {
           forwardedEnv: input.forwardedEnv,
           userEnv: input.userEnv,
         }) as NodeJS.ProcessEnv,
+        fetchImplementation: input.providerFetch ?? undefined,
         signal: input.signal,
       });
     },
     startTelegramTyping: async (request) => {
-      const sendTelegramChatAction = input.effectsPort?.sendTelegramChatAction;
+      const sendTelegramChatAction = input.providerFetch ? undefined : input.effectsPort?.sendTelegramChatAction;
       if (sendTelegramChatAction) {
         return startAssistantChannelActivitySession({
           refreshMs: HOSTED_CHANNEL_TYPING_REFRESH_MS,
@@ -134,6 +136,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
           forwardedEnv: input.forwardedEnv,
           platformEnv: input.platformEnv,
         }) as NodeJS.ProcessEnv,
+        fetchImplementation: input.providerFetch ?? undefined,
         signal: input.signal,
       });
     },
@@ -262,6 +265,7 @@ function logHostedLinqTypingBestEffortFailure(error: unknown): void {
 export async function markHostedConversationReadBestEffort(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "markLinqRead"> | null;
   forwardedEnv: Readonly<Record<string, string>>;
+  providerFetch?: typeof fetch | null;
   userEnv: Readonly<Record<string, string>>;
   wake: HostedExecutionConversationMessageWake;
   signal?: AbortSignal;
@@ -276,7 +280,7 @@ export async function markHostedConversationReadBestEffort(input: {
   }
 
   try {
-    if (input.effectsPort?.markLinqRead) {
+    if (!input.providerFetch && input.effectsPort?.markLinqRead) {
       await input.effectsPort.markLinqRead({
         chatId: linqMessage.chatId,
       });
@@ -292,6 +296,7 @@ export async function markHostedConversationReadBestEffort(input: {
           forwardedEnv: input.forwardedEnv,
           userEnv: input.userEnv,
         }) as NodeJS.ProcessEnv,
+        fetchImplementation: input.providerFetch ?? undefined,
         signal: input.signal,
       },
     );

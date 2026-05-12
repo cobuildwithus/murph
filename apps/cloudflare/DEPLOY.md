@@ -178,7 +178,8 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider secrets:
 
-- `OPENAI_API_KEY` when the hosted assistant should call OpenAI directly through Codex
+- `OPENAI_API_KEY` when the hosted assistant should call OpenAI through Codex. The deploy secret stays in the Worker; the runner container receives only the hosted injected-credential placeholder and Cloudflare injects the real key through the HTTPS egress intercept.
+- `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_PHONE_NUMBER_ID` when those hosted runtime integrations are enabled. These are also Worker-owned intercept credentials, not raw child-container env.
 
 Hosted usage-reporting secrets:
 
