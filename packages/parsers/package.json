@@ -29,7 +29,7 @@
   "dependencies": {
     "@murphai/core": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zxing-wasm": "3.0.2"
+    "zxing-wasm": "3.0.3"
   },
   "engines": {
     "node": ">=24.14.1"

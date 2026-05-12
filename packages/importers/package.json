@@ -60,6 +60,6 @@
   "dependencies": {
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   }
 }

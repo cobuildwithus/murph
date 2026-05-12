@@ -96,11 +96,11 @@
   "dependencies": {
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
-    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.1.8"
+    "zod": "^4.4.3"
   },
   "bundleDependencies": [
     "@murphai/core",

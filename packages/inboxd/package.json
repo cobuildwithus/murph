@@ -60,6 +60,6 @@
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "grammy": "1.41.1"
+    "grammy": "1.42.0"
   }
 }

@@ -37,6 +37,7 @@ function createMockTelegramBotUser(input: {
     is_bot: true,
     first_name: "Murph",
     username: input.username,
+    can_manage_bots: false,
     can_join_groups: true,
     can_read_all_group_messages: false,
     supports_inline_queries: false,
