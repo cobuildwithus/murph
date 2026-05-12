@@ -77,6 +77,12 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "TMPDIR",
   "TZ",
 ] as const;
+const HOSTED_RUNTIME_PLATFORM_TRANSPORT_ENV_NAMES = [
+  "ALL_PROXY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+] as const;
 const HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES = [
   "HOSTED_ASSISTANT_API_KEY_ENV",
   "HOSTED_ASSISTANT_BASE_URL",
@@ -231,9 +237,11 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
 export function projectHostedRuntimeToChildEnv(input: {
   ambientEnv?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
+  platformTransportEnv?: Readonly<Record<string, string | undefined>>;
 }): Record<string, string> {
   return {
     ...buildHostedBaseProcessEnvironment(input.ambientEnv ?? process.env),
+    ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
   };
 }
@@ -460,6 +468,21 @@ function buildHostedBaseProcessEnvironment(
   const env: Record<string, string> = {};
 
   for (const key of HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES) {
+    const value = source[key];
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  return env;
+}
+
+function buildHostedPlatformTransportProcessEnvironment(
+  source: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of HOSTED_RUNTIME_PLATFORM_TRANSPORT_ENV_NAMES) {
     const value = source[key];
     if (typeof value === "string") {
       env[key] = value;

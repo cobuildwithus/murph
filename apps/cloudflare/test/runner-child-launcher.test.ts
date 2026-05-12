@@ -40,14 +40,17 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   const launcherDirectories = createLauncherDirectories("/tmp/hosted-runner");
   const env = createHostedRunnerChildProcessEnv({
     ambientEnv: {
+      ALL_PROXY: "http://cloudflare-all-proxy.example.test:8080",
       CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       FFMPEG_COMMAND: "/usr/bin/ffmpeg",
       FILE_COMMAND: "/usr/bin/file",
+      HTTP_PROXY: "http://cloudflare-local-proxy.example.test:8080",
       HTTPS_PROXY: "https://proxy.example.test",
       LANG: "en_US.UTF-8",
       MUTOOL_COMMAND: "/usr/bin/mutool",
       NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+      NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
       PATH: "/usr/bin:/bin",
       PDFINFO_COMMAND: "/usr/bin/pdfinfo",
       PDFTOPPM_COMMAND: "/usr/bin/pdftoppm",
@@ -67,8 +70,12 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
       HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      ALL_PROXY: "http://user-all-proxy.example.test:8080",
+      HTTP_PROXY: "http://user-proxy.example.test:8080",
+      HTTPS_PROXY: "http://user-proxy.example.test:8080",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       OPENAI_API_KEY: "secret",
+      NO_PROXY: "api.openai.com",
       PATH: "/custom/bin",
       WHISPER_COMMAND: "/stale/whisper-cli",
       WHISPER_MODEL_PATH: "/stale/model.bin",
@@ -78,12 +85,16 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   });
 
   assert.deepEqual(env, {
+    ALL_PROXY: "http://cloudflare-all-proxy.example.test:8080",
     CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     HF_HOME: launcherDirectories.huggingFaceRoot,
     HOME: launcherDirectories.homeRoot,
+    HTTP_PROXY: "http://cloudflare-local-proxy.example.test:8080",
+    HTTPS_PROXY: "https://proxy.example.test",
     LANG: "en_US.UTF-8",
     NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+    NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
     OPENAI_API_KEY: "secret",
     PATH: "/usr/bin:/bin",
     REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
@@ -96,7 +107,6 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
     XDG_CACHE_HOME: launcherDirectories.cacheRoot,
   });
   assert.equal("FFMPEG_COMMAND" in env, false);
-  assert.equal("HTTPS_PROXY" in env, false);
   assert.equal("PDFINFO_COMMAND" in env, false);
   assert.equal("PDFTOTEXT_COMMAND" in env, false);
   assert.equal(env.PATH, "/usr/bin:/bin");

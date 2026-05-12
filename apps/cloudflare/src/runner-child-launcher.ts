@@ -7,20 +7,6 @@ import {
   projectHostedRuntimeToChildEnv,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
-const HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS = [
-  "CODEX_CA_CERTIFICATE",
-  "CURL_CA_BUNDLE",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "NODE_EXTRA_CA_CERTS",
-  "PATH",
-  "REQUESTS_CA_BUNDLE",
-  "SSL_CERT_DIR",
-  "SSL_CERT_FILE",
-  "TZ",
-] as const;
-
 export interface HostedRunnerChildLauncherDirectories {
   cacheRoot: string;
   homeRoot: string;
@@ -53,10 +39,9 @@ export function createHostedRunnerChildProcessEnv(input: {
 }): Record<string, string> {
   const ambientEnv = input.ambientEnv ?? process.env;
   const env = projectHostedRuntimeToChildEnv({
-    ambientEnv: Object.fromEntries(
-      HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS.map((key) => [key, ambientEnv[key]]),
-    ),
+    ambientEnv,
     forwardedEnv: input.forwardedEnv,
+    platformTransportEnv: ambientEnv,
   });
 
   Object.assign(env, {
