@@ -31,10 +31,10 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 ] as const;
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
-const DEFAULT_OPENAI_API_HOST = "api.openai.com";
-const DEFAULT_MAPBOX_API_HOST = "api.mapbox.com";
-const DEFAULT_TELEGRAM_API_HOST = "api.telegram.org";
-const DEFAULT_WHATSAPP_API_HOST = "graph.facebook.com";
+const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
+const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
+const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 
 const OPENAI_EGRESS_POLICY = [
   {
@@ -135,14 +135,24 @@ async function maybeHandleOpenAiRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  if (input.url.hostname !== DEFAULT_OPENAI_API_HOST) {
+  const baseUrl = readProviderBaseUrl(undefined, DEFAULT_OPENAI_API_BASE_URL);
+  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
+  if (pathnameSuffix === null) {
+    if (isKnownProviderHost(input.url, baseUrl)) {
+      return disallowedProviderEgress();
+    }
     return null;
   }
-  if (!isAllowedOpenAiRequest(input.request.method, input.url.pathname)) {
+  if (!isAllowedOpenAiRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
-    return null;
+    return disallowedProviderEgress();
+  }
+
+  const authorized = await requestOwnsRuntimeFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
@@ -157,14 +167,24 @@ async function maybeHandleMapboxRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  if (input.url.hostname !== DEFAULT_MAPBOX_API_HOST) {
+  const baseUrl = readProviderBaseUrl(undefined, DEFAULT_MAPBOX_API_BASE_URL);
+  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
+  if (pathnameSuffix === null) {
+    if (isKnownProviderHost(input.url, baseUrl)) {
+      return disallowedProviderEgress();
+    }
     return null;
   }
-  if (!isAllowedMapboxRequest(input.request.method, input.url.pathname)) {
+  if (!isAllowedMapboxRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
   if (!hasQueryCredentialSentinel(input.url, "access_token")) {
-    return null;
+    return disallowedProviderEgress();
+  }
+
+  const authorized = await requestOwnsRuntimeFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");
@@ -185,22 +205,20 @@ async function maybeHandleLinqRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const baseUrl = readConfiguredBaseUrl(input.env.LINQ_API_BASE_URL, DEFAULT_LINQ_API_BASE_URL);
-  if (input.url.origin !== baseUrl.origin) {
+  const baseUrl = readProviderBaseUrl(input.env.LINQ_API_BASE_URL, DEFAULT_LINQ_API_BASE_URL);
+  const suffix = readProviderPathSuffix(input.url, baseUrl);
+  if (suffix === null) {
+    if (isKnownProviderHost(input.url, baseUrl)) {
+      return disallowedProviderEgress();
+    }
     return null;
   }
 
-  const prefix = baseUrl.pathname.replace(/\/+$/u, "");
-  if (!input.url.pathname.startsWith(prefix)) {
-    return null;
-  }
-
-  const suffix = input.url.pathname.slice(prefix.length);
   if (!isAllowedLinqRequest(input.request.method, suffix)) {
-    return null;
+    return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
-    return null;
+    return disallowedProviderEgress();
   }
 
   const authorized = await requestOwnsRuntimeWriteFence(input);
@@ -220,14 +238,19 @@ async function maybeHandleTelegramRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const configuredHost = readConfiguredHost(input.env.TELEGRAM_API_BASE_URL) ?? DEFAULT_TELEGRAM_API_HOST;
-  if (input.url.hostname !== configuredHost) {
+  const baseUrl = readProviderBaseUrl(input.env.TELEGRAM_API_BASE_URL, DEFAULT_TELEGRAM_API_BASE_URL);
+  const prefix = normalizedProviderBasePath(baseUrl);
+  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
+  if (pathnameSuffix === null) {
+    if (isKnownProviderHost(input.url, baseUrl)) {
+      return disallowedProviderEgress();
+    }
     return null;
   }
 
-  const operation = readTelegramSentinelOperation(input.url.pathname);
+  const operation = readTelegramSentinelOperation(pathnameSuffix);
   if (!operation || !isAllowedTelegramOperation(operation)) {
-    return null;
+    return disallowedProviderEgress();
   }
 
   const authorized = await requestOwnsRuntimeWriteFence(input);
@@ -237,7 +260,7 @@ async function maybeHandleTelegramRequest(input: {
 
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
   const upstreamUrl = new URL(input.url);
-  upstreamUrl.pathname = `/bot${token}/${operation}`;
+  upstreamUrl.pathname = `${prefix}/bot${token}/${operation}`;
   return await fetch(
     await createHostedRunnerUpstreamRequest(
       input.request,
@@ -253,13 +276,21 @@ async function maybeHandleWhatsAppRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const configuredHost = readConfiguredHost(input.env.WHATSAPP_API_BASE_URL) ?? DEFAULT_WHATSAPP_API_HOST;
-  if (
-    input.url.hostname !== configuredHost
-    || input.request.method !== "POST"
-    || !/^\/v[0-9]+\.[0-9]+\/__cloudflare_injected__\/messages$/u.test(input.url.pathname)
-  ) {
+  const baseUrl = readProviderBaseUrl(input.env.WHATSAPP_API_BASE_URL, DEFAULT_WHATSAPP_API_BASE_URL);
+  const prefix = normalizedProviderBasePath(baseUrl);
+  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
+  if (pathnameSuffix === null) {
+    if (isKnownProviderHost(input.url, baseUrl)) {
+      return disallowedProviderEgress();
+    }
     return null;
+  }
+
+  if (
+    input.request.method !== "POST"
+    || !/^\/v[0-9]+\.[0-9]+\/__cloudflare_injected__\/messages$/u.test(pathnameSuffix)
+  ) {
+    return disallowedProviderEgress();
   }
 
   const authorized = await requestOwnsRuntimeWriteFence(input);
@@ -273,10 +304,10 @@ async function maybeHandleWhatsAppRequest(input: {
     "WHATSAPP_PHONE_NUMBER_ID",
   );
   const upstreamUrl = new URL(input.url);
-  upstreamUrl.pathname = input.url.pathname.replace(
+  upstreamUrl.pathname = `${prefix}${pathnameSuffix.replace(
     "/__cloudflare_injected__/messages",
     `/${encodeURIComponent(phoneNumberId)}/messages`,
-  );
+  )}`;
   const headers = stripHostedRuntimeAuthorityHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
   return await fetch(await createHostedRunnerUpstreamRequest(input.request, upstreamUrl, headers));
@@ -327,6 +358,30 @@ function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
     return true;
   }
   return method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix);
+}
+
+async function requestOwnsRuntimeFence(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string | null;
+}): Promise<boolean> {
+  if (!input.userId) {
+    return false;
+  }
+
+  try {
+    await requireRunnerRuntimeWriteFenceWrite({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {
@@ -417,21 +472,55 @@ function readRequiredInterceptSecret(value: unknown, label: string): string {
   return normalized;
 }
 
-function readConfiguredHost(value: unknown): string | null {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-  try {
-    return new URL(value).hostname;
-  } catch {
-    return null;
-  }
-}
-
 function disallowedProviderEgress(): Response {
   return new Response("Forbidden", { status: 403 });
 }
 
-function readConfiguredBaseUrl(value: unknown, fallback: string): URL {
-  return new URL(typeof value === "string" && value.trim() ? value : fallback);
+function readProviderBaseUrl(value: unknown, fallback: string): URL {
+  const fallbackUrl = new URL(fallback);
+  const rawValue = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  try {
+    const url = new URL(rawValue);
+    if (isAllowedProviderBaseUrl(url)) {
+      return url;
+    }
+  } catch {
+    return fallbackUrl;
+  }
+  return fallbackUrl;
+}
+
+function readProviderPathSuffix(url: URL, base: URL): string | null {
+  if (url.origin !== base.origin) {
+    return null;
+  }
+  const prefix = normalizedProviderBasePath(base);
+  if (!url.pathname.startsWith(prefix)) {
+    return null;
+  }
+  return url.pathname.slice(prefix.length);
+}
+
+function normalizedProviderBasePath(base: URL): string {
+  return base.pathname.replace(/\/+$/u, "");
+}
+
+function isKnownProviderHost(url: URL, base: URL): boolean {
+  return url.hostname === base.hostname;
+}
+
+function isAllowedProviderBaseUrl(url: URL): boolean {
+  return url.protocol === "https:"
+    || (url.protocol === "http:" && isLocalOrTestProviderHost(url.hostname));
+}
+
+function isLocalOrTestProviderHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "localhost"
+    || normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "[::1]"
+    || normalized === "host.docker.internal"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".test");
 }

@@ -1468,6 +1468,87 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("aborts an in-progress idle-shutdown checkpoint when explicit cleanup destroys the shell", async () => {
+    const runnerRequestSignal = createDeferred<AbortSignal>();
+    const runnerRequestAborted = createDeferred<void>();
+    const beginIdleCheckpointLease = vi.fn(async () => ({
+      attemptId: "attempt_idle_destroy",
+      generation: "17",
+      userId: "member_123",
+      workspaceVersion: "7",
+    }));
+    const finishIdleCheckpointLease = vi.fn(async () => ({
+      completed: true,
+    }));
+    const runnerStub = {
+      beginIdleCheckpointLease,
+      finishIdleCheckpointLease,
+    };
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected idle checkpoint runner request to receive an abort signal.");
+      }
+      runnerRequestSignal.resolve(signal);
+      return await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          runnerRequestAborted.resolve();
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("idle checkpoint runner request aborted"));
+        }, { once: true });
+      });
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      env: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => runnerStub),
+        },
+      },
+      initialStatus: "running",
+    });
+    Object.assign(container, {
+      pendingIdleCheckpoint: {
+        checkpointNextWakeAt: null,
+        runtime: {},
+        timeoutMs: 30_000,
+        userId: "member_123",
+        workspaceVersion: "7",
+      },
+    });
+
+    const activityExpiredPromise = container.onActivityExpired();
+    const signal = await runnerRequestSignal.promise;
+    expect(signal.aborted).toBe(false);
+
+    const destroyPromise = container.destroyInstance();
+    await runnerRequestAborted.promise;
+
+    await expect(activityExpiredPromise).resolves.toBeUndefined();
+    await expect(destroyPromise).resolves.toBeUndefined();
+    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
+      userId: "member_123",
+      workspaceVersion: "7",
+    });
+    expect(finishIdleCheckpointLease).toHaveBeenCalledWith({
+      attemptId: "attempt_idle_destroy",
+      generation: "17",
+      nextWakeAt: null,
+      userId: "member_123",
+    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for explicit destroy to resolve through the native container lifecycle", async () => {
     vi.useFakeTimers();
 

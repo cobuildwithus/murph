@@ -42,13 +42,14 @@ The live ownership split is:
   takes one short Durable Object write-fence lease, posts checkpoint reason
   `idle_shutdown_checkpoint` into the already-warm runner, validates the same
   workspace CAS/user fences, releases the fence with the returned next wake, and
-  then tears down best-effort. Lease acquisition or checkpoint failure is logged
-  and the shell still proceeds to cleanup; there is no retry loop and no durable
-  idle-checkpoint scheduler. This intentionally favors lifecycle simplicity
-  over maximum replay resistance: if the warm shell is lost before this
-  best-effort checkpoint completes, the next wake may restore the prior
-  checkpoint and rely on runtime/provider idempotency for duplicate-effect
-  safety.
+  then tears down best-effort. Explicit cleanup or user-data deletion aborts an
+  in-progress idle-shutdown checkpoint rather than waiting for the runner
+  timeout. Lease acquisition or checkpoint failure is logged and the shell still
+  proceeds to cleanup; there is no retry loop and no durable idle-checkpoint
+  scheduler. This intentionally favors lifecycle simplicity over maximum replay
+  resistance: if the warm shell is lost before this best-effort checkpoint
+  completes, the next wake may restore the prior checkpoint and rely on
+  runtime/provider idempotency for duplicate-effect safety.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority

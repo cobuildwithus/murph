@@ -604,8 +604,7 @@ describe("hosted runtime callbacks", () => {
         },
       ),
     );
-    const sendTelegram = vi.fn();
-    const effectsPort = createHostedRuntimeEffectsPortStub({ sendTelegram });
+    const effectsPort = createHostedRuntimeEffectsPortStub();
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
       abortController.abort(new Error("lease expired before provider dispatch"));
       try {
@@ -644,7 +643,7 @@ describe("hosted runtime callbacks", () => {
       }),
     ).rejects.toThrow("lease expired before provider dispatch");
 
-    expect(sendTelegram).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
     expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: false,
@@ -678,11 +677,11 @@ describe("hosted runtime callbacks", () => {
         },
       ),
     );
-    const sendTelegram = vi.fn().mockImplementationOnce(async () => {
+    mocks.sendTelegramMessage.mockImplementationOnce(async () => {
       abortController.abort(new Error("lease expired after provider dispatch"));
       return createDelivery();
     });
-    const effectsPort = createHostedRuntimeEffectsPortStub({ sendTelegram });
+    const effectsPort = createHostedRuntimeEffectsPortStub();
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
       await request.dependencies.sendTelegram({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -707,7 +706,7 @@ describe("hosted runtime callbacks", () => {
       }),
     ).rejects.toThrow("lease expired after provider dispatch");
 
-    expect(sendTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
@@ -740,7 +739,7 @@ describe("hosted runtime callbacks", () => {
         },
       ),
     );
-    const sendLinq = vi.fn().mockImplementationOnce(async () => {
+    mocks.sendLinqMessage.mockImplementationOnce(async () => {
       abortController.abort(new Error("lease expired after Linq provider dispatch"));
       return createDelivery({
         channel: "linq",
@@ -750,7 +749,7 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
     });
-    const effectsPort = createHostedRuntimeEffectsPortStub({ sendLinq });
+    const effectsPort = createHostedRuntimeEffectsPortStub();
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
       await request.dependencies.sendLinq({
         directRecipientPhoneNumber: "+15550001",
@@ -778,7 +777,7 @@ describe("hosted runtime callbacks", () => {
       }),
     ).rejects.toThrow("lease expired after Linq provider dispatch");
 
-    expect(sendLinq).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 

@@ -285,6 +285,9 @@ async function resolveHostedProviderLinqRecoverySenders(input: {
   try {
     const probed = await probeLinqApi({
       env: input.dependencies.env,
+      fetchImplementation: adaptHostedProviderFetchForLinq(
+        input.dependencies.fetchImplementation,
+      ),
       signal: input.dependencies.signal,
     });
     return normalizeLinqSenderPhoneNumbers(probed.phoneNumbers);

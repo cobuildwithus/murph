@@ -166,128 +166,25 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
   assert.deepEqual(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.env, telegramEnv);
 });
 
-test("hosted typing prefers provider effects when available", async () => {
-  vi.useFakeTimers();
-  try {
-    const sendLinqChatAction = vi.fn(async () => undefined);
-    const sendTelegramChatAction = vi.fn(async () => undefined);
-    const typing = createHostedAssistantChannelTypingDependencies({
-      effectsPort: {
-        sendLinqChatAction,
-        sendTelegramChatAction,
-      },
-      forwardedEnv: {},
-      platformEnv: {},
-      userEnv: {},
-    });
+test("hosted channel activity uses provider fetch instead of effects-port provider tunnels", async () => {
+  const providerFetch = vi.fn() as unknown as typeof fetch;
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {},
+    platformEnv: {},
+    providerFetch,
+    userEnv: {},
+  });
 
-    const linqHandle = await typing.startLinqTyping?.({
-      target: "linq_chat_123",
-    });
-    await vi.advanceTimersByTimeAsync(8_100);
-    await linqHandle?.stop();
-    await flushBackgroundChannelActivity();
-    const telegramHandle = await typing.startTelegramTyping?.({
-      target: "telegram_chat_123",
-    });
-    await vi.advanceTimersByTimeAsync(4_100);
-    await telegramHandle?.stop();
-
-    assert.deepEqual(sendLinqChatAction.mock.calls, [
-      [{
-        action: "typing",
-        target: "linq_chat_123",
-      }],
-      [{
-        action: "typing",
-        target: "linq_chat_123",
-      }],
-      [{
-        action: "typing",
-        target: "linq_chat_123",
-      }],
-      [{
-        action: "typing_stop",
-        target: "linq_chat_123",
-      }],
-    ]);
-    assert.deepEqual(sendTelegramChatAction.mock.calls, [[{
-      action: "typing",
-      target: "telegram_chat_123",
-    }], [{
-      action: "typing",
-      target: "telegram_chat_123",
-    }]]);
-    assert.equal(mocks.startLinqTypingIndicator.mock.calls.length, 0);
-    assert.equal(mocks.startTelegramTypingIndicator.mock.calls.length, 0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("hosted Linq typing effects are nonblocking and best-effort", async () => {
-  vi.useFakeTimers();
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  try {
-    const sendLinqChatAction = vi.fn(() => new Promise<void>(() => {}));
-    const typing = createHostedAssistantChannelTypingDependencies({
-      effectsPort: {
-        sendLinqChatAction,
-      },
-      forwardedEnv: {},
-      platformEnv: {},
-      userEnv: {},
-    });
-
-    const handle = await typing.startLinqTyping?.({
-      target: "linq_chat_123",
-    });
-    let providerTurnStarted = false;
-    providerTurnStarted = true;
-
-    assert.equal(providerTurnStarted, true);
-    assert.deepEqual(sendLinqChatAction.mock.calls, [[{
-      action: "typing",
-      target: "linq_chat_123",
-    }]]);
-
-    await vi.advanceTimersByTimeAsync(750);
-    await flushBackgroundChannelActivity();
-
-    assert.deepEqual(warn.mock.calls, [[
-      "Hosted Linq typing provider effect failed; continuing best-effort.",
-      {
-        errorName: "Timeout",
-      },
-    ]]);
-
-    let replyDeliveryRan = false;
-    await handle?.stop();
-    replyDeliveryRan = true;
-
-    assert.equal(replyDeliveryRan, true);
-    await flushBackgroundChannelActivity();
-    assert.deepEqual(sendLinqChatAction.mock.calls[1], [{
-      action: "typing_stop",
-      target: "linq_chat_123",
-    }]);
-
-    await vi.advanceTimersByTimeAsync(750);
-    await flushBackgroundChannelActivity();
-  } finally {
-    warn.mockRestore();
-    vi.useRealTimers();
-  }
-});
-
-test("hosted Linq mark-read prefers provider effects when available", async () => {
-  const markLinqRead = vi.fn(async () => undefined);
+  await typing.startLinqTyping?.({
+    target: "linq_chat_123",
+  });
+  await typing.startTelegramTyping?.({
+    target: "telegram_chat_123",
+  });
 
   await markHostedConversationReadBestEffort({
-    effectsPort: {
-      markLinqRead,
-    },
     forwardedEnv: {},
+    providerFetch,
     userEnv: {},
     wake: buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq",
@@ -304,14 +201,7 @@ test("hosted Linq mark-read prefers provider effects when available", async () =
     }),
   });
 
-  assert.deepEqual(markLinqRead.mock.calls, [[{
-    chatId: "chat_123",
-  }]]);
-  assert.equal(mocks.markLinqChatRead.mock.calls.length, 0);
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+  assert.equal(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+  assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
 });
-
-async function flushBackgroundChannelActivity(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-}
