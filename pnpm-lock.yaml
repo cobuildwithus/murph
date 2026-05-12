@@ -51,8 +51,8 @@ importers:
   apps/cloudflare:
     dependencies:
       '@cloudflare/containers':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.3
+        version: 0.3.3
       '@murphai/assistant-runtime':
         specifier: workspace:*
         version: link:../../packages/assistant-runtime
@@ -1074,8 +1074,8 @@ packages:
   '@clack/prompts@0.11.0':
     resolution: {integrity: sha512-pMN5FcrEw9hUkZA4f+zLlzivQSeQf5dRGJjSUbvVYDLvpKCdQx5OaknvKzgbtXOizhP+SJJJjqEbOe55uKKfAw==}
 
-  '@cloudflare/containers@0.2.0':
-    resolution: {integrity: sha512-npxGQCHKx5grXnzAHHVAlg6FbyrH07v3COHxXniq7qWfqqIxD64Vrp7Jy9iCPkZamTRfXr0E4Pi0tRIY10Dq9w==}
+  '@cloudflare/containers@0.3.3':
+    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
 
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution: {integrity: sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ==}
@@ -10041,7 +10041,7 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@cloudflare/containers@0.2.0': {}
+  '@cloudflare/containers@0.3.3': {}
 
   '@cloudflare/kv-asset-handler@0.4.2': {}
 
