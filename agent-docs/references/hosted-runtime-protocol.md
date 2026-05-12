@@ -207,9 +207,14 @@ only. It does not persist queue history, per-message completion, outbox truth,
 assistant channel enablement state, or checkpoint recovery truth.
 When the Durable Object is idle, the persisted nudge starts the runner drive
 directly and keeps the alarm as recovery. When an invocation is active, runtime
-liveness heartbeats surface that input is available so the active-turn refresh
-path can import late mailbox rows; the alarm remains the durable backstop if the
-active path does not consume or commit them.
+liveness stays as the coarse activity signal, and the Durable Object sends a
+payloadless runtime wake to the active container child after that child has
+acknowledged wake readiness. The hosted runtime owns the foreground
+conversation-mailbox import loop, imports late rows through the same mailbox
+state/input-store path as the initial import, and then notifies the
+assistant-engine active-turn controller. The alarm remains the durable backstop
+if the foreground wake path does not consume or commit the appended mailbox
+rows.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. The
@@ -248,10 +253,15 @@ evidence. Auto-reply channel state stores only a fixed `eligibleAfter` seed
 boundary for channel enablement; it is never advanced as handling progress.
 Inbox projections are rebuildable scan acceleration and must not hide
 imported-but-unhandled assistant input. Late same-conversation input is
-supported by the hosted mailbox-backed active-turn input refresh: at provider
-request boundaries and at the final commit barrier, the runtime refreshes
-mailbox rows, stages any new input, checkpoints accepted input state, and
-continues the same logical assistant turn before outbox intent creation.
+supported by the hosted foreground mailbox import loop plus the store-backed
+assistant input spine: a payloadless runtime wake causes the active child to
+import conversation mailbox rows, stage any new `AssistantInputEvent` records,
+run prompt-preparation effects best-effort, and notify active-turn admission.
+The assistant engine then admits the persisted input through live steer,
+event-driven, provider-boundary, or pre-provider admission without using
+hosted-specific mailbox refresh/checkpoint ports. Accepted-input journaling,
+transcript updates, checkpoint bookkeeping, provider-request metadata, and
+outbox intent creation remain on the normal local assistant-service path.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable

@@ -150,6 +150,47 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
   });
 
+  it("wakes the active runtime best-effort when a nudge arrives during an invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({ accepted: true }));
+    const { invoke, runner } = createRunnerHarness({
+      invocationResults: [firstInvocation.promise],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alreadyRunning: true,
+          runtimeWakeAccepted: true,
+        }),
+        message: "Hosted runner nudge accepted.",
+      }),
+    );
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  });
+
   it("returns a busy idle-checkpoint lease result behind an active write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -550,6 +591,7 @@ function createRunnerHarness(input: {
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   onWorkspaceRead?: () => Promise<void> | void;
+  wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState();
@@ -573,6 +615,7 @@ function createRunnerHarness(input: {
       service: "runner",
       status: 200,
     }),
+    ...(input.wakeRuntime ? { wakeRuntime: input.wakeRuntime } : {}),
   };
   const namespace: HostedExecutionContainerNamespaceLike = {
     getByName(name) {

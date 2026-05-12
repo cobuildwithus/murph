@@ -14,6 +14,7 @@ import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
+  type AssistantActiveTurnInputAdmissionHook,
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
@@ -1536,19 +1537,6 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
   )
   mocks.executeProviderTurnWithRecovery
     .mockImplementationOnce(async () => firstProviderTurn.promise)
-    .mockImplementationOnce(async () => {
-      return {
-        kind: 'succeeded',
-        providerTurn: {
-          onboardingGuidanceInjected: true,
-          providerContinuation: {
-            kind: 'thread-start',
-          },
-          response: 'final after steered input',
-          session,
-        },
-      }
-    })
 
   const firstResultPromise = sendAssistantMessageLocal({
     prompt: 'Initial prompt',
@@ -1588,6 +1576,10 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
   await vi.waitFor(() => {
     expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
   })
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
+    'Follow-up while prompt persistence is blocked',
+  )
   firstProviderTurn.resolve({
     kind: 'succeeded',
     providerTurn: {
@@ -1595,7 +1587,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
       providerContinuation: {
         kind: 'explicit-structured-history',
       },
-      response: 'draft before steered input',
+      response: 'final after steered input',
       session,
     },
   })
@@ -1608,11 +1600,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
   assert.equal(firstResult.response, 'final after steered input')
   assert.equal(steeredResult.response, 'final after steered input')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
-  assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
-    'Follow-up while prompt persistence is blocked',
-  )
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal starts a new turn when same-conversation input lacks expected turn id', async () => {
@@ -2774,8 +2762,8 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 })
 
-test('sendAssistantMessageLocal skips blind active-turn polling for hosted queue-only auto-replies', async () => {
-  const activeTurnInput = vi.fn(async () => ({
+test('sendAssistantMessageLocal preserves boundary admission for hosted queue-only auto-replies', async () => {
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
     kind: 'no-new-input' as const,
   }))
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -2801,7 +2789,11 @@ test('sendAssistantMessageLocal skips blind active-turn polling for hosted queue
   })
 
   assert.equal(result.response, 'assistant response')
-  assert.equal(activeTurnInput.mock.calls.length, 0)
+  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.deepEqual(
+    activeTurnInput.mock.calls.map((call) => call[0]?.phase),
+    ['request_boundary', 'commit_barrier'],
+  )
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })

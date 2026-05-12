@@ -89,6 +89,7 @@ vi.mock("../src/hosted-runtime/workspace-runner.ts", async (importOriginal) => {
 });
 
 import {
+  createCoalescingRuntimeWakeSignal,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   HostedWorkspaceRunnerUserMismatchError,
   parseHostedAssistantWorkspaceRuntimeJobInput,
@@ -1116,18 +1117,8 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           events.push("assistant.phase");
-          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
-          if (typeof checkpointActiveTurnInput !== "function") {
-            throw new Error("Expected hosted active-turn checkpoint to be installed.");
-          }
-          await checkpointActiveTurnInput({
-            acceptedInputIds: ["input_synthetic_foreground_active_turn"],
-            providerRequestOrdinal: 0,
-            requestId: "request_synthetic_foreground_active_turn",
-            sessionId: "session_synthetic_foreground_active_turn",
-            turnId: "turn_synthetic_foreground_active_turn",
-            vault: vaultRoot,
-          });
+          assert.equal("checkpointActiveTurnInput" in input.platform, false);
+          assert.equal("refreshMailboxForActiveTurnInput" in input.platform, false);
           return {
             checkpointReason: "assistant_runtime_commit",
             progressed: true,
@@ -1151,16 +1142,11 @@ describe("hosted workspace runtime entrypoint", () => {
         "runtime.log:mailbox.imported",
         "assistant.phase",
         "runtime.log:checkpoint.runtime_residue_deferred",
-        "runtime.log:checkpoint.runtime_residue_deferred",
       ]);
       assert.deepEqual(checkpointRequests, []);
       const deferredLogs = logRequests.flatMap((request) => request.entries)
         .filter((entry) => entry.eventCode === "checkpoint.runtime_residue_deferred");
       assert.deepEqual(deferredLogs.map((entry) => entry.redactedJson), [
-        {
-          checkpointPhase: "active_turn_input",
-          checkpointReason: "active_turn_acceptance",
-        },
         {
           checkpointPhase: "assistant",
           checkpointReason: "assistant_runtime_commit",
@@ -1344,14 +1330,15 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("normal foreground active-turn refresh does not build a checkpoint request", async () => {
+  test("foreground runtime wake import does not build a checkpoint request", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const createCheckpointSnapshot = vi.fn(async () => {
-      throw new Error("Foreground active-turn refresh should not build checkpoint snapshots.");
+      throw new Error("Foreground runtime wake import should not build checkpoint snapshots.");
     });
     let fetchCount = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
@@ -1404,17 +1391,11 @@ describe("hosted workspace runtime entrypoint", () => {
             workspace: createWorkspaceState({ version: "0" }),
           }),
         }),
-        async runAssistantPhase(input) {
-          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
-          if (typeof refreshMailbox !== "function") {
-            throw new Error("Expected hosted mailbox refresh to be installed.");
-          }
-          const refresh = await refreshMailbox({
-            requestId: "request_synthetic_entrypoint_active_turn_refresh",
-          });
-          assert.deepEqual(refresh, {
-            progressed: true,
-            reason: "ingested_input",
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          runtimeWakeSignal.notify();
+          await waitUntil(() => {
+            assert.equal(events.includes("import:1"), true);
           });
           return {
             checkpointReason: "canonical_runtime_commit",
@@ -3514,7 +3495,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(events, ["workspace.read", "mailbox.fetch", "mailbox.fetch"]);
+      assert.deepEqual(events, ["workspace.read", "mailbox.fetch"]);
       assert.deepEqual(result, {
         nextWakeAt,
         redactedStatus: {
@@ -3576,7 +3557,6 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(events, [
         "workspace.read",
-        "mailbox.fetch",
         "mailbox.fetch",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), []);

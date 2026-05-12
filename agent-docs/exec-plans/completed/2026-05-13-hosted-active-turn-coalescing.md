@@ -16,7 +16,9 @@ Success criteria:
 - Imported conversation input notifies the assistant active-turn controller
   after best-effort prompt-preparation effects.
 - `assistant-engine` owns active-turn admission through separate event,
-  boundary, and live-poll flags, with hosted mailbox disabling only live polling.
+  boundary, and live-poll flags, with hosted queue-only auto-replies disabling
+  only live polling while preserving event-driven and provider-boundary
+  admission.
 - Hosted active-turn mailbox refresh/checkpoint ports are deleted as
   correctness paths.
 - Tests and docs assert one coherent outbound reply/coalesced logical turn,
@@ -52,10 +54,16 @@ Success criteria:
 
 ## Verification
 
-Planned:
+Completed:
 
 - `pnpm typecheck`
 - `bash scripts/workspace-verify.sh test:diff <task paths>`
 - Focused assistant-engine, assistant-runtime, and Cloudflare tests added or
   updated for the wake/import/admission behavior.
 - Completion audit passes required for high-risk runtime/trust-boundary work.
+  Security/privacy, simplify, coverage-write, and task-finish-review completed;
+  no blocking findings remained after the simplify fix preserving
+  provider-boundary admission for hosted queue-only auto-replies.
+Status: completed
+Updated: 2026-05-13
+Completed: 2026-05-13

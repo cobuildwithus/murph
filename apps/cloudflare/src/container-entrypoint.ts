@@ -174,6 +174,7 @@ export async function startHostedContainerEntrypoint(input: {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
+    let runtimeWakeForRequest: (() => void) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
 
@@ -301,6 +302,7 @@ export async function startHostedContainerEntrypoint(input: {
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
         onChildReadyForRuntimeWake(sendWake) {
           activeRuntimeWake = sendWake;
+          runtimeWakeForRequest = sendWake;
         },
         signal: requestAbort.signal,
       });
@@ -340,7 +342,9 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       stopActiveJobDiagnostics?.();
-      activeRuntimeWake = null;
+      if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
+        activeRuntimeWake = null;
+      }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }

@@ -11,7 +11,6 @@ import {
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
   createAssistantOutboxIntent,
-  type AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
 import type {
   HostedMailboxFetchRequest,
@@ -42,6 +41,7 @@ import { describe, test, vi } from "vitest";
 
 import {
   HostedMailboxImportCheckpointConflictError,
+  createCoalescingRuntimeWakeSignal,
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
@@ -79,30 +79,6 @@ import type {
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
-type SyntheticConversationCursor = {
-  captureId: string;
-  createdAt: string | null;
-  occurredAt: string;
-};
-
-type SyntheticInputSource = {
-  refresh(input: { phase: "input_available" }): Promise<AssistantTurnInputRefreshResult>;
-  listNewConversationInputs(input: {
-    afterCursor: SyntheticConversationCursor;
-    conversation: {
-      accountId: string | null;
-      actorId: string | null;
-      actorIsSelf: boolean;
-      source: string;
-      threadId: string | null;
-      threadIsDirect: boolean | null;
-    };
-    knownProjectionCaptureIds?: readonly string[];
-  }): Promise<{
-    inputs: unknown[];
-    nextCursor: SyntheticConversationCursor;
-  }>;
-};
 
 function createInboxProjectionEffectResult(
   overrides: Partial<HostedMailboxPostCheckpointEffectResult> = {},
@@ -240,7 +216,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           assert.equal(input.initialMailboxImport.checkpoint, null);
           assert.equal(input.initialMailboxImport.checkpointDeferred, true);
           assert.equal(input.now?.(), TEST_NOW);
-          assert.equal(input.platform.refreshMailboxForActiveTurnInput !== undefined, true);
+          assert.equal(input.platform.mailboxPort !== undefined, true);
           return {
             progressed: false,
           };
@@ -1380,7 +1356,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("active-turn refresh imports late conversation input without foreground checkpointing", async () => {
+  test("runtime wake imports late conversation input without foreground checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -1397,149 +1373,60 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const workspacePort = createWorkspacePort({
       checkpointRequests,
     });
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
     try {
-      let caught: unknown;
-      let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>> | null = null;
-      try {
-        result = await runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_runner_active_turn",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "4",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
-          }),
-          expectedUserId: TEST_USER_ID,
-          async importItem(item) {
-            importedSeqs.push(item.item.laneSeq);
-            if (item.item.laneSeq === "2") {
-              return { status: "imported" };
-            }
-            return { status: "imported" };
-          },
-          limitPerLane: 10,
-          platform: createPlatform({
-            logRequests,
-            mailboxPort,
-            workspacePort,
-          }),
-          requestId: "request_synthetic_runner_active_turn",
-          runtimeLogContext: {
-            attemptId: "attempt_synthetic_runner_active_turn",
-            leaseGeneration: "4",
-            workspaceVersion: "0",
-          },
-          async runAssistantPhase(input) {
-            items.push(createMailboxItem({
-              id: "mailbox_item_runner_late",
-              laneSeq: "2",
-              occurredAt: "2026-04-26T00:00:02.000Z",
-            }));
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_active_turn",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_active_turn",
+          leaseGeneration: "4",
+          workspaceVersion: "0",
+        },
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          events.push("assistant:start");
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("2"));
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
 
-            const inputSource: SyntheticInputSource = {
-              async refresh(refreshInput) {
-                assert.equal(refreshInput.phase, "input_available");
-                events.push("refresh:start");
-                const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
-                if (typeof refreshMailbox !== "function") {
-                  throw new Error("Expected hosted mailbox refresh to be installed.");
-                }
-                const refresh = await refreshMailbox({
-                  requestId: "request_synthetic_runner_active_turn_input",
-                });
-                events.push("refresh:done");
-                return refresh;
-              },
-              async listNewConversationInputs(query) {
-                events.push("list");
-                return {
-                  inputs: importedSeqs.includes("2")
-                    ? [
-                        {
-                          accountId: null,
-                          actorId: "actor_synthetic",
-                          actorIsSelf: false,
-                          actorName: "Sender",
-                          attachmentCount: 0,
-                          captureId: "capture_synthetic_late",
-                          createdAt: "2026-04-26T00:00:02.000Z",
-                          envelopePath: "capture-envelope-redacted",
-                          eventId: "event_synthetic_late",
-                          externalId: "external_synthetic_late",
-                          occurredAt: "2026-04-26T00:00:02.000Z",
-                          promotions: [],
-                          receivedAt: "2026-04-26T00:00:02.100Z",
-                          source: "telegram",
-                          text: null,
-                          threadId: "thread_synthetic",
-                          threadIsDirect: true,
-                          threadTitle: null,
-                        },
-                      ]
-                    : [],
-                  nextCursor: importedSeqs.includes("2")
-                    ? {
-                        captureId: "capture_synthetic_late",
-                        createdAt: "2026-04-26T00:00:02.000Z",
-                        occurredAt: "2026-04-26T00:00:02.000Z",
-                    }
-                    : query.afterCursor,
-                };
-              },
-            };
-            await inputSource.refresh({
-              phase: "input_available",
-            });
-            const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
-            if (typeof checkpointActiveTurnInput !== "function") {
-              throw new Error("Expected hosted active-turn checkpoint to be installed.");
-            }
-            await checkpointActiveTurnInput({
-              acceptedInputIds: ["request-1"],
-              providerRequestOrdinal: 0,
-              requestId: "request_synthetic_runner_active_turn_input",
-              sessionId: "session_synthetic",
-              turnId: "turn_synthetic",
-              vault: vaultRoot,
-            });
-            const lateInputs = await inputSource.listNewConversationInputs({
-              afterCursor: {
-                captureId: "capture_synthetic_initial",
-                createdAt: "2026-04-26T00:00:01.000Z",
-                occurredAt: "2026-04-26T00:00:01.000Z",
-              },
-              conversation: {
-                accountId: null,
-                actorId: "actor_synthetic",
-                actorIsSelf: false,
-                source: "telegram",
-                threadId: "thread_synthetic",
-                threadIsDirect: true,
-              },
-              knownProjectionCaptureIds: ["capture_synthetic_initial"],
-            });
-            assert.equal(lateInputs.inputs.length, 1);
-            return {
-              checkpointReason: "canonical_runtime_commit",
-              progressed: true,
-            };
-          },
-          vaultRoot,
-          workspace: createWorkspaceState({ version: "0" }),
-          now: () => TEST_NOW,
-        });
-      } catch (error) {
-        caught = error;
-      }
-
-      assert.equal(caught, undefined);
-      assert.ok(result);
       assert.deepEqual(events, [
-        "refresh:start",
-        "refresh:done",
-        "list",
+        "import:1",
+        "assistant:start",
+        "import:2",
       ]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
@@ -1587,366 +1474,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         workspaceVersion: "0",
       });
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("active-turn refresh keeps accepted input and reply intent local when optional lanes degrade", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const items = [
-      createMailboxItem({
-        id: "mailbox_item_runner_active_turn_degraded_initial",
-        laneSeq: "1",
-      }),
-    ];
-    const importedSeqs: string[] = [];
-    const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const workspacePort = createWorkspacePort({
-      checkpointRequests,
-    });
-
-    try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_active_turn_degraded",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem(item) {
-          importedSeqs.push(item.item.laneSeq);
-          events.push(`import:${item.item.laneSeq}`);
-          if (item.item.laneSeq === "2") {
-            return {
-              afterCheckpoint: async () => {
-                events.push("optional:active-turn-projection");
-                throw Object.assign(new Error("active-turn projection unavailable"), {
-                  code: "ACTIVE_TURN_PROJECTION_UNAVAILABLE",
-                });
-              },
-              status: "imported",
-            };
-          }
-          return { status: "imported" };
-        },
-        limitPerLane: 10,
-        platform: {
-          ...createPlatform({
-            mailboxPort,
-            workspacePort,
-          }),
-          logPort: {
-            async write() {
-              events.push("optional:log");
-              throw new Error("log export unavailable");
-            },
-          },
-        },
-        requestId: "request_synthetic_runner_active_turn_degraded",
-        runtimeLogContext: {
-          attemptId: "attempt_synthetic_runner_active_turn_degraded",
-          leaseGeneration: "4",
-          workspaceVersion: "0",
-        },
-        async runAssistantPhase(input) {
-          events.push("assistant:start");
-          items.push(createMailboxItem({
-            id: "mailbox_item_runner_active_turn_degraded_late",
-            laneSeq: "2",
-            occurredAt: "2026-04-26T00:00:02.000Z",
-          }));
-
-          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
-          if (typeof refreshMailbox !== "function") {
-            throw new Error("Expected hosted mailbox refresh to be installed.");
-          }
-          events.push("refresh:start");
-          const refresh = await refreshMailbox({
-            requestId: "request_synthetic_runner_active_turn_degraded_input",
-          });
-          events.push("refresh:done");
-          assert.deepEqual(refresh, {
-            progressed: true,
-            reason: "ingested_input",
-          });
-
-          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
-          if (typeof checkpointActiveTurnInput !== "function") {
-            throw new Error("Expected hosted active-turn checkpoint to be installed.");
-          }
-          await checkpointActiveTurnInput({
-            acceptedInputIds: ["request-1", "request-2"],
-            providerRequestOrdinal: 1,
-            requestId: "request_synthetic_runner_active_turn_degraded_input",
-            sessionId: "session_synthetic",
-            turnId: "turn_synthetic",
-            vault: vaultRoot,
-          });
-          events.push("accepted");
-
-          return {
-            checkpointReason: "outbox_sending",
-            progressed: true,
-            redactedStatus: {
-              hostedOutboxSendingCheckpointed: true,
-            },
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      await flushBackgroundMailboxEffects();
-
-      assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.latestWorkspace?.version, "0");
-      assert.deepEqual(importedSeqs, ["1", "2"]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
-      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
-        [
-          { importedSeq: "0", lane: "system" },
-          { importedSeq: "0", lane: "conversation" },
-        ],
-        [
-          { importedSeq: "1", lane: "conversation" },
-        ],
-      ]);
-      assert.deepEqual(events, [
-        "import:1",
-        "optional:log",
-        "assistant:start",
-        "refresh:start",
-        "import:2",
-        "optional:log",
-        "optional:active-turn-projection",
-        "optional:log",
-        "refresh:done",
-        "optional:log",
-        "accepted",
-        "optional:log",
-      ]);
-    } finally {
-      warn.mockRestore();
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("suppresses runtime logs for idle active-turn mailbox refresh polls", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const items = [
-      createMailboxItem({
-        id: "mailbox_item_runner_idle_active_turn_initial",
-        laneSeq: "1",
-      }),
-    ];
-    const { mailboxPort } = createMailboxPort({ items });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const workspacePort = createWorkspacePort({
-      checkpointRequests,
-    });
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_idle_active_turn",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          return { status: "imported" };
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          logRequests,
-          mailboxPort,
-          workspacePort,
-        }),
-        requestId: "request_synthetic_runner_idle_active_turn",
-        runtimeLogContext: {
-          attemptId: "attempt_synthetic_runner_idle_active_turn",
-          leaseGeneration: "4",
-          workspaceVersion: "0",
-        },
-        async runAssistantPhase(input) {
-          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
-          if (typeof refreshMailbox !== "function") {
-            throw new Error("Expected hosted mailbox refresh to be installed.");
-          }
-          const refresh = await refreshMailbox({
-            requestId: "request_synthetic_runner_idle_active_turn_input",
-          });
-          assert.deepEqual(refresh, {
-            progressed: false,
-            reason: "no_new_input",
-          });
-          return {
-            checkpointReason: "canonical_runtime_commit",
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.phase),
-        ["import", "checkpoint"],
-      );
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("accepts active-turn input without foreground checkpointing", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const items = [
-      createMailboxItem({
-        id: "mailbox_item_runner_initial",
-        laneSeq: "1",
-      }),
-    ];
-    const { mailboxPort } = createMailboxPort({ items });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const workspacePort = createWorkspacePort({
-      checkpointRequests,
-    });
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_acceptance",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          return { status: "imported" };
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort,
-        }),
-        requestId: "request_synthetic_runner_acceptance",
-        async runAssistantPhase(input) {
-          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
-          if (typeof checkpointActiveTurnInput !== "function") {
-            throw new Error("Expected hosted active-turn checkpoint to be installed.");
-          }
-          await checkpointActiveTurnInput({
-            acceptedInputIds: ["request-1"],
-            providerRequestOrdinal: 0,
-            requestId: "request_synthetic_runner_acceptance",
-            sessionId: "session_synthetic",
-            turnId: "turn_synthetic",
-            vault: vaultRoot,
-          });
-          return {};
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("does not checkpoint active-turn input acceptance when scheduled wake fields exist", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const { mailboxPort } = createMailboxPort({
-      items: [
-        createMailboxItem({
-          id: "mailbox_item_runner_scheduled_wake",
-          laneSeq: "1",
-        }),
-      ],
-    });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const nextWakeAt = "2026-04-26T00:05:00.000Z";
-
-    try {
-      await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_acceptance_wake",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "4",
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          return { status: "imported" };
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_acceptance_wake",
-        async runAssistantPhase(input) {
-          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
-          if (typeof checkpointActiveTurnInput !== "function") {
-            throw new Error("Expected hosted active-turn checkpoint to be installed.");
-          }
-          await checkpointActiveTurnInput({
-            acceptedInputIds: ["request-1"],
-            providerRequestOrdinal: 0,
-            requestId: "request_synthetic_runner_acceptance_wake",
-            sessionId: "session_synthetic",
-            turnId: "turn_synthetic",
-            vault: vaultRoot,
-          });
-          return {};
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({
-          nextWakeAt,
-          nextWakeReason: "assistant",
-          version: "0",
-        }),
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -2856,43 +2383,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("summarizes active-turn refreshes without exposing payload state", async () => {
-    const idle = await runActiveTurnRefreshSummaryScenario({
-      lateItem: null,
-    });
-    assert.deepEqual(idle, {
-      progressed: false,
-      reason: "no_new_input",
-    });
-
-    const retryable = await runActiveTurnRefreshSummaryScenario({
-      lateItem: createMailboxItem({
-        createdAt: "9999-01-01T00:00:00.000Z",
-        id: "mailbox_item_runner_sidecar_retry",
-        laneSeq: "2",
-        payloadInlineCiphertext: null,
-        payloadRef: "hosted-mailbox-payload:mailbox_item_runner_sidecar_retry",
-      }),
-      payloadsUnavailable: true,
-    });
-    assert.deepEqual(retryable, {
-      progressed: false,
-      reason: "source_unavailable",
-    });
-
-    const quarantined = await runActiveTurnRefreshSummaryScenario({
-      lateItem: createMailboxItem({
-        id: "mailbox_item_runner_quarantine",
-        laneSeq: "2",
-        payloadSchema: "murph.invalid-hosted-mailbox-item.v1",
-      }),
-    });
-    assert.deepEqual(quarantined, {
-      progressed: true,
-      reason: "ingested_input",
-    });
-  });
-
   test("fails closed when mailbox fetch returns a different user", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
@@ -3068,81 +2558,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("keeps active-turn mailbox state local when foreground import checkpoints are disabled", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const items = [
-      createMailboxItem({
-        id: "mailbox_item_runner_stale_refresh_initial",
-        laneSeq: "1",
-      }),
-    ];
-    const { mailboxPort } = createMailboxPort({
-      items,
-    });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const workspacePort = createWorkspacePort({
-      checkpointRequests,
-      checkpointed: (request) => request.reason !== "import" || request.expectedWorkspaceVersion !== "1",
-    });
-
-    try {
-      let caught: unknown;
-      try {
-        await runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_runner_stale_refresh",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "2",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
-          }),
-          expectedUserId: TEST_USER_ID,
-          async importItem() {
-            return { status: "imported" };
-          },
-          limitPerLane: 10,
-          platform: createPlatform({
-            mailboxPort,
-            workspacePort,
-          }),
-          requestId: "request_synthetic_runner_stale_refresh",
-          async runAssistantPhase(phaseInput) {
-            items.push(createMailboxItem({
-              id: "mailbox_item_runner_stale_refresh_late",
-              laneSeq: "2",
-              occurredAt: "2026-04-26T00:00:02.000Z",
-            }));
-            const refreshMailbox = phaseInput.platform.refreshMailboxForActiveTurnInput;
-            if (typeof refreshMailbox !== "function") {
-              throw new Error("Expected hosted mailbox refresh to be installed.");
-            }
-            await refreshMailbox({
-              requestId: "request_synthetic_runner_stale_refresh_active_turn_input",
-            });
-            return {};
-          },
-          vaultRoot,
-          workspace: createWorkspaceState({ version: "0" }),
-        });
-      } catch (error) {
-        caught = error;
-      }
-
-      assert.equal(caught, undefined);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-      ]);
-      assert.equal(
-        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
-        "2",
-      );
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
 });
 
 function createPlatform(input: {
@@ -3326,75 +2741,6 @@ function createMailboxPort(input: {
       },
     },
   };
-}
-
-async function runActiveTurnRefreshSummaryScenario(input: {
-  lateItem: HostedMailboxItem | null;
-  payloadsUnavailable?: boolean;
-}) {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-  const items = [
-    createMailboxItem({
-      id: "mailbox_item_runner_summary_initial",
-      laneSeq: "1",
-    }),
-  ];
-  const { mailboxPort } = createMailboxPort({
-    items,
-    payloadsUnavailable: input.payloadsUnavailable,
-  });
-  const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-  const logRequests: HostedRuntimeLogRequest[] = [];
-  let refreshResult: AssistantTurnInputRefreshResult | null = null;
-
-  try {
-    await runHostedWorkspaceUntilIdleOrBudget({
-      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-        attemptId: "attempt_synthetic_runner_summary",
-        expectedWorkspaceVersion: "0",
-        leaseGeneration: "1",
-        nextWakeAt: null,
-        nextWakeReason: null,
-        snapshotRef: null,
-      }),
-      expectedUserId: TEST_USER_ID,
-      async importItem() {
-        return { status: "imported" };
-      },
-      limitPerLane: 10,
-      platform: createPlatform({
-        logRequests,
-        mailboxPort,
-        workspacePort: createWorkspacePort({ checkpointRequests }),
-      }),
-      requestId: "request_synthetic_runner_summary",
-      async runAssistantPhase(phaseInput) {
-        if (input.lateItem) {
-          items.push(input.lateItem);
-        }
-        const refreshMailbox = phaseInput.platform.refreshMailboxForActiveTurnInput;
-        if (typeof refreshMailbox !== "function") {
-          throw new Error("Expected hosted mailbox refresh to be installed.");
-        }
-        refreshResult = await refreshMailbox({
-          requestId: "request_synthetic_runner_summary_active_turn_input",
-        });
-        return {};
-      },
-      vaultRoot,
-      workspace: createWorkspaceState({ version: "0" }),
-    });
-
-    if (!refreshResult) {
-      throw new Error("Expected active-turn refresh result.");
-    }
-    return refreshResult;
-  } finally {
-    await rm(vaultRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
 }
 
 async function runFastDispatchCrashWindowAttempt(input: {
@@ -3634,4 +2980,15 @@ async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 250): Promise
       clearTimeout(timeout);
     }
   }
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs = 250): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for hosted workspace runner condition.");
 }
