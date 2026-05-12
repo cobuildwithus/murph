@@ -485,7 +485,7 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const usage = {
-      memberId: "member_123",
+      memberId: "member_child_controlled",
       provider: "codex-cli",
       reportingUserId: "musr_child_controlled",
       schema: "murph.assistant-usage.v1",
@@ -1262,13 +1262,13 @@ describe("handleRunnerOutboundRequest", () => {
     expect(emailSendMock).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed provider effect request JSON", async () => {
+  it("rejects malformed Telegram file effect request JSON", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         body: "{not-json",
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
@@ -1296,13 +1296,13 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects non-POST provider effect requests", async () => {
+  it("rejects non-POST Telegram file effect requests", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         headers: createMailboxPayloadDecodeHeaders(),
         method: "GET",
       }),
@@ -1326,97 +1326,43 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("sends Telegram through Worker-owned provider env without returning token material", async () => {
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => new Response(JSON.stringify({
-      ok: true,
-      result: {
-        message_id: 123,
-      },
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+  it.each([
+    "/telegram/send",
+    "/telegram/chat-action",
+    "/linq/send",
+    "/linq/chat-action",
+    "/linq/chats/mark-read",
+    "/linq/messages/delete",
+    "/whatsapp/send",
+  ])("does not route legacy provider delivery effect path %s", async (path) => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH}`, {
-        body: JSON.stringify({
-          message: "hello",
-          target: "12345",
-        }),
+      new Request(`http://results.worker${path}`, {
+        body: JSON.stringify({ ok: true }),
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        TELEGRAM_BOT_TOKEN: "telegram-token",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
       }),
       "member_123" ,
     );
 
-    expect(response.status).toBe(200);
-    const payload = await response.json();
-    expect(payload).toEqual({
-      cleanupMessages: [{ messageId: "123", target: "12345" }],
-      providerMessageId: "123",
-      target: "12345",
-    });
-    const serialized = JSON.stringify(payload);
-    expect(serialized).not.toContain("telegram-token");
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const telegramRequest = fetchMock.mock.calls[0]?.[0];
-    expect(String(telegramRequest)).toBe("https://api.telegram.org/bottelegram-token/sendMessage");
-  });
-
-  it("sends WhatsApp through Worker-owned provider env without returning token material", async () => {
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => new Response(JSON.stringify({
-      contacts: [{ wa_id: "15550100001" }],
-      messages: [{ id: "wamid.MESSAGE_1" }],
-      messaging_product: "whatsapp",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH}`, {
-        body: JSON.stringify({
-          message: "hello",
-          replyToMessageId: "wamid.REPLY_1",
-          target: "15550100001",
-        }),
-        headers: createMailboxPayloadDecodeHeaders(),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
-        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(200);
-    const payload = await response.json();
-    expect(payload).toEqual({
-      providerMessageId: "wamid.MESSAGE_1",
-      providerThreadId: "15550100001",
-      target: "15550100001",
-    });
-    const serialized = JSON.stringify(payload);
-    expect(serialized).not.toContain("test-whatsapp-token");
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const whatsAppRequest = fetchMock.mock.calls[0]?.[0];
-    expect(String(whatsAppRequest)).toBe(
-      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
-    );
+    expect(response.status).toBe(404);
+    expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("looks up Telegram files through Worker-owned provider env", async () => {
