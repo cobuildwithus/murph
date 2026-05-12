@@ -12,6 +12,21 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  buildHostedLinqChannelEnv: vi.fn((input: {
+    forwardedEnv: Readonly<Record<string, string>>;
+    userEnv: Readonly<Record<string, string>>;
+  }) => {
+    const env: Record<string, string> = {};
+    const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
+    const baseUrl = input.userEnv.LINQ_API_BASE_URL ?? input.forwardedEnv.LINQ_API_BASE_URL;
+    if (baseUrl) {
+      env.LINQ_API_BASE_URL = baseUrl;
+    }
+    if (token) {
+      env.LINQ_API_TOKEN = token;
+    }
+    return env;
+  }),
   compareAssistantInputCursors: vi.fn(),
   collectHostedAssistantDeliverySideEffects: vi.fn(),
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes: vi.fn(),
@@ -57,6 +72,7 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
+  buildHostedLinqChannelEnv: mocks.buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies:
     mocks.createHostedAssistantChannelTypingDependencies,
 }));
@@ -161,6 +177,18 @@ function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
+    const env: Record<string, string> = {};
+    const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
+    const baseUrl = input.userEnv.LINQ_API_BASE_URL ?? input.forwardedEnv.LINQ_API_BASE_URL;
+    if (baseUrl) {
+      env.LINQ_API_BASE_URL = baseUrl;
+    }
+    if (token) {
+      env.LINQ_API_TOKEN = token;
+    }
+    return env;
+  });
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
   mocks.createHostedAssistantChannelTypingDependencies.mockReturnValue({});
   mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes.mockImplementation(
@@ -1947,7 +1975,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: null,
     });
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeForwardedEnv: {
+        LINQ_API_BASE_URL: "https://linq.example",
+        LINQ_API_TOKEN: "forwarded-linq-token",
+        OPENAI_API_KEY: "sk-not-for-cleanup",
+      },
+      runtimeUserEnv: {
+        LINQ_API_TOKEN: "user-linq-token",
+      },
+    }));
 
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
@@ -1960,7 +1997,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         checkpoint: {
           nextWakeAt: null,
         },
-        env: {},
+        env: {
+          LINQ_API_BASE_URL: "https://linq.example",
+          LINQ_API_TOKEN: "user-linq-token",
+        },
         vaultRoot: "/tmp/murph-vault",
       }),
     );
