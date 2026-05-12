@@ -330,10 +330,8 @@ function createHostedRunnerInternalRequest(source: Request): Request {
 }
 
 function createHostedRunnerPassthroughRequest(source: Request): Request {
-  const headers = new Headers(source.headers);
-  headers.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
   return new Request(source, {
-    headers,
+    headers: stripHostedRuntimeAuthorityHeaders(source.headers),
   });
 }
 
