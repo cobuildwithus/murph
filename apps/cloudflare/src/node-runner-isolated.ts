@@ -37,6 +37,7 @@ export interface HostedExecutionIsolatedRunnerInput {
 
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
 const HOSTED_RUNNER_WARM_WORKSPACE_ID_HEX_LENGTH = 32;
+const HOSTED_RUNNER_CHILD_OUTPUT_TAIL_MAX_CHARS = 4096;
 
 const hostedRunnerWarmLauncherRoots = new Map<string, string>();
 
@@ -98,8 +99,11 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
 
   let stdoutRemainder = "";
   let stderrRemainder = "";
+  const stdoutTail = createHostedRunnerOutputTailBuffer();
+  const stderrTail = createHostedRunnerOutputTailBuffer();
   const childResultState = createHostedRunnerChildResultState(child);
   child.stdout.on("data", (chunk: string) => {
+    stdoutTail.append(chunk);
     stdoutRemainder = forwardHostedRuntimeChildOutputChunk({
       chunk,
       remainder: stdoutRemainder,
@@ -107,6 +111,7 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
     });
   });
   child.stderr.on("data", (chunk: string) => {
+    stderrTail.append(chunk);
     stderrRemainder = forwardHostedRuntimeChildOutputChunk({
       chunk,
       remainder: stderrRemainder,
@@ -125,9 +130,14 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
 
   try {
     child.stdin.end(JSON.stringify(input));
-    const code = await new Promise<number | null>((resolve, reject) => {
+    const closeResult = await new Promise<HostedRunnerChildCloseResult>((resolve, reject) => {
       child.once("error", reject);
-      child.once("close", resolve);
+      child.once("close", (code, signal) => {
+        resolve({
+          code,
+          signal: signal ?? null,
+        });
+      });
     });
     flushHostedRuntimeChildOutputRemainder({
       remainder: stdoutRemainder,
@@ -137,16 +147,22 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
       remainder: stderrRemainder,
       sink: process.stderr,
     });
-    const childResult = readHostedRunnerChildResult(childResultState, code);
+    const childDiagnostics = createHostedRunnerChildExitDiagnostics({
+      abortSignal: options?.signal,
+      closeResult,
+      stderrTail: stderrTail.read(),
+      stdoutTail: stdoutTail.read(),
+    });
+    const childResult = readHostedRunnerChildResult(childResultState, childDiagnostics);
 
-    if (childResult.ok && code !== 0) {
+    if (childResult.ok && closeResult.code !== 0) {
       throw new Error(
-        `Hosted assistant runtime child exited with code ${code ?? "unknown"} after reporting success.`,
+        `Hosted assistant runtime child exited with code ${closeResult.code ?? "unknown"} after reporting success.`,
       );
     }
 
     if (!childResult.ok) {
-      throw createHostedRuntimeChildFailure(childResult.error, code);
+      throw createHostedRuntimeChildFailure(childResult.error, childDiagnostics);
     }
 
     const result = childResult.result;
@@ -234,15 +250,18 @@ function createHostedRuntimeChildFailure(
     name?: string | null;
     stack?: string | null;
   } | undefined,
-  code: number | null,
+  childDiagnostics: HostedRunnerChildExitDiagnostics,
 ): Error {
   const message = error?.message
     ? redactHostedRuntimeDiagnosticText(error.message)
-    : `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`;
+    : `Hosted assistant runtime child exited with code ${childDiagnostics.exitCode ?? "unknown"}.`;
   const stack = error?.stack
     ? redactHostedRuntimeDiagnosticText(error.stack)
     : null;
-  const details = redactHostedRuntimeDiagnosticDetails(error?.details);
+  const details = {
+    ...(redactHostedRuntimeDiagnosticDetails(error?.details) ?? {}),
+    childProcess: childDiagnostics,
+  };
 
   if (error?.name === "HostedAssistantConfigurationError") {
     const classified = new HostedAssistantConfigurationError(
@@ -252,9 +271,7 @@ function createHostedRuntimeChildFailure(
       message,
     ) as HostedAssistantConfigurationError & { details?: Record<string, unknown> | null };
     classified.stack = stack ?? classified.stack;
-    if (details) {
-      classified.details = details;
-    }
+    classified.details = details;
     return classified;
   }
 
@@ -265,15 +282,28 @@ function createHostedRuntimeChildFailure(
   if (stack) {
     untyped.stack = stack;
   }
-  if (details) {
-    untyped.details = details;
-  }
+  untyped.details = details;
   return untyped;
 }
 
 interface HostedRunnerChildResultState {
   errors: Error[];
   results: HostedExecutionRunnerChildResult[];
+}
+
+interface HostedRunnerChildCloseResult {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+interface HostedRunnerChildExitDiagnostics {
+  abortedByParent: boolean;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  abortReasonMessage?: string;
+  abortReasonName?: string;
+  stderrTail?: string;
+  stdoutTail?: string;
 }
 
 function createHostedRunnerChildResultState(child: ChildProcess): HostedRunnerChildResultState {
@@ -295,16 +325,14 @@ function createHostedRunnerChildResultState(child: ChildProcess): HostedRunnerCh
 
 function readHostedRunnerChildResult(
   state: HostedRunnerChildResultState,
-  code: number | null,
+  childDiagnostics: HostedRunnerChildExitDiagnostics,
 ): HostedExecutionRunnerChildResult {
   if (state.errors.length > 0) {
     throw state.errors[0];
   }
 
   if (state.results.length === 0) {
-    throw new Error(
-      `Hosted assistant runtime child exited with code ${code ?? "unknown"} without emitting a result payload.`,
-    );
+    throw createHostedRunnerMissingChildResultError(childDiagnostics);
   }
 
   if (state.results.length > 1) {
@@ -312,6 +340,93 @@ function readHostedRunnerChildResult(
   }
 
   return state.results[0]!;
+}
+
+function createHostedRunnerMissingChildResultError(
+  childDiagnostics: HostedRunnerChildExitDiagnostics,
+): Error {
+  const exitFragments = [
+    `code ${childDiagnostics.exitCode ?? "unknown"}`,
+    `signal ${childDiagnostics.signal ?? "unknown"}`,
+  ];
+  if (childDiagnostics.abortedByParent) {
+    exitFragments.push("after parent abort");
+  }
+  const error = new Error(
+    `Hosted assistant runtime child exited with ${exitFragments.join(", ")} without emitting a result payload.`,
+  ) as Error & { details?: Record<string, unknown> };
+  error.details = {
+    childProcess: childDiagnostics,
+  };
+  return error;
+}
+
+function createHostedRunnerChildExitDiagnostics(input: {
+  abortSignal?: AbortSignal;
+  closeResult: HostedRunnerChildCloseResult;
+  stderrTail: string;
+  stdoutTail: string;
+}): HostedRunnerChildExitDiagnostics {
+  const abortReason = input.abortSignal?.reason;
+  const diagnostics: HostedRunnerChildExitDiagnostics = {
+    abortedByParent: input.abortSignal?.aborted === true,
+    exitCode: input.closeResult.code,
+    signal: input.closeResult.signal,
+  };
+  const abortReasonName = readHostedRunnerAbortReasonName(abortReason);
+  const abortReasonMessage = readHostedRunnerAbortReasonMessage(abortReason);
+  const stdoutTail = redactHostedRuntimeDiagnosticText(input.stdoutTail.trim());
+  const stderrTail = redactHostedRuntimeDiagnosticText(input.stderrTail.trim());
+
+  if (abortReasonName) {
+    diagnostics.abortReasonName = abortReasonName;
+  }
+  if (abortReasonMessage) {
+    diagnostics.abortReasonMessage = abortReasonMessage;
+  }
+  if (stdoutTail.length > 0) {
+    diagnostics.stdoutTail = stdoutTail;
+  }
+  if (stderrTail.length > 0) {
+    diagnostics.stderrTail = stderrTail;
+  }
+
+  return diagnostics;
+}
+
+function readHostedRunnerAbortReasonName(reason: unknown): string | null {
+  if (reason instanceof Error && reason.name.trim().length > 0) {
+    return redactHostedRuntimeDiagnosticText(reason.name);
+  }
+  return null;
+}
+
+function readHostedRunnerAbortReasonMessage(reason: unknown): string | null {
+  if (reason instanceof Error && reason.message.trim().length > 0) {
+    return redactHostedRuntimeDiagnosticText(reason.message);
+  }
+  if (typeof reason === "string" && reason.trim().length > 0) {
+    return redactHostedRuntimeDiagnosticText(reason);
+  }
+  return null;
+}
+
+function createHostedRunnerOutputTailBuffer(): {
+  append: (chunk: string) => void;
+  read: () => string;
+} {
+  let tail = "";
+  return {
+    append(chunk) {
+      tail += chunk;
+      if (tail.length > HOSTED_RUNNER_CHILD_OUTPUT_TAIL_MAX_CHARS) {
+        tail = tail.slice(-HOSTED_RUNNER_CHILD_OUTPUT_TAIL_MAX_CHARS);
+      }
+    },
+    read() {
+      return tail;
+    },
+  };
 }
 
 function forwardHostedRuntimeChildOutputChunk(input: {
