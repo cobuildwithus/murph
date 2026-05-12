@@ -1,12 +1,24 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
+  handleHostedRunnerInternalOutbound,
+  handleHostedRunnerLinqOutbound,
+  handleHostedRunnerMapboxOutbound,
+  handleHostedRunnerOpenAiOutbound,
+  handleHostedRunnerOpenInternetOutbound,
+  handleHostedRunnerTelegramOutbound,
+  handleHostedRunnerWhatsAppOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+  HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
+  HOSTED_RUNNER_OUTBOUND_BY_HOST,
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
 import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
+import {
+  HOSTED_RUNTIME_WORKSPACE_PATH,
+} from "@murphai/hosted-execution/routes";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
@@ -35,6 +47,23 @@ afterEach(() => {
 });
 
 describe("hostedRunnerIntercept", () => {
+  it("maps default provider and internal hosts to Cloudflare per-host outbound handlers", () => {
+    expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
+      .toBe(handleHostedRunnerOpenAiOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox])
+      .toBe(handleHostedRunnerMapboxOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq])
+      .toBe(handleHostedRunnerLinqOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
+      .toBe(handleHostedRunnerTelegramOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp])
+      .toBe(handleHostedRunnerWhatsAppOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
+      .toBe(handleHostedRunnerInternalOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["unexpected.example.test"]).toBeUndefined();
+  });
+
   it("preserves runtime write-fence headers for internal intercepted requests", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       ok: true,
@@ -98,6 +127,37 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("routes internal web-control workspace reads without a top-level write-fence check", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-05-12T00:00:00.000Z",
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("workspace reads should be owned by the web-control handler");
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({ validateRuntimeWriteFence }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("injects OpenAI authorization with a valid runtime write fence and strips authority headers", async () => {

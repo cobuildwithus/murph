@@ -17,7 +17,7 @@ import {
 } from "./string-env.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-} from "./runner-egress-intercept.ts";
+} from "./runner-injected-credential.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",

@@ -330,7 +330,7 @@ export async function startHostedContainerEntrypoint(input: {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(input.port ?? 8080, () => resolve());
+    server.listen(input.port ?? 8080, "0.0.0.0", () => resolve());
   }).catch((error) => {
     emitHostedExecutionStructuredLog({
       component: "container",

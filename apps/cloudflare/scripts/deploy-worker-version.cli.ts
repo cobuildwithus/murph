@@ -70,10 +70,8 @@ export async function runDeployWorkerVersionCli(
   });
 
   if (options.log ?? true) {
-    console.log("Rendered Cloudflare deployment result.");
-    if (result.candidateVersionId) {
-      console.log(`Candidate version: ${result.candidateVersionId}`);
-    }
+    console.log("Deployed Cloudflare Worker with direct Wrangler.");
+    console.log(`Smoke version: ${result.smokeVersionId}`);
   }
 
   return result;
