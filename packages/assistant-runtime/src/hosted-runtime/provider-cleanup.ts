@@ -68,6 +68,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "deleteLinqMessages"> | null;
   env: NodeJS.ProcessEnv;
+  fetchImplementation?: Parameters<typeof deleteHostedLinqMessages>[0]["fetchImplementation"];
   checkpoint: HostedProviderCleanupCheckpoint;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -94,11 +95,12 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
 
   try {
     await assertHostedProviderCleanupLiveNow(input);
-    if (input.effectsPort?.deleteLinqMessages) {
+    if (!input.fetchImplementation && input.effectsPort?.deleteLinqMessages) {
       await input.effectsPort.deleteLinqMessages({ messageIds });
     } else {
       await deleteHostedLinqMessages({
         env: input.env,
+        fetchImplementation: input.fetchImplementation,
         messageIds,
         signal: input.signal ?? undefined,
       });

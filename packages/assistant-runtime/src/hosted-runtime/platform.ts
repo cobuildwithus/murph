@@ -272,6 +272,7 @@ export interface HostedRuntimePlatform {
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
+  providerFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;

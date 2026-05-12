@@ -1,0 +1,337 @@
+import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
+} from "./internal-hosts.ts";
+import {
+  handleRunnerOutboundRequest,
+} from "./runner-outbound.ts";
+import {
+  requireRunnerRuntimeWriteFenceWrite,
+  RunnerRuntimeWriteFenceError,
+} from "./runner-outbound/write-fence.ts";
+import type {
+  RunnerOutboundEnvironmentSource,
+} from "./runner-outbound/shared.ts";
+
+export const HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL =
+  "__cloudflare_injected__";
+
+const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
+  "x-hosted-runtime-attempt-id",
+  "x-hosted-runtime-lease-generation",
+  "x-hosted-runtime-workspace-version",
+] as const;
+
+const DEFAULT_LINQ_API_HOST = "api.linqapp.com";
+const DEFAULT_OPENAI_API_HOST = "api.openai.com";
+const DEFAULT_MAPBOX_API_HOST = "api.mapbox.com";
+const DEFAULT_TELEGRAM_API_HOST = "api.telegram.org";
+const DEFAULT_WHATSAPP_API_HOST = "graph.facebook.com";
+
+interface HostedRunnerOutboundContext {
+  containerId?: string;
+}
+
+export async function hostedRunnerIntercept(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const userId = readHostedRunnerUserIdFromOutboundContext(ctx);
+
+  if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
+    if (!userId) {
+      return new Response("Missing hosted runner identity.", { status: 403 });
+    }
+    return await handleRunnerOutboundRequest(request, env, userId);
+  }
+
+  const handled =
+    await maybeHandleOpenAiRequest({ env, request, url, userId })
+    ?? await maybeHandleMapboxRequest({ env, request, url, userId })
+    ?? await maybeHandleLinqRequest({ env, request, url, userId })
+    ?? await maybeHandleTelegramRequest({ env, request, url, userId })
+    ?? await maybeHandleWhatsAppRequest({ env, request, url, userId });
+
+  if (handled) {
+    return handled;
+  }
+
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      host: url.hostname,
+      method: request.method,
+      path: url.pathname,
+      userId: userId ?? null,
+    },
+    level: "warn",
+    message: "Hosted runner egress passed through unclassified outbound request during migration.",
+    phase: "wake.running",
+    userId: userId ?? undefined,
+  });
+  return await fetch(request);
+}
+
+async function maybeHandleOpenAiRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (input.url.hostname !== DEFAULT_OPENAI_API_HOST || !input.url.pathname.startsWith("/v1/")) {
+    return null;
+  }
+
+  const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
+  const headers = stripHostedRuntimeAuthorityHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  return await fetch(await createHostedRunnerUpstreamRequest(input.request, input.url, headers));
+}
+
+async function maybeHandleMapboxRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  if (input.url.hostname !== DEFAULT_MAPBOX_API_HOST || !isAllowedMapboxPath(input.url.pathname)) {
+    return null;
+  }
+
+  const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");
+  const upstreamUrl = new URL(input.url);
+  upstreamUrl.searchParams.set("access_token", token);
+  return await fetch(
+    await createHostedRunnerUpstreamRequest(
+      input.request,
+      upstreamUrl,
+      stripHostedRuntimeAuthorityHeaders(input.request.headers),
+    ),
+  );
+}
+
+async function maybeHandleLinqRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const configuredHost = readConfiguredHost(input.env.LINQ_API_BASE_URL) ?? DEFAULT_LINQ_API_HOST;
+  if (input.url.hostname !== configuredHost || !isAllowedLinqRequest(input.request.method, input.url.pathname)) {
+    return null;
+  }
+
+  if (isSideEffectMethod(input.request.method)) {
+    const authorized = await requestOwnsRuntimeWriteFence(input);
+    if (!authorized) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+  }
+
+  const token = readRequiredInterceptSecret(input.env.LINQ_API_TOKEN, "LINQ_API_TOKEN");
+  const headers = stripHostedRuntimeAuthorityHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  return await fetch(await createHostedRunnerUpstreamRequest(input.request, input.url, headers));
+}
+
+async function maybeHandleTelegramRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const configuredHost = readConfiguredHost(input.env.TELEGRAM_API_BASE_URL) ?? DEFAULT_TELEGRAM_API_HOST;
+  if (input.url.hostname !== configuredHost) {
+    return null;
+  }
+
+  const operation = readTelegramSentinelOperation(input.url.pathname);
+  if (!operation || !isAllowedTelegramOperation(operation)) {
+    return null;
+  }
+
+  if (isTelegramWriteOperation(operation)) {
+    const authorized = await requestOwnsRuntimeWriteFence(input);
+    if (!authorized) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+  }
+
+  const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
+  const upstreamUrl = new URL(input.url);
+  upstreamUrl.pathname = `/bot${token}/${operation}`;
+  return await fetch(
+    await createHostedRunnerUpstreamRequest(
+      input.request,
+      upstreamUrl,
+      stripHostedRuntimeAuthorityHeaders(input.request.headers),
+    ),
+  );
+}
+
+async function maybeHandleWhatsAppRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const configuredHost = readConfiguredHost(input.env.WHATSAPP_API_BASE_URL) ?? DEFAULT_WHATSAPP_API_HOST;
+  if (
+    input.url.hostname !== configuredHost
+    || input.request.method !== "POST"
+    || !/^\/v[^/]+\/__cloudflare_injected__\/messages$/u.test(input.url.pathname)
+  ) {
+    return null;
+  }
+
+  const authorized = await requestOwnsRuntimeWriteFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const token = readRequiredInterceptSecret(input.env.WHATSAPP_ACCESS_TOKEN, "WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = readRequiredInterceptSecret(
+    input.env.WHATSAPP_PHONE_NUMBER_ID,
+    "WHATSAPP_PHONE_NUMBER_ID",
+  );
+  const upstreamUrl = new URL(input.url);
+  upstreamUrl.pathname = input.url.pathname.replace(
+    "/__cloudflare_injected__/messages",
+    `/${encodeURIComponent(phoneNumberId)}/messages`,
+  );
+  const headers = stripHostedRuntimeAuthorityHeaders(input.request.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  return await fetch(await createHostedRunnerUpstreamRequest(input.request, upstreamUrl, headers));
+}
+
+function readHostedRunnerUserIdFromOutboundContext(ctx: HostedRunnerOutboundContext): string | null {
+  const containerId = typeof ctx.containerId === "string" ? ctx.containerId.trim() : "";
+  if (!containerId) {
+    return null;
+  }
+  const [userId] = containerId.split("--v-", 1);
+  return userId && userId.length > 0 ? userId : null;
+}
+
+function isAllowedMapboxPath(pathname: string): boolean {
+  return pathname.startsWith("/directions/")
+    || pathname.startsWith("/search/geocode/")
+    || pathname.startsWith("/search/searchbox/")
+    || pathname.startsWith("/v4/mapbox.mapbox-terrain-v2/tilequery/");
+}
+
+function isAllowedLinqRequest(method: string, pathname: string): boolean {
+  if (method === "GET" && pathname === "/api/partner/v3/phone_numbers") {
+    return true;
+  }
+  if (method === "POST" && pathname === "/api/partner/v3/chats") {
+    return true;
+  }
+  if (
+    method === "POST"
+    && /^\/api\/partner\/v3\/chats\/[^/]+\/(?:messages|typing|read)$/u.test(pathname)
+  ) {
+    return true;
+  }
+  if (method === "DELETE" && /^\/api\/partner\/v3\/chats\/[^/]+\/typing$/u.test(pathname)) {
+    return true;
+  }
+  return method === "DELETE" && /^\/api\/partner\/v3\/messages\/[^/]+$/u.test(pathname);
+}
+
+function readTelegramSentinelOperation(pathname: string): string | null {
+  const prefix = `/bot${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/`;
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const operation = pathname.slice(prefix.length);
+  return operation.length > 0 && !operation.includes("/") ? operation : null;
+}
+
+function isAllowedTelegramOperation(operation: string): boolean {
+  return operation === "sendMessage"
+    || operation === "sendChatAction"
+    || operation === "deleteMessages"
+    || operation === "deleteBusinessMessages"
+    || operation === "getFile";
+}
+
+function isTelegramWriteOperation(operation: string): boolean {
+  return operation !== "getFile";
+}
+
+function isSideEffectMethod(method: string): boolean {
+  return method === "POST" || method === "DELETE" || method === "PATCH" || method === "PUT";
+}
+
+async function requestOwnsRuntimeWriteFence(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string | null;
+}): Promise<boolean> {
+  if (!input.userId) {
+    return false;
+  }
+
+  try {
+    await requireRunnerRuntimeWriteFenceWrite({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
+  const stripped = new Headers(headers);
+  for (const name of HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES) {
+    stripped.delete(name);
+  }
+  return stripped;
+}
+
+async function createHostedRunnerUpstreamRequest(
+  source: Request,
+  url: URL,
+  headers: Headers,
+): Promise<Request> {
+  return new Request(url, {
+    body: source.method === "GET" || source.method === "HEAD"
+      ? null
+      : await source.arrayBuffer(),
+    headers,
+    method: source.method,
+    redirect: source.redirect,
+    signal: source.signal,
+  });
+}
+
+function readRequiredInterceptSecret(value: unknown, label: string): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized || normalized === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
+    throw new Error(`Hosted runner intercept requires Worker secret ${label}.`);
+  }
+  return normalized;
+}
+
+function readConfiguredHost(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return null;
+  }
+}

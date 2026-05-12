@@ -16,7 +16,6 @@ import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
   normalizeAssistantDeliveryError,
-  sendLinqMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
@@ -39,9 +38,13 @@ import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
 import {
+  buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
+import {
+  sendHostedProviderLinqMessage,
+} from "../hosted-provider-effects.ts";
 
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -277,13 +280,19 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
+  providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
+  userEnv?: Readonly<Record<string, string>>;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
   const telegramEnv = buildHostedTelegramChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
+  const linqEnv = buildHostedLinqChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
   const whatsAppEnv = buildHostedWhatsAppChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
@@ -319,8 +328,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       assertLiveness: input.assertLiveness,
       assistantDeliveryEffect,
       signal: input.signal ?? null,
+      linqEnv,
       telegramEnv,
       whatsAppEnv,
+      providerFetch: input.providerFetch ?? null,
       userId: input.wake.userId,
       vaultRoot: input.vaultRoot,
     }));
@@ -337,8 +348,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assertLiveness?: () => Promise<void>;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
+  linqEnv: NodeJS.ProcessEnv;
   telegramEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
+  providerFetch: typeof fetch | null;
   userId: string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryOutcome> {
@@ -394,7 +407,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendTelegram: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
-          const result = input.effectsPort.sendTelegram
+          const result = input.providerFetch === null && input.effectsPort.sendTelegram
             ? await input.effectsPort.sendTelegram({
                 idempotencyKey: request.idempotencyKey ?? null,
                 message: request.message,
@@ -403,6 +416,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               })
             : await sendTelegramMessage(request, {
                 env: input.telegramEnv,
+                fetchImplementation: input.providerFetch ?? undefined,
                 signal: input.signal ?? undefined,
               });
           await assertHostedDeliveryLiveNow(input);
@@ -427,7 +441,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               wake: input.wake,
             });
           providerDispatchEntered = true;
-          const result = input.effectsPort.sendLinq
+          const result = input.providerFetch === null && input.effectsPort.sendLinq
             ? await input.effectsPort.sendLinq({
                 directRecipientPhoneNumber,
                 fromPhoneNumber,
@@ -437,7 +451,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 target: request.target,
                 targetKind: request.targetKind ?? null,
               })
-            : await sendLinqMessage(request, {
+            : await sendHostedProviderLinqMessage({
+                directRecipientPhoneNumber,
+                fromPhoneNumber,
+                idempotencyKey: request.idempotencyKey ?? null,
+                message: request.message,
+                replyToMessageId: request.replyToMessageId ?? null,
+                target: request.target,
+                targetKind: request.targetKind ?? null,
+              }, {
+                env: input.linqEnv,
+                fetchImplementation: input.providerFetch ?? undefined,
                 signal: input.signal ?? undefined,
               });
           await assertHostedDeliveryLiveNow(input);
@@ -446,7 +470,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           providerDispatchEntered = true;
-          const result = input.effectsPort.sendWhatsApp
+          const result = input.providerFetch === null && input.effectsPort.sendWhatsApp
             ? await input.effectsPort.sendWhatsApp({
                 message: request.message,
                 replyToMessageId: request.replyToMessageId ?? null,
@@ -454,6 +478,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               })
             : await sendWhatsAppMessage(request, {
                 env: input.whatsAppEnv,
+                fetchImplementation: input.providerFetch ?? undefined,
                 signal: input.signal ?? undefined,
               });
           await assertHostedDeliveryLiveNow(input);
