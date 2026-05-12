@@ -157,12 +157,12 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
-    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.1.8"
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=24.14.1"

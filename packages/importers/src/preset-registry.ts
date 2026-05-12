@@ -72,6 +72,7 @@ const optionalMetadataColumnsInputSchema = z
         )),
     { error: "metadataColumns must be an array of strings when provided" },
   )
+  .optional()
   .transform((value) =>
     value === undefined
       ? undefined

@@ -79,12 +79,12 @@
     "@murphai/runtime-state": "workspace:*",
     "@murphai/setup-cli": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "grammy": "1.41.1",
+    "grammy": "1.42.0",
+    "incur": "0.4.5",
     "ink": "^6.8.0",
-    "incur": "0.4.4",
-    "react": "^19.2.4",
-    "zxing-wasm": "3.0.2",
-    "zod": "^4.1.8"
+    "react": "^19.2.6",
+    "zod": "^4.4.3",
+    "zxing-wasm": "3.0.3"
   },
   "optionalDependencies": {
     "@murphai/gateway-core": "workspace:*"
