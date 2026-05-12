@@ -9,6 +9,7 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionRunnerJobInput,
@@ -17,6 +18,17 @@ import {
 } from "./runner-job-transport.ts";
 
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+const HOSTED_CONTAINER_EGRESS_PROBE_TIMEOUT_MS = 2_500;
+const HOSTED_CONTAINER_EGRESS_PROBE_TARGETS = [
+  {
+    label: "example",
+    url: "https://example.com/",
+  },
+  {
+    label: "openaiModels",
+    url: "https://api.openai.com/v1/models",
+  },
+] as const;
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -206,6 +218,11 @@ export async function startHostedContainerEntrypoint(input: {
         },
         message: "Hosted container entrypoint accepted runner job.",
         phase: "wake.running",
+        userId: readHostedExecutionRunnerJobUserId(job),
+      });
+
+      await logHostedContainerEgressProbe({
+        fetchImpl: runtime.fetchImpl,
         userId: readHostedExecutionRunnerJobUserId(job),
       });
 
@@ -438,6 +455,123 @@ function discardUnreadRequestBody(request: IncomingMessage): void {
   if (!request.readableEnded && !request.destroyed) {
     request.resume();
   }
+}
+
+async function logHostedContainerEgressProbe(input: {
+  fetchImpl: typeof fetch;
+  userId: string;
+}): Promise<void> {
+  if (!shouldRunHostedContainerEgressProbe()) {
+    return;
+  }
+
+  const results = await Promise.all(
+    HOSTED_CONTAINER_EGRESS_PROBE_TARGETS.map(async (target) =>
+      await probeHostedContainerEgressTarget(input.fetchImpl, target)
+    ),
+  );
+
+  const details: HostedExecutionStructuredLogDetails = {};
+  for (const result of results) {
+    const prefix = `egressProbe_${result.label}`;
+    details[`${prefix}ElapsedMs`] = result.elapsedMs;
+    details[`${prefix}Ok`] = result.ok ? "true" : "false";
+    if (result.status !== null) {
+      details[`${prefix}Status`] = String(result.status);
+    }
+    if (result.errorName !== null) {
+      details[`${prefix}ErrorName`] = result.errorName;
+    }
+    if (result.errorCode !== null) {
+      details[`${prefix}ErrorCode`] = result.errorCode;
+    }
+    if (result.errorCauseCode !== null) {
+      details[`${prefix}ErrorCauseCode`] = result.errorCauseCode;
+    }
+    if (result.errorMessagePresent) {
+      details[`${prefix}ErrorMessagePresent`] = "true";
+    }
+  }
+
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details,
+    level: results.every((result) => result.ok) ? "info" : "warn",
+    message: "Hosted container public egress probe completed.",
+    phase: "container.ready",
+    userId: input.userId,
+  });
+}
+
+async function probeHostedContainerEgressTarget(
+  fetchImpl: typeof fetch,
+  target: typeof HOSTED_CONTAINER_EGRESS_PROBE_TARGETS[number],
+): Promise<{
+  elapsedMs: number;
+  errorCauseCode: string | null;
+  errorCode: string | null;
+  errorMessagePresent: boolean;
+  errorName: string | null;
+  label: string;
+  ok: boolean;
+  status: number | null;
+}> {
+  const startedAt = Date.now();
+  try {
+    const response = await fetchImpl(target.url, {
+      signal: AbortSignal.timeout(HOSTED_CONTAINER_EGRESS_PROBE_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      elapsedMs: Date.now() - startedAt,
+      errorCauseCode: null,
+      errorCode: null,
+      errorMessagePresent: false,
+      errorName: null,
+      label: target.label,
+      ok: true,
+      status: response.status,
+    };
+  } catch (error) {
+    return {
+      elapsedMs: Date.now() - startedAt,
+      errorCauseCode: readHostedContainerProbeErrorCauseCode(error),
+      errorCode: readHostedContainerProbeErrorCode(error),
+      errorMessagePresent: summarizeHostedExecutionError(error).length > 0,
+      errorName: readHostedExecutionSafeErrorName(error),
+      label: target.label,
+      ok: false,
+      status: null,
+    };
+  }
+}
+
+function shouldRunHostedContainerEgressProbe(): boolean {
+  const configured = process.env.MURPH_HOSTED_CONTAINER_EGRESS_PROBE?.trim().toLowerCase();
+  if (configured === "0" || configured === "false" || configured === "off") {
+    return false;
+  }
+  if (configured === "1" || configured === "true" || configured === "on") {
+    return true;
+  }
+  return process.env.NODE_ENV !== "test";
+}
+
+function readHostedContainerProbeErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.length > 0 ? code : null;
+}
+
+function readHostedContainerProbeErrorCauseCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("cause" in error)) {
+    return null;
+  }
+
+  return readHostedContainerProbeErrorCode((error as { cause?: unknown }).cause);
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
