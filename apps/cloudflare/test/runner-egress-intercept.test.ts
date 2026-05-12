@@ -122,6 +122,28 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
   });
 
+  it("strips runtime authority headers from unclassified passthrough egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://unexpected.example.test/path", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://unexpected.example.test/path");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("requires the active write fence before injecting Linq credentials for sends", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
