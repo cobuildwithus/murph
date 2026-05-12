@@ -279,6 +279,18 @@ export function buildHostedExecutionRuntimePlatform(input: {
         await putArtifactOnce({ bytes, sha256 });
       },
     },
+    ...(hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
+      ? {
+          providerFetch: createCloudflareHostedProviderFetch(
+            input.boundUserId,
+            input.fetchImpl ?? fetch,
+            {
+              readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
+              runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
+            },
+          ),
+        }
+      : {}),
     ...(hostedWebControlTransport
       ? {
           logPort: createHostedWebRuntimeLogPort({
@@ -738,6 +750,32 @@ export function createCloudflareHostedRuntimeFetch(
       }
       throw error;
     }
+  }) as typeof fetch;
+}
+
+export function createCloudflareHostedProviderFetch(
+  boundUserId: string,
+  fetchImpl: typeof fetch,
+  options: {
+    readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
+    runtimeCallbackBaseUrl?: string | null;
+  } = {},
+): typeof fetch {
+  const runtimeFetch = createCloudflareHostedRuntimeFetch(boundUserId, fetchImpl, options);
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
+      return await runtimeFetch(request);
+    }
+
+    const headers = new Headers(request.headers);
+    const lease = await options.readCurrentLease?.() ?? null;
+    if (lease) {
+      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    }
+
+    return await fetchImpl(new Request(request, { headers }));
   }) as typeof fetch;
 }
 

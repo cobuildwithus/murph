@@ -15,6 +15,9 @@ import {
 import {
   type StringEnvSource,
 } from "./string-env.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "./runner-egress-intercept.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
@@ -55,6 +58,14 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
+  "LINQ_API_TOKEN",
+  "MAPBOX_ACCESS_TOKEN",
+  HOSTED_RUNNER_OPENAI_API_KEY_ENV,
+  "TELEGRAM_BOT_TOKEN",
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_PHONE_NUMBER_ID",
+]);
 
 export const HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER =
   HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER;
@@ -170,8 +181,12 @@ export function buildHostedRunnerContainerEnv(
   assertHostedRunnerAssistantProvider(source);
 
   return buildHostedRuntimeForwardedEnv(source, {
-    mapValue: ({ key, value }) =>
-      rewriteHostedRunnerLoopbackUrlForContainer(key, value, source),
+    mapValue: ({ key, value }) => {
+      if (HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS.has(key)) {
+        return HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+      }
+      return rewriteHostedRunnerLoopbackUrlForContainer(key, value, source);
+    },
   });
 }
 

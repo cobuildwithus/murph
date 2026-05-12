@@ -12,6 +12,9 @@ import {
   summarizeHostedRunnerForwardedEnvLogCategories,
   summarizeHostedRunnerSecretLogCategories,
 } from "../src/hosted-env-policy.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-egress-intercept.ts";
 
 const requiredWorkerSecrets = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -32,7 +35,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
-    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(env.STRIPE_SECRET_KEY).toBeUndefined();
   });
 
@@ -42,7 +45,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       OPENAI_API_KEY: "openai-secret",
     });
 
-    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
   });
 
   it("requires the direct OpenAI hosted assistant provider at the runner boundary", () => {
