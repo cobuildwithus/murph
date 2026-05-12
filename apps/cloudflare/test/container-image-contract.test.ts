@@ -535,10 +535,6 @@ describe("hosted runner container image contract", () => {
       new URL("../scripts/runner-python-path-e2e.ts", import.meta.url),
       "utf8",
     );
-    const runnerControlTokenScript = await readFile(
-      new URL("../scripts/runner-control-token-e2e.ts", import.meta.url),
-      "utf8",
-    );
     const hostedRunnerSmokeChild = await readFile(
       new URL("../src/hosted-runner-smoke-child.ts", import.meta.url),
       "utf8",
@@ -557,9 +553,6 @@ describe("hosted runner container image contract", () => {
     );
     expect(packageJson.scripts?.["runner:docker:build"]).toBe(
       "pnpm runner:bundle && pnpm runner:docker:base && docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
-    );
-    expect(packageJson.scripts?.["runner:docker:control-token"]).toBe(
-      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-control-token-e2e.ts",
     );
     expect(packageJson.scripts?.["runner:docker:python-path"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-python-path-e2e.ts",
@@ -625,21 +618,6 @@ describe("hosted runner container image contract", () => {
     expect(runnerPythonPathScript).toContain("python -c");
     expect(runnerPythonPathScript).toContain("python3 -c");
     expect(runnerPythonPathScript).not.toContain("console.log(output)");
-    expect(runnerControlTokenScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');
-    expect(runnerControlTokenScript).toContain('"--detach"');
-    expect(runnerControlTokenScript).toContain('"--platform",\n    "linux/amd64"');
-    expect(runnerControlTokenScript).toContain('"--network",\n    "none"');
-    expect(runnerControlTokenScript).toContain("HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN");
-    expect(runnerControlTokenScript).toContain("OLD_RUNNER_CONTROL_TOKEN");
-    expect(runnerControlTokenScript).toContain("NEXT_RUNNER_CONTROL_TOKEN");
-    expect(runnerControlTokenScript).toContain("surviving-old-shell");
-    expect(runnerControlTokenScript).toContain("fresh-shell-after-destroy");
-    expect(runnerControlTokenScript).toContain("/internal/workspace-invocation");
-    expect(runnerControlTokenScript).toContain("rejected.status !== 401");
-    expect(runnerControlTokenScript).toContain("accepted.status === 401");
-    expect(runnerControlTokenScript).toContain("accepted.status !== 400");
-    expect(runnerControlTokenScript).toContain("await removeContainer(oldContainerId)");
-    expect(runnerControlTokenScript).toContain("await removeContainer(nextContainerId)");
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("file")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python3")');
@@ -679,9 +657,6 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["test:e2e:linq-webhook:local"]).toBeUndefined();
     expect(packageJson.scripts?.["test:e2e:mailbox-platform-env:local"]).toBeUndefined();
     expect(packageJson.scripts?.["test:e2e:first-contact:local"]).toBeUndefined();
-    expect(packageJson.scripts?.["test:e2e:runner-control-token:local"]).toBe(
-      "pnpm runner:docker:build && pnpm runner:docker:control-token",
-    );
     expect(packageJson.scripts?.["test:e2e:runner-python:local"]).toBe(
       "pnpm runner:docker:build && pnpm runner:docker:python-path",
     );

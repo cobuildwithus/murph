@@ -88,9 +88,6 @@ export function projectRunnerStateRecord(input: {
         }
       : null,
     bundleRef: input.bundleRef,
-    deferredCheckpointRequired: false,
-    deferredCheckpointMailboxStatus: null,
-    idleCheckpoint: null,
     // Legacy inFlight projection around the write fence. Delete after 2026-05-25.
     inFlight: writeFence !== null,
     lastError,

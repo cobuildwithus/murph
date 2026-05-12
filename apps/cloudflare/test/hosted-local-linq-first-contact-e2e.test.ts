@@ -37,7 +37,6 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const productionLikeAssistantModel = "gpt-5.5";
-const localIdleShutdownCheckpointSafetyMarginMs = "2000";
 const localRunnerIdleTtlMs = "6000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -747,8 +746,6 @@ async function startLinqScenario(
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS:
-        localIdleShutdownCheckpointSafetyMarginMs,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",

@@ -19,14 +19,14 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const runId = Date.now();
-const userId = `member_local_warm_auth_${runId}`;
-const chatId = `chat_local_warm_auth_${runId}`;
-const linqWebhookSecret = "linq-local-warm-auth-secret";
+const userId = `member_local_warm_reuse_${runId}`;
+const chatId = `chat_local_warm_reuse_${runId}`;
+const linqWebhookSecret = "linq-local-warm-reuse-secret";
 const productionLikeAssistantModel = "gpt-5.5";
-const firstUserText = "warm auth setup input";
-const secondUserText = "warm auth recovery input";
-const firstReplyText = "Warm auth setup reply.";
-const secondReplyText = "Warm auth recovered reply.";
+const firstUserText = "warm reuse setup input";
+const secondUserText = "warm reuse followup input";
+const firstReplyText = "Warm reuse setup reply.";
+const secondReplyText = "Warm reuse followup reply.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -42,12 +42,12 @@ afterAll(async () => {
   linqStub = null;
 }, 120_000);
 
-describe("hosted local runner warm auth recovery e2e", () => {
+describe("hosted local runner warm reuse e2e", () => {
   beforeAll(async () => {
     await startScenario();
   }, 300_000);
 
-  it("recovers a foreground nudge after stale warm-shell control auth returns 401", async () => {
+  it("processes consecutive foreground nudges through a warm runner", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -70,8 +70,8 @@ describe("hosted local runner warm auth recovery e2e", () => {
 
     const firstWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_warm_auth_first_${runId}`,
-        messageId: `msg_warm_auth_first_${runId}`,
+        eventId: `evt_warm_reuse_first_${runId}`,
+        messageId: `msg_warm_reuse_first_${runId}`,
         text: firstUserText,
       }),
     );
@@ -88,13 +88,10 @@ describe("hosted local runner warm auth recovery e2e", () => {
     const firstStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstStatus.lastErrorCode ?? null).toBeNull();
 
-    await expect(requireScenario().harness.poisonWarmRunnerControlTokenForTest(userId))
-      .resolves.toEqual({ ok: true });
-
     const secondWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_warm_auth_second_${runId}`,
-        messageId: `msg_warm_auth_second_${runId}`,
+        eventId: `evt_warm_reuse_second_${runId}`,
+        messageId: `msg_warm_reuse_second_${runId}`,
         text: secondUserText,
       }),
     );
@@ -112,7 +109,6 @@ describe("hosted local runner warm auth recovery e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(countWarmControlAuthFailures()).toBeGreaterThan(0);
   }, 600_000);
 });
 
@@ -122,7 +118,6 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS: "0",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "15000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
@@ -136,9 +131,9 @@ async function startScenario(): Promise<void> {
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
-    persistDirPrefix: "murph-hosted-local-warm-auth-",
+    persistDirPrefix: "murph-hosted-local-warm-reuse-",
     requiredRunnerEnvProfile: "linq",
-    scenarioLabel: "Local hosted runner warm auth recovery e2e",
+    scenarioLabel: "Local hosted runner warm reuse e2e",
     streamLogs: streamDevLogs,
   });
 }
@@ -160,7 +155,7 @@ async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Re
 
 function buildActivationWake(userId: string) {
   return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${userId}:evt_runner_warm_auth_recovery`,
+    eventId: `member.activated:local:${userId}:evt_runner_warm_reuse`,
     memberChannels: {
       email: false,
       linq: true,
@@ -177,16 +172,6 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
-}
-
-function countWarmControlAuthFailures(): number {
-  const output = [
-    requireScenario().harness.stdoutTail(200_000),
-    requireScenario().harness.stderrTail(200_000),
-  ].join("\n");
-  return output.split(/\r?\n/u).filter((line) =>
-    line.includes("Hosted runner container control health check returned HTTP 401")
-  ).length;
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

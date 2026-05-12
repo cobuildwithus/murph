@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedAssistantWorkspaceRuntimeJobResult } from "@murphai/assistant-runtime";
 import {
   createBrowserVaultReplica,
@@ -22,7 +21,7 @@ import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
+import worker from "../src/index.ts";
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
@@ -88,10 +87,6 @@ afterEach(() => {
 });
 
 describe("cloudflare worker routes", () => {
-  it("re-exports ContainerProxy for container outbound routing", () => {
-    expect(ExportedContainerProxy).toBe(PackageContainerProxy);
-  });
-
   it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
     const [workerSource, hostedEmailIngressSource] = await Promise.all([
       readFile(path.join(APP_DIR, "src/index.ts"), "utf8"),

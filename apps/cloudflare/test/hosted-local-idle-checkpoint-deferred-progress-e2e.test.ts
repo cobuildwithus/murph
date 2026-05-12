@@ -37,7 +37,6 @@ const firstUserText = "idle checkpoint deferred first input";
 const secondUserText = "idle checkpoint deferred second input";
 const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
-const localIdleShutdownCheckpointSafetyMarginMs = "2000";
 const localRunnerIdleTtlMs = "6000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -163,8 +162,6 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_SHUTDOWN_CHECKPOINT_SAFETY_MARGIN_MS:
-        localIdleShutdownCheckpointSafetyMarginMs,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
@@ -226,7 +223,7 @@ async function waitForIdleShutdownCheckpoint(input: {
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
-  let lastAlarmError: unknown = null;
+  let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 120_000) {
@@ -244,18 +241,11 @@ async function waitForIdleShutdownCheckpoint(input: {
       return status;
     }
 
-    const alarmDelayMs = status.nextAlarmAt
-      ? Math.max(0, Date.parse(status.nextAlarmAt) - Date.now())
-      : 250;
-    if (alarmDelayMs > 0) {
-      await sleep(Math.min(alarmDelayMs + 100, 1_000));
-    }
-
     try {
-      await requireScenario().harness.runHostedAlarmForTest(userId);
-      lastAlarmError = null;
+      await requireScenario().harness.expireRunnerActivityForTest(userId);
+      lastActivityExpiryError = null;
     } catch (error) {
-      lastAlarmError = error;
+      lastActivityExpiryError = error;
     }
     await sleep(250);
   }
@@ -263,7 +253,9 @@ async function waitForIdleShutdownCheckpoint(input: {
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint after deferred progress.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
-    ...(lastAlarmError ? [`last alarm error: ${formatErrorMessage(lastAlarmError)}`] : []),
+    ...(lastActivityExpiryError
+      ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
   ]));
 }
 

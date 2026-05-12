@@ -1,7 +1,5 @@
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedExecutionStructuredLogRecord } from "@murphai/hosted-execution";
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -90,8 +88,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(destroy).not.toHaveBeenCalled();
 
-    const supervisorEnv = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
-    expect(supervisorEnv).toEqual({
+    expect(container.envVars).toEqual({
       PORT: "8080",
     });
 
@@ -100,15 +97,11 @@ describe("RunnerContainer", () => {
     );
     expect(executeCalls).toHaveLength(2);
     expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/workspace-invocation");
-    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
-    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
 
     const firstBody = JSON.parse(executeCalls[0]?.[1]?.body as string);
     const secondBody = JSON.parse(executeCalls[1]?.[1]?.body as string);
-    expect(firstBody).toMatchObject({
-    });
-    expect(secondBody).toMatchObject({
-    });
+    expect(Object.keys(firstBody).sort()).toEqual(["job", "runtimeCallbackBaseUrl"]);
+    expect(Object.keys(secondBody).sort()).toEqual(["job", "runtimeCallbackBaseUrl"]);
   });
 
   it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
@@ -150,10 +143,9 @@ describe("RunnerContainer", () => {
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(containerFetch).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+    expect(container.envVars).toEqual({
       PORT: "8080",
     });
-    expect(readAuthorizationHeader(containerFetch.mock.calls[0]?.[1]?.headers)).toBeNull();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -195,45 +187,11 @@ describe("RunnerContainer", () => {
     });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars ?? {};
-    expect(envVars).toEqual({
+    expect(container.envVars).toEqual({
       PORT: "8080",
     });
-    expect(envVars).not.toHaveProperty("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
-    expect(envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
-  });
-
-  it("keeps operator secrets out of supervisor procfs env", async () => {
-    if (!existsSync("/proc/self/environ")) {
-      return;
-    }
-
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "model-api-key",
-      },
-    });
-
-    await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_procfs_supervisor_env"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    });
-
-    const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
-    if (!envVars) {
-      throw new Error("Expected runner supervisor env vars.");
-    }
-    const procEnv = await readParentProcEnvironmentFromChild(envVars);
-
-    expect(procEnv).not.toContain("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
-    expect(procEnv).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
-    expect(procEnv).not.toContain("OPENAI_API_KEY");
+    expect(container.envVars).not.toHaveProperty("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
+    expect(container.envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
   });
 
   it("uses callback transport for container runtime requests", async () => {
@@ -303,46 +261,6 @@ describe("RunnerContainer", () => {
     expect(observedTopLevelKeys).toEqual(["job", "runtimeCallbackBaseUrl"]);
   });
 
-  it("does not install legacy outbound handlers before runner requests", async () => {
-    const setOutboundByHosts = vi
-      .fn()
-      .mockRejectedValue(new Error("legacy sidecar egress should not be used"));
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      setOutboundByHosts,
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_retry_outbound_handlers"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
-  });
-
-  it("does not expose legacy outbound handlers after callback transport cutover", () => {
-    expect(Object.keys(RunnerContainer.outboundHandlers ?? {})).toEqual([]);
-  });
-
-  it("does not configure sidecar outbound handlers for runner requests", async () => {
-    const { container, setOutboundByHosts } = createContainerDouble();
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_loopback_proxy"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
-  });
-
   it("uses activity expiry as fallback cleanup after warm reuse and cold-starts the next run", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble();
@@ -383,8 +301,12 @@ describe("RunnerContainer", () => {
       const executeCalls = containerFetch.mock.calls.filter(([url]) =>
         String(url).endsWith("/internal/workspace-invocation")
       );
-      expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
-      expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
+      expect(executeCalls[0]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
+      expect(executeCalls[1]?.[1]?.headers).toEqual({
+        "content-type": "application/json; charset=utf-8",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -423,8 +345,12 @@ describe("RunnerContainer", () => {
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );
-    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
-    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
+    expect(executeCalls[0]?.[1]?.headers).toEqual({
+      "content-type": "application/json; charset=utf-8",
+    });
+    expect(executeCalls[1]?.[1]?.headers).toEqual({
+      "content-type": "application/json; charset=utf-8",
+    });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -494,12 +420,15 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("fails active workspace invocations when the container lifecycle stops", async () => {
+  it("logs container lifecycle stops without aborting active workspace invocations", async () => {
     let markRunnerRequestStarted!: () => void;
     const runnerRequestStarted = new Promise<void>((resolve) => {
       markRunnerRequestStarted = resolve;
     });
-    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    let finishRunnerResponse!: (response: Response) => void;
+    const runnerResponse = new Promise<Response>((resolve) => {
+      finishRunnerResponse = resolve;
+    });
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
@@ -511,9 +440,9 @@ describe("RunnerContainer", () => {
       }
 
       markRunnerRequestStarted();
-      return await hangingRunnerResponse;
+      return await runnerResponse;
     });
-    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch,
     });
 
@@ -529,29 +458,37 @@ describe("RunnerContainer", () => {
 
     container.onStop({ exitCode: 0, reason: "exit" });
 
-    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
         details: expect.objectContaining({
-          activeWorkspaceInvocationAborted: true,
+          activeWorkspaceInvocationPresent: true,
           lifecycleStage: "onStop",
         }),
-        level: "warn",
-        message: "Hosted execution container stopped during active work.",
-        phase: "failed",
+        level: "info",
+        message: "Hosted execution container lifecycle hook reported stop.",
+        phase: "container.ready",
       }),
     );
+    finishRunnerResponse(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
-  it("fails active workspace invocations when the container lifecycle errors", async () => {
+  it("logs container lifecycle errors without aborting active workspace invocations", async () => {
     let markRunnerRequestStarted!: () => void;
     const runnerRequestStarted = new Promise<void>((resolve) => {
       markRunnerRequestStarted = resolve;
     });
-    const hangingRunnerResponse = new Promise<Response>(() => undefined);
+    let finishRunnerResponse!: (response: Response) => void;
+    const runnerResponse = new Promise<Response>((resolve) => {
+      finishRunnerResponse = resolve;
+    });
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
@@ -563,9 +500,9 @@ describe("RunnerContainer", () => {
       }
 
       markRunnerRequestStarted();
-      return await hangingRunnerResponse;
+      return await runnerResponse;
     });
-    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch,
     });
 
@@ -583,20 +520,25 @@ describe("RunnerContainer", () => {
       "runtime signalled the container to exit",
     );
 
-    await expect(invocation).rejects.toThrow("workspace invocation container stopped");
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
         details: expect.objectContaining({
-          activeWorkspaceInvocationAborted: true,
+          activeWorkspaceInvocationPresent: true,
           lifecycleStage: "onError",
         }),
         message: "Hosted execution container lifecycle hook reported an error.",
         phase: "failed",
       }),
     );
+    finishRunnerResponse(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
   });
 
   it("fails active workspace invocations when lifecycle status becomes stopped", async () => {
@@ -626,7 +568,7 @@ describe("RunnerContainer", () => {
     const startAndWaitForPorts = vi.fn(async () => {
       currentStatus = "running";
     });
-    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch,
       getState,
       startAndWaitForPorts,
@@ -645,7 +587,6 @@ describe("RunnerContainer", () => {
 
     await expect(invocation).rejects.toThrow("workspace invocation container stopped");
     expect(destroy).not.toHaveBeenCalled();
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -693,7 +634,7 @@ describe("RunnerContainer", () => {
     const startAndWaitForPorts = vi.fn(async () => {
       currentStatus = "running";
     });
-    const { container, destroy, setOutboundByHosts } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch,
       getState,
       startAndWaitForPorts,
@@ -712,43 +653,6 @@ describe("RunnerContainer", () => {
 
     await expect(invocation).rejects.toThrow("workspace invocation container stopped");
     expect(destroy).not.toHaveBeenCalled();
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
-  });
-
-  it("keeps warm reuse independent of legacy outbound handler cleanup", async () => {
-    const setOutboundByHosts = vi.fn(async () => {
-      throw new Error("legacy sidecar egress should not be used");
-    });
-    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
-      setOutboundByHosts,
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_proxy_expire_failure_first"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_proxy_expire_failure_second"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(readAuthorizationHeader(executeCalls[0]?.[1]?.headers)).toBeNull();
-    expect(readAuthorizationHeader(executeCalls[1]?.[1]?.headers)).toBeNull();
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(destroy).not.toHaveBeenCalled();
-    expect(setOutboundByHosts).not.toHaveBeenCalled();
   });
 
   it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {
@@ -797,28 +701,26 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("destroys an already-running shell with ambiguous supervisor state before cold start", async () => {
+  it("reuses an already-running shell after plain health succeeds", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",
     });
 
-    await container.invoke({
+    await expect(container.invoke({
       job: {
         kind: "workspace-invocation",
-        request: createRunnerRequest("evt_restart_ambiguous_shell"),
+        request: createRunnerRequest("evt_reuse_running_shell"),
       },
       timeoutMs: 30_000,
       userId: "member_123",
-    });
+    })).resolves.toEqual(createRunnerResult());
 
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
-      startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
+    expect(destroy).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
   it("reuses a surviving warm shell after plain health succeeds", async () => {
-    const rehydratedContainerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const rehydratedContainerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
           headers: {
@@ -829,7 +731,6 @@ describe("RunnerContainer", () => {
       }
 
       expect(url).toBe("http://container/internal/workspace-invocation");
-      expect(readAuthorizationHeader(init?.headers)).toBeNull();
       return new Response(JSON.stringify(createRunnerResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -845,7 +746,7 @@ describe("RunnerContainer", () => {
     await expect(rehydrated.container.invoke({
       job: {
         kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recovered_control_token"),
+        request: createRunnerRequest("evt_reuse_surviving_warm_shell"),
       },
       timeoutMs: 30_000,
       userId: "member_123",
@@ -869,11 +770,7 @@ describe("RunnerContainer", () => {
         status,
       }));
       const destroy = vi.fn(async () => {});
-      const startAndWaitForPorts = vi.fn(async (_options: {
-        startOptions?: {
-          envVars?: Record<string, string>;
-        };
-      }) => {
+      const startAndWaitForPorts = vi.fn(async () => {
         await startGate.promise;
         status = "running";
       });
@@ -908,18 +805,20 @@ describe("RunnerContainer", () => {
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
 
     try {
-      let healthFailures = 0;
+      let healthChecks = 0;
       const { container, startAndWaitForPorts } = createContainerDouble({
         initialStatus: "running",
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
-            healthFailures += 1;
-            vi.setSystemTime(new Date("2026-04-08T00:00:02.500Z"));
-            return new Response(JSON.stringify({ error: "stale shell" }), {
+            healthChecks += 1;
+            if (healthChecks === 1) {
+              vi.setSystemTime(new Date("2026-04-08T00:00:02.500Z"));
+            }
+            return new Response(JSON.stringify(healthChecks === 1 ? { error: "stale shell" } : { ok: true }), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
               },
-              status: 503,
+              status: healthChecks === 1 ? 503 : 200,
             });
           }
 
@@ -931,10 +830,6 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-      Object.assign(container, {
-        runnerControlToken: "stale-control-token",
-      });
-
       await container.invoke({
         job: {
           kind: "workspace-invocation",
@@ -944,7 +839,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       });
 
-      expect(healthFailures).toBe(1);
+      expect(healthChecks).toBe(2);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
       expect(startAndWaitForPorts.mock.calls[0]?.[0]).toMatchObject({
         cancellationOptions: expect.objectContaining({
@@ -963,59 +858,6 @@ describe("RunnerContainer", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("restarts a warm shell when the control token no longer matches the container process", async () => {
-    let controlHealthChecks = 0;
-    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
-      initialStatus: "running",
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        if (url.endsWith("/internal/control-health")) {
-          controlHealthChecks += 1;
-          return new Response(JSON.stringify({ error: "Unauthorized" }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 401,
-          });
-        }
-
-        return new Response(JSON.stringify(createRunnerResult()), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }),
-    });
-    Object.assign(container, {
-      runnerControlToken: "stale-control-token",
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_restart_after_failed_control_health"),
-      },
-      timeoutMs: 30_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(controlHealthChecks).toBe(1);
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    )).toBe(true);
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
@@ -1037,13 +879,6 @@ describe("RunnerContainer", () => {
         abort: expect.any(AbortSignal),
         waitInterval: 250,
       }),
-      ports: 8080,
-      startOptions: {
-        enableInternet: true,
-        envVars: expect.objectContaining({
-          PORT: "8080",
-        }),
-      },
     });
     expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeLessThanOrEqual(1_000);
     expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeGreaterThan(0);
@@ -1687,11 +1522,28 @@ describe("RunnerContainer", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it("fails closed before reuse when destroying an ambiguous warm shell throws", async () => {
+  it("fails closed before reuse when an unhealthy warm shell cannot be destroyed", async () => {
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");
     });
     const { container, startAndWaitForPorts } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ error: "stale shell" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
       destroy,
       initialStatus: "running",
     });
@@ -1741,6 +1593,14 @@ describe("RunnerContainer", () => {
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
             healthChecks += 1;
+            if (healthChecks > 1) {
+              return new Response(JSON.stringify({ ok: true }), {
+                headers: {
+                  "content-type": "application/json; charset=utf-8",
+                },
+                status: 200,
+              });
+            }
             return new Response(JSON.stringify({ error: "stale shell" }), {
               headers: {
                 "content-type": "application/json; charset=utf-8",
@@ -1760,10 +1620,6 @@ describe("RunnerContainer", () => {
         getState,
         startAndWaitForPorts: startAndWaitForPortsMock,
       });
-      Object.assign(container, {
-        runnerControlToken: "stale-control-token",
-      });
-
       const invokePromise = container.invoke({
         job: {
           kind: "workspace-invocation",
@@ -1775,7 +1631,7 @@ describe("RunnerContainer", () => {
       await vi.advanceTimersByTimeAsync(600);
 
       await expect(invokePromise).resolves.toEqual(createRunnerResult());
-      expect(healthChecks).toBe(1);
+      expect(healthChecks).toBe(2);
       expect(destroy).toHaveBeenCalledTimes(1);
       expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     } finally {
@@ -1968,22 +1824,6 @@ describe("RunnerContainer", () => {
       timeoutMs: 45_000,
       userId: "member_123",
     });
-  });
-
-  it("keeps browser-vault refresh container methods as deploy-skew throws", async () => {
-    const { container, startAndWaitForPorts } = createContainerDouble();
-
-    await expect(container.refreshBrowserVaultReplica({
-      attemptId: "browser-vault-refresh:removed",
-      runtime: {},
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).rejects.toThrow("Hosted runner browser-vault refresh side path has been removed.");
-    await expect(container.abortBrowserVaultRefresh({
-      attemptId: "browser-vault-refresh:removed",
-      userId: "member_123",
-    })).resolves.toBeUndefined();
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
   it("resolves runner container names from worker version metadata", () => {
@@ -2331,7 +2171,6 @@ function createContainerDouble(input: {
   env?: Record<string, unknown>;
   getState?: ReturnType<typeof vi.fn>;
   initialStatus?: "running" | "stopped" | "stopped_with_code";
-  setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
   } = {}) {
@@ -2367,7 +2206,6 @@ function createContainerDouble(input: {
     lastChange: Date.now(),
     status: currentStatus,
   }));
-  const setOutboundByHosts = input.setOutboundByHosts ?? vi.fn(async () => {});
   const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
     currentStatus = "running";
   });
@@ -2376,7 +2214,6 @@ function createContainerDouble(input: {
     containerFetch,
     destroy,
     getState,
-    setOutboundByHosts,
     startAndWaitForPorts,
   });
 
@@ -2385,7 +2222,6 @@ function createContainerDouble(input: {
     containerFetch,
     destroy,
     getState,
-    setOutboundByHosts,
     startAndWaitForPorts,
   };
 }
@@ -2395,18 +2231,6 @@ interface ContainerStorageDouble {
   get<T>(key: string): Promise<T | undefined>;
   list<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
-}
-
-async function readStoredRunnerControlToken(
-  storage: ContainerStorageDouble,
-): Promise<string | null> {
-  const value = await storage.get<unknown>("runner-container-control-token:v1");
-  if (!value) {
-    return null;
-  }
-
-  const record = requireObject(value, "runner control token record");
-  return typeof record.token === "string" ? record.token : null;
 }
 
 function createContainerStorageDouble(overrides: Partial<ContainerStorageDouble> = {}): ContainerStorageDouble {
@@ -2506,59 +2330,6 @@ function createWorkspaceRunnerJob(userId: string) {
       },
     },
   };
-}
-
-function readAuthorizationHeader(headers: HeadersInit | undefined): string | null {
-  if (headers instanceof Headers) {
-    return headers.get("authorization");
-  }
-
-  if (Array.isArray(headers)) {
-    const match = headers.find(([key]) => key.toLowerCase() === "authorization");
-    return match?.[1] ?? null;
-  }
-
-  const record = headers as Record<string, string | undefined> | undefined;
-  const value = record?.authorization ?? record?.Authorization;
-  return typeof value === "string" ? value : null;
-}
-
-async function readParentProcEnvironmentFromChild(
-  parentEnv: Record<string, string>,
-): Promise<string> {
-  const parentScript = [
-    "const { spawn } = require('node:child_process');",
-    "const child = spawn(process.execPath, ['-e', \"const fs = require('node:fs'); process.stdout.write(fs.readFileSync('/proc/' + process.ppid + '/environ', 'utf8'));\"], { stdio: ['ignore', 'pipe', 'inherit'] });",
-    "child.stdout.pipe(process.stdout);",
-    "child.on('exit', (code) => process.exit(code ?? 1));",
-  ].join("\n");
-
-  const child = spawn(process.execPath, ["-e", parentScript], {
-    env: parentEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
-  child.stdout.on("data", (chunk) => {
-    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-  child.stderr.on("data", (chunk) => {
-    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
-
-  if (exitCode !== 0) {
-    throw new Error(
-      Buffer.concat(stderrChunks).toString("utf8")
-        || `Proc env probe exited with ${exitCode ?? "unknown"}.`,
-    );
-  }
-
-  return Buffer.concat(stdoutChunks).toString("utf8");
 }
 
 function createRunnerResult(): HostedWorkspaceInvocationResult {

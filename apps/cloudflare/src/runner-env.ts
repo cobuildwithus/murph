@@ -26,14 +26,6 @@ import {
 const HOSTED_LEGACY_DEVICE_SYNC_PLATFORM_ENV_KEYS =
   new Set<string>(HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES);
 
-export function buildHostedRunnerSupervisorEnv(input: {
-  port: number;
-}): Record<string, string> {
-  return {
-    PORT: String(input.port),
-  };
-}
-
 export function buildHostedRunnerJobRuntime(input: {
   commitTimeoutMs?: number | null;
   configSource?: Readonly<Record<string, string | undefined>>;

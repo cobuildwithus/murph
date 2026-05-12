@@ -30,6 +30,7 @@ export interface HostedLocalDevHarness {
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
+  expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
     reason?: HostedWorkspaceInvocationReason;
@@ -160,6 +161,15 @@ export async function startHostedLocalDevHarness(input: {
         });
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
+      expireRunnerActivityForTest: async (userId: string): Promise<{ ok: true }> => {
+        return await requestJsonForRuntime<{ ok: true }>(
+          `/__test/users/${encodeURIComponent(userId)}/container-activity-expired`,
+          {
+            headers: statusHeaders(userId),
+            method: "POST",
+          },
+        );
+      },
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
