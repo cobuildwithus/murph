@@ -1578,7 +1578,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("cold-starts after a warm health failure whose destroy races with an already-stopping shell", async () => {
+  it("fails closed after a warm health failure whose destroy reports an already-stopping shell", async () => {
     vi.useFakeTimers();
 
     try {
@@ -1636,13 +1636,15 @@ describe("RunnerContainer", () => {
         },
         timeoutMs: 30_000,
         userId: "member_123",
-      });
+      }).catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(600);
 
-      await expect(invokePromise).resolves.toEqual(createRunnerResult());
-      expect(healthChecks).toBe(2);
+      const thrown = await invokePromise;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toContain("Hosted runner container failed to destroy cleanly.");
+      expect(healthChecks).toBe(1);
       expect(destroy).toHaveBeenCalledTimes(1);
-      expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

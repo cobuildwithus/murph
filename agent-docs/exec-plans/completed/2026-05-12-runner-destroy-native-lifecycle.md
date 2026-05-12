@@ -21,3 +21,6 @@ Simplify `RunnerContainer` destroy cleanup to rely on Cloudflare Containers' nat
 - Focused `runner-container` tests.
 - `pnpm --dir apps/cloudflare typecheck`.
 - `pnpm --dir apps/cloudflare verify` if focused checks pass.
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12

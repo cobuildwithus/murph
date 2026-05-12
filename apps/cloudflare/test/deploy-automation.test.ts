@@ -612,6 +612,7 @@ describe("hosted deploy automation helpers", () => {
     expect(workflow).not.toContain("uses: useblacksmith/build-push-action");
     expect(workflow).not.toContain("cache-from: type=gha,scope=cloudflare-runner-base");
     expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
+    expect(workflow).not.toContain("CF_RUNNER_DESTROY_TIMEOUT_MS");
     expect(workflow).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT");
     expect(workflow).not.toContain("run: pnpm --dir apps/cloudflare deploy:artifacts");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
