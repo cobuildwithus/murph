@@ -642,11 +642,11 @@ export function createCloudflareHostedRuntimeFetch(
   } = {},
 ): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(input, init);
+    const request = new Request(input, init);
     const url = new URL(request.url);
 
     if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return input instanceof Request ? fetchImpl(input) : fetchImpl(input, init);
+      return fetchImpl(request);
     }
 
     if (!options.runtimeCallbackBaseUrl) {
@@ -661,10 +661,10 @@ export function createCloudflareHostedRuntimeFetch(
       writeRunnerRuntimeWriteFenceHeaders(headers, lease);
     }
     const proxiedUrl = createHostedRuntimeCallbackUrl(
-        options.runtimeCallbackBaseUrl,
-        url,
-        boundUserId,
-      );
+      options.runtimeCallbackBaseUrl,
+      url,
+      boundUserId,
+    );
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
     const shouldLogInternalRequest = true;
     const details = {

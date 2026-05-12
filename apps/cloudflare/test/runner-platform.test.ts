@@ -340,6 +340,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves Request init overrides for external fetch passthrough", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedRuntimeFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+    );
+    const abortController = new AbortController();
+    const original = new Request("https://example.test/", {
+      body: "a",
+      method: "POST",
+    });
+
+    await hostedFetch(original, {
+      body: "b",
+      headers: { "x-test": "1" },
+      method: "PUT",
+      signal: abortController.signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "external passthrough fetch");
+    expect(forwarded.headers.get("x-test")).toBe("1");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
+    expect(forwarded.method).toBe("PUT");
+    expect(await forwarded.text()).toBe("b");
+
+    expect(forwarded.signal.aborted).toBe(false);
+    abortController.abort();
+    expect(forwarded.signal.aborted).toBe(true);
+  });
+
   it("classifies internal authority 401 responses as stale invocation authority", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: "Unauthorized",
@@ -386,6 +420,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.url).toBe("https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/messages/raw%2Fmessage%231");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.method).toBe("GET");
+  });
+
+  it("preserves Request init overrides before internal callback rewriting", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    const hostedFetch = createCloudflareHostedRuntimeFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      { runtimeCallbackBaseUrl: "https://worker.example.test" },
+    );
+    const abortController = new AbortController();
+    const original = new Request("https://results.worker/messages/raw", {
+      body: "a",
+      method: "POST",
+    });
+
+    await hostedFetch(original, {
+      body: "b",
+      headers: { "x-test": "1" },
+      method: "PUT",
+      signal: abortController.signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const forwarded = requireFetchRequest(fetchMock.mock.calls[0], "internal callback fetch");
+    expect(forwarded.url).toBe(
+      "https://worker.example.test/__murph/runtime-callback/users/member_123/results.worker/messages/raw",
+    );
+    expect(forwarded.headers.get("x-test")).toBe("1");
+    expect(forwarded.method).toBe("PUT");
+    expect(await forwarded.text()).toBe("b");
+
+    expect(forwarded.signal.aborted).toBe(false);
+    abortController.abort();
+    expect(forwarded.signal.aborted).toBe(true);
   });
 
   it("routes internal runtime requests through the stable callback authority with write-fence headers", async () => {
@@ -612,9 +680,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(snapshot.userId).toBe("member_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "device-sync fetch");
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/runtime/snapshot");
-    const headers = new Headers(init?.headers);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "device-sync fetch");
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/snapshot");
+    const headers = request.headers;
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
@@ -659,10 +727,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "usage fetch");
-    expect(String(url)).toBe("https://web.example.test/api/internal/hosted-execution/usage/record");
-    expect(init?.method).toBe("POST");
-    const headers = new Headers(init?.headers);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "usage fetch");
+    expect(request.url).toBe("https://web.example.test/api/internal/hosted-execution/usage/record");
+    expect(request.method).toBe("POST");
+    const headers = request.headers;
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
@@ -734,13 +802,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(
+    const request = requireFetchRequest(
       fetchMock.mock.calls[0],
       "device-sync dirty pending fetch",
     );
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
-    expect(init?.method).toBe("POST");
-    const headers = new Headers(init?.headers);
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/runtime/dirty-pending");
+    expect(request.method).toBe("POST");
+    const headers = request.headers;
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
@@ -774,14 +842,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(connectLink.provider).toBe("oura");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(
+    const request = requireFetchRequest(
       fetchMock.mock.calls[0],
       "device-sync connect-link fetch",
     );
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/connect-targets/oura/connect-link");
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBeUndefined();
-    const headers = new Headers(init?.headers);
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/connect-targets/oura/connect-link");
+    expect(request.method).toBe("POST");
+    expect(request.body).toBeNull();
+    const headers = request.headers;
     expect(headers.get("content-type")).toBeNull();
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signing-key-id")).toBe("v1");
@@ -816,16 +884,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(
+    const request = requireFetchRequest(
       fetchMock.mock.calls[0],
       "device-sync connect-link fetch",
     );
-    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/connect-targets/whoop/connect-link");
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({
+    expect(request.url).toBe("https://web.example.test/api/internal/device-sync/connect-targets/whoop/connect-link");
+    expect(request.method).toBe("POST");
+    await expect(request.text()).resolves.toBe(JSON.stringify({
       messagingReturnTarget: "telegram",
     }));
-    const headers = new Headers(init?.headers);
+    const headers = request.headers;
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
