@@ -26,6 +26,10 @@ unit: "task-specific assessment"
 interpretationFrame:
   principle: "For red-light glasses, task performance mainly supports stop rules and task exclusions where tinted lenses could make ordinary tasks less safe."
   caveat: "A home protocol should not generalize task-performance findings beyond the specific task and lighting context."
+biomarker:
+  direction:
+    desired: higher_or_stable
+    label: Better or stable task performance is the goal.
 ---
 
 Task Performance is included so evening-light appraisals can reference performance-sensitive safety contexts without creating a broad cognitive-performance claim.

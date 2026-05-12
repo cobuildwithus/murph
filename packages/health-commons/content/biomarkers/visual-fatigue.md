@@ -26,6 +26,10 @@ unit: "0-10 rating"
 interpretationFrame:
   principle: "Visual fatigue can be logged as tolerability context but should not be used to claim that bedtime glasses treat eye strain."
   caveat: "Screen duration, task difficulty, sleep debt, and room lighting can dominate this rating."
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Less visual fatigue is the goal.
 ---
 
 Visual Fatigue is a conservative endpoint for evening-light source appraisals that discuss tired-eyes or visual-discomfort outcomes.

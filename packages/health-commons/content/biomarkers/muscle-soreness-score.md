@@ -25,6 +25,10 @@ unit: "0–10 score"
 interpretationFrame:
   principle: "Compare the same time window and muscle group across baseline and intervention days."
   caveat: "Soreness is subjective and strongly affected by training load, novelty, sleep, expectation, and injury."
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Lower soreness in the target muscle group is generally preferred for recovery.
 ---
 
 Muscle Soreness Score is included so the pneumatic compression pants test can track a practical, user-reportable signal without turning mixed recovery evidence into a stronger clinical claim.

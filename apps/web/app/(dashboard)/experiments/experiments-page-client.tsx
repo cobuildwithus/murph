@@ -40,7 +40,6 @@ interface ExperimentLibraryCard {
   privateBadgeLabel?: string;
   matchPercent?: number;
   durationDays?: number;
-  studyCount?: number;
   metadata?: string;
   statusLabel?: string;
   statusVariant?: ExperimentCardStatusVariant;
@@ -208,7 +207,6 @@ function protocolToCard(
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
     `${protocolDays} days`,
-    protocol.researchSummaryLabel,
   ].filter((part): part is string => part !== null).join(" · ");
   const description = privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description;
 
@@ -220,7 +218,6 @@ function protocolToCard(
     href: `/experiments/${protocol.id}`,
     matchPercent: protocol.matchPercent,
     durationDays: protocolDays,
-    studyCount: protocol.studyCount,
     metadata,
     privateBadgeLabel: privateRun ? "Private data" : undefined,
     statusLabel,

@@ -15,7 +15,6 @@ interface ExperimentHeroCardProps {
   privateBadgeLabel?: string;
   matchPercent?: number;
   durationDays?: number;
-  studyCount?: number;
   metadata?: string;
   statusLabel?: string;
   statusVariant?: ExperimentCardStatusVariant;
@@ -35,7 +34,6 @@ export function ExperimentHeroCard({
   privateBadgeLabel,
   matchPercent,
   durationDays,
-  studyCount,
   metadata,
   statusLabel,
   statusVariant = "secondary",
@@ -87,7 +85,7 @@ export function ExperimentHeroCard({
           {title}
         </span>
         <span className="text-xs text-muted-foreground">
-          {metadata ?? formatDefaultMetadata(durationDays, studyCount)}
+          {metadata ?? (typeof durationDays === "number" ? `${durationDays} days` : "Protocol")}
         </span>
         {description ? (
           <span className="line-clamp-3 text-sm text-muted-foreground">
@@ -119,12 +117,3 @@ export function ExperimentHeroCard({
   );
 }
 
-function formatDefaultMetadata(
-  durationDays: number | undefined,
-  studyCount: number | undefined,
-): string {
-  return [
-    typeof durationDays === "number" ? `${durationDays} days` : null,
-    typeof studyCount === "number" ? `${studyCount} studies` : null,
-  ].filter((part): part is string => part !== null).join(" · ") || "Protocol";
-}

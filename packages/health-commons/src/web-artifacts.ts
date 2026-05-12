@@ -165,6 +165,7 @@ export interface HealthCommonsWebBiomarkerIndexEntry {
   aliases: string[];
   bundlePath: string;
   categories: string[];
+  desiredDirection: HealthCommonsBiomarkerDesiredDirection | null;
   hidden: boolean;
   key: string;
   published: boolean;
@@ -674,6 +675,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             aliases: bundle.route.aliases,
             bundlePath: bundlePathForEntity(bundle.route.entityType, bundle.route.routeId),
             categories: entity.categories ?? [],
+            desiredDirection: entity.biomarker?.direction?.desired ?? null,
             hidden: entity.hidden === true,
             key: entity.key,
             published: isPublishedBiomarkerIndexEntity(entity, entitiesByKey.values()),

@@ -18,6 +18,10 @@ unit: clinical lab
 interpretationFrame:
   principle: Compare baseline and intervention windows using the same measurement method and context.
   caveat: This marker is part of interpretation or safety context; abnormal clinical labs or symptoms should be reviewed with an appropriate clinician.
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Lower or stable uric acid within the healthy range reduces gout risk.
 ---
 
 Optional gout and urate-context safety lab interpreted clinically when relevant.

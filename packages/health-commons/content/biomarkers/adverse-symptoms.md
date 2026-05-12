@@ -25,6 +25,10 @@ unit: "symptom log"
 interpretationFrame:
   principle: "Any severe, unusual, neurologic, skin-injury, clot/PE, or malfunction signal should override efficacy interpretation."
   caveat: "Absence of logged symptoms does not prove safety; small consumer recovery experiments cannot estimate rare adverse-event rates."
+biomarker:
+  direction:
+    desired: lower_or_stable
+    label: Fewer or stable adverse symptoms is the goal; any new severe, neurologic, or safety signal pauses the protocol.
 ---
 
 Adverse Symptoms is included so the pneumatic compression pants test can track a practical, user-reportable signal without turning mixed recovery evidence into a stronger clinical claim.

@@ -120,7 +120,7 @@ export function ResultsSummarySkeleton() {
     <div className="flex flex-col gap-4">
       <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-foreground/50">
         <span className="size-1.5 rounded-full bg-primary" />
-        Your active run
+        Your experiment
       </span>
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCardSkeleton />
