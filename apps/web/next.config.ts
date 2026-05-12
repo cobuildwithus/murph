@@ -26,6 +26,10 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
 ] as const;
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
+const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
+const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
+const WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR = ".next/workflow-data";
+const WORKFLOW_LOCAL_TARGET_WORLD = "local";
 const PRIVY_REQUIRED_CHILD_FRAME_SOURCES = [
   "https://auth.privy.io",
   "https://verify.walletconnect.com",
@@ -219,6 +223,32 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
   };
 }
 
+export function configureHostedWebWorkflowLocalDataDir(
+  phase: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  if (environment.VERCEL_DEPLOYMENT_ID) {
+    return;
+  }
+
+  const targetWorld = environment[WORKFLOW_TARGET_WORLD_ENV_KEY]?.trim();
+
+  if (targetWorld && targetWorld !== WORKFLOW_LOCAL_TARGET_WORLD) {
+    return;
+  }
+
+  const configuredDataDir = environment[WORKFLOW_LOCAL_DATA_DIR_ENV_KEY]?.trim();
+
+  if (configuredDataDir && configuredDataDir !== WORKFLOW_NEXT_DEFAULT_LOCAL_DATA_DIR) {
+    return;
+  }
+
+  environment[WORKFLOW_LOCAL_DATA_DIR_ENV_KEY] = path.join(
+    resolveHostedWebDistDir(phase, environment),
+    "workflow-data",
+  );
+}
+
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
     distDir: resolveHostedWebDistDir(phase, process.env),
@@ -257,6 +287,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
 }
 
 async function nextConfig(phase: string): Promise<NextConfig> {
+  configureHostedWebWorkflowLocalDataDir(phase);
   return buildHostedWebNextConfig(phase);
 }
 
