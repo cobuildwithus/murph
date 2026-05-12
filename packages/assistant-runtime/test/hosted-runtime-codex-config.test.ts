@@ -1173,6 +1173,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
+      'env_http_headers = { "x-hosted-runner-bound-user-id" = "MURPH_HOSTED_CODEX_BOUND_USER_ID", "x-hosted-runtime-attempt-id" = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID", "x-hosted-runtime-lease-generation" = "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION", "x-hosted-runtime-workspace-version" = "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION" }',
       "requires_openai_auth = false",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
@@ -1188,7 +1189,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       "",
       "[shell_environment_policy]",
       'inherit = "none"',
-      'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
     ].join("\n"),
   );

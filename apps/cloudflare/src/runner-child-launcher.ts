@@ -8,6 +8,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 const HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS = [
+  "CODEX_CA_CERTIFICATE",
   "CURL_CA_BUNDLE",
   "LANG",
   "LC_ALL",
