@@ -206,7 +206,7 @@ async function maybeHandleWhatsAppRequest(input: {
   if (
     input.url.hostname !== configuredHost
     || input.request.method !== "POST"
-    || !/^\/v[^/]+\/__cloudflare_injected__\/messages$/u.test(input.url.pathname)
+    || !/^\/v[0-9]+\.[0-9]+\/__cloudflare_injected__\/messages$/u.test(input.url.pathname)
   ) {
     return null;
   }
