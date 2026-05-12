@@ -12,6 +12,7 @@ import {
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
 import {
+  HOSTED_CODEX_RUNTIME_AUTHORITY_ENV,
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
@@ -478,6 +479,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const baseRuntimeEnv = {
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
+      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId]: input.request.attemptId,
+      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId]: input.request.userId,
+      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration]: input.request.leaseGeneration,
+      [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion]: input.request.workspaceVersion,
     };
     const hostedCodexRuntime = await raceHostedRuntimeCancellation(
       prepareHostedCodexRuntimeEnvironment({

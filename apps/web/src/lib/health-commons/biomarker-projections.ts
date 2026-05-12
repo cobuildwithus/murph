@@ -4,13 +4,13 @@ import type {
   HealthCommonsWebBiomarkerResearch,
   HealthCommonsWebBiomarkerShell,
 } from "@murphai/health-commons/runtime";
-import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
 
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanHealthCommonsUserFacingCopyList,
   cleanOptionalHealthCommonsUserFacingCopy,
 } from "./user-facing-copy";
+export { resolveBiomarkerDesiredDirection } from "./biomarker-desired-direction";
 import {
   loadGeneratedBiomarkerOverview,
   loadGeneratedBiomarkerResearch,
@@ -32,26 +32,6 @@ export function listHealthCommonsBiomarkerRoutes(): string[] {
     .filter((entry) => entry.published && !entry.hidden)
     .map((entry) => entry.routeId)
     .sort();
-}
-
-let biomarkerDesiredDirectionByKey: Map<
-  string,
-  HealthCommonsBiomarkerDesiredDirection
-> | null = null;
-
-export function resolveBiomarkerDesiredDirection(
-  biomarkerKey: string,
-): HealthCommonsBiomarkerDesiredDirection | null {
-  if (biomarkerDesiredDirectionByKey === null) {
-    const map = new Map<string, HealthCommonsBiomarkerDesiredDirection>();
-    for (const entry of getGeneratedHealthCommonsWebBiomarkerIndex().biomarkers) {
-      if (entry.desiredDirection) {
-        map.set(entry.key, entry.desiredDirection);
-      }
-    }
-    biomarkerDesiredDirectionByKey = map;
-  }
-  return biomarkerDesiredDirectionByKey.get(biomarkerKey) ?? null;
 }
 
 export function resolveHealthCommonsBiomarkerShell(

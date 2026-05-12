@@ -12,7 +12,7 @@ import {
   createBrowserVaultQueryClient,
   parseBrowserVaultReplica,
   type BrowserVaultQueryClient,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-replica-client";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
   parseHostedBrowserVaultReplicaRef,

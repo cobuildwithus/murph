@@ -619,9 +619,12 @@ function parseTestWorkspaceInvocationReason(
 async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
+  const openAiIntercept = context.url.searchParams.get("openAiIntercept") === "1";
   const result = await context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env))
-    .smokeHealth();
+    .smokeHealth({
+      openAiIntercept,
+    });
 
   return json({
     ok: result.ok === true,

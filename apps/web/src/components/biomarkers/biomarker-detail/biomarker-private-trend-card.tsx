@@ -10,7 +10,7 @@ import {
   type BrowserVaultBiomarkerPanelStatus,
   type BrowserVaultBiomarkerTrend,
   type BrowserVaultQueryClient,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-biomarkers";
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";

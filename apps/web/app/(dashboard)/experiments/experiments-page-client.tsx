@@ -6,7 +6,7 @@ import {
   selectBrowserVaultTrackedExperiments,
   type BrowserVaultQueryClient,
   type OverviewExperiment,
-} from "@murphai/query/browser";
+} from "@murphai/query/browser-overview";
 
 import { CategoryFilter } from "@/src/components/experiments/category-filter";
 import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
@@ -207,6 +207,7 @@ function protocolToCard(
   const metadata = [
     startedOn ? `Started ${formatIsoDate(startedOn)}` : null,
     `${protocolDays} days`,
+    protocol.researchSummaryLabel,
   ].filter((part): part is string => part !== null).join(" · ");
   const description = privateRun?.summaryDetail ?? privateRun?.summary ?? protocol.description;
 

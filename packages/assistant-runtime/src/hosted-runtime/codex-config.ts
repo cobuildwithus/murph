@@ -79,6 +79,19 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
 const HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID = "hosted-openai";
+const HOSTED_CODEX_BOUND_USER_ID_ENV = "MURPH_HOSTED_CODEX_BOUND_USER_ID";
+const HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID";
+const HOSTED_CODEX_RUNTIME_LEASE_GENERATION_ENV =
+  "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION";
+const HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION_ENV =
+  "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION";
+
+export const HOSTED_CODEX_RUNTIME_AUTHORITY_ENV = {
+  attemptId: HOSTED_CODEX_RUNTIME_ATTEMPT_ID_ENV,
+  boundUserId: HOSTED_CODEX_BOUND_USER_ID_ENV,
+  leaseGeneration: HOSTED_CODEX_RUNTIME_LEASE_GENERATION_ENV,
+  workspaceVersion: HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION_ENV,
+} as const;
 
 export interface HostedCodexRuntimeEnvironmentInput {
   operatorHomeRoot: string;
@@ -319,6 +332,12 @@ export function buildHostedCodexConfigToml(input: {
     `base_url = ${tomlString(input.provider.baseUrl)}`,
     `env_key = ${tomlString(input.provider.envKey)}`,
     `wire_api = ${tomlString(input.provider.wireApi)}`,
+    `env_http_headers = ${tomlInlineTable({
+      "x-hosted-runner-bound-user-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.boundUserId,
+      "x-hosted-runtime-attempt-id": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.attemptId,
+      "x-hosted-runtime-lease-generation": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration,
+      "x-hosted-runtime-workspace-version": HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion,
+    })}`,
     "requires_openai_auth = false",
     ...(input.disableProviderRetries
       ? [
@@ -372,4 +391,10 @@ function tomlString(value: string): string {
 
 function tomlStringArray(values: readonly string[]): string {
   return `[${values.map(tomlString).join(", ")}]`;
+}
+
+function tomlInlineTable(values: Readonly<Record<string, string>>): string {
+  return `{ ${Object.entries(values).map(([key, value]) =>
+    `${tomlString(key)} = ${tomlString(value)}`
+  ).join(", ")} }`;
 }
