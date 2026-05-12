@@ -153,14 +153,6 @@ function augmentHostedRunnerWebControlBody(input: {
     return input.body;
   }
 
-  const reportingUserId = createAssistantUsageReportingUserId({
-    memberId: input.userId,
-    reportingSecret: readRunnerStringEnv(input.env, "HOSTED_AI_USAGE_REPORTING_SECRET"),
-  });
-  if (!reportingUserId) {
-    return input.body;
-  }
-
   let payload: unknown;
   try {
     payload = JSON.parse(input.body);
@@ -171,11 +163,16 @@ function augmentHostedRunnerWebControlBody(input: {
     return input.body;
   }
 
+  const reportingUserId = createAssistantUsageReportingUserId({
+    memberId: input.userId,
+    reportingSecret: readRunnerStringEnv(input.env, "HOSTED_AI_USAGE_REPORTING_SECRET"),
+  });
+
   return JSON.stringify({
     ...payload,
     usage: {
       ...payload.usage,
-      reportingUserId,
+      reportingUserId: reportingUserId ?? null,
     },
   });
 }
