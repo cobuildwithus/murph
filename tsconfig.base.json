@@ -184,6 +184,9 @@
       "@murphai/query/browser": [
         "packages/query/src/browser.ts"
       ],
+      "@murphai/query/browser-murph-age": [
+        "packages/query/src/browser-murph-age.ts"
+      ],
       "@murphai/query/entity-families": [
         "packages/query/src/entity-families.ts"
       ],

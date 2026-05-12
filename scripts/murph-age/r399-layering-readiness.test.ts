@@ -63,18 +63,38 @@ describe("R399 layering readiness runner", () => {
       expect(output.productPromotionAuthorized).toBe(false);
       expect(output.evidence.biomarkerIncrement.map((entry) => entry.sourceId)).toEqual([
         "midus2-lab5-internal",
+        "midus-refresher-r399-lab3-internal",
         "creles-lab5-local",
         "midus2-lab5-to-creles-transport",
       ]);
       expect(output.evidence.biomarkerIncrement[0]?.verdict).toBe("promising_internal_only");
-      expect(output.evidence.biomarkerIncrement[2]?.verdict).toBe("not_promotable");
-      expect(output.evidence.biomarkerIncrement[2]?.comparison).toEqual({
+      expect(output.evidence.biomarkerIncrement[1]?.verdict).toBe("promising_internal_only");
+      expect(output.evidence.biomarkerIncrement[3]?.verdict).toBe("not_promotable");
+      expect(output.evidence.biomarkerIncrement[3]?.comparison).toEqual({
         aucDelta: -0.002677,
         brierDelta: 0.000441,
         logLossDelta: 0.001687,
         modelId: "midus2_lab5_source_creles_recalibrated",
         referenceModelId: "creles_age_sex_reference",
       });
+      expect(output.nextLoop.candidateBatch).toMatchObject({
+        batchId: "r600-frozen-anchor-residual-increment-batch",
+        selectionPolicy: "predeclared-small-batch",
+        status: "frozen-research-only",
+      });
+      expect(output.nextLoop.candidateBatch.candidates).toEqual([
+        { id: "r399-anchor-research-comparator", role: "reference", scoreBearing: true },
+        { id: "r399-plus-compact-bloodwork-residual", role: "proposal", scoreBearing: true },
+        { id: "r399-plus-compact-bloodwork-body-residual", role: "proposal", scoreBearing: true },
+        { id: "wearable-shadow-qc-only", role: "shadow", scoreBearing: false },
+        { id: "age-like-display-abstain", role: "abstain_display", scoreBearing: false },
+      ]);
+      expect(output.nextLoop.sourceRoles).toContainEqual({
+        id: "midus-refresher",
+        optimizationAllowed: false,
+        role: "internal_replication",
+      });
+      expect(output.nextLoop.reviewGate.nextGate).toBe("aggregate-results");
       expect(output.coefficientsStored).toBe(false);
       expect(output.modelParametersStored).toBe(false);
       expect(output.predictionsStored).toBe(false);
@@ -212,7 +232,7 @@ describe("R399 layering readiness runner", () => {
       });
 
       expect(output.gates.biomarkerTransportConfirmed.status).toBe("passed");
-      expect(output.evidence.biomarkerIncrement[2]?.verdict).toBe("transport_confirmed");
+      expect(output.evidence.biomarkerIncrement[3]?.verdict).toBe("transport_confirmed");
       expect(output.gates.productPromotionReady.status).toBe("blocked");
       expect(output.productPromotionAuthorized).toBe(false);
       expect(output.blockedReasons.some((reason) => reason.includes("Wearable"))).toBe(true);
@@ -317,6 +337,7 @@ describe("R399 layering readiness runner", () => {
           ...process.env,
           MURPH_AGE_CRELES_OUTPUT_PATH: paths.crelesOutputPath,
           MURPH_AGE_MIDUS2_OUTPUT_PATH: paths.midus2OutputPath,
+          MURPH_AGE_MIDUS_REFRESHER_OUTPUT_PATH: paths.midusRefresherOutputPath,
           MURPH_AGE_R399_MODEL_CARD_PATH: path.join(tmp, "missing-model-card.json"),
           MURPH_AGE_R399_PARAMS_PATH: paths.r399ParamsPath,
           MURPH_AGE_RESEARCH_OUTPUT_DIR: path.join(tmp, "out"),
@@ -384,12 +405,14 @@ async function writeFixtureArtifacts(
 ): Promise<{
   crelesOutputPath: string;
   midus2OutputPath: string;
+  midusRefresherOutputPath: string;
   r399ParamsPath: string;
   transportOutputPath: string;
 }> {
   await mkdir(tmp, { recursive: true });
   const r399ParamsPath = path.join(tmp, "r399.json");
   const midus2OutputPath = path.join(tmp, "midus2.json");
+  const midusRefresherOutputPath = path.join(tmp, "midus-refresher.json");
   const crelesOutputPath = path.join(tmp, "creles.json");
   const transportOutputPath = path.join(tmp, "transport.json");
   await Promise.all([
@@ -427,6 +450,20 @@ async function writeFixtureArtifacts(
         },
       },
     }),
+    writeJson(midusRefresherOutputPath, {
+      models: {
+        r399_anchor_recalibrated: {
+          splitMetrics: {
+            test: metrics({ auc: 0.66447, brier: 0.032621, logLoss: 0.145832 }),
+          },
+        },
+        r399_plus_lab3_bmi_increment: {
+          splitMetrics: {
+            test: metrics({ auc: 0.75219, brier: 0.032183, logLoss: 0.141327 }),
+          },
+        },
+      },
+    }),
     writeJson(crelesOutputPath, {
       models: {
         age_sex_reference: {
@@ -458,12 +495,13 @@ async function writeFixtureArtifacts(
       },
     }),
   ]);
-  return { crelesOutputPath, midus2OutputPath, r399ParamsPath, transportOutputPath };
+  return { crelesOutputPath, midus2OutputPath, midusRefresherOutputPath, r399ParamsPath, transportOutputPath };
 }
 
 async function addForbiddenInputDetails(paths: {
   crelesOutputPath: string;
   midus2OutputPath: string;
+  midusRefresherOutputPath: string;
   r399ParamsPath: string;
   transportOutputPath: string;
 }): Promise<void> {
@@ -472,6 +510,9 @@ async function addForbiddenInputDetails(paths: {
 
   const midus2 = JSON.parse(await readFile(paths.midus2OutputPath, "utf8"));
   midus2.rawRows = [{ M2ID: "private-row-id", value: 1 }];
+
+  const midusRefresher = JSON.parse(await readFile(paths.midusRefresherOutputPath, "utf8"));
+  midusRefresher.rawRows = [{ MRID: "private-row-id", value: 1 }];
 
   const creles = JSON.parse(await readFile(paths.crelesOutputPath, "utf8"));
   creles.models.lab5_lipid_body_no_crp.predictionById = { MRID: 0.42 };
@@ -482,6 +523,7 @@ async function addForbiddenInputDetails(paths: {
   await Promise.all([
     writeJson(paths.r399ParamsPath, r399),
     writeJson(paths.midus2OutputPath, midus2),
+    writeJson(paths.midusRefresherOutputPath, midusRefresher),
     writeJson(paths.crelesOutputPath, creles),
     writeJson(paths.transportOutputPath, transport),
   ]);

@@ -150,6 +150,38 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
   });
 
+  it("returns a busy idle-checkpoint lease result behind an active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [firstInvocation.promise],
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const activeFence = readRunnerMeta(sql);
+
+    await expect(runner.beginIdleCheckpointLease({
+      userId: "member_123",
+      workspaceVersion: "7",
+    })).resolves.toBeNull();
+
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: activeFence.active_attempt_id,
+      active_expires_at: activeFence.active_expires_at,
+    });
+    expect(alarms.at(-1)).toBe(activeFence.active_expires_at);
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+  });
+
   it("uses the active write-fence expiry for status alarms before workspace wakes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

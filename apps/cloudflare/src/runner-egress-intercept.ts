@@ -91,8 +91,14 @@ const MAPBOX_EGRESS_POLICY = [
 ] as const;
 
 interface ProviderBaseConfig {
+  acceptedBaseUrls: readonly URL[];
   baseUrl: URL;
   knownHosts: readonly string[];
+}
+
+interface ProviderPathMatch {
+  pathnameSuffix: string;
+  upstreamBaseUrl: URL;
 }
 
 interface HostedRunnerOutboundContext {
@@ -264,15 +270,15 @@ async function maybeHandleOpenAiRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(undefined, DEFAULT_OPENAI_API_BASE_URL);
-  const baseUrl = providerBase.baseUrl;
-  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
-  if (pathnameSuffix === null) {
+  const providerBase = readProviderBaseConfig(undefined, DEFAULT_OPENAI_API_BASE_URL, input.env);
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
     if (isKnownProviderHost(input.url, providerBase)) {
       return disallowedProviderEgress();
     }
     return null;
   }
+  const { pathnameSuffix } = pathMatch;
   if (!isAllowedOpenAiRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
@@ -288,7 +294,11 @@ async function maybeHandleOpenAiRequest(input: {
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return await fetch(await createHostedRunnerUpstreamRequest(input.request, input.url, headers));
+  return await fetch(await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+  ));
 }
 
 async function maybeHandleMapboxRequest(input: {
@@ -297,15 +307,15 @@ async function maybeHandleMapboxRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(undefined, DEFAULT_MAPBOX_API_BASE_URL);
-  const baseUrl = providerBase.baseUrl;
-  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
-  if (pathnameSuffix === null) {
+  const providerBase = readProviderBaseConfig(undefined, DEFAULT_MAPBOX_API_BASE_URL, input.env);
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
     if (isKnownProviderHost(input.url, providerBase)) {
       return disallowedProviderEgress();
     }
     return null;
   }
+  const { pathnameSuffix } = pathMatch;
   if (!isAllowedMapboxRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
@@ -313,13 +323,8 @@ async function maybeHandleMapboxRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const authorized = await requestOwnsRuntimeWriteFence(input);
-  if (!authorized) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const token = readRequiredInterceptSecret(input.env.MAPBOX_ACCESS_TOKEN, "MAPBOX_ACCESS_TOKEN");
-  const upstreamUrl = new URL(input.url);
+  const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   upstreamUrl.searchParams.set("access_token", token);
   return await fetch(
     await createHostedRunnerUpstreamRequest(
@@ -336,17 +341,20 @@ async function maybeHandleLinqRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(input.env.LINQ_API_BASE_URL, DEFAULT_LINQ_API_BASE_URL);
-  const baseUrl = providerBase.baseUrl;
-  const suffix = readProviderPathSuffix(input.url, baseUrl);
-  if (suffix === null) {
+  const providerBase = readProviderBaseConfig(
+    input.env.LINQ_API_BASE_URL,
+    DEFAULT_LINQ_API_BASE_URL,
+    input.env,
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
     if (isKnownProviderHost(input.url, providerBase)) {
       return disallowedProviderEgress();
     }
     return null;
   }
 
-  if (!isAllowedLinqRequest(input.request.method, suffix)) {
+  if (!isAllowedLinqRequest(input.request.method, pathMatch.pathnameSuffix)) {
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
@@ -361,7 +369,11 @@ async function maybeHandleLinqRequest(input: {
   const token = readRequiredInterceptSecret(input.env.LINQ_API_TOKEN, "LINQ_API_TOKEN");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return await fetch(await createHostedRunnerUpstreamRequest(input.request, input.url, headers));
+  return await fetch(await createHostedRunnerUpstreamRequest(
+    input.request,
+    createProviderUpstreamUrl(input.url, pathMatch),
+    headers,
+  ));
 }
 
 async function maybeHandleTelegramRequest(input: {
@@ -370,18 +382,21 @@ async function maybeHandleTelegramRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(input.env.TELEGRAM_API_BASE_URL, DEFAULT_TELEGRAM_API_BASE_URL);
-  const baseUrl = providerBase.baseUrl;
-  const prefix = normalizedProviderBasePath(baseUrl);
-  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
-  if (pathnameSuffix === null) {
+  const providerBase = readProviderBaseConfig(
+    input.env.TELEGRAM_API_BASE_URL,
+    DEFAULT_TELEGRAM_API_BASE_URL,
+    input.env,
+    { acceptFallbackBaseUrl: true },
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
     if (isKnownProviderHost(input.url, providerBase)) {
       return disallowedProviderEgress();
     }
     return null;
   }
 
-  const operation = readTelegramSentinelOperation(pathnameSuffix);
+  const operation = readTelegramSentinelOperation(pathMatch.pathnameSuffix);
   if (!operation || !isAllowedTelegramOperation(operation)) {
     return disallowedProviderEgress();
   }
@@ -392,7 +407,8 @@ async function maybeHandleTelegramRequest(input: {
   }
 
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
-  const upstreamUrl = new URL(input.url);
+  const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
+  const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
   upstreamUrl.pathname = `${prefix}/bot${token}/${operation}`;
   return await fetch(
     await createHostedRunnerUpstreamRequest(
@@ -409,16 +425,20 @@ async function maybeHandleWhatsAppRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(input.env.WHATSAPP_API_BASE_URL, DEFAULT_WHATSAPP_API_BASE_URL);
-  const baseUrl = providerBase.baseUrl;
-  const prefix = normalizedProviderBasePath(baseUrl);
-  const pathnameSuffix = readProviderPathSuffix(input.url, baseUrl);
-  if (pathnameSuffix === null) {
+  const providerBase = readProviderBaseConfig(
+    input.env.WHATSAPP_API_BASE_URL,
+    DEFAULT_WHATSAPP_API_BASE_URL,
+    input.env,
+    { acceptFallbackBaseUrl: true },
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
     if (isKnownProviderHost(input.url, providerBase)) {
       return disallowedProviderEgress();
     }
     return null;
   }
+  const { pathnameSuffix } = pathMatch;
 
   if (
     input.request.method !== "POST"
@@ -437,7 +457,8 @@ async function maybeHandleWhatsAppRequest(input: {
     input.env.WHATSAPP_PHONE_NUMBER_ID,
     "WHATSAPP_PHONE_NUMBER_ID",
   );
-  const upstreamUrl = new URL(input.url);
+  const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
+  const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
   upstreamUrl.pathname = `${prefix}${pathnameSuffix.replace(
     "/__cloudflare_injected__/messages",
     `/${encodeURIComponent(phoneNumberId)}/messages`,
@@ -597,12 +618,21 @@ function disallowedProviderEgress(): Response {
   return new Response("Forbidden", { status: 403 });
 }
 
-function readProviderBaseConfig(value: unknown, fallback: string): ProviderBaseConfig {
+function readProviderBaseConfig(
+  value: unknown,
+  fallback: string,
+  env: RunnerOutboundEnvironmentSource,
+  options: {
+    acceptFallbackBaseUrl?: boolean;
+  } = {},
+): ProviderBaseConfig {
   const fallbackUrl = new URL(fallback);
-  const fallbackHosts = [fallbackUrl.hostname];
+  const fallbackBaseUrls = withContainerHostAlias(fallbackUrl, env);
+  const fallbackHosts = fallbackBaseUrls.map((url) => url.hostname);
   const rawValue = typeof value === "string" && value.trim() ? value.trim() : null;
   if (!rawValue) {
     return {
+      acceptedBaseUrls: fallbackBaseUrls,
       baseUrl: fallbackUrl,
       knownHosts: fallbackHosts,
     };
@@ -611,32 +641,72 @@ function readProviderBaseConfig(value: unknown, fallback: string): ProviderBaseC
   try {
     const url = new URL(rawValue);
     if (isAllowedProviderBaseUrl(url)) {
+      const acceptedBaseUrls = uniqueProviderBaseUrls(
+        ...withContainerHostAlias(url, env),
+        ...(options.acceptFallbackBaseUrl ? fallbackBaseUrls : []),
+      );
       return {
+        acceptedBaseUrls,
         baseUrl: url,
-        knownHosts: uniqueProviderHosts(url.hostname, fallbackUrl.hostname),
+        knownHosts: uniqueProviderHosts(
+          ...acceptedBaseUrls.map((accepted) => accepted.hostname),
+          fallbackUrl.hostname,
+        ),
       };
     }
     return {
+      acceptedBaseUrls: fallbackBaseUrls,
       baseUrl: fallbackUrl,
       knownHosts: uniqueProviderHosts(url.hostname, fallbackUrl.hostname),
     };
   } catch {
     return {
+      acceptedBaseUrls: fallbackBaseUrls,
       baseUrl: fallbackUrl,
       knownHosts: fallbackHosts,
     };
   }
 }
 
-function readProviderPathSuffix(url: URL, base: URL): string | null {
-  if (url.origin !== base.origin) {
-    return null;
+function uniqueProviderBaseUrls(...urls: URL[]): URL[] {
+  const seen = new Set<string>();
+  const unique: URL[] = [];
+
+  for (const url of urls) {
+    const key = url.origin + normalizedProviderBasePath(url);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(url);
   }
-  const prefix = normalizedProviderBasePath(base);
-  if (!url.pathname.startsWith(prefix)) {
-    return null;
+
+  return unique;
+}
+
+function readProviderPathMatch(url: URL, providerBase: ProviderBaseConfig): ProviderPathMatch | null {
+  for (const acceptedBaseUrl of providerBase.acceptedBaseUrls) {
+    if (url.origin !== acceptedBaseUrl.origin) {
+      continue;
+    }
+    const prefix = normalizedProviderBasePath(acceptedBaseUrl);
+    if (!url.pathname.startsWith(prefix)) {
+      continue;
+    }
+    return {
+      pathnameSuffix: url.pathname.slice(prefix.length),
+      upstreamBaseUrl: providerBase.baseUrl,
+    };
   }
-  return url.pathname.slice(prefix.length);
+  return null;
+}
+
+function createProviderUpstreamUrl(sourceUrl: URL, match: ProviderPathMatch): URL {
+  const upstreamUrl = new URL(match.upstreamBaseUrl.toString());
+  upstreamUrl.pathname = `${normalizedProviderBasePath(match.upstreamBaseUrl)}${match.pathnameSuffix}`;
+  upstreamUrl.search = sourceUrl.search;
+  upstreamUrl.hash = sourceUrl.hash;
+  return upstreamUrl;
 }
 
 function normalizedProviderBasePath(base: URL): string {
@@ -661,6 +731,31 @@ function isLocalOrTestProviderHost(hostname: string): boolean {
     || normalized === "host.docker.internal"
     || normalized.endsWith(".localhost")
     || normalized.endsWith(".test");
+}
+
+function withContainerHostAlias(baseUrl: URL, env: RunnerOutboundEnvironmentSource): URL[] {
+  const urls = [baseUrl];
+  const alias = readLocalProviderHostAlias(env);
+  if (!alias || !isLocalOrTestProviderHost(baseUrl.hostname)) {
+    return urls;
+  }
+
+  const aliasUrl = new URL(baseUrl.toString());
+  aliasUrl.hostname = alias;
+  if (aliasUrl.origin !== baseUrl.origin) {
+    urls.push(aliasUrl);
+  }
+  return urls;
+}
+
+function readLocalProviderHostAlias(env: RunnerOutboundEnvironmentSource): string | null {
+  const alias = typeof env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS === "string"
+    ? env.HOSTED_EXECUTION_RUNNER_HOST_ALIAS.trim()
+    : "";
+  if (!alias || !isLocalOrTestProviderHost(alias)) {
+    return null;
+  }
+  return alias;
 }
 
 function uniqueProviderHosts(...hosts: string[]): string[] {

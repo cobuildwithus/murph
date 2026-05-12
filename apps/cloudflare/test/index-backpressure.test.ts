@@ -105,6 +105,40 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("exposes idle-checkpoint lease methods on the user runner durable object", async () => {
+    const harness = createUserRunnerDurableObject();
+    await harness.durableObject.bindUser("member_123");
+
+    const lease = await harness.durableObject.beginIdleCheckpointLease({
+      userId: "member_123",
+      workspaceVersion: "7",
+    });
+
+    expect(lease).toMatchObject({
+      reason: "idle_shutdown_checkpoint",
+      userId: "member_123",
+      workspaceVersion: "7",
+    });
+    expect(lease).not.toBeNull();
+    if (!lease) {
+      throw new Error("Expected idle checkpoint lease.");
+    }
+
+    await expect(harness.durableObject.validateRuntimeWriteFence({
+      attemptId: lease.attemptId,
+      generation: lease.generation,
+      userId: "member_123",
+      workspaceVersion: "7",
+    })).resolves.toBe(true);
+
+    await expect(harness.durableObject.finishIdleCheckpointLease({
+      attemptId: lease.attemptId,
+      generation: lease.generation,
+      nextWakeAt: null,
+      userId: "member_123",
+    })).resolves.toEqual({ completed: true });
+  });
+
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
     const harness = createUserRunnerDurableObject({
       CF_VERSION_METADATA: {

@@ -368,7 +368,7 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects Mapbox access tokens only for allowed GET path families with a valid runtime write fence", async () => {
+  it("injects Mapbox access tokens only for allowed read-only GET path families without a runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -378,7 +378,6 @@ describe("hostedRunnerIntercept", () => {
         `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         {
           headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
             authorization: "Bearer user-supplied-mapbox-token",
             cookie: "session=user-supplied-cookie",
             "proxy-authorization": "Bearer user-supplied-proxy-token",
@@ -395,12 +394,7 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     const forwarded = readForwardedRequest(fetchMock);
     const forwardedUrl = new URL(forwarded.url);
     expect(forwardedUrl.origin).toBe("https://api.mapbox.com");
@@ -414,13 +408,13 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("rejects Mapbox token injection without a valid runtime write fence", async () => {
+  it("still requires the Mapbox sentinel before injecting the Worker token", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
       new Request(
-        `https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        "https://api.mapbox.com/directions/v5/mapbox/walking/1,2;3,4?access_token=user-token",
         {
           method: "GET",
         },
@@ -431,7 +425,7 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -478,6 +472,30 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Mapbox provider egress outside the explicit allowed path prefixes", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://api.mapbox.com/styles/v1/mapbox/streets-v12?access_token=${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        {
+          method: "GET",
+        },
+      ),
+      createInterceptEnv({
+        MAPBOX_ACCESS_TOKEN: "mapbox-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -893,6 +911,38 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
   });
 
+  it("treats the hosted-local container host alias as the configured provider origin", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://host.docker.internal:4011/bot__cloudflare_injected__/sendMessage", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
+        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4011",
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
   it("rejects invalid configured Telegram HTTP base hosts instead of passing them through", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -1010,8 +1060,8 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("rejects default Telegram provider host egress while a custom Telegram base is configured", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("maps default Telegram provider host egress to the configured upstream base", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -1028,9 +1078,15 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://telegram.example.test/bottelegram-worker-secret/sendMessage");
   });
 
   it("requires the active write fence before rewriting Telegram getFile", async () => {
@@ -1276,8 +1332,8 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects default WhatsApp provider host egress while a custom WhatsApp base is configured", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+  it("maps default WhatsApp provider host egress to the configured upstream base", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
@@ -1295,9 +1351,15 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.url).toBe("https://whatsapp.example.test/v25.0/phone_123/messages");
   });
 
   it("honors configured WhatsApp base URL pathname prefixes", async () => {
@@ -1377,6 +1439,7 @@ describe("hostedRunnerIntercept", () => {
 });
 
 function createInterceptEnv(input: {
+  HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
@@ -1396,6 +1459,7 @@ function createInterceptEnv(input: {
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     LINQ_API_BASE_URL: input.LINQ_API_BASE_URL,
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     MAPBOX_ACCESS_TOKEN: input.MAPBOX_ACCESS_TOKEN,

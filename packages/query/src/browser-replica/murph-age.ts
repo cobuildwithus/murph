@@ -10,7 +10,6 @@ import {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMurphAgeModelCardPolicy,
-  type MetricConfidence,
   type MetricPoint,
   type MetricSourceKind,
   type MurphAgeContextBundleAssessment,
@@ -238,10 +237,11 @@ function metricPointFromBrowserSelection(
 ): MetricPoint {
   const sourceKind = inferSourceKind(selection, row);
   const metricKey = selection.metricKey;
+  const value = selection.value ?? row?.value ?? null;
   const normalized = normalizeMetricValue({
     metricKey,
     unit: selection.unit ?? row?.unit ?? null,
-    value: selection.value ?? row?.value ?? 0,
+    value: value ?? 0,
   });
 
   return {
@@ -277,7 +277,7 @@ function metricPointFromBrowserSelection(
     statistic: row?.statistic ?? "value",
     textValue: null,
     unit: selection.unit ?? row?.unit ?? null,
-    value: selection.value ?? row?.value,
+    value,
   };
 }
 

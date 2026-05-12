@@ -78,7 +78,7 @@ const MODEL_CANDIDATE_DEFINITIONS = {
   age_sex_reference: {
     candidateRole: "reference",
     featureKeys: ["age", "female"],
-    hypothesis: "Age and sex reference model on the same MIDUS 2 denominator.",
+    hypothesis: "Age and sex reference model on the same cohort denominator.",
     hypothesisSource: "literature or mechanistic rationale",
   },
   r399_anchor_recalibrated: {
@@ -86,6 +86,12 @@ const MODEL_CANDIDATE_DEFINITIONS = {
     featureKeys: ["r399-logit"],
     hypothesis: "Frozen R399 transported to MIDUS with train-only intercept/slope recalibration.",
     hypothesisSource: "external-source feasibility need",
+  },
+  r399_plus_bmi_increment: {
+    candidateRole: "proposal",
+    featureKeys: ["r399-logit", "bmi"],
+    hypothesis: "Body-size residual signal may improve transport over the frozen R399 proxy anchor without introducing lab dependencies.",
+    hypothesisSource: "train/calibration diagnostic",
   },
   r399_plus_lab3_increment: {
     candidateRole: "proposal",
@@ -513,6 +519,7 @@ async function buildBenchmarkRows(input: {
 
     const r399Risk = scoreR399Risk({
       age,
+      config,
       r399Model: input.r399Model,
       sex,
       values,
@@ -545,6 +552,7 @@ function buildR399ProxyValues(input: {
 
 function scoreR399Risk(input: {
   age: number;
+  config: R399MidusCohortConfig;
   r399Model: MurphAgeRiskModel;
   sex: MurphAgeSex;
   values: Record<string, number | null>;
@@ -556,7 +564,7 @@ function scoreR399Risk(input: {
     points: R399_PROXY_FEATURE_KEYS
       .map((metricKey) => {
         const value = input.values[metricKey];
-        return value === null ? null : metricPoint(metricKey, value);
+        return value === null ? null : metricPoint(metricKey, value, input.config);
       })
       .filter((point): point is MetricPoint => point !== null),
     sex: input.sex,
@@ -815,7 +823,7 @@ async function readZippedTsvColumns(
   return rows;
 }
 
-function metricPoint(metricKey: string, value: number): MetricPoint {
+function metricPoint(metricKey: string, value: number, config: R399MidusCohortConfig): MetricPoint {
   const unit = metricKey === "bmi" ? "kg/m^2" : null;
   return {
     biomarkerKey: null,
@@ -831,11 +839,11 @@ function metricPoint(metricKey: string, value: number): MetricPoint {
       notes: [],
       provider: null,
       rawRefs: [],
-      sourceLabel: "MIDUS 2 local research adapter",
+      sourceLabel: config.metricPointSourceLabel,
     },
     effectiveDate: "2026-05-12",
     grain: "instant",
-    id: `metric-point:${metricKey}:midus2-local-research`,
+    id: `metric-point:${metricKey}:${config.cohortId}-local-research`,
     metricKey,
     observedAt: "2026-05-12T00:00:00.000Z",
     provenance: {
@@ -844,7 +852,7 @@ function metricPoint(metricKey: string, value: number): MetricPoint {
       labName: null,
       provider: null,
       rawRefs: [],
-      sourceLabel: "MIDUS 2 local research adapter",
+      sourceLabel: config.metricPointSourceLabel,
     },
     recordedAt: null,
     reportedAt: null,
@@ -852,8 +860,8 @@ function metricPoint(metricKey: string, value: number): MetricPoint {
     source: {
       family: "derived",
       kind: metricKey === "bmi" ? "measurement" : "survey-response",
-      path: "local://midus2-r399-adapter",
-      recordId: "midus2-local-research-row",
+      path: config.metricPointSourcePath,
+      recordId: config.metricPointRecordId,
       resultIndex: null,
     },
     statistic: "value",
@@ -1007,7 +1015,8 @@ function nullableMetricDelta(candidate: number | null, anchor: number | null): n
 }
 
 async function main(): Promise<void> {
-  const { output } = await runR399Midus2BiomarkerIncrement({
+  const { output, outputPath } = await runR399MidusBiomarkerIncrement({
+    cohortId: parseR399MidusCohortId(process.env.MURPH_AGE_MIDUS_COHORT),
     downloadsDir: process.env.MURPH_AGE_DOWNLOADS_DIR,
     outputDir: process.env.MURPH_AGE_RESEARCH_OUTPUT_DIR,
     r399ModelCardPath: process.env.MURPH_AGE_R399_MODEL_CARD_PATH,
@@ -1018,14 +1027,56 @@ async function main(): Promise<void> {
       featureCount: output.anchor.featureCount,
       modelId: output.anchor.modelId,
     },
-    artifact: OUTPUT_FILE_NAME,
+    artifact: path.basename(outputPath),
     benchmarkId: output.benchmarkId,
     candidateBatch: output.candidateBatch,
-    dataShape: output.dataShape,
+    dataShape: summarizeDataShapeForCli(output.dataShape),
     modelIds: Object.keys(output.models),
     schemaVersion: output.schemaVersion,
     status: output.status,
   }, null, 2)}\n`);
+}
+
+function summarizeDataShapeForCli(
+  dataShape: R399Midus2BiomarkerIncrementOutput["dataShape"],
+): {
+  eligibleRowsBand: string;
+  eventCountBand: string;
+  r399ProxyFeatureObservedCountBands: Record<typeof R399_PROXY_FEATURE_KEYS[number], string>;
+  splitCountBands: Record<Split, { eventCountBand: string; rowCountBand: string }>;
+} {
+  return {
+    eligibleRowsBand: countBand(dataShape.eligibleRows),
+    eventCountBand: countBand(dataShape.events),
+    r399ProxyFeatureObservedCountBands: Object.fromEntries(
+      Object.entries(dataShape.r399ProxyFeatureObservedCounts).map(([key, count]) => [key, countBand(count)]),
+    ) as Record<typeof R399_PROXY_FEATURE_KEYS[number], string>,
+    splitCountBands: Object.fromEntries(
+      Object.entries(dataShape.splitCounts).map(([split, counts]) => [
+        split,
+        {
+          eventCountBand: countBand(counts.events),
+          rowCountBand: countBand(counts.n),
+        },
+      ]),
+    ) as Record<Split, { eventCountBand: string; rowCountBand: string }>,
+  };
+}
+
+function countBand(count: number): string {
+  if (count <= 0) return "0";
+  if (count < 10) return "1-9";
+  if (count < 50) return "10-49";
+  if (count < 100) return "50-99";
+  if (count < 500) return "100-499";
+  if (count < 1000) return "500-999";
+  return "1000+";
+}
+
+function parseR399MidusCohortId(value: string | undefined): R399MidusCohortId | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  if (value === "midus2" || value === "midus-refresher") return value;
+  throw new Error(`Unsupported MIDUS cohort id: ${value}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

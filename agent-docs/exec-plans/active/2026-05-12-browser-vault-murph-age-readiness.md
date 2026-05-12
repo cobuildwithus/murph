@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose a browser-safe Murph Age readiness projection from the browser vault so the website can tell which lab, blood-pressure, body, and wearable inputs are present without scoring, promoting, or displaying a biological-age estimate.
+Expose a browser-safe Murph Age readiness projection from the browser vault for internal research plumbing only, so downstream code can tell which lab, blood-pressure, body, and wearable inputs are present without scoring, promoting, or displaying a biological-age estimate.
 
 ## Scope
 
@@ -13,6 +13,7 @@ Expose a browser-safe Murph Age readiness projection from the browser vault so t
 ## Non-Goals
 
 - No production Murph Age score display.
+- No website route, sidebar item, dashboard card, or user-facing Murph Age readiness surface until a later product authorization plan explicitly unlocks it.
 - No model promotion, recommendation claim, protocol claim, or causal/actionability claim.
 - No ReviewGPT call for local export/test plumbing.
 

@@ -1624,6 +1624,55 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the warm shell when an idle-shutdown checkpoint lease is busy", async () => {
+    const beginIdleCheckpointLease = vi.fn(async () => null);
+    const runnerStub = {
+      beginIdleCheckpointLease,
+    };
+    const { container, containerFetch, destroy } = createContainerDouble({
+      env: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => runnerStub),
+        },
+      },
+      initialStatus: "running",
+    });
+    const renewActivityTimeout = vi.fn();
+    const pendingIdleCheckpoint = {
+      checkpointNextWakeAt: null,
+      runtime: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+      workspaceVersion: "7",
+    };
+    Object.assign(container, {
+      pendingIdleCheckpoint,
+      renewActivityTimeout,
+    });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+
+    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
+      userId: "member_123",
+      workspaceVersion: "7",
+    });
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toBe(false);
+    expect((container as unknown as {
+      pendingIdleCheckpoint: typeof pendingIdleCheckpoint | null;
+    }).pendingIdleCheckpoint).toBe(pendingIdleCheckpoint);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        message: "Hosted execution container kept warm shell for deferred idle-shutdown checkpoint.",
+        phase: "container.ready",
+      }),
+    );
+  });
+
   it("waits for explicit destroy to resolve through the native container lifecycle", async () => {
     vi.useFakeTimers();
 

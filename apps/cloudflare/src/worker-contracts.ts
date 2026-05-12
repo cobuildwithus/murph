@@ -15,7 +15,7 @@ export interface WorkerUserRunnerStubLike {
     leaseGeneration: string;
     userId: string;
     workspaceVersion: string | null;
-  }>;
+  } | null>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
   finishIdleCheckpointLease?(input: {

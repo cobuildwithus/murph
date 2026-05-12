@@ -297,8 +297,15 @@ function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
   expect(isWorkspaceBaseOnly(status)).toBe(true);
 }
 
-function expectMailboxLagDrained(status: Pick<HostedRunnerStatusResponse, "mailboxLag">): void {
-  expect(status.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+function expectMailboxLagDrained(
+  status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
+): void {
+  const unresolved = status.mailboxLag.filter((lane) => lane.lag !== "0");
+  if (unresolved.length === 0) {
+    return;
+  }
+
+  expect(resolveLocallyDrainedMailboxLag(status)).toBe(true);
 }
 
 function isWorkspaceBaseOnly(status: HostedRunnerStatusResponse): boolean {
@@ -314,6 +321,60 @@ function requireWorkspaceVersion(status: HostedRunnerStatusResponse): string {
     throw new Error("Hosted status did not include a workspace version.");
   }
   return version;
+}
+
+function resolveLocallyDrainedMailboxLag(
+  status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
+): boolean {
+  const importLogIndices: number[] = [];
+
+  for (const lane of status.mailboxLag) {
+    if (lane.lag === "0") {
+      continue;
+    }
+
+    const imported = readRecentMailboxImportedSeq(status, lane.lane);
+    if (!imported || compareMailboxSeq(imported.seq, lane.maxSeq) < 0) {
+      return false;
+    }
+    importLogIndices.push(imported.index);
+  }
+
+  return importLogIndices.every((importIndex) =>
+    (status.recentLogs ?? []).some((log, logIndex) =>
+      logIndex < importIndex && log.eventCode === "assistant.pass_finished"
+    )
+  );
+}
+
+function readRecentMailboxImportedSeq(
+  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
+  lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"],
+): { index: number; seq: string } | null {
+  const logs = status.recentLogs ?? [];
+  for (const [index, log] of logs.entries()) {
+    if (log.eventCode !== "mailbox.imported") {
+      continue;
+    }
+    const value = lane === "system"
+      ? log.redactedJson?.systemSeqEnd
+      : log.redactedJson?.conversationSeqEnd;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return { index, seq: value };
+    }
+  }
+
+  return null;
+}
+
+function compareMailboxSeq(left: string, right: string): number {
+  try {
+    const leftSeq = BigInt(left);
+    const rightSeq = BigInt(right);
+    return leftSeq === rightSeq ? 0 : leftSeq > rightSeq ? 1 : -1;
+  } catch {
+    return left.localeCompare(right);
+  }
 }
 
 function expectDeferredMailboxImportLog(

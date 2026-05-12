@@ -147,6 +147,19 @@ interface RunnerPendingIdleCheckpoint {
   workspaceVersion: string;
 }
 
+type RunnerIdleCheckpointLeaseAttempt =
+  | {
+      attemptId: string;
+      generation: string;
+      status: "acquired";
+    }
+  | {
+      status: "busy";
+    }
+  | {
+      status: "unavailable";
+    };
+
 interface RunnerContainerUserRunnerStubLike {
   beginIdleCheckpointLease?(input: {
     userId: string;
@@ -156,7 +169,7 @@ interface RunnerContainerUserRunnerStubLike {
     generation: string;
     userId: string;
     workspaceVersion: string | null;
-  }>;
+  } | null>;
   finishIdleCheckpointLease?(input: {
     attemptId: string;
     generation: string;
@@ -164,6 +177,14 @@ interface RunnerContainerUserRunnerStubLike {
     userId: string;
   }): Promise<{ completed: boolean }>;
 }
+
+type RunnerContainerUserRunnerBeginLeaseStub =
+  RunnerContainerUserRunnerStubLike
+  & Required<Pick<RunnerContainerUserRunnerStubLike, "beginIdleCheckpointLease">>;
+
+type RunnerContainerUserRunnerFinishLeaseStub =
+  RunnerContainerUserRunnerStubLike
+  & Required<Pick<RunnerContainerUserRunnerStubLike, "finishIdleCheckpointLease">>;
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -335,9 +356,10 @@ export class RunnerContainer extends Container {
       }
 
       const pendingIdleCheckpoint = this.pendingIdleCheckpoint;
+      let cleanupWarmContainer = true;
       try {
         if (pendingIdleCheckpoint) {
-          await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
+          cleanupWarmContainer = await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
         }
       } catch (error) {
         this.pendingIdleCheckpoint = null;
@@ -350,6 +372,19 @@ export class RunnerContainer extends Container {
           userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
         });
       } finally {
+        if (!cleanupWarmContainer) {
+          this.noteRunnerActivity("activity-expired-idle-checkpoint-deferred");
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              lifecycleStage: "activity-expired-idle-checkpoint-deferred",
+            },
+            message: "Hosted execution container kept warm shell for deferred idle-shutdown checkpoint.",
+            phase: "container.ready",
+            userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
+          });
+          return;
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -612,41 +647,48 @@ export class RunnerContainer extends Container {
 
   private async runPendingIdleCheckpoint(
     pending: RunnerPendingIdleCheckpoint,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const warmContainerReady = await this.openWarmContainerIfReady({
       timeoutMs: pending.timeoutMs,
       userId: pending.userId,
     });
     if (!warmContainerReady) {
       this.pendingIdleCheckpoint = null;
-      return;
+      return true;
     }
 
-    let lease: {
-      attemptId: string;
-      generation: string;
-    } | null = null;
+    let leaseAttempt: RunnerIdleCheckpointLeaseAttempt;
     try {
-      lease = await this.beginIdleCheckpointLease(pending);
+      leaseAttempt = await this.beginIdleCheckpointLease(pending);
     } catch (error) {
-      this.pendingIdleCheckpoint = null;
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: {
-          ...buildRunnerContainerMetadataOnlyErrorDetails(error),
-        },
+        details: buildRunnerContainerLeaseErrorDetails(error),
         level: "warn",
         message: "Hosted execution container could not begin idle-shutdown checkpoint lease.",
         phase: "failed",
         userId: pending.userId,
       });
-      return;
+      return false;
     }
-    if (!lease) {
+    if (leaseAttempt.status === "busy") {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          lifecycleStage: "idle-checkpoint-lease-busy",
+        },
+        message: "Hosted execution container deferred idle-shutdown checkpoint because another write fence is active.",
+        phase: "scheduled",
+        userId: pending.userId,
+      });
+      return false;
+    }
+    if (leaseAttempt.status === "unavailable") {
       this.pendingIdleCheckpoint = null;
-      return;
+      return true;
     }
 
+    const lease = leaseAttempt;
     let nextWakeAt = pending.checkpointNextWakeAt;
     const idleAbortController = new AbortController();
     const activeOperation: RunnerActiveOperationRecord = {
@@ -719,6 +761,7 @@ export class RunnerContainer extends Container {
         });
       });
     }
+    return true;
   }
 
   private async postRunnerRequest(input: {
@@ -750,13 +793,11 @@ export class RunnerContainer extends Container {
     return assertHostedExecutionRunnerJobResult(await response.json(), input.job);
   }
 
-  private async beginIdleCheckpointLease(input: RunnerPendingIdleCheckpoint): Promise<{
-    attemptId: string;
-    generation: string;
-  } | null> {
+  private async beginIdleCheckpointLease(
+    input: RunnerPendingIdleCheckpoint,
+  ): Promise<RunnerIdleCheckpointLeaseAttempt> {
     const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
-    const beginIdleCheckpointLease = stub?.beginIdleCheckpointLease;
-    if (typeof beginIdleCheckpointLease !== "function") {
+    if (!hasBeginIdleCheckpointLease(stub)) {
       emitHostedExecutionStructuredLog({
         component: "container",
         level: "warn",
@@ -764,12 +805,20 @@ export class RunnerContainer extends Container {
         phase: "failed",
         userId: input.userId,
       });
-      return null;
+      return { status: "unavailable" };
     }
-    return await beginIdleCheckpointLease.call(stub, {
+    const lease = await stub.beginIdleCheckpointLease({
       userId: input.userId,
       workspaceVersion: input.workspaceVersion,
     });
+    if (!lease) {
+      return { status: "busy" };
+    }
+    return {
+      attemptId: lease.attemptId,
+      generation: lease.generation,
+      status: "acquired",
+    };
   }
 
   private async finishIdleCheckpointLease(input: {
@@ -779,11 +828,10 @@ export class RunnerContainer extends Container {
     userId: string;
   }): Promise<void> {
     const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
-    const finishIdleCheckpointLease = stub?.finishIdleCheckpointLease;
-    if (typeof finishIdleCheckpointLease !== "function") {
+    if (!hasFinishIdleCheckpointLease(stub)) {
       return;
     }
-    await finishIdleCheckpointLease.call(stub, input);
+    await stub.finishIdleCheckpointLease(input);
   }
 
   private async ensureContainerReady(
@@ -1524,6 +1572,18 @@ function readRunnerContainerUserRunnerStub(
   }).getByName(userId);
 }
 
+function hasBeginIdleCheckpointLease(
+  stub: RunnerContainerUserRunnerStubLike | null,
+): stub is RunnerContainerUserRunnerBeginLeaseStub {
+  return typeof stub?.beginIdleCheckpointLease === "function";
+}
+
+function hasFinishIdleCheckpointLease(
+  stub: RunnerContainerUserRunnerStubLike | null,
+): stub is RunnerContainerUserRunnerFinishLeaseStub {
+  return typeof stub?.finishIdleCheckpointLease === "function";
+}
+
 function emitRunnerContainerLifecycleFailure(input: {
   context: RunnerContainerLogContext | null;
   destroyLatencyMs: number | null;
@@ -1838,6 +1898,29 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function buildRunnerContainerLeaseErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  if (!diagnostics) {
+    return {};
+  }
+
+  return sanitizeHostedExecutionStructuredLogDetails({
+    ...buildRunnerContainerMetadataOnlyErrorDetails(error),
+    leaseErrorCausePreview: readHostedRunnerContainerDiagnosticFragment(
+      diagnostics.errorCause,
+      { redactEnvKeys: true },
+    ),
+    leaseErrorCodePreview: readHostedRunnerContainerDiagnosticFragment(
+      diagnostics.errorCodeDetail ?? diagnostics.errorCode,
+      { redactEnvKeys: false },
+    ),
+    leaseErrorDetailPreview: readHostedRunnerContainerDiagnosticFragment(
+      diagnostics.errorDetail,
+      { redactEnvKeys: true },
+    ),
+  }) ?? {};
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

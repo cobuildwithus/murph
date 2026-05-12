@@ -15,6 +15,7 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerChannelPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
   buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
@@ -469,9 +470,14 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       TELEGRAM_BOT_TOKEN: "user-telegram-token",
     };
     const forwardedEnv = buildHostedRunnerContainerEnv(configSource);
-    const platformEnv = buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
-      rewriteLoopbackUrlsForContainer: true,
-    });
+    const platformEnv = {
+      ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(configSource, {
+        rewriteLoopbackUrlsForContainer: true,
+      }),
+      ...buildHostedRunnerChannelPlatformEnv(configSource, {
+        rewriteLoopbackUrlsForContainer: true,
+      }),
+    };
 
     expect(buildHostedRunnerJobRuntimeConfig({
       configSource,
@@ -821,7 +827,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.platformEnv).toBeUndefined();
   });
 
-  it("does not serialize Telegram platform authority for container runtime", () => {
+  it("serializes Telegram platform authority as container-only sentinels", () => {
     const runtime = buildHostedRunnerJobRuntimeConfig({
       configSource: {
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
@@ -837,9 +843,13 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
     expect(runtime).toMatchObject({
       forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
+        TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
+      },
       userEnv: {},
     });
-    expect(runtime.platformEnv).toBeUndefined();
   });
 
   it("keeps Telegram platform env out of runner secrets even when operators try to allowlist it", () => {
@@ -864,9 +874,13 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
 
     expect(runtime).toMatchObject({
       forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
       userEnv: {},
     });
-    expect(runtime.platformEnv).toBeUndefined();
   });
 
   it("preserves an explicit resolved config override when the caller already computed semantics", () => {
@@ -889,6 +903,11 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: false,
@@ -922,7 +941,12 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
 
     expect(runtime.forwardedEnv).toEqual({});
-    expect(runtime.platformEnv).toBeUndefined();
+    expect(runtime.platformEnv).toEqual({
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    });
+    expect(runtime.userEnv?.TELEGRAM_BOT_TOKEN).toBeUndefined();
     expect(runtime.resolvedConfig).toBeDefined();
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
     expect(runtime.resolvedConfig?.deviceSync).toEqual({

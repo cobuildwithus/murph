@@ -165,7 +165,10 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(1);
+    expect(
+      assistantProviderRequests,
+      summarizeGroupedWebhookProviderRequests(assistantProviderRequests),
+    ).toHaveLength(1);
     expect(assistantProviderRequests[0]?.body).toContain("U can call me Comet Rider");
     expect(assistantProviderRequests[0]?.body).toContain(
       "I want to build more strength, improve endurance, and get fitter overall.",
@@ -521,6 +524,18 @@ function summarizeProviderImageRequestShape(
     inputItemCount: Array.isArray(body.input) ? body.input.length : null,
     inputTypes: collectJsonTypeFields(body).slice(0, 24),
   });
+}
+
+function summarizeGroupedWebhookProviderRequests(
+  requests: readonly { body: string; method: string; url: string }[],
+): string {
+  return JSON.stringify(requests.map((request) => ({
+    bodyBytes: Buffer.byteLength(request.body, "utf8"),
+    hasFirstWebhookText: request.body.includes("U can call me Comet Rider"),
+    hasSecondWebhookText: request.body.includes("I want to build more strength"),
+    method: request.method,
+    url: request.url,
+  })));
 }
 
 function collectJsonTypeFields(value: unknown): string[] {

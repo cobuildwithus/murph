@@ -30,6 +30,8 @@ The immediate research philosophy is: simple, calibrated, interpretable models f
 
 Murph Age currently has research anchors only. Nothing is product-facing, clinical, protocol, recommendation, or promotion-ready.
 
+Until a later product authorization review explicitly unlocks it, Murph Age must not appear on the website, in the dashboard sidebar, in dashboard cards, or as user-facing readiness/status copy. Local query projections and benchmark artifacts may support research plumbing, but product surfaces stay silent.
+
 Current live research anchor:
 
 - data source: official public NHIS linked-mortality lane
