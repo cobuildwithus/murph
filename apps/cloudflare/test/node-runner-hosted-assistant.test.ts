@@ -4,6 +4,9 @@ import {
   buildHostedRunnerContainerEnv,
   isHostedRunnerSecretKeyAllowed,
 } from "../src/hosted-env-policy.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-egress-intercept.ts";
 
 describe("hosted assistant runner env policy", () => {
   it("forwards hosted Codex seed vars and the OpenAI key", () => {
@@ -26,7 +29,7 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
-      OPENAI_API_KEY: "secret-value",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 

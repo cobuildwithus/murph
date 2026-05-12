@@ -34,8 +34,9 @@ Internal control routes:
 The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends child-runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the child container receives sentinel placeholder values for those keys. The Worker validates the runtime write fence for mutating provider calls, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
 
-Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` through Worker secrets or encrypted runner secrets.
+Root `pnpm dev` starts the same local Cloudflare container path and uses the image-owned `codex app-server` runtime with direct OpenAI configuration routed through the Worker intercept. There is no host Codex bridge for normal hosted-local execution: `MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN` and `MURPH_DEV_CODEX_APP_SERVER_PROXY_URL` are rejected by the Cloudflare runner env policy. Generated local env files are treated as secret material and must provide `HOSTED_ASSISTANT_PROVIDER=openai` plus the Worker-owned `OPENAI_API_KEY` secret; the raw key is not copied into the child container env.
 
 ## Storage Contract
 
@@ -108,9 +109,9 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` plus `OPENAI_API_KEY` for Codex hosted assistant execution through direct OpenAI; host Codex bridge/proxy env is not accepted
+- `HOSTED_ASSISTANT_PROVIDER=openai` plus Worker-owned `OPENAI_API_KEY` for Codex hosted assistant execution through the Worker egress intercept; host Codex bridge/proxy env is not accepted
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
-- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, and `MAPBOX_ACCESS_TOKEN`; native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
+- opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the child container by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
 
 When hosted email sender identity is configured, deploy automation renders an environment-specific native `HOSTED_EMAIL` send binding and constrains it with `allowed_sender_addresses` so outbound sender selection remains config-owned.
 

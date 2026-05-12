@@ -30,6 +30,9 @@ import {
 import {
   HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN_ENV,
 } from "../src/runner-native-parser-toolchain.ts";
+import {
+  HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+} from "../src/runner-egress-intercept.ts";
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
@@ -63,7 +66,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
-      MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      MAPBOX_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
@@ -93,7 +96,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SEND_READY: "true",
-      MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      MAPBOX_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       NODE_ENV: "production",
     });
   });
@@ -130,7 +133,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
-      OPENAI_API_KEY: "openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 
@@ -167,14 +170,14 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       NODE_ENV: "development",
-      OPENAI_API_KEY: "openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     })).toEqual({
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "development",
-      OPENAI_API_KEY: "openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 
@@ -203,13 +206,13 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
-      LINQ_API_TOKEN: "linq-token",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      LINQ_API_TOKEN: "linq-token",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       NODE_ENV: "production",
     });
   });
@@ -297,13 +300,13 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "fixture-openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "fixture-openai-key",
+      OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
   });
 
@@ -429,7 +432,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
       LINQ_API_BASE_URL: "http://localhost:4011",
-      LINQ_API_TOKEN: "linq-token",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
@@ -588,7 +591,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      LINQ_API_TOKEN: "linq-token",
+      LINQ_API_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       NODE_ENV: "production",
     });
     expect(buildHostedRunnerJobRuntimeConfig({

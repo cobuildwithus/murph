@@ -12,6 +12,9 @@ import {
 } from "@murphai/hosted-execution";
 import { methodNotAllowed } from "./json.ts";
 import {
+  hostedRunnerIntercept,
+} from "./runner-egress-intercept.ts";
+import {
   assertHostedExecutionRunnerJobResult,
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   parseHostedExecutionRunnerJobInput,
