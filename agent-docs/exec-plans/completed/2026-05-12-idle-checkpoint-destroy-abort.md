@@ -9,7 +9,7 @@ Success criteria:
 - Idle-shutdown checkpoint runner requests publish an abort controller through the same active-operation fields used by foreground invocations.
 - Runner request timeout handling still applies when no caller abort signal is supplied.
 - Explicit `destroyInstance()` aborts the in-progress idle checkpoint and then completes cleanup without waiting for the original runner timeout.
-- Focused regression coverage and hosted runner docs describe the destroy-preemption behavior.
+- Focused regression coverage and the hosted runtime protocol doc describe the destroy-preemption behavior.
 
 ## Constraints
 
@@ -30,9 +30,12 @@ Success criteria:
 Completed:
 
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-container.test.ts`
-- `git diff --check -- apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/README.md agent-docs/references/hosted-runtime-protocol.md agent-docs/exec-plans/active/2026-05-12-idle-checkpoint-destroy-abort.md`
+- `git diff --check -- apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-container.test.ts agent-docs/references/hosted-runtime-protocol.md agent-docs/exec-plans/active/2026-05-12-idle-checkpoint-destroy-abort.md`
 
 Blocked by unrelated existing failures:
 
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-container.test.ts agent-docs/exec-plans/active/2026-05-12-idle-checkpoint-hard-cut.md`
 - `pnpm typecheck`
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
