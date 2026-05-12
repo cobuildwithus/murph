@@ -169,12 +169,12 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   let activeHostedRunnerJobCount = 0;
-  let activeRuntimeWake: (() => void) | null = null;
+  let activeRuntimeWake: (() => boolean) | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
-    let runtimeWakeForRequest: (() => void) | null = null;
+    let runtimeWakeForRequest: (() => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
 
@@ -196,8 +196,7 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
-        if (wake) {
-          wake();
+        if (wake?.() === true) {
           response.setHeader("x-runtime-wake-accepted", "1");
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");
@@ -1142,7 +1141,7 @@ async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
@@ -1154,7 +1153,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {

@@ -431,6 +431,9 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     const ready = createDeferred();
     const release = createDeferred();
     const spawnedChild = createDeferred<MockChildProcess>();
+    const runtimeWakeRef: { current: (() => boolean) | null } = {
+      current: null,
+    };
 
     spawnMock.mockImplementation(() => {
       const child = createMockChildProcess(4250);
@@ -445,9 +448,10 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     const invocation = module.runHostedWorkspaceInvocationIsolatedDetailed({
       job: createWorkspaceJob("evt_child_runtime_wake"),
     }, {
-      onChildReadyForRuntimeWake(sendWake: () => void) {
+      onChildReadyForRuntimeWake(sendWake: () => boolean) {
+        runtimeWakeRef.current = sendWake;
         ready.resolve();
-        sendWake();
+        expect(sendWake()).toBe(true);
         release.resolve();
       },
     });
@@ -467,6 +471,13 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         type: "murph.hosted-execution.runner-child-runtime-wake.v1",
       }),
     );
+    activeChild.connected = false;
+    const runtimeWake = runtimeWakeRef.current;
+    if (runtimeWake === null) {
+      throw new Error("Expected runtime wake sink.");
+    }
+    expect(runtimeWake()).toBe(false);
+    expect((activeChild.send as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
     await release.promise;
   });
 

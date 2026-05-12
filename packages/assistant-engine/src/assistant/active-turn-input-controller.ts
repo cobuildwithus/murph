@@ -115,6 +115,12 @@ class AssistantActiveTurnInputController {
       return Promise.resolve(undefined)
     }
 
+    return this.pollInputAvailable(input)
+  }
+
+  private pollInputAvailable(input?: {
+    signal?: AbortSignal
+  }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     return this.admitAvailableInput({
       phase: 'input_available',
       signal: input?.signal,
@@ -167,7 +173,10 @@ class AssistantActiveTurnInputController {
     return (await this.admitPending()) ?? hookAdmission
   }
 
-  async admitAvailable(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+  async admitAvailable(input?: {
+    pollIfIdle?: boolean
+    signal?: AbortSignal
+  }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     this.throwFatalAdmissionError()
     const queuedAdmission = await this.admitPending()
     if (queuedAdmission?.kind === 'accepted') {
@@ -175,6 +184,12 @@ class AssistantActiveTurnInputController {
     }
 
     await this.waitForInputAvailableAdmission()
+    const notifiedAdmission = await this.admitPending()
+    if (notifiedAdmission?.kind === 'accepted' || input?.pollIfIdle !== true) {
+      return notifiedAdmission
+    }
+
+    await this.pollInputAvailable({ signal: input.signal })
     return await this.admitPending()
   }
 
@@ -460,7 +475,10 @@ export function createAssistantActiveTurnInputController(input: {
   admit(input: AssistantActiveTurnInputAdmissionInput): Promise<
     AssistantActiveTurnInputAdmissionResult | undefined
   >
-  admitAvailable(): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
+  admitAvailable(input?: {
+    pollIfIdle?: boolean
+    signal?: AbortSignal
+  }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
@@ -486,7 +504,7 @@ export function createAssistantActiveTurnInputController(input: {
 
   return {
     admit: (admissionInput) => controller.admit(admissionInput),
-    admitAvailable: () => controller.admitAvailable(),
+    admitAvailable: (input) => controller.admitAvailable(input),
     close() {
       controller.close()
       for (const key of keys) {
@@ -649,6 +667,10 @@ function mergeAssistantActiveTurnInputAdmissions(
       second.deliveryReplyToMessageId === undefined
         ? first.deliveryReplyToMessageId
         : second.deliveryReplyToMessageId,
+    deliveryIdempotencyKey:
+      second.deliveryIdempotencyKey === undefined
+        ? first.deliveryIdempotencyKey
+        : second.deliveryIdempotencyKey,
     kind: 'accepted',
     prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
     ...(first.providerAlreadySteered === true && second.providerAlreadySteered === true

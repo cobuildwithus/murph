@@ -362,8 +362,15 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
         },
       }
     })
-  const activeTurnInput = vi.fn()
-    .mockResolvedValueOnce({
+  let acceptedLateFollowUp = false
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async (input) => {
+    if (input.phase !== 'request_boundary' || acceptedLateFollowUp) {
+      return {
+        kind: 'no-new-input' as const,
+      }
+    }
+    acceptedLateFollowUp = true
+    return {
       acceptedInputs: [
         {
           id: 'late-follow-up',
@@ -378,10 +385,8 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
         captureIds: 'capture-1,capture-2',
       },
       transcriptText: 'Late follow up',
-    })
-    .mockResolvedValue({
-      kind: 'no-new-input' as const,
-    })
+    }
+  })
   const activeTurnCheckpoint = vi.fn(
     async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
   )
@@ -625,8 +630,15 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
         },
       },
     }))
-  const activeTurnInput = vi.fn()
-    .mockResolvedValueOnce({
+  let acceptedLateFollowUp = false
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async (input) => {
+    if (input.phase !== 'request_boundary' || acceptedLateFollowUp) {
+      return {
+        kind: 'no-new-input' as const,
+      }
+    }
+    acceptedLateFollowUp = true
+    return {
       acceptedInputs: [
         {
           id: 'late-follow-up',
@@ -639,10 +651,8 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
       prompt: 'Late follow up',
       receiptMetadata: {},
       transcriptText: 'Late follow up',
-    })
-    .mockResolvedValue({
-      kind: 'no-new-input' as const,
-    })
+    }
+  })
 
   await sendAssistantMessageLocal({
     activeTurnInput,
@@ -831,8 +841,15 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
       }
     })
 
-  const activeTurnInput = vi.fn()
-    .mockResolvedValueOnce({
+  let acceptedLateFollowUp = false
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async (input) => {
+    if (input.phase !== 'request_boundary' || acceptedLateFollowUp) {
+      return {
+        kind: 'no-new-input' as const,
+      }
+    }
+    acceptedLateFollowUp = true
+    return {
       acceptedInputs: [
         {
           id: 'late-follow-up',
@@ -847,10 +864,8 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
         captureIds: 'capture-1,capture-2',
       },
       transcriptText: 'Late follow up',
-    })
-    .mockResolvedValue({
-      kind: 'no-new-input' as const,
-    })
+    }
+  })
   const activeTurnCheckpoint = vi.fn(async () => {
     if (!checkpointObserved) {
       checkpointObserved = true
@@ -2649,6 +2664,118 @@ test('active-turn controller can rely on input-available notifications instead o
   }
 })
 
+test('active-turn controller can poll store-backed input before provider execution', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const admissions: string[] = []
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      admissions.push(input.phase)
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-polled',
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: 'Polled hook input',
+            source: 'assistant-input',
+          },
+        ],
+        kind: 'accepted',
+        prompt: 'Polled hook input',
+        transcriptText: 'Polled hook transcript',
+      }
+    },
+    boundaryAdmissionEnabled: false,
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    eventAdmissionEnabled: false,
+    livePollEnabled: false,
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    assert.deepEqual(await controller.admitAvailable({ pollIfIdle: true }), {
+      acceptedInputs: [
+        {
+          id: 'hook-polled',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Polled hook input',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Polled hook input',
+      transcriptText: 'Polled hook transcript',
+    })
+    assert.deepEqual(admissions, ['input_available'])
+  } finally {
+    controller.close()
+  }
+})
+
+test('active-turn controller preserves delivery idempotency across merged admissions', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  let ordinal = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => {
+      ordinal += 1
+      return {
+        acceptedInputs: [
+          {
+            id: `hook-${ordinal}`,
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: `Hook input ${ordinal}`,
+            source: 'assistant-input',
+          },
+        ],
+        deliveryIdempotencyKey: `idem-${ordinal}`,
+        kind: 'accepted',
+        prompt: `Hook input ${ordinal}`,
+        transcriptText: `Hook transcript ${ordinal}`,
+      }
+    },
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    await controller.notifyInputAvailable()
+    await controller.notifyInputAvailable()
+
+    assert.deepEqual(await controller.admitAvailable(), {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook input 1',
+          source: 'assistant-input',
+        },
+        {
+          id: 'hook-2',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook input 2',
+          source: 'assistant-input',
+        },
+      ],
+      deliveryReplyToMessageId: undefined,
+      deliveryIdempotencyKey: 'idem-2',
+      kind: 'accepted',
+      prompt: 'Hook input 1\n\nHook input 2',
+      receiptMetadata: undefined,
+      transcriptText: 'Hook transcript 1\n\nHook transcript 2',
+      userMessageContent: undefined,
+    })
+  } finally {
+    controller.close()
+  }
+})
+
 test('sendAssistantMessageLocal closes steering at commit barrier without empty checkpoint', async () => {
   const session = createAssistantSession({
     binding: {
@@ -2666,7 +2793,7 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
   })
   const commitStarted = createDeferred<void>()
   const commitRelease = createDeferred<void>()
-  const activeTurnInput = vi.fn(async () => ({
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
     kind: 'no-new-input' as const,
   }))
   const activeTurnCheckpoint = vi.fn(
@@ -2758,7 +2885,11 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
   commitRelease.resolve()
   const firstResult = await firstResultPromise
   assert.equal(firstResult.response, 'first response')
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
+  assert.deepEqual(
+    activeTurnInput.mock.calls.map((call) => call[0]?.phase),
+    ['input_available', 'request_boundary', 'commit_barrier'],
+  )
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 })
 
@@ -2789,10 +2920,10 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
   })
 
   assert.equal(result.response, 'assistant response')
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
   assert.deepEqual(
     activeTurnInput.mock.calls.map((call) => call[0]?.phase),
-    ['request_boundary', 'commit_barrier'],
+    ['input_available', 'request_boundary', 'commit_barrier'],
   )
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)

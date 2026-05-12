@@ -1426,6 +1426,105 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground runtime wake retryable blocks schedule the next mailbox wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let fetchCount = 0;
+    const sidecarItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_late_sidecar_retry",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_entrypoint_late_sidecar_retry",
+    });
+
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchCount += 1;
+        events.push(`mailbox.fetch:${fetchCount}`);
+        return {
+          fetchedAt: TEST_NOW,
+          items: fetchCount === 1 ? [] : [sidecarItem],
+          maxSeqByLane: request.lanes.map((lane) => ({
+            lane: lane.lane,
+            maxSeq: fetchCount === 1 ? lane.importedSeq : "1",
+          })),
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        events.push("mailbox.fetchPayload");
+        return {
+          fetchedAt: TEST_NOW,
+          payload: null,
+          unavailable: {
+            code: "not_found",
+            retryable: true,
+          },
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Foreground runtime wake import should not build checkpoint snapshots.");
+        },
+        async importItem() {
+          throw new Error("Retryable sidecar block must not import the item.");
+        },
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          runtimeWakeSignal.notify();
+          await waitUntil(() => {
+            assert.equal(events.includes("mailbox.fetchPayload"), true);
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+      });
+
+      const mailboxRetryWakeAt = result.nextWakeAt;
+      assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch:1",
+        "mailbox.fetch:2",
+        "mailbox.fetchPayload",
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(result, {
+        nextWakeAt: mailboxRetryWakeAt,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 1,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 1,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxNextRetryAtPresent: true,
+          hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "scheduled",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("fails closed when workspace read returns a stale version before mailbox fetch", async () => {
     const events: string[] = [];
 

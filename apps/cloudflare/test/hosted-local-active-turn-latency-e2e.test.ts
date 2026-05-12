@@ -63,13 +63,13 @@ describe("hosted local active-turn latency e2e", () => {
         `${[
           "Hosted active-turn latency probe:",
           `latency=${Math.round(result.webhookToFirstReplyMs)}ms`,
-          `lateInputFolded=${String(result.lateInputFolded)}`,
+          `lateInputHandled=${String(result.lateInputHandled)}`,
           `providerRequests=${result.providerRequestCount}`,
         ].join(" ")}\n`,
       );
 
-      expect(result.lateInputFolded).toBe(true);
-      expect(result.providerRequestCount).toBe(1);
+      expect(result.lateInputHandled).toBe(true);
+      expect(result.outboundReplyCount).toBe(1);
       expect(result.webhookToFirstReplyMs).toBeGreaterThanOrEqual(0);
     } finally {
       await database.cleanup();
@@ -80,7 +80,8 @@ describe("hosted local active-turn latency e2e", () => {
 async function runActiveTurnLatencyProbe(input: {
   localDatabaseUrl: string;
 }): Promise<{
-  lateInputFolded: boolean;
+  lateInputHandled: boolean;
+  outboundReplyCount: number;
   providerRequestCount: number;
   webhookToFirstReplyMs: number;
 }> {
@@ -160,15 +161,18 @@ async function runActiveTurnLatencyProbe(input: {
       timeoutMs: 420_000,
     });
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    const outboundReplyCount =
+      requireLinqStub().countObservedSends(replyPath) - baselineSendCount;
 
     const providerRequests = requireScenario().assistantProviderRequests.slice(
       baselineProviderRequestCount,
     );
-    const firstProviderRequestBody = providerRequests[0]?.body ?? "";
-    expect(firstProviderRequestBody).toContain(firstText);
+    const providerRequestBodies = providerRequests.map((request) => request.body);
+    expect(providerRequestBodies.some((body) => body.includes(firstText))).toBe(true);
 
     return {
-      lateInputFolded: firstProviderRequestBody.includes(lateText),
+      lateInputHandled: providerRequestBodies.some((body) => body.includes(lateText)),
+      outboundReplyCount,
       providerRequestCount: providerRequests.length,
       webhookToFirstReplyMs,
     };

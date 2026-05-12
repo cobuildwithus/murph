@@ -316,6 +316,7 @@ describe("startHostedContainerEntrypoint", () => {
       async (_job, options) => {
         options?.onChildReadyForRuntimeWake?.(() => {
           runtimeWakeCount += 1;
+          return true;
         });
         childReady.resolve();
         await releaseInvocation.promise;
@@ -369,6 +370,60 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runtimeWakeCount).toBe(2);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mark runtime wakes accepted when the ready child cannot receive IPC", async () => {
+    const childReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    let childCanReceiveWake = false;
+    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onChildReadyForRuntimeWake?.(() => childCanReceiveWake);
+        childReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_disconnected",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await childReady.promise;
+
+    const rejectedWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    childCanReceiveWake = true;
+    const acceptedWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    expect(rejectedWake.status).toBe(204);
+    expect(rejectedWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(acceptedWake.status).toBe(204);
+    expect(acceptedWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(invocationResponse.status).toBe(200);
   });
 
   it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {

@@ -48,21 +48,21 @@ const hostedRunnerWarmLauncherRoots = new Map<string, string>();
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export async function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
-    onChildReadyForRuntimeWake?: (sendWake: () => void) => void;
+    onChildReadyForRuntimeWake?: (sendWake: () => boolean) => void;
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
@@ -408,7 +408,7 @@ interface HostedRunnerChildExitDiagnostics {
 function createHostedRunnerChildResultState(
   child: ChildProcess,
   input: {
-    onRuntimeWakeReady?: ((sendWake: () => void) => void) | null;
+    onRuntimeWakeReady?: ((sendWake: () => boolean) => void) | null;
   } = {},
 ): HostedRunnerChildResultState {
   const state: HostedRunnerChildResultState = {
@@ -424,12 +424,13 @@ function createHostedRunnerChildResultState(
           runtimeWakeReady = true;
           input.onRuntimeWakeReady?.(() => {
             if (!child.connected || child.killed) {
-              return;
+              return false;
             }
             try {
-              child.send(createHostedExecutionRunnerChildRuntimeWakeMessage());
+              return child.send(createHostedExecutionRunnerChildRuntimeWakeMessage()) !== false;
             } catch {
               // Best-effort wake only; durable runner wake state remains pending.
+              return false;
             }
           });
         }
