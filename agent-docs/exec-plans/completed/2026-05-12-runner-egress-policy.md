@@ -28,5 +28,11 @@ Success criteria:
 
 ## Verification
 
-- Pending: focused runner egress tests.
-- Pending: Cloudflare app verification or truthful narrower lane.
+- Passed: `pnpm --dir apps/cloudflare test:node -- runner-egress-intercept.test.ts runner-container.test.ts`
+- Passed: `pnpm --dir apps/cloudflare verify`
+- Passed: `git diff --check`
+- Security/privacy review found passthrough path logging risk; fixed by removing arbitrary outbound path and duplicate details user id from the open-internet passthrough log.
+- Final review reported no findings.
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12

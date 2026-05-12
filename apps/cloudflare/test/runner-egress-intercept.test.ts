@@ -1,5 +1,19 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 import {
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
@@ -43,6 +57,7 @@ const BOUND_USER_WRITE_FENCE_HEADERS = {
 } as const;
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -489,12 +504,12 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("strips runtime authority headers from unclassified passthrough egress", async () => {
+  it("strips runtime authority headers and sensitive path metadata from open-internet passthrough egress", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://unexpected.example.test/path", {
+      new Request("https://unexpected.example.test/path/member_123/private-token", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
         method: "POST",
       }),
@@ -504,11 +519,22 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://unexpected.example.test/path");
+    expect(forwarded.url).toBe("https://unexpected.example.test/path/member_123/private-token");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          host: "unexpected.example.test",
+          method: "POST",
+          policy: "open_internet_passthrough",
+        },
+        message: "Hosted runner open-internet passthrough forwarded outbound request.",
+        userId: "member_123",
+      }),
+    );
   });
 
   it("requires the active write fence before injecting Linq credentials for sends", async () => {

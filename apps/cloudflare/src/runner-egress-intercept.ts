@@ -140,9 +140,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     details: {
       host: url.hostname,
       method: request.method,
-      path: url.pathname,
       policy: "open_internet_passthrough",
-      userId: userId ?? null,
     },
     level: "warn",
     message: "Hosted runner open-internet passthrough forwarded outbound request.",

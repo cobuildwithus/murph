@@ -8,13 +8,65 @@ interface TestContainerContext {
   storage: TestContainerStorage;
 }
 
+interface TestContainerProxyContext {
+  props: {
+    className: string;
+    containerId: string;
+    enableInternet?: boolean;
+  };
+}
+
+export interface OutboundHandlerContext {
+  className: string;
+  containerId: string;
+  params?: unknown;
+}
+
+export type OutboundHandler = (
+  request: Request,
+  env: Record<string, unknown>,
+  ctx: OutboundHandlerContext,
+) => Promise<Response> | Response;
+
+const outboundByHostRegistry = new Map<string, Record<string, OutboundHandler>>();
+const outboundHandlersRegistry = new Map<string, Record<string, OutboundHandler>>();
+const defaultOutboundHandlerNameRegistry = new Map<string, string>();
+
 export class Container {
+  static get outboundByHost(): Record<string, OutboundHandler> | undefined {
+    return outboundByHostRegistry.get(this.name);
+  }
+
+  static set outboundByHost(handlers: Record<string, OutboundHandler>) {
+    outboundByHostRegistry.set(this.name, handlers);
+  }
+
+  static get outbound(): OutboundHandler | undefined {
+    const name = defaultOutboundHandlerNameRegistry.get(this.name);
+    if (!name) {
+      return undefined;
+    }
+    return outboundHandlersRegistry.get(this.name)?.[name];
+  }
+
+  static set outbound(handler: OutboundHandler) {
+    const name = "__outbound__";
+    outboundHandlersRegistry.set(this.name, {
+      ...(outboundHandlersRegistry.get(this.name) ?? {}),
+      [name]: handler,
+    });
+    defaultOutboundHandlerNameRegistry.set(this.name, name);
+  }
+
   readonly ctx: TestContainerContext;
   defaultPort?: number;
+  enableInternet = true;
   requiredPorts?: number[];
   envVars: Record<string, string> = {};
   entrypoint?: string[];
+  interceptHttps = false;
   pingEndpoint = "ping";
+  sleepAfter: string | number = "10m";
 
   constructor(ctx?: { storage?: TestContainerStorage }) {
     this.ctx = {
@@ -44,6 +96,36 @@ export class Container {
   }
 
   async startAndWaitForPorts(..._args: unknown[]): Promise<void> {}
+}
+
+export class ContainerProxy {
+  readonly ctx: TestContainerProxyContext;
+  readonly env: Record<string, unknown>;
+
+  constructor(ctx: TestContainerProxyContext, env: Record<string, unknown> = {}) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const props = this.ctx.props;
+    const handler = outboundByHostRegistry.get(props.className)?.[url.hostname]
+      ?? readDefaultOutboundHandler(props.className);
+
+    if (handler) {
+      return await handler(request, this.env, {
+        className: props.className,
+        containerId: props.containerId,
+      });
+    }
+
+    if (props.enableInternet) {
+      return await fetch(request);
+    }
+
+    return new Response(null, { status: 403 });
+  }
 }
 
 
@@ -79,4 +161,12 @@ function createMemoryStorage(): TestContainerStorage {
       values.set(key, value);
     },
   };
+}
+
+function readDefaultOutboundHandler(className: string): OutboundHandler | undefined {
+  const name = defaultOutboundHandlerNameRegistry.get(className);
+  if (!name) {
+    return undefined;
+  }
+  return outboundHandlersRegistry.get(className)?.[name];
 }
