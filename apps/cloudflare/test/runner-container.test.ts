@@ -758,45 +758,160 @@ describe("RunnerContainer", () => {
     )).toBe(true);
   });
 
-  it("does not publish an active invocation abort controller during cold start", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const startGate = createDeferred<void>();
-      let status: "running" | "stopped" = "stopped";
-      const getState = vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
-      }));
-      const destroy = vi.fn(async () => {});
-      const startAndWaitForPorts = vi.fn(async () => {
-        await startGate.promise;
-        status = "running";
+  it("aborts explicit destroy while a workspace invocation is cold-starting", async () => {
+    const startAbortSignal = createDeferred<AbortSignal>();
+    const startAborted = createDeferred<void>();
+    let status: "running" | "stopped" = "stopped";
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const startAndWaitForPorts = vi.fn(async (options?: {
+      cancellationOptions?: {
+        abort?: unknown;
+      };
+    }) => {
+      status = "running";
+      const signal = options?.cancellationOptions?.abort;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected cold start to receive an abort signal.");
+      }
+      startAbortSignal.resolve(signal);
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          startAborted.resolve();
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("workspace invocation cold start aborted"));
+        }, { once: true });
       });
-      const { container } = createContainerDouble({
-        destroy,
-        getState,
-        startAndWaitForPorts,
-      });
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      getState,
+      startAndWaitForPorts,
+    });
 
-      const invokeResultPromise = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_destroy_during_cold_start"),
+    const invokeResultPromise = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_destroy_during_cold_start"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    const signal = await startAbortSignal.promise;
+    expect(signal.aborted).toBe(false);
+
+    const destroyPromise = container.destroyInstance();
+    await startAborted.promise;
+
+    await expect(invokeResultPromise).resolves.toMatchObject({
+      message: "workspace invocation container destroyed",
+    });
+    await expect(destroyPromise).resolves.toBeUndefined();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("destroys a cold shell when post-start health fails", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({ error: "not ready" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+
+      return new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
-        timeoutMs: 30_000,
-        userId: "member_123",
-      }).catch((error: unknown) => error);
+        status: 200,
+      });
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+    });
 
-      await vi.waitFor(() => expect(startAndWaitForPorts).toHaveBeenCalledTimes(1));
-      await expect(container.destroyInstance()).resolves.toBeUndefined();
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_cold_health_failure"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
 
-      startGate.resolve();
-      await expect(invokeResultPromise).resolves.toEqual(createRunnerResult());
-      expect(destroy).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toBe(false);
+  });
+
+  it("aborts a preempted workspace invocation while cold-starting", async () => {
+    const startAbortSignal = createDeferred<AbortSignal>();
+    let status: "running" | "stopped" = "stopped";
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const startAndWaitForPorts = vi.fn(async (options?: {
+      cancellationOptions?: {
+        abort?: unknown;
+      };
+    }) => {
+      status = "running";
+      const signal = options?.cancellationOptions?.abort;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected cold start to receive an abort signal.");
+      }
+      startAbortSignal.resolve(signal);
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("workspace invocation cold start aborted"));
+        }, { once: true });
+      });
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      getState,
+      startAndWaitForPorts,
+    });
+    const request = createRunnerRequest("evt_preempt_during_cold_start");
+
+    const invokeResultPromise = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    const signal = await startAbortSignal.promise;
+    expect(signal.aborted).toBe(false);
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    await expect(invokeResultPromise).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("uses the remaining caller timeout budget when a warm-shell health check fails", async () => {

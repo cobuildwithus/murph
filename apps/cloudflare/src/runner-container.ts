@@ -175,7 +175,10 @@ export class RunnerContainer extends Container {
   async destroyInstance(): Promise<void> {
     this.pendingIdleCheckpoint = null;
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    await this.stopWarmContainer();
+    await this.withLifecycleLock(async () => {
+      this.pendingIdleCheckpoint = null;
+      await this.stopWarmContainer();
+    });
   }
 
   async abortWorkspaceInvocation(input: { attemptId: string; userId: string }): Promise<void> {
@@ -360,6 +363,8 @@ export class RunnerContainer extends Container {
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
+    this.workspaceInvocationAbortController = operationAbortController;
+    this.workspaceInvocationActiveOperation = activeOperation;
 
     try {
       const startTime = Date.now();
@@ -380,15 +385,13 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: routeUserId,
       });
-      await this.ensureContainerReady(input);
+      await this.ensureContainerReady(input, operationAbortController.signal);
       cleanupWarmContainerOnFailure = true;
       this.noteRunnerActivity("container-ready");
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       activeOperationAcquired = true;
-      this.workspaceInvocationAbortController = operationAbortController;
-      this.workspaceInvocationActiveOperation = activeOperation;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
@@ -696,6 +699,7 @@ export class RunnerContainer extends Container {
 
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
+    operationAbortSignal: AbortSignal,
   ): Promise<true> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -703,7 +707,11 @@ export class RunnerContainer extends Container {
 
     if (!isRunnerContainerStopped(status)) {
       try {
-        await assertRunnerHealthy(this, Math.min(input.timeoutMs, readyTimeoutMs));
+        await assertRunnerHealthy(
+          this,
+          Math.min(input.timeoutMs, readyTimeoutMs),
+          operationAbortSignal,
+        );
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -735,6 +743,7 @@ export class RunnerContainer extends Container {
         await this.stopWarmContainer();
       }
     }
+    throwIfRunnerContainerOperationAborted(operationAbortSignal);
 
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -759,13 +768,16 @@ export class RunnerContainer extends Container {
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
-          abort: AbortSignal.timeout(readinessTimeoutMs),
+          abort: combineRunnerContainerAbortSignals(
+            operationAbortSignal,
+            AbortSignal.timeout(readinessTimeoutMs),
+          ),
           instanceGetTimeoutMS: readinessTimeoutMs,
           portReadyTimeoutMS: readinessTimeoutMs,
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
-      await assertRunnerHealthy(this, readinessTimeoutMs);
+      await assertRunnerHealthy(this, readinessTimeoutMs, operationAbortSignal);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -783,6 +795,7 @@ export class RunnerContainer extends Container {
         phase: "container.starting",
         userId: input.userId,
       });
+      await this.stopWarmContainer({ failClosed: false }).catch(() => undefined);
       throw error;
     }
 
@@ -1178,6 +1191,9 @@ function combineRunnerContainerAbortSignals(
 ): AbortSignal {
   if (first.aborted) {
     return first;
+  }
+  if (second.aborted) {
+    return second;
   }
 
   const controller = new AbortController();
@@ -1592,12 +1608,16 @@ function readTimeoutMs(value: unknown, fallback: number): number {
 async function assertRunnerHealthy(
   container: RunnerContainer,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const response = await container.containerFetch(
     RUNNER_HEALTH_URL,
     {
       method: "GET",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal
+        ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
+        : timeoutSignal,
     },
   );
 
