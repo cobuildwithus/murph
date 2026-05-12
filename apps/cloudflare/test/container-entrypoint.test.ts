@@ -396,6 +396,10 @@ describe("startHostedContainerEntrypoint", () => {
     const originalSecret = process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK;
     const originalCaCert = process.env.CODEX_CA_CERTIFICATE;
     const originalSslCertFile = process.env.SSL_CERT_FILE;
+    const originalAllProxy = process.env.ALL_PROXY;
+    const originalHttpProxy = process.env.HTTP_PROXY;
+    const originalHttpsProxy = process.env.HTTPS_PROXY;
+    const originalNoProxy = process.env.NO_PROXY;
     const root = await mkdtemp(path.join(tmpdir(), "hosted-container-codex-smoke-test-"));
     const binDir = path.join(root, "bin");
     const capturePath = path.join(root, "env.json");
@@ -409,14 +413,18 @@ describe("startHostedContainerEntrypoint", () => {
           "#!/usr/bin/env node",
           "const fs = require('node:fs');",
           `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
+          "  ALL_PROXY: process.env.ALL_PROXY,",
           "  CODEX_CA_CERTIFICATE: process.env.CODEX_CA_CERTIFICATE,",
           "  CODEX_HOME: process.env.CODEX_HOME,",
           "  CODEX_CONFIG: fs.readFileSync(`${process.env.CODEX_HOME}/config.toml`, 'utf8'),",
           "  HOME: process.env.HOME,",
+          "  HTTP_PROXY: process.env.HTTP_PROXY,",
+          "  HTTPS_PROXY: process.env.HTTPS_PROXY,",
           "  MURPH_HOSTED_CODEX_BOUND_USER_ID: process.env.MURPH_HOSTED_CODEX_BOUND_USER_ID,",
           "  MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: process.env.MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID,",
           "  MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: process.env.MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION,",
           "  MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: process.env.MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION,",
+          "  NO_PROXY: process.env.NO_PROXY,",
           "  NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,",
           "  OPENAI_API_KEY: process.env.OPENAI_API_KEY,",
           "  REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE,",
@@ -435,6 +443,10 @@ describe("startHostedContainerEntrypoint", () => {
       process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK = "do-not-forward";
       process.env.CODEX_CA_CERTIFICATE = "/managed-container/cloudflare-ca.pem";
       process.env.SSL_CERT_FILE = "/managed-container/ssl-cert-file.pem";
+      process.env.ALL_PROXY = "http://cloudflare-local-all-proxy.example.test:8080";
+      process.env.HTTP_PROXY = "http://cloudflare-local-proxy.example.test:8080";
+      process.env.HTTPS_PROXY = "http://cloudflare-local-proxy.example.test:8080";
+      process.env.NO_PROXY = "localhost,127.0.0.1,host.docker.internal";
 
       const server = await startHostedContainerEntrypoint({ port: 0 });
       servers.push(server);
@@ -466,11 +478,15 @@ describe("startHostedContainerEntrypoint", () => {
       });
       const captured = JSON.parse(await readFile(capturePath, "utf8")) as Record<string, unknown>;
       expect(captured).toMatchObject({
+        ALL_PROXY: "http://cloudflare-local-all-proxy.example.test:8080",
         CODEX_CA_CERTIFICATE: "/managed-container/cloudflare-ca.pem",
+        HTTP_PROXY: "http://cloudflare-local-proxy.example.test:8080",
+        HTTPS_PROXY: "http://cloudflare-local-proxy.example.test:8080",
         MURPH_HOSTED_CODEX_BOUND_USER_ID: "member_smoke",
         MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID: "attempt_smoke",
         MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION: "17",
         MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
+        NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
         OPENAI_API_KEY: "__cloudflare_injected__",
         SSL_CERT_FILE: "/managed-container/ssl-cert-file.pem",
       });
@@ -517,6 +533,26 @@ describe("startHostedContainerEntrypoint", () => {
         delete process.env.SSL_CERT_FILE;
       } else {
         process.env.SSL_CERT_FILE = originalSslCertFile;
+      }
+      if (originalAllProxy === undefined) {
+        delete process.env.ALL_PROXY;
+      } else {
+        process.env.ALL_PROXY = originalAllProxy;
+      }
+      if (originalHttpProxy === undefined) {
+        delete process.env.HTTP_PROXY;
+      } else {
+        process.env.HTTP_PROXY = originalHttpProxy;
+      }
+      if (originalHttpsProxy === undefined) {
+        delete process.env.HTTPS_PROXY;
+      } else {
+        process.env.HTTPS_PROXY = originalHttpsProxy;
+      }
+      if (originalNoProxy === undefined) {
+        delete process.env.NO_PROXY;
+      } else {
+        process.env.NO_PROXY = originalNoProxy;
       }
       await rm(root, { force: true, recursive: true });
     }

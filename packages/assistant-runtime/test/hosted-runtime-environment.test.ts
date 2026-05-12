@@ -223,7 +223,9 @@ test("hosted runtime child env does not project typed parser toolchain into proc
       CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       HOME: "/ambient/home",
+      HTTP_PROXY: "http://ambient-proxy.example.test:8080",
       NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+      NO_PROXY: "api.openai.com",
       PATH: "/usr/bin:/bin",
       REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       WHISPER_COMMAND: "/ambient/whisper-cli",
@@ -237,19 +239,31 @@ test("hosted runtime child env does not project typed parser toolchain into proc
       MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
       NODE_ENV: "production",
       OPENAI_API_KEY: "worker-openai-secret",
+      HTTP_PROXY: "http://forwarded-proxy.example.test:8080",
+      HTTPS_PROXY: "http://forwarded-proxy.example.test:8080",
       WHISPER_COMMAND: "/stale/whisper-cli",
       WHISPER_MODEL_PATH: "/stale/model.bin",
+    },
+    platformTransportEnv: {
+      ALL_PROXY: "http://platform-all-proxy.example.test:8080",
+      HTTP_PROXY: "http://platform-proxy.example.test:8080",
+      HTTPS_PROXY: "http://platform-proxy.example.test:8080",
+      NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
     },
   });
 
   assert.deepEqual(childEnv, {
+    ALL_PROXY: "http://platform-all-proxy.example.test:8080",
     CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
+    HTTP_PROXY: "http://platform-proxy.example.test:8080",
+    HTTPS_PROXY: "http://platform-proxy.example.test:8080",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS: "1",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_FILE: "/tmp/checkpoint-debug.json",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG: "1",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT: "20000",
     MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW: "1",
+    NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
     NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     NODE_ENV: "production",
     PATH: "/usr/bin:/bin",
@@ -279,6 +293,20 @@ test("hosted runtime child env omits parser path env when no typed toolchain is 
     {
       NODE_ENV: "production",
     },
+  );
+});
+
+test("hosted runtime child env omits ambient proxy env unless platform transport is supplied", () => {
+  assert.deepEqual(
+    projectHostedRuntimeToChildEnv({
+      ambientEnv: {
+        HTTP_PROXY: "http://ambient-proxy.example.test:8080",
+        HTTPS_PROXY: "http://ambient-proxy.example.test:8080",
+        NO_PROXY: "api.openai.com",
+      },
+      forwardedEnv: {},
+    }),
+    {},
   );
 });
 

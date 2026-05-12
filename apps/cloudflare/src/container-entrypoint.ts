@@ -726,12 +726,16 @@ function buildHostedContainerOpenAiInterceptSmokeProcessEnv(input: {
     TMPDIR: input.workspaceRoot,
   };
 
+  copyOptionalHostedContainerSmokeEnv(env, "ALL_PROXY");
   copyOptionalHostedContainerSmokeEnv(env, "CI");
   copyOptionalHostedContainerSmokeEnv(env, "COLORTERM");
   copyOptionalHostedContainerSmokeEnv(env, "FORCE_COLOR");
+  copyOptionalHostedContainerSmokeEnv(env, "HTTP_PROXY");
+  copyOptionalHostedContainerSmokeEnv(env, "HTTPS_PROXY");
   copyOptionalHostedContainerSmokeEnv(env, "LANG");
   copyOptionalHostedContainerSmokeEnv(env, "LC_ALL");
   copyOptionalHostedContainerSmokeEnv(env, "LC_CTYPE");
+  copyOptionalHostedContainerSmokeEnv(env, "NO_PROXY");
   copyOptionalHostedContainerSmokeEnv(env, "NO_COLOR");
   copyOptionalHostedContainerSmokeEnv(env, "SSL_CERT_DIR");
   copyOptionalHostedContainerSmokeEnv(env, "TERM");
