@@ -143,6 +143,10 @@ Device sync has user OAuth tokens, hosted/local sync state, and provider client 
 
 This can eventually fit the same intercept model, but it is not just “inject env variables.” User OAuth tokens are per-user credentials, not platform env vars. Defer device sync until the delivery/model/map APIs are clean.
 
+### 9. HTTPS interception needs explicit runtime CA trust env
+
+Cloudflare creates the interception CA at runtime, not build time. The container supervisor should set `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to the Cloudflare Containers CA path so Node, Python requests, and curl-based tooling have an explicit trust pointer. The isolated child launcher must preserve those CA env vars while continuing to block user runner-secret overrides for process trust configuration.
+
 ## Final migration guide
 
 ### Phase 0 — Define the one primitive

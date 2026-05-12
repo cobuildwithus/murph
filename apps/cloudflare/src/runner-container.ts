@@ -35,6 +35,8 @@ const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
+const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
+  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
@@ -146,7 +148,10 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   enableInternet = true;
   envVars = {
+    CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+    NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
     PORT: String(RUNNER_PORT),
+    REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
   };
   interceptHttps = true;
   requiredPorts = [RUNNER_PORT];

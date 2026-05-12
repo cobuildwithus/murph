@@ -26,6 +26,14 @@ import {
 } from "../src/runner-container.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
+const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
+  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const EXPECTED_RUNNER_CONTAINER_ENV = {
+  CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  PORT: "8080",
+  REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+} as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -88,9 +96,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(destroy).not.toHaveBeenCalled();
 
-    expect(container.envVars).toEqual({
-      PORT: "8080",
-    });
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
@@ -143,9 +149,7 @@ describe("RunnerContainer", () => {
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(containerFetch).toHaveBeenCalledTimes(1);
-    expect(container.envVars).toEqual({
-      PORT: "8080",
-    });
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -187,9 +191,7 @@ describe("RunnerContainer", () => {
     });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(container.envVars).toEqual({
-      PORT: "8080",
-    });
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(container.envVars).not.toHaveProperty("HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK");
     expect(container.envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
   });

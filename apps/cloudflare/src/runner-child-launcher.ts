@@ -8,11 +8,13 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 const HOSTED_RUNNER_CHILD_AMBIENT_ENV_KEYS = [
+  "CURL_CA_BUNDLE",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
   "NODE_EXTRA_CA_CERTS",
   "PATH",
+  "REQUESTS_CA_BUNDLE",
   "SSL_CERT_DIR",
   "SSL_CERT_FILE",
   "TZ",

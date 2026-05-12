@@ -12,8 +12,12 @@ import {
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  createAssistantUsageReportingUserId,
+} from "@murphai/hosted-execution/assistant-usage";
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../runtime-mailbox-payload-decode-contract.ts";
@@ -85,6 +89,12 @@ export async function handleRunnerWebControlRequest(input: {
     body = input.request.method === "POST"
       ? await readOptionalHostedRunnerWebControlBody(input.request)
       : undefined;
+    body = augmentHostedRunnerWebControlBody({
+      body,
+      env: input.env,
+      path: input.url.pathname,
+      userId: input.userId,
+    });
   } catch (error) {
     if (error instanceof RangeError) {
       return jsonError("Request body too large.", 413);
@@ -130,9 +140,68 @@ export async function handleRunnerWebControlRequest(input: {
   return response;
 }
 
+function augmentHostedRunnerWebControlBody(input: {
+  body: string | undefined;
+  env: RunnerOutboundEnvironmentSource;
+  path: string;
+  userId: string;
+}): string | undefined {
+  if (
+    input.body === undefined
+    || input.path !== HOSTED_RUNTIME_USAGE_RECORD_PATH
+  ) {
+    return input.body;
+  }
+
+  const reportingUserId = createAssistantUsageReportingUserId({
+    memberId: input.userId,
+    reportingSecret: readRunnerStringEnv(input.env, "HOSTED_AI_USAGE_REPORTING_SECRET"),
+  });
+  if (!reportingUserId) {
+    return input.body;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(input.body);
+  } catch {
+    return input.body;
+  }
+  if (!isHostedRunnerRecord(payload)) {
+    return input.body;
+  }
+
+  return JSON.stringify({
+    ...payload,
+    usage: {
+      ...payload.usage,
+      reportingUserId,
+    },
+  });
+}
+
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {
   const bodyText = await readRequestBodyText(request, {
     limitBytes: HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES,
   });
   return bodyText.length > 0 ? bodyText : undefined;
+}
+
+function isHostedRunnerRecord(value: unknown): value is {
+  usage: Record<string, unknown>;
+} {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as { usage?: unknown }).usage === "object"
+    && (value as { usage?: unknown }).usage !== null
+    && !Array.isArray((value as { usage?: unknown }).usage);
+}
+
+function readRunnerStringEnv(
+  env: RunnerOutboundEnvironmentSource,
+  key: string,
+): string | null {
+  const value = env[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }

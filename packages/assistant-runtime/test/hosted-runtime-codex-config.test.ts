@@ -1032,6 +1032,39 @@ test("hosted runtime launch env policy does not forward local Codex bridge confi
   );
 });
 
+test("hosted runtime launch env policy does not forward non-provider platform secrets", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      "HOSTED_AI_USAGE_REPORTING_SECRET",
+    ),
+    false,
+  );
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      "HOSTED_LOG_FINGERPRINT_SECRET",
+    ),
+    false,
+  );
+  assert.equal(HOSTED_RUNTIME_ENV_KEY_NAMES.includes("HOSTED_AI_USAGE_REPORTING_SECRET"), false);
+  assert.equal(HOSTED_RUNTIME_ENV_KEY_NAMES.includes("HOSTED_LOG_FINGERPRINT_SECRET"), false);
+  assert.deepEqual(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_AI_USAGE_REPORTING_SECRET: "usage-secret",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-secret",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    }),
+    {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    },
+  );
+});
+
 test("hosted runtime launch env policy forwards the test-only model provider base URL override", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(

@@ -20,6 +20,9 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  createAssistantUsageReportingUserId,
+} from "@murphai/hosted-execution/assistant-usage";
+import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -44,14 +47,8 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_LINQ_CHAT_ACTION_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_DELETE_MESSAGES_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH,
-  HOSTED_EXECUTION_RUNNER_LINQ_SEND_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
-  HOSTED_EXECUTION_RUNNER_TELEGRAM_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_WHATSAPP_SEND_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
   asWorkerStringEnvironment,
@@ -473,6 +470,59 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("adds hosted usage reporting attribution inside the Worker web-control proxy", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const usage = {
+      memberId: "member_123",
+      provider: "codex-cli",
+      reportingUserId: "musr_child_controlled",
+      schema: "murph.assistant-usage.v1",
+      usageId: "turn_123.attempt-1",
+    };
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
+        body: JSON.stringify({ usage }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the usage web-control fetch to run.");
+    }
+    const [, init] = firstCall;
+    expect(init?.body).toBe(JSON.stringify({
+      usage: {
+        ...usage,
+        reportingUserId: createAssistantUsageReportingUserId({
+          memberId: "member_123",
+          reportingSecret: "usage-reporting-secret",
+        }),
+      },
+    }));
+  });
 
   it("rejects oversized allowlisted hosted web-control bodies before proxying", async () => {
     const fetchMock = vi.fn();
@@ -1029,15 +1079,15 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("rejects provider effect requests without active lease headers", async () => {
+  it("rejects Telegram file effect requests without active lease headers", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         body: JSON.stringify({
-          chatId: "linq_chat_123",
+          fileId: "telegram_file_123",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1064,7 +1114,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects provider effects when the live invocation lease is stale", async () => {
+  it("rejects Telegram file effects when the live invocation lease is stale", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => false);
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const getByName = vi.fn(() => ({
@@ -1079,15 +1129,15 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         body: JSON.stringify({
-          chatId: "linq_chat_123",
+          fileId: "telegram_file_123",
         }),
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        LINQ_API_TOKEN: "linq-token",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
         USER_RUNNER: {
           getByName,
         },
@@ -1107,7 +1157,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects provider effects when the workspace version does not match the write fence", async () => {
+  it("rejects Telegram file effects when the workspace version does not match the write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       activeWorkspaceVersion: "5",
     });
@@ -1119,15 +1169,15 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_LINQ_MARK_READ_PATH}`, {
+      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH}`, {
         body: JSON.stringify({
-          chatId: "linq_chat_123",
+          fileId: "telegram_file_123",
         }),
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        LINQ_API_TOKEN: "linq-token",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
         USER_RUNNER: {
           getByName: runner.getByName,
         },
