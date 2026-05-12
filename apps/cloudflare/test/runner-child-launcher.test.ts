@@ -40,6 +40,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   const launcherDirectories = createLauncherDirectories("/tmp/hosted-runner");
   const env = createHostedRunnerChildProcessEnv({
     ambientEnv: {
+      CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
       FFMPEG_COMMAND: "/usr/bin/ffmpeg",
       FILE_COMMAND: "/usr/bin/file",
@@ -77,6 +78,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   });
 
   assert.deepEqual(env, {
+    CODEX_CA_CERTIFICATE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     CURL_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     HF_HOME: launcherDirectories.huggingFaceRoot,
     HOME: launcherDirectories.homeRoot,
