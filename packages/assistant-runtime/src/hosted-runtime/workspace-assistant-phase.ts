@@ -32,6 +32,7 @@ import {
   resolveHostedAssistantOutboxNextWakeAt,
 } from "./callbacks.ts";
 import {
+  buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
@@ -1237,7 +1238,10 @@ async function drainHostedPostCheckpointDelivery(input: {
       checkpoint: input.providerCleanup.checkpoint ?? {
         nextWakeAt: null,
       },
-      env: input.input.runtimeEnv,
+      env: buildHostedLinqChannelEnv({
+        forwardedEnv: input.input.runtime.forwardedEnv,
+        userEnv: input.input.runtime.userEnv,
+      }) as NodeJS.ProcessEnv,
       fetchImplementation: input.input.runtime.platform.providerFetch ?? undefined,
       signal: input.input.signal ?? null,
       vaultRoot: input.input.restored.vaultRoot,

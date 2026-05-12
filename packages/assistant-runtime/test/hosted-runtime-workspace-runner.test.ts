@@ -670,27 +670,44 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       providerThreadId: string;
       target: string;
     }>();
-    const sendLinq: NonNullable<HostedRuntimeEffectsPort["sendLinq"]> = vi.fn(
-      async (request) => {
-        transportRequests.push({ idempotencyKey: request.idempotencyKey ?? null });
-        if (!request.idempotencyKey) {
-          throw new Error("Expected Linq fast dispatch to carry an idempotency key.");
-        }
-        const idempotencyKey = request.idempotencyKey;
-        assert.equal(idempotencyKey, "assistant-outbox:crash-window-linq");
-        const existing = externalMessages.get(idempotencyKey);
-        if (existing) {
-          return existing;
-        }
-        const created = {
-          providerMessageId: `provider_synthetic_linq_${externalMessages.size + 1}`,
-          providerThreadId: "thread_synthetic_linq_crash_window",
-          target: "thread_synthetic_linq_crash_window",
+    const providerFetch = vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        message?: {
+          idempotency_key?: string;
         };
-        externalMessages.set(idempotencyKey, created);
-        return created;
-      },
-    );
+      };
+      const idempotencyKey = body.message?.idempotency_key ?? null;
+      transportRequests.push({ idempotencyKey });
+      if (!idempotencyKey) {
+        throw new Error("Expected Linq fast dispatch to carry an idempotency key.");
+      }
+      assert.equal(idempotencyKey, "assistant-outbox:crash-window-linq");
+      const existing = externalMessages.get(idempotencyKey);
+      if (existing) {
+        return Response.json({
+          chat: {
+            id: existing.providerThreadId,
+            message: {
+              id: existing.providerMessageId,
+            },
+          },
+        });
+      }
+      const created = {
+        providerMessageId: `provider_synthetic_linq_${externalMessages.size + 1}`,
+        providerThreadId: "thread_synthetic_linq_crash_window",
+        target: "thread_synthetic_linq_crash_window",
+      };
+      externalMessages.set(idempotencyKey, created);
+      return Response.json({
+        chat: {
+          id: created.providerThreadId,
+          message: {
+            id: created.providerMessageId,
+          },
+        },
+      });
+    });
 
     try {
       await initializeVault({
@@ -726,7 +743,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await runFastDispatchCrashWindowAttempt({
         checkpointRequests,
         effectObservations,
-        sendLinq,
+        providerFetch,
         vaultRoot: attemptVaultRoot,
       });
 
@@ -3134,6 +3151,7 @@ function createPlatform(input: {
   effectsPort?: Partial<HostedRuntimeEffectsPort>;
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort;
+  providerFetch?: typeof fetch;
   usageRecordPort?: HostedRuntimeUsageRecordPort;
   workspacePort: HostedRuntimeWorkspacePort;
 }) {
@@ -3169,6 +3187,7 @@ function createPlatform(input: {
         }
       : {}),
     mailboxPort: input.mailboxPort,
+    ...(input.providerFetch ? { providerFetch: input.providerFetch } : {}),
     ...(input.usageRecordPort ? { usageRecordPort: input.usageRecordPort } : {}),
     workspacePort: input.workspacePort,
   };
@@ -3381,7 +3400,7 @@ async function runActiveTurnRefreshSummaryScenario(input: {
 async function runFastDispatchCrashWindowAttempt(input: {
   checkpointRequests: HostedWorkspaceCheckpointRequest[];
   effectObservations: Array<{ effectId: string; idempotencyKey: string | null }>;
-  sendLinq: NonNullable<HostedRuntimeEffectsPort["sendLinq"]>;
+  providerFetch: typeof fetch;
   vaultRoot: string;
 }) {
   const { mailboxPort } = createMailboxPort({ items: [] });
@@ -3401,10 +3420,8 @@ async function runFastDispatchCrashWindowAttempt(input: {
     initialMailboxImport: createCheckpointedMailboxImportResult(),
     limitPerLane: 10,
     platform: createPlatform({
-      effectsPort: {
-        sendLinq: input.sendLinq,
-      },
       mailboxPort,
+      providerFetch: input.providerFetch,
       workspacePort: createWorkspacePort({
         checkpointRequests: input.checkpointRequests,
       }),
@@ -3433,8 +3450,12 @@ async function runFastDispatchCrashWindowAttempt(input: {
         allowPreparedSending: true,
         assistantDeliveryEffects: effects,
         effectsPort: phaseInput.platform.effectsPort,
-        forwardedEnv: {},
+        forwardedEnv: {
+          LINQ_API_BASE_URL: "https://linq.example",
+          LINQ_API_TOKEN: "test-linq-token",
+        },
         platformEnv: {},
+        providerFetch: phaseInput.platform.providerFetch ?? null,
         vaultRoot: input.vaultRoot,
         wake: createRunnerConversationWake(),
       });

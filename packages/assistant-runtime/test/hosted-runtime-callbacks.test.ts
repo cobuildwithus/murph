@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
+  sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
 
@@ -48,6 +49,7 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.resetAssistantOutboxPreparedDispatchById,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
+  sendWhatsAppMessage: mocks.sendWhatsAppMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
 
@@ -1098,117 +1100,6 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("prefers effectsPort.sendTelegram for hosted Telegram deliveries", async () => {
-    const effect = createEffect();
-    const sendTelegram = vi.fn(async () => ({
-      providerMessageId: "provider_effect_123",
-      target: "chat_123",
-    }));
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      const delivery = await dependencies.sendTelegram({
-        idempotencyKey: "assistant-outbox:intent_123",
-        message: "hello from hosted",
-        replyToMessageId: null,
-        target: "chat_123",
-      });
-
-      return createDispatchResult({
-        delivery: createDelivery({
-          providerMessageId: delivery.providerMessageId,
-          target: delivery.target,
-        }),
-        status: "sent",
-      });
-    });
-
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: [effect],
-      wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({
-        sendTelegram,
-      }),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
-
-    expect(sendTelegram).toHaveBeenCalledWith({
-      idempotencyKey: "assistant-outbox:intent_123",
-      message: "hello from hosted",
-      replyToMessageId: null,
-      target: "chat_123",
-    });
-    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryChannel: "telegram",
-        deliveryStatus: "sent",
-      }),
-    ]);
-  });
-
-  it("injects effectsPort.sendLinq for hosted Linq deliveries", async () => {
-    const effect = createEffect({
-      bindingDeliveryKind: "thread",
-      bindingDeliveryTarget: "linq_chat_123",
-      channel: "linq",
-      explicitTarget: "linq_chat_123",
-      transportIdempotent: true,
-    });
-    const sendLinq = vi.fn(async () => ({
-      providerMessageId: "linq_message_123",
-      providerThreadId: "linq_chat_123",
-      target: "linq_chat_123",
-      targetKind: "thread" as const,
-    }));
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      const delivery = await dependencies.sendLinq({
-        directRecipientPhoneNumber: "+15550001",
-        fromPhoneNumber: null,
-        idempotencyKey: "assistant-outbox:intent_123",
-        message: "hello from hosted",
-        replyToMessageId: null,
-        target: "linq_chat_123",
-        targetKind: "thread",
-      });
-
-      return createDispatchResult({
-        delivery: createDelivery({
-          channel: "linq",
-          providerMessageId: delivery.providerMessageId,
-          providerThreadId: delivery.providerThreadId,
-          target: delivery.target,
-          targetKind: delivery.targetKind,
-        }),
-        status: "sent",
-      });
-    });
-
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: [effect],
-      wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({
-        sendLinq,
-      }),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
-
-    expect(sendLinq).toHaveBeenCalledWith({
-      directRecipientPhoneNumber: "+15550001",
-      fromPhoneNumber: null,
-      idempotencyKey: "assistant-outbox:intent_123",
-      message: "hello from hosted",
-      replyToMessageId: null,
-      target: "linq_chat_123",
-      targetKind: "thread",
-    });
-    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryChannel: "linq",
-        deliveryStatus: "sent",
-      }),
-    ]);
-  });
-
   it("uses providerFetch for hosted Linq deliveries when the runtime can intercept egress", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_direct_provider_fetch",
@@ -1238,12 +1129,6 @@ describe("hosted runtime callbacks", () => {
     });
     const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
       status: 204,
-    }));
-    const sendLinq = vi.fn(async () => ({
-      providerMessageId: "legacy_linq_message",
-      providerThreadId: "legacy_linq_thread",
-      target: "legacy_linq_thread",
-      targetKind: "thread" as const,
     }));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -1277,14 +1162,11 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({
-        sendLinq,
-      }),
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(sendLinq).not.toHaveBeenCalled();
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
@@ -1318,6 +1200,83 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("routes WhatsApp deliveries through the shared WhatsApp runtime with platform env and provider fetch", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "whatsapp_thread_123",
+      channel: "whatsapp",
+      explicitTarget: "whatsapp_thread_123",
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 204,
+    }));
+    mocks.sendWhatsAppMessage.mockResolvedValueOnce({
+      providerMessageId: "whatsapp_message_123",
+      providerThreadId: "whatsapp_thread_123",
+      target: "whatsapp_thread_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendWhatsApp({
+        message: "hello from hosted",
+        replyToMessageId: "whatsapp_inbound_123",
+        target: "whatsapp_thread_123",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "whatsapp",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        WHATSAPP_ACCESS_TOKEN: "forwarded-whatsapp-token",
+      },
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
+        WHATSAPP_GRAPH_VERSION: "v20.0",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
+      },
+      providerFetch,
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.sendWhatsAppMessage).toHaveBeenCalledWith({
+      message: "hello from hosted",
+      replyToMessageId: "whatsapp_inbound_123",
+      target: "whatsapp_thread_123",
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
+        WHATSAPP_GRAPH_VERSION: "v20.0",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "whatsapp",
+        deliveryStatus: "sent",
+        providerMessageId: "whatsapp_message_123",
+        providerThreadId: "whatsapp_thread_123",
+        target: "whatsapp_thread_123",
+      }),
+    ]);
+  });
+
   it("attaches same-wake Linq direct recipient context without checkpointing it", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_123",
@@ -1345,12 +1304,12 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_123",
       transportIdempotent: true,
     });
-    const sendLinq = vi.fn(async () => ({
+    mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_123",
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "thread" as const,
-    }));
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -1377,21 +1336,22 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({
-        sendLinq,
-      }),
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
-    expect(sendLinq).toHaveBeenCalledWith({
-      directRecipientPhoneNumber: "+15550001",
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
       replyToMessageId: "linq_message_inbound_123",
       target: "linq_chat_123",
       targetKind: "thread",
+    }, {
+      env: {},
+      fetchImplementation: undefined,
+      signal: undefined,
     });
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -1428,12 +1388,12 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "ain_hashed_thread",
       transportIdempotent: true,
     });
-    const sendLinq = vi.fn(async () => ({
+    mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_materialized",
       target: "linq_chat_materialized",
-      targetKind: "thread" as const,
-    }));
+      targetKind: "participant" as const,
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -1460,22 +1420,23 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub({
-        sendLinq,
-      }),
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
-    expect(sendLinq).toHaveBeenCalledWith({
-      directRecipientPhoneNumber: "+15550001",
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
-      target: "ain_hashed_thread",
-      targetKind: "thread",
+      target: "+15550001",
+      targetKind: "participant",
+    }, {
+      env: {},
+      fetchImplementation: undefined,
+      signal: undefined,
     });
     expect(outcomes).toEqual([
       expect.objectContaining({
