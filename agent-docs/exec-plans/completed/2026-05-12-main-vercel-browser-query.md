@@ -22,3 +22,6 @@ Fix the current `main` production gate failures: the Vercel build failure caused
 
 - Done: `pnpm --dir apps/web build` passed locally after the browser entrypoint split.
 - Pending: focused assistant-runtime hosted Codex config test.
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12
