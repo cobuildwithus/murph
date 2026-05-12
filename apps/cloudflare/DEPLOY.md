@@ -293,7 +293,7 @@ The GitHub-hosted production deploy job downloads that immediate handoff only fo
 - `GET /`
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint
-- if `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` is also configured, the managed-container smoke runs a Codex CLI `responses` request from inside the Cloudflare container with `OPENAI_API_KEY=__cloudflare_injected__`, proving the container trusts Cloudflare's HTTPS-interception CA and the Worker injects the real OpenAI secret before upstream egress
+- if `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` is also configured, the managed-container smoke mints a short-lived write fence for `HOSTED_EXECUTION_SMOKE_USER_ID`, then runs a Codex CLI `responses` request from inside the Cloudflare container with `OPENAI_API_KEY=__cloudflare_injected__`, proving the container trusts Cloudflare's HTTPS-interception CA and the Worker injects the real OpenAI secret only under runtime authority
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 Optional smoke env:
@@ -302,7 +302,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_USER_ID` to enable the authenticated status check
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
-- `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` to extend the managed-container smoke with the real Codex/OpenAI HTTPS-intercept probe; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` and a deployed Worker `OPENAI_API_KEY` secret
+- `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` to extend the managed-container smoke with the real Codex/OpenAI HTTPS-intercept probe; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, `HOSTED_EXECUTION_SMOKE_USER_ID`, status auth for that user, and a deployed Worker `OPENAI_API_KEY` secret
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 

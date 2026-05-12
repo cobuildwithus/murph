@@ -188,7 +188,15 @@ describe("RunnerContainer", () => {
       }),
     });
 
-    const result = await container.smokeHealth({ openAiIntercept: true });
+    const result = await container.smokeHealth({
+      openAiIntercept: true,
+      openAiInterceptAuthority: {
+        attemptId: "attempt_smoke",
+        leaseGeneration: "17",
+        userId: "member_smoke",
+        workspaceVersion: "42",
+      },
+    });
 
     expect(result.openAiIntercept).toEqual({
       client: "codex",
@@ -197,6 +205,15 @@ describe("RunnerContainer", () => {
       stdoutBytes: 256,
     });
     expect(containerFetch).toHaveBeenCalledTimes(2);
+    const smokeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/deploy-openai-intercept-smoke")
+    );
+    expect(smokeCall).toBeTruthy();
+    const headers = new Headers(smokeCall?.[1]?.headers);
+    expect(headers.get("x-hosted-runner-bound-user-id")).toBe("member_smoke");
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_smoke");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("17");
+    expect(headers.get("x-hosted-runtime-workspace-version")).toBe("42");
   });
 
   it("recycles any warm deploy smoke shell before checking container health", async () => {

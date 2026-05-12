@@ -17,6 +17,9 @@ import type {
   RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
 import { unauthorized } from "./json.ts";
@@ -25,9 +28,9 @@ export const HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL =
   "__cloudflare_injected__";
 
 const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
-  "x-hosted-runtime-attempt-id",
-  "x-hosted-runtime-lease-generation",
-  "x-hosted-runtime-workspace-version",
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
 ] as const;
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
@@ -154,6 +157,11 @@ async function maybeHandleOpenAiRequest(input: {
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
     return disallowedProviderEgress();
+  }
+
+  const authorized = await requestOwnsRuntimeWriteFence(input);
+  if (!authorized) {
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");

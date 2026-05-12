@@ -136,7 +136,22 @@ export async function runSmokeHostedDeploy(input: {
     source.HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT,
     false,
   );
+  if (shouldSmokeOpenAiIntercept && !shouldSmokeRunnerContainer) {
+    throw new Error(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  }
+  if (shouldSmokeOpenAiIntercept && !smokeUserId) {
+    throw new Error(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_USER_ID.",
+    );
+  }
   const authorizationHeader = readSmokeOidcAuthorizationHeader(source);
+  if (shouldSmokeOpenAiIntercept && !authorizationHeader) {
+    throw new Error(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN.",
+    );
+  }
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
 
@@ -188,7 +203,7 @@ export async function runSmokeHostedDeploy(input: {
   };
   const status = await readSmokeUserStatus(statusRequest);
   log(
-    `Authenticated hosted status check passed for ${smokeUserId}. `
+    "Authenticated hosted status check passed. "
       + `mailboxLag=${JSON.stringify(status.mailboxLag)}`,
   );
   log("Cloudflare hosted execution smoke checks passed.");
@@ -237,7 +252,10 @@ async function readRunnerContainerSmoke(input: {
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<SmokeRunnerBundleManifest | null> {
   const url = new URL(input.url);
-  const payload = "";
+  const smokeUserId = normalizeOptionalString(input.source.HOSTED_EXECUTION_SMOKE_USER_ID);
+  const payload = input.expectOpenAiIntercept
+    ? JSON.stringify({ openAiInterceptUserId: smokeUserId })
+    : "";
   const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
     environment: readHostedWebCallbackSigningEnvironment(input.source),
     method: "POST",

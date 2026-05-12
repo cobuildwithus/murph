@@ -2,10 +2,11 @@ import {
   resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
-
-const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
-const HOSTED_RUNTIME_LEASE_GENERATION_HEADER = "x-hosted-runtime-lease-generation";
-const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER = "x-hosted-runtime-workspace-version";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+} from "./headers.ts";
 
 export interface RunnerRuntimeWriteFenceHeaders {
   attemptId: string;

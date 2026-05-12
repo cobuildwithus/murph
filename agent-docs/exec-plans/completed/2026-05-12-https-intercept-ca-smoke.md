@@ -13,17 +13,20 @@ Key decisions:
 - Use the Codex native provider path for the probe so it covers the highest-risk client, not just Node fetch/curl.
 
 State:
-- Active.
+- Ready to close after scoped commit.
 
 Done:
 - Confirmed current deploy smoke only checks public banner, `/health`, container health, and optional status.
+- Found Codex native CA handling uses `CODEX_CA_CERTIFICATE`/`SSL_CERT_FILE`, so the runner must set those in addition to curl/Node/Python CA env.
+- Added hosted Codex provider `env_http_headers` for runtime authority headers and an opt-in managed-container Codex/OpenAI intercept smoke path.
+- Hardened OpenAI provider-secret injection to require the same runtime write fence as Linq, Telegram, and WhatsApp, and routed the OpenAI deploy smoke through a short-lived smoke-user write fence.
+- Kept Mapbox on the existing read-only GET allowlist because the CLI Mapbox path does not currently carry runtime authority headers.
 
 Now:
-- Implement the Codex provider authority-header configuration and opt-in managed-container OpenAI intercept smoke.
+- Close the plan and commit the scoped changes.
 
 Next:
-- Run focused Cloudflare/assistant-runtime tests and typecheck.
-- Run required completion audits for trust-boundary/deploy-surface changes.
+- Run the real deployed-container smoke before production cutover.
 
 Open questions (UNCONFIRMED if needed):
 - Live production/staging Cloudflare credentials and smoke env may not be available locally; if unavailable, handoff must call out the remaining real deployed-container smoke command.
@@ -34,7 +37,14 @@ Working set (files/ids/commands):
 - `apps/cloudflare/src/container-entrypoint.ts`
 - `apps/cloudflare/src/runner-container.ts`
 - `apps/cloudflare/src/index.ts`
+- `apps/cloudflare/src/runtime-platform.ts`
+- `apps/cloudflare/src/runner-outbound/headers.ts`
+- `apps/cloudflare/src/runner-outbound/write-fence.ts`
+- `apps/cloudflare/src/runner-egress-intercept.ts`
 - `apps/cloudflare/scripts/smoke-hosted-deploy.shared.ts`
 - `apps/cloudflare/test/container-entrypoint.test.ts`
 - `apps/cloudflare/test/smoke-hosted-deploy.test.ts`
 - `apps/cloudflare/DEPLOY.md`
+Status: completed
+Updated: 2026-05-12
+Completed: 2026-05-12

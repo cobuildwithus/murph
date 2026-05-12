@@ -343,7 +343,7 @@ describe("runSmokeHostedDeploy", () => {
       "utf8",
     );
     const fetchCalls: string[] = [];
-    const fetchImpl = async (url: RequestInfo | URL) => {
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
       fetchCalls.push(String(url));
 
       if (String(url).endsWith("/")) {
@@ -357,6 +357,7 @@ describe("runSmokeHostedDeploy", () => {
       }
 
       if (String(url).endsWith("/internal/deploy/container-smoke?openAiIntercept=1")) {
+        expect(init?.body).toBe(JSON.stringify({ openAiInterceptUserId: "member_smoke" }));
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -377,6 +378,18 @@ describe("runSmokeHostedDeploy", () => {
         }), { status: 200 });
       }
 
+      if (String(url).endsWith("/status")) {
+        return new Response(JSON.stringify({
+          inFlight: false,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastInvocationAt: "2026-03-27T00:59:00.000Z",
+          mailboxLag: [],
+          userId: "member_smoke",
+          workspace: null,
+        }), { status: 200 });
+      }
+
       throw new Error(`Unexpected smoke request: ${String(url)}`);
     };
 
@@ -385,8 +398,10 @@ describe("runSmokeHostedDeploy", () => {
       log() {},
       source: {
         HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
         HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
         HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
       },
@@ -394,6 +409,38 @@ describe("runSmokeHostedDeploy", () => {
 
     expect(fetchCalls).toContain(
       "https://worker.example.test/internal/deploy/container-smoke?openAiIntercept=1",
+    );
+  });
+
+  it("requires the managed-container smoke when the OpenAI intercept smoke is enabled", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => {
+        throw new Error("OpenAI intercept precondition should fail before deploy smoke requests.");
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  });
+
+  it("requires status auth before running the OpenAI intercept smoke", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => {
+        throw new Error("OpenAI intercept auth precondition should fail before deploy smoke requests.");
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_smoke",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN.",
     );
   });
 

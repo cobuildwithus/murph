@@ -97,16 +97,15 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects OpenAI authorization without forwarding runtime authority headers", async () => {
+  it("injects OpenAI authorization with a valid runtime write fence and strips authority headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI credential injection must not require a runtime write fence.");
-    });
+    const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
         headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
           "openai-organization": "org_user_supplied",
           "openai-project": "proj_user_supplied",
@@ -124,7 +123,12 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
     expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
@@ -139,7 +143,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-api-key")).toBe(false);
   });
 
-  it("injects OpenAI authorization without an active runtime write fence", async () => {
+  it("rejects OpenAI credential injection without a valid runtime write fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -156,10 +160,8 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "member_123--v-version_1" },
     );
 
-    expect(response.status).toBe(200);
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
-    expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects OpenAI credential injection outside the canonical HTTPS origin", async () => {
@@ -214,13 +216,12 @@ describe("hostedRunnerIntercept", () => {
   it("allows the observed OpenAI models read path", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("OpenAI model reads must not require a runtime write fence.");
-    });
+    const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/models", {
         headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
         },
         method: "GET",
@@ -233,7 +234,12 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/models");
     const authorization = forwarded.headers.get("authorization");
