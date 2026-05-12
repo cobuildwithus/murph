@@ -846,7 +846,6 @@ jobs:
           DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
           GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
           GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: direct
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}

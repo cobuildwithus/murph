@@ -20,19 +20,10 @@ describe("runDeployWorkerVersionCli", () => {
     wranglerMocks.runWranglerLogged.mockReset();
   });
 
-  it("passes app-root deploy artifact paths to the rollout entrypoint", async () => {
+  it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
     const repoRoot = path.join("/tmp", "repo");
     const deployRoot = path.join(repoRoot, "apps", "cloudflare");
-    const runHostedWorkerDeployment = vi.fn(async () => ({
-      candidateVersionId: null,
-      currentDeploymentVersions: null,
-      finalDeploymentVersions: [],
-      mode: "direct" as const,
-      rolloutPercentage: null,
-      smokeVersionId: null,
-      uploadedVersionId: null,
-      workerName: "hosted-worker",
-    }));
+    const runHostedWorkerDeployment = vi.fn(async () => createDeploymentResult());
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -40,7 +31,6 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot,
         env: {
           CF_WORKER_NAME: "hosted-worker",
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
         },
         log: false,
         runHostedWorkerDeployment,
@@ -69,7 +59,6 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
           CF_WORKER_NAME: "hosted-worker",
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
         },
         log: false,
         runHostedWorkerDeployment,
@@ -88,22 +77,12 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
           CF_WORKER_NAME: "hosted-worker",
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
         },
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
           expect(await dependencies.readCurrentDeployment("hosted-worker", "/tmp/config.jsonc")).toBeNull();
 
-          return {
-            candidateVersionId: null,
-            currentDeploymentVersions: null,
-            finalDeploymentVersions: [],
-            mode: "direct",
-            rolloutPercentage: null,
-            smokeVersionId: null,
-            uploadedVersionId: null,
-            workerName: "hosted-worker",
-          };
+          return createDeploymentResult();
         },
       },
     );
@@ -126,7 +105,6 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
           CF_WORKER_NAME: "hosted-worker",
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
         },
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
@@ -140,16 +118,7 @@ describe("runDeployWorkerVersionCli", () => {
             workerName: "hosted-worker",
           });
 
-          return {
-            candidateVersionId: null,
-            currentDeploymentVersions: null,
-            finalDeploymentVersions: [],
-            mode: "direct",
-            rolloutPercentage: null,
-            smokeVersionId: null,
-            uploadedVersionId: null,
-            workerName: "hosted-worker",
-          };
+          return createDeploymentResult();
         },
       },
     );
@@ -176,7 +145,6 @@ describe("runDeployWorkerVersionCli", () => {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
         env: {
           CF_WORKER_NAME: "hosted-worker",
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
         },
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
@@ -190,16 +158,7 @@ describe("runDeployWorkerVersionCli", () => {
             workerName: "hosted-worker",
           });
 
-          return {
-            candidateVersionId: null,
-            currentDeploymentVersions: null,
-            finalDeploymentVersions: [],
-            mode: "direct",
-            rolloutPercentage: null,
-            smokeVersionId: null,
-            uploadedVersionId: null,
-            workerName: "hosted-worker",
-          };
+          return createDeploymentResult();
         },
       },
     );
@@ -228,7 +187,6 @@ describe("runDeployWorkerVersionCli", () => {
           deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
           env: {
             CF_WORKER_NAME: "hosted-worker",
-            HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
           },
           log: false,
           runHostedWorkerDeployment: async ({ dependencies }) => {
@@ -243,3 +201,11 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
 });
+
+function createDeploymentResult() {
+  return {
+    finalDeploymentVersions: [],
+    smokeVersionId: "version-direct",
+    workerName: "hosted-worker",
+  };
+}

@@ -7,28 +7,6 @@ import {
 } from "../scripts/deploy-worker-version.shared.js";
 
 describe("runHostedWorkerDeployment", () => {
-  it("rejects non-direct deployment modes before running Wrangler", async () => {
-    const dependencies = createDependencies();
-
-    await expect(runHostedWorkerDeployment({
-      configPath: "/tmp/wrangler.generated.jsonc",
-      dependencies,
-      env: {
-        CF_WORKER_NAME: "hosted-worker",
-        HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
-      },
-      resultPath: "/tmp/deployment-result.json",
-      runnerBundleDir: "/tmp/runner-bundle",
-      secretsFilePath: "/tmp/worker-secrets.json",
-      workerName: "hosted-worker",
-    })).rejects.toThrow("HOSTED_EXECUTION_DEPLOYMENT_MODE must be 'direct'.");
-
-    expect(dependencies.mkdir).not.toHaveBeenCalled();
-    expect(dependencies.deployDirect).not.toHaveBeenCalled();
-    expect(dependencies.validateDeployEnvironment).not.toHaveBeenCalled();
-    expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
-  });
-
   it("runs a direct deploy and records the final deployment traffic", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
@@ -53,8 +31,6 @@ describe("runHostedWorkerDeployment", () => {
         CF_WORKER_NAME: "hosted-worker",
         GITHUB_OUTPUT: "/tmp/github-output.txt",
         HOSTED_EXECUTION_DEPLOYMENT_MESSAGE: "manual direct deploy",
-        HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
-        HOSTED_EXECUTION_VERSION_MESSAGE: "unused direct version message",
       },
       resultPath: "/tmp/deployment-result.json",
       runnerBundleDir: "/tmp/runner-bundle",
@@ -87,7 +63,6 @@ describe("runHostedWorkerDeployment", () => {
       workerName: "hosted-worker",
     });
     expect(result).toMatchObject({
-      candidateVersionId: "version-direct",
       finalDeploymentVersions: [
         {
           percentage: 100,
@@ -95,19 +70,14 @@ describe("runHostedWorkerDeployment", () => {
         },
       ],
       smokeVersionId: "version-direct",
-      uploadedVersionId: null,
     });
     expect(dependencies.writeFile).toHaveBeenCalledWith(
       "/tmp/github-output.txt",
-      expect.stringContaining("smoke_version_id=version-direct"),
-      {
-        encoding: "utf8",
-        flag: "a",
-      },
-    );
-    expect(dependencies.writeFile).toHaveBeenCalledWith(
-      "/tmp/github-output.txt",
-      expect.stringContaining("final_version_traffic=[{\"percentage\":100,\"versionId\":\"version-direct\"}]"),
+      [
+        "final_version_traffic=[{\"percentage\":100,\"versionId\":\"version-direct\"}]",
+        "smoke_version_id=version-direct",
+        "",
+      ].join("\n"),
       {
         encoding: "utf8",
         flag: "a",
@@ -115,7 +85,7 @@ describe("runHostedWorkerDeployment", () => {
     );
   });
 
-  it("defaults to a direct deploy when no deployment mode is provided", async () => {
+  it("defaults to a direct deploy", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
       versions: [
@@ -153,7 +123,7 @@ describe("runHostedWorkerDeployment", () => {
       versionTag: expect.any(String),
       workerName: "hosted-worker",
     });
-    expect(result.mode).toBe("direct");
+    expect(result.smokeVersionId).toBe("version-direct");
   });
 
   it("fails direct deploys that do not report a 100% Worker version for smoke", async () => {
@@ -215,7 +185,6 @@ describe("runHostedWorkerDeployment", () => {
       env: {
         CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_INCLUDE_SECRETS: "no",
-        HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
       },
       resultPath: "/tmp/deployment-result.json",
       runnerBundleDir: "/tmp/runner-bundle",
@@ -254,7 +223,6 @@ describe("runHostedWorkerDeployment", () => {
       env: {
         CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_INCLUDE_SECRETS: "yes",
-        HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
       },
       resultPath: "/tmp/deployment-result.json",
       runnerBundleDir: "/tmp/runner-bundle",
