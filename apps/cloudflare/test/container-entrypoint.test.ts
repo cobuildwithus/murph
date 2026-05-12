@@ -808,7 +808,6 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(runnerSpy).toHaveBeenCalledTimes(1);
       expect(runnerSpy.mock.calls[0]?.[1]).toEqual({
-        runtimeCallbackBaseUrl: null,
         signal: expect.any(AbortSignal),
       });
     } finally {

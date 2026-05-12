@@ -224,8 +224,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
       '{"kty":"EC","d":"fixture-automation"}',
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
       '{"keys":[{"keyId":"cloudflare-automation:v1","privateJwk":{"kty":"EC","d":"fixture-automation"}}]}',
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:
-      "http://runner-callback.example.test",
+    HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
     HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -284,7 +283,7 @@ async function serializeContainerRequestBody(
   let requestBody = "";
   let running = false;
   const container = new RunnerContainer({}, {
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://runner-callback.example.test",
+    HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
   });
 
   Object.assign(container, {

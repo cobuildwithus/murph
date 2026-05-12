@@ -256,7 +256,6 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBe("murph");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBe("murph-web");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("development");
-    expect(merged.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL).toBe("http://127.0.0.1:8787");
     expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("192.168.65.2");
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(callbackPrivateJwkJson);
     expect(merged.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
@@ -667,21 +666,19 @@ describe("mergeCloudflareLocalEnv", () => {
     );
   });
 
-  it("preserves an explicit runner callback override instead of resetting to the listen host", () => {
+  it("preserves an explicit runner host alias instead of resetting to the listen host", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:9999",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
       },
       oidcIdentity,
       overrides: {
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://host.docker.internal:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
       },
     });
 
-    expect(merged.HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL).toBe(
-      "http://host.docker.internal:8787",
-    );
+    expect(merged.HOSTED_EXECUTION_RUNNER_HOST_ALIAS).toBe("host.docker.internal");
   });
 });
 
@@ -994,7 +991,7 @@ describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
-        HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -1008,7 +1005,7 @@ describe("buildWranglerVarArgs", () => {
       }),
     ).toEqual([
       "--var",
-      "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL:http://127.0.0.1:8787",
+      "HOSTED_EXECUTION_RUNNER_HOST_ALIAS:127.0.0.1",
       "--var",
       "HOSTED_WEB_BASE_URL:http://localhost:3000",
       "--var",

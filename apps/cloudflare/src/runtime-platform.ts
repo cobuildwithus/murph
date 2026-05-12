@@ -161,26 +161,23 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
-  runtimeCallbackBaseUrl?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
   workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
-  const fetchImpl = createCloudflareHostedRuntimeFetch(
+  const fetchImpl = createCloudflareHostedProviderFetch(
     input.boundUserId,
     input.fetchImpl ?? fetch,
     {
       readCurrentLease: input.workspaceCheckpointBridge?.readCurrentLease,
-      runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
     },
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
   const hostedWebControlTransport = resolveHostedWebControlTransport({
-    runtimeCallbackBaseUrl: input.runtimeCallbackBaseUrl ?? null,
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
+    workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
   });
-  const hasRuntimeCallbackAuthority = Boolean(input.runtimeCallbackBaseUrl);
   const hostedWebDeviceSyncPort = hostedWebControlTransport
     ? createHostedWebDeviceSyncPort({
         boundUserId: input.boundUserId,
@@ -251,7 +248,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     inFlightArtifactUploads.set(artifact.sha256, upload);
     await upload;
   };
-  const providerEffectsPort = hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
+  const providerEffectsPort = input.workspaceCheckpointBridge
     ? createCloudflareRunnerProviderEffectsPort({
         fetchImpl,
         timeoutMs,
@@ -303,7 +300,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
-    ...(hasRuntimeCallbackAuthority && input.workspaceCheckpointBridge
+    ...(input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({
             boundUserId: input.boundUserId,
@@ -612,16 +609,10 @@ export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
 }
 
 function resolveHostedWebControlTransport(input: {
-  runtimeCallbackBaseUrl: string | null;
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedWebControlTransport | null {
-  if (input.runtimeCallbackBaseUrl) {
-    return {
-      mode: "proxy",
-    };
-  }
-
   if (input.webControlBaseUrl && input.webCallbackSigning) {
     return {
       callbackSigning: input.webCallbackSigning,
@@ -630,15 +621,20 @@ function resolveHostedWebControlTransport(input: {
     };
   }
 
+  if (input.workspaceCheckpointBridge) {
+    return {
+      mode: "proxy",
+    };
+  }
+
   return null;
 }
 
-export function createCloudflareHostedRuntimeFetch(
+export function createCloudflareHostedProviderFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
   options: {
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
-    runtimeCallbackBaseUrl?: string | null;
   } = {},
 ): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -649,30 +645,27 @@ export function createCloudflareHostedRuntimeFetch(
       return fetchImpl(request);
     }
 
-    if (!options.runtimeCallbackBaseUrl) {
+    if (!options.readCurrentLease) {
       throw new Error(
-        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime callback authority.`,
+        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence authority.`,
       );
     }
 
     const headers = new Headers(request.headers);
     const lease = await options.readCurrentLease?.() ?? null;
-    if (lease) {
-      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    if (!lease) {
+      throw new Error(
+        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence lease.`,
+      );
     }
-    const proxiedUrl = createHostedRuntimeCallbackUrl(
-      options.runtimeCallbackBaseUrl,
-      url,
-      boundUserId,
-    );
-    const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
+    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+    const internalRequest = createHostedInternalRequest(request, headers);
     const shouldLogInternalRequest = true;
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
       host: url.hostname,
-      method: proxiedRequest.method,
+      method: internalRequest.method,
       path: url.pathname,
-      proxiedViaRuntimeCallback: "true",
       userId: boundUserId,
     };
 
@@ -687,7 +680,7 @@ export function createCloudflareHostedRuntimeFetch(
     }
 
     try {
-      const response = await fetchImpl(proxiedRequest);
+      const response = await fetchImpl(internalRequest);
       if (shouldLogInternalRequest) {
         emitHostedExecutionStructuredLog({
           component: "assistant-delivery",
@@ -745,55 +738,13 @@ function isInternalAuthorityRejectedStatus(status: number): boolean {
   return status === 401 || status === 403;
 }
 
-function createHostedRuntimeCallbackUrl(
-  baseUrl: string,
-  targetUrl: URL,
-  boundUserId: string,
-): URL {
-  const normalizedBaseUrl = ensureTrailingSlash(new URL(baseUrl));
-  const callbackBaseUrl = new URL(
-    `__murph/runtime-callback/users/${encodeURIComponent(boundUserId)}/`,
-    normalizedBaseUrl,
-  );
-  const callbackUrl = new URL(
-    `${encodeURIComponent(targetUrl.hostname)}${targetUrl.pathname}`,
-    callbackBaseUrl,
-  );
-  callbackUrl.search = targetUrl.search;
-  return callbackUrl;
-}
-
-interface HostedRequestInitWithDuplex extends RequestInit {
-  duplex?: "half";
-}
-
-function createHostedInternalProxyRequest(
-  proxiedUrl: URL,
+function createHostedInternalRequest(
   request: Request,
   headers: Headers,
 ): Request {
-  const init: HostedRequestInitWithDuplex = {
-    body: request.body,
+  return new Request(request, {
     headers,
-    method: request.method,
-    signal: request.signal,
-  };
-
-  if (request.body) {
-    init.duplex = "half";
-  }
-
-  return new Request(proxiedUrl, init);
-}
-
-function ensureTrailingSlash(value: URL): URL {
-  if (value.pathname.endsWith("/")) {
-    return value;
-  }
-
-  const next = new URL(value.toString());
-  next.pathname = `${next.pathname}/`;
-  return next;
+  });
 }
 
 function createHostedWebDeviceSyncPort(input: {

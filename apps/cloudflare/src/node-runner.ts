@@ -24,7 +24,7 @@ import {
 } from "./node-runner-isolated.ts";
 import {
   buildHostedExecutionRuntimePlatform,
-  createCloudflareHostedRuntimeFetch,
+  createCloudflareHostedProviderFetch,
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./runtime-platform.ts";
 import {
@@ -50,7 +50,6 @@ import {
 export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
 export interface HostedWorkspaceInvocationOptions {
-  runtimeCallbackBaseUrl?: string | null;
   signal?: AbortSignal;
 }
 
@@ -150,7 +149,6 @@ export function createHostedWorkspaceInvocationRunner(
     options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
     onBeforeRun?.();
-    const runtimeCallbackBaseUrl = options?.runtimeCallbackBaseUrl ?? null;
     const runtime = buildRuntime(input.runtime ?? {});
     const boundUserId = readHostedExecutionRunnerJobUserId(input);
     if (runMode === "in-process") {
@@ -161,44 +159,34 @@ export function createHostedWorkspaceInvocationRunner(
       const runtimePlatform = buildRuntimePlatform({
         boundUserId,
         commitTimeoutMs: runtime.commitTimeoutMs,
-        runtimeCallbackBaseUrl,
         workspaceCheckpointBridge,
       });
-      const webControlFetch = runtimeCallbackBaseUrl
-        ? createCloudflareHostedRuntimeFetch(
-            boundUserId,
-            fetch,
-            {
-              readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-              runtimeCallbackBaseUrl,
-            },
-          )
-        : undefined;
-      const decodeMailboxPayload = webControlFetch
-        ? createCloudflareHostedMailboxPayloadDecoder({
-          fetchImpl: webControlFetch,
+      const webControlFetch = createCloudflareHostedProviderFetch(
+        boundUserId,
+        fetch,
+        {
           readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-          timeoutMs: readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs ?? null),
-        })
-        : undefined;
+        },
+      );
+      const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
+        fetchImpl: webControlFetch,
+        readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
+        timeoutMs: readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs ?? null),
+      });
       const runtimeBridgeJobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
-        ...(decodeMailboxPayload ? { decodeMailboxPayload } : {}),
+        decodeMailboxPayload,
         platform: runtimePlatform,
         readCurrentLease: workspaceCheckpointBridge.readCurrentLease,
-        requireMailboxPayloadDecoder: Boolean(runtimeCallbackBaseUrl),
+        requireMailboxPayloadDecoder: true,
         request: input.request,
         runtime,
         vaultRoot: resolveHostedWorkspaceInProcessVaultRoot(),
-        ...(webControlFetch
-          ? {
-              webControlAllowHttpHosts: [
-                CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
-                ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
-              ],
-              webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
-              webControlFetch,
-            }
-          : {}),
+        webControlAllowHttpHosts: [
+          CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+          ...LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
+        ],
+        webControlBaseUrl: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
+        webControlFetch,
       });
 
       return await runWorkspaceInProcess({
@@ -208,7 +196,6 @@ export function createHostedWorkspaceInvocationRunner(
     }
 
     return await runIsolated({
-      runtimeCallbackBaseUrl: options?.runtimeCallbackBaseUrl ?? null,
       job: {
         ...input,
         runtime,

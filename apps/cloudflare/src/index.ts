@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+export { ContainerProxy } from "@cloudflare/containers";
 
 import {
   emitHostedExecutionStructuredLog,
@@ -35,7 +36,6 @@ import {
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
-  CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
@@ -74,11 +74,6 @@ import {
   type HostedRunnerStuckInvocationTestResult,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
-import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
-import {
-  requireRunnerRuntimeWriteFence,
-  RunnerRuntimeWriteFenceError,
-} from "./runner-outbound/write-fence.ts";
 import {
   asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
@@ -282,14 +277,6 @@ export default {
   ): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const runtimeCallbackResponse = await maybeHandleRuntimeCallbackRoute(
-        request,
-        url,
-        env,
-      );
-      if (runtimeCallbackResponse) {
-        return runtimeCallbackResponse;
-      }
       const publicResponse = await handleDeclarativeRoute(workerPublicRoutes, { env, request, url });
       if (publicResponse) {
         return publicResponse;
@@ -825,8 +812,12 @@ async function handleTestRunUntilIdleRoute(
       userId: string;
     }): Promise<HostedWorkspaceInvocationResult>;
   };
+  const reason = parseTestWorkspaceInvocationReason(context.url.searchParams.get("reason"));
+  if (reason === "invalid") {
+    return json({ error: "Unsupported test workspace invocation reason." }, 400);
+  }
   return json(await stub.runUntilIdleForTest({
-    reason: "manual",
+    reason: reason ?? "manual",
     userId,
   }));
 }
@@ -1248,93 +1239,6 @@ function requireNonEmptyString(value: unknown, label: string): string {
   }
 
   return value;
-}
-
-interface InternalProxyRequestInit extends RequestInit {
-  duplex?: "half";
-}
-
-async function maybeHandleRuntimeCallbackRoute(
-  request: Request,
-  url: URL,
-  env: WorkerEnvironmentSource,
-): Promise<Response | null> {
-  const match =
-    /^\/__murph\/runtime-callback\/users\/(?<userId>[^/]+)\/(?<host>[^/]+)(?<path>\/.*)?$/u.exec(
-      url.pathname,
-    );
-  if (!match?.groups) {
-    return null;
-  }
-
-  const boundUserId = decodeRouteParam(match.groups.userId);
-  const targetHost = decodeRouteParam(match.groups.host);
-  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(targetHost)) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-callback-target-host-not-found",
-        routeName: "runtime-callback",
-        targetHost,
-      }, request, boundUserId),
-      level: "warn",
-      message: "Hosted worker rejected a runtime callback request for an unknown internal host.",
-      phase: "failed",
-      userId: boundUserId,
-    });
-    return notFound();
-  }
-
-  try {
-    await requireRunnerRuntimeWriteFence({
-      env,
-      request,
-      userId: boundUserId,
-    });
-  } catch (error) {
-    if (!(error instanceof RunnerRuntimeWriteFenceError)) {
-      throw error;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "runtime-callback-write-fence-verification-failed",
-        routeName: "runtime-callback",
-        targetHost,
-      }, request, boundUserId),
-      level: "warn",
-      message: "Hosted worker rejected a runtime callback request after write-fence verification failed.",
-      phase: "failed",
-      userId: boundUserId,
-    });
-    return unauthorized();
-  }
-
-  const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
-  internalUrl.search = url.search;
-  return await handleRunnerOutboundRequest(
-    createInternalCallbackRequest(request, internalUrl),
-    env,
-    boundUserId,
-  );
-}
-
-function createInternalCallbackRequest(
-  request: Request,
-  internalUrl: URL,
-): Request {
-  const init: InternalProxyRequestInit = {
-    headers: request.headers,
-    method: request.method,
-    signal: request.signal,
-  };
-
-  if (request.body) {
-    init.body = request.body;
-    init.duplex = "half";
-  }
-
-  return new Request(internalUrl, init);
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {

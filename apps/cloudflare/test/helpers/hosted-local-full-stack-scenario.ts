@@ -212,6 +212,7 @@ export async function startHostedLocalFullStackScenario(input: {
       HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK: TEST_HOSTED_WEB_CALLBACK_PUBLIC_JWK_JSON,
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
       MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       MURPH_HOSTED_LOCAL_PROFILE: assistantProviderMode === "live" ? "e2e:live" : "e2e:stub",
       MURPH_DEV_FORCE_RESET_LOCAL_DB: input.resetLocalDatabase === false ? "0" : "1",
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",

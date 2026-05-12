@@ -7,7 +7,7 @@ import type {
   HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.js";
 
-describe("RunnerContainer runtime callback dispatch", () => {
+describe("RunnerContainer internal runtime dispatch", () => {
   it("posts workspace jobs without active-operation storage", async () => {
     const storage = createContainerStorageDouble();
     const startAndWaitForPorts = vi.fn(async () => {});
@@ -33,9 +33,7 @@ describe("RunnerContainer runtime callback dispatch", () => {
     });
     const container = new RunnerContainer({
       storage,
-    } as never, {
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
-    } as never);
+    } as never, {} as never);
     Object.assign(container, {
       containerFetch,
       destroy,
@@ -56,37 +54,12 @@ describe("RunnerContainer runtime callback dispatch", () => {
 
     const requestBody = readPostedRunnerBody(containerFetch, 0);
     expect(requestBody).toMatchObject({
+      job: {
+        kind: "workspace-invocation",
+      },
     });
     expect([...storage.values.keys()].some((key) => key.includes("active-operation"))).toBe(false);
     expect(destroy).not.toHaveBeenCalled();
-  });
-
-  it("fails fast before starting a container when the callback authority is missing", async () => {
-    const storage = createContainerStorageDouble();
-    const startAndWaitForPorts = vi.fn(async () => {});
-    const containerFetch = vi.fn(async () => new Response(null, { status: 500 }));
-    const container = new RunnerContainer({
-      storage,
-    } as never, {} as never);
-    Object.assign(container, {
-      containerFetch,
-      destroy: vi.fn(async () => {}),
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status: "stopped",
-      })),
-      startAndWaitForPorts,
-    });
-
-    await expect(container.invoke({
-      job: createWorkspaceRunnerJob("member_123"),
-      timeoutMs: 5_000,
-      userId: "member_123",
-    })).rejects.toThrow(
-      "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL must be configured",
-    );
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(containerFetch).not.toHaveBeenCalled();
   });
 
   it("runs a pending idle checkpoint from the activity-expired lifecycle hook", async () => {
@@ -131,7 +104,6 @@ describe("RunnerContainer runtime callback dispatch", () => {
     const container = new RunnerContainer({
       storage,
     } as never, {
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
       USER_RUNNER: {
         getByName: vi.fn(() => ({
           beginIdleCheckpointLease,
@@ -220,7 +192,6 @@ describe("RunnerContainer runtime callback dispatch", () => {
     const container = new RunnerContainer({
       storage,
     } as never, {
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
       USER_RUNNER: {
         getByName: vi.fn(() => ({
           beginIdleCheckpointLease,
@@ -305,7 +276,6 @@ describe("RunnerContainer runtime callback dispatch", () => {
     const container = new RunnerContainer({
       storage,
     } as never, {
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
       USER_RUNNER: {
         getByName: vi.fn(() => ({
           beginIdleCheckpointLease,

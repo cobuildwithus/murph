@@ -1124,6 +1124,62 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
+  it("passes the test run-until-idle reason to the Durable Object", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=idle_shutdown_checkpoint",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    expect(stub.runUntilIdleForTest).toHaveBeenCalledWith({
+      reason: "idle_shutdown_checkpoint",
+      userId: "member_123",
+    });
+  });
+
+  it("rejects unsupported test run-until-idle reasons", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=unsupported",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported test workspace invocation reason.",
+    });
+    expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
+  });
+
   it("passes signed AI usage allow decisions from runner nudge requests to the Durable Object", async () => {
     const stub = createUserRunnerStub({
       nudgeHostedRunnerForUser: vi.fn(async () => ({
@@ -2037,6 +2093,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     nudgeHostedRunner,
     nudgeHostedRunnerForUser,
     runUntilIdleOrBudget: vi.fn(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    })),
+    runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
     })),

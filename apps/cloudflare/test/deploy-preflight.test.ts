@@ -23,7 +23,6 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"secret\",\"x\":\"public-x\",\"y\":\"public-y\"}",
     HOSTED_CRYPTO_ENV: "production",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
-    HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://worker.example.test",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
@@ -61,7 +60,6 @@ describe("deploy preflight helpers", () => {
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
       "HOSTED_CRYPTO_ENV",
-      "HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       "OPENAI_API_KEY",
@@ -93,10 +91,9 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "   ",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "   ",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK OPENAI_API_KEY",
     );
   });
 
@@ -128,14 +125,6 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("requires the runtime callback origin to be the deployed worker origin in production", () => {
-    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
-      HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "https://other-worker.example.test",
-    }), { deployWorker: true })).toThrowError(
-      "production deploys must set HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL to CF_PUBLIC_BASE_URL",
-    );
-  });
-
   it("rejects preview-shaped hosted web origins even when the expected production URL is misconfigured", () => {
     expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       HOSTED_WEB_BASE_URL: "https://murph-git-main-team.vercel.app",
@@ -145,7 +134,7 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("rejects preview-shaped worker and callback origins in production deploys", () => {
+  it("rejects preview-shaped worker origins in production deploys", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       CF_PUBLIC_BASE_URL: "https://worker-git-main-team.workers.dev",
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-preview.example.test/api/device-sync",
@@ -164,7 +153,6 @@ describe("deploy preflight helpers", () => {
 
   it.each([
     ["http worker origin", { CF_PUBLIC_BASE_URL: "http://worker.example.test" }],
-    ["http runtime callback origin", { HOSTED_EXECUTION_RUNNER_CALLBACK_BASE_URL: "http://worker.example.test" }],
     ["http hosted web origin", { HOSTED_WEB_BASE_URL: "http://app.example.test" }],
     ["localhost hosted web origin", { HOSTED_WEB_BASE_URL: "https://localhost" }],
     ["loopback hosted web origin", { HOSTED_WEB_BASE_URL: "https://127.0.0.1" }],

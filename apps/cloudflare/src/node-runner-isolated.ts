@@ -34,7 +34,6 @@ import {
 } from "./hosted-runtime-redaction.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
-  runtimeCallbackBaseUrl?: string | null;
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 

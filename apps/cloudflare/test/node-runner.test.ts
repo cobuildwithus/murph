@@ -110,7 +110,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
         ? requestInfo
         : new Request(requestInfo, init);
       expect(requestObject.url).toBe(
-        `https://worker.example.test/__murph/runtime-callback/users/${request.userId}/web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
+        `http://web-control.worker${HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH}`,
       );
       expect(requestObject.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
       expect(requestObject.headers.get("x-hosted-runtime-attempt-id")).toBe(
@@ -162,8 +162,6 @@ describe("createHostedWorkspaceInvocationRunner", () => {
       runtime: {
         platformEnv: {},
       },
-    }, {
-      runtimeCallbackBaseUrl: "https://worker.example.test",
     })).resolves.toEqual(result);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -208,8 +206,6 @@ describe("createHostedWorkspaceInvocationRunner", () => {
       runtime: {
         platformEnv: {},
       },
-    }, {
-      runtimeCallbackBaseUrl: "https://worker.example.test",
     })).rejects.toMatchObject({
       status: 503,
       statusCode: 503,
