@@ -498,8 +498,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
       input.request.idleCheckpointDelayMs,
     );
-    const checkpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
-      commitTimeoutMs: readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs),
+    const commitTimeoutMs = readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs);
+    const hostDeadlineCheckpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
+      commitTimeoutMs,
       deadlineAt: input.request.deadlineAt ?? null,
     });
     let result: HostedWorkspaceRunnerResult;
@@ -518,30 +519,40 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       while (runtimeStateDirty) {
-        const checkpointWaitResult = await waitForHostedRuntimeIdleCheckpointWindow({
-          checkpointStartByMs,
-          idleCheckpointDelayMs,
-          runtimeAbortSignal: runtimeAbortController.signal,
-          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-        });
-        if (checkpointWaitResult === "wake") {
-          idleWakeOrdinal += 1;
-          result = await runForegroundPass({
-            initialMailboxImport: null,
-            requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
-            workspace: result.latestWorkspace ?? workspaceRead.workspace,
+        if (accumulatedProjection.status !== "budget_exhausted") {
+          const projectedWakeCheckpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
+            commitTimeoutMs,
+            deadlineAt: accumulatedProjection.nextWakeAt,
           });
-          const nextProjection = buildHostedWorkspaceInvocationProjection({
-            mailboxBudgetExhausted: mailboxBudget.exhausted,
-            result,
-            workspace: accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
-          });
-          accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
-            accumulatedProjection,
-            nextProjection,
+          const checkpointStartByMs = earliestHostedRuntimeFiniteMs(
+            hostDeadlineCheckpointStartByMs,
+            projectedWakeCheckpointStartByMs,
           );
-          runtimeStateDirty ||= result.runtimeStateDirty;
-          continue;
+          const checkpointWaitResult = await waitForHostedRuntimeIdleCheckpointWindow({
+            checkpointStartByMs,
+            idleCheckpointDelayMs,
+            runtimeAbortSignal: runtimeAbortController.signal,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          });
+          if (checkpointWaitResult === "wake") {
+            idleWakeOrdinal += 1;
+            result = await runForegroundPass({
+              initialMailboxImport: null,
+              requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
+              workspace: result.latestWorkspace ?? workspaceRead.workspace,
+            });
+            const nextProjection = buildHostedWorkspaceInvocationProjection({
+              mailboxBudgetExhausted: mailboxBudget.exhausted,
+              result,
+              workspace: accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
+            });
+            accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
+              accumulatedProjection,
+              nextProjection,
+            );
+            runtimeStateDirty ||= result.runtimeStateDirty;
+            continue;
+          }
         }
 
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
@@ -719,6 +730,20 @@ function resolveHostedRuntimeCheckpointStartByMs(input: {
   }
 
   return deadlineMs - input.commitTimeoutMs - HOSTED_RUNTIME_DEADLINE_MARGIN_MS;
+}
+
+function earliestHostedRuntimeFiniteMs(...values: (number | null)[]): number | null {
+  let earliest: number | null = null;
+  for (const value of values) {
+    if (value === null || !Number.isFinite(value)) {
+      continue;
+    }
+    if (earliest === null || value < earliest) {
+      earliest = value;
+    }
+  }
+
+  return earliest;
 }
 
 async function waitForHostedRuntimeIdleCheckpointWindow(input: {
