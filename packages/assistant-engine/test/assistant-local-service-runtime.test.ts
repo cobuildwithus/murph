@@ -2668,6 +2668,134 @@ test('active-turn controller only probes input after explicit notification or pr
   }
 })
 
+test('active-turn controller reruns input-available admission for in-flight notifications', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputAvailable,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const firstAdmissionStarted = createDeferred<void>()
+  const firstAdmissionRelease = createDeferred<void>()
+  const phases: string[] = []
+  const steer = vi.fn(async () => undefined)
+  let ordinal = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      phases.push(input.phase)
+      ordinal += 1
+      if (ordinal === 1) {
+        firstAdmissionStarted.resolve()
+        await firstAdmissionRelease.promise
+        return {
+          kind: 'no-new-input',
+        }
+      }
+
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-2',
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: 'Rerun hook input',
+            source: 'assistant-input',
+          },
+        ],
+        kind: 'accepted',
+        prompt: 'Rerun hook input',
+        transcriptText: 'Rerun hook transcript',
+        userMessageContent: [
+          {
+            text: 'Rerun hook input',
+            type: 'text',
+          },
+        ],
+      }
+    },
+    boundaryAdmissionEnabled: false,
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    providerSessionId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    const firstNotification = notifyAssistantActiveTurnInputAvailable({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      vault: '/vaults/test',
+    })
+    await firstAdmissionStarted.promise
+    const secondNotification = notifyAssistantActiveTurnInputAvailable({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      vault: '/vaults/test',
+    })
+    await Promise.resolve()
+    assert.deepEqual(phases, ['input_available'])
+
+    firstAdmissionRelease.resolve()
+    const [firstResult, secondResult] = await Promise.all([
+      firstNotification,
+      secondNotification,
+    ])
+    assert.deepEqual(phases, ['input_available', 'input_available'])
+    assert.equal(firstResult?.kind, 'accepted')
+    assert.equal(secondResult?.kind, 'accepted')
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect(steer).toHaveBeenCalledWith({
+      prompt: 'Rerun hook input',
+      userMessageContent: [
+        {
+          text: 'Rerun hook input',
+          type: 'text',
+        },
+      ],
+    })
+    assert.deepEqual(await controller.admit({
+      phase: 'commit_barrier',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-2',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Rerun hook input',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Rerun hook input',
+      providerAlreadySteered: true,
+      transcriptText: 'Rerun hook transcript',
+      userMessageContent: [
+        {
+          text: 'Rerun hook input',
+          type: 'text',
+        },
+      ],
+    })
+  } finally {
+    firstAdmissionRelease.resolve()
+    releaseLiveTurn()
+    controller.close()
+  }
+})
+
 test('active-turn controller can probe store-backed input before provider execution', async () => {
   const {
     createAssistantActiveTurnInputController,

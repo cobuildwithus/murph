@@ -55,6 +55,7 @@ class AssistantActiveTurnInputController {
   private admissionHookQueue: Promise<void> = Promise.resolve()
   private fatalAdmissionError: unknown = null
   private inputAvailableAdmission: Promise<AssistantActiveTurnInputAdmissionResult | undefined> | null = null
+  private inputAvailableAdmissionRerunRequested = false
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private completion:
@@ -247,10 +248,11 @@ class AssistantActiveTurnInputController {
     }
 
     if (this.inputAvailableAdmission) {
+      this.inputAvailableAdmissionRerunRequested = true
       return this.inputAvailableAdmission
     }
 
-    const admission = this.runAdmissionHook(() => this.buildAdmissionInput(input))
+    const admission = this.runInputAvailableAdmissionLoop(input)
       .finally(() => {
         if (this.inputAvailableAdmission === admission) {
           this.inputAvailableAdmission = null
@@ -258,6 +260,28 @@ class AssistantActiveTurnInputController {
       })
     this.inputAvailableAdmission = admission
     return admission
+  }
+
+  private async runInputAvailableAdmissionLoop(input: {
+    phase: AssistantActiveTurnInputPhase
+    signal?: AbortSignal
+  }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    let acceptedResult: AssistantActiveTurnInputAdmissionResult | undefined
+    let result: AssistantActiveTurnInputAdmissionResult | undefined
+
+    do {
+      this.inputAvailableAdmissionRerunRequested = false
+      result = await this.runAdmissionHook(() => this.buildAdmissionInput(input))
+      if (result?.kind === 'accepted') {
+        acceptedResult = result
+      }
+    } while (
+      this.inputAvailableAdmissionRerunRequested &&
+      !this.closed &&
+      this.input.admissionHook
+    )
+
+    return acceptedResult ?? result
   }
 
   private async admitHookInput(
