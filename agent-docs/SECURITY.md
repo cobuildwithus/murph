@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-05-09
+Last verified: 2026-05-13
 
 ## Non-Negotiable Rules
 
@@ -21,10 +21,10 @@ Last verified: 2026-05-09
 - Prefer repo-local helpers or built-in platform APIs over one-off utility packages when the replacement is small, stable, and auditable.
 - When adding or updating dependencies, review the manifest and lockfile together, run `pnpm deps:guard`, run `pnpm deps:audit`, and review blocked install scripts with `pnpm deps:ignored-builds` / `pnpm deps:approve-builds` before handoff. Keep any `allowBuilds`, `minimumReleaseAgeExclude`, or `trustPolicyExclude` exceptions as narrow and reviewable as possible.
 
-## Bootstrap Security Posture
+## Runtime Security Posture
 
-- No runtime trust boundary is implemented yet.
-- Before adding external APIs, auth, wallets, storage, or webhooks, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
+- Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
+- Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
 - Prefer least-privilege defaults and explicit validation at system boundaries.
 - `vault-cli inbox model bundle` materializes only the normalized inbox bundle and image-routing eligibility metadata as a rebuildable audit artifact. That bundle can still contain sensitive health data and must be treated as high-sensitivity operator input. The live `inbox model route` backend call surface is removed/disabled for this hard cut.
 - Persist only audited inbox model bundle artifacts; never persist provider secrets alongside those artifacts.

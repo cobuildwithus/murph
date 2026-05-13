@@ -1,6 +1,6 @@
 # Hosted Contact-Privacy Rotation
 
-Last verified: 2026-04-23
+Last verified: 2026-05-13
 
 ## Goal
 
@@ -38,6 +38,11 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - `HostedMemberIdentity.privyUserLookupKey`
 - `HostedMemberIdentity.walletAddressLookupKey`
 - `HostedMemberRouting.linqChatLookupKey`
+- `HostedMemberRouting.linqRecipientPhoneLookupKey`
+- `HostedMemberRouting.pendingLinqChatLookupKey`
+- `HostedMemberRouting.pendingLinqRecipientPhoneLookupKey`
+- `HostedMemberRouting.pendingLinqParticipantContactLookupKey`
+- `HostedMemberRouting.replyAliasLookupKey`
 - `HostedMemberRouting.telegramUserLookupKey`
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
@@ -45,8 +50,8 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 ## Current Guidance
 
 - Treat `HOSTED_CONTACT_PRIVACY_KEYS` plus `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` as the durable seam that preserves future rotation options.
-- Keep the lookup-key storage model at one canonical stored key per field, but make writes scan the full configured read-candidate set before rebinding Telegram or Stripe identifiers so a rotated legacy key cannot silently coexist on another member.
-- Serialize Telegram and Stripe rebinds with a transaction-scoped advisory lock whose conflict token stays stable across current-version flips for the same raw external identity; candidate scans alone are not sufficient to prevent mixed-version write races.
-- If multi-version reads ever find more than one member for the same Telegram or Stripe raw identifier, fail closed and repair the duplicate binding instead of ordering or `findFirst` heuristics.
+- Keep the lookup-key storage model at one canonical stored key per field, but make writes scan the full configured read-candidate set before rebinding Telegram, Linq, reply-alias, or Stripe identifiers so a rotated legacy key cannot silently coexist on another member.
+- Serialize Telegram, Linq, reply-alias, and Stripe rebinds with a transaction-scoped advisory lock whose conflict token stays stable across current-version flips for the same raw external identity; candidate scans alone are not sufficient to prevent mixed-version write races.
+- If multi-version reads ever find more than one member for the same Telegram, Linq, reply-alias, or Stripe raw identifier, fail closed and repair the duplicate binding instead of ordering or `findFirst` heuristics.
 - Do not add parallel lookup columns, permanent dual-write logic, or deploy-history backfill commands just to keep the option open.
 - If a real deployed rotation is needed later, design a targeted procedure against the then-current runtime behavior, queue semantics, and stored data shape instead of reviving the removed prelaunch campaign tooling unchanged.

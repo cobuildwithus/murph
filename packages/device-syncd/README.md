@@ -28,10 +28,13 @@ What it does:
 - imports provider snapshots through `@murphai/importers`
 
 Current providers:
-- Junction-backed Garmin targets
-- Oura
-- Strava
-- WHOOP
+- Direct runtime providers: Oura, Strava, and WHOOP.
+- Junction-backed connect sources are driven by `DEVICE_CONNECT_SOURCES` and `JUNCTION_PROVIDER_FILTER`; current configured targets include Garmin/Fitbit-style Junction sources when enabled.
+
+Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
+for the current connect target catalog, and use
+`packages/importers/src/device-providers/provider-descriptors.ts` for provider
+descriptor support.
 
 ## Shared public ingress
 

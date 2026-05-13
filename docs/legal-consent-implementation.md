@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-04-29
+Last verified: 2026-05-13
 
 ## Purpose
 
@@ -35,6 +35,20 @@ The hosted consent API routes are:
 - `POST /api/legal/consent/revoke`
 
 All routes require authenticated hosted member context. Launch-required consent can be accepted but not revoked through the revoke endpoint. Optional feature scopes can be granted and revoked independently.
+The `POST` accept and revoke routes also enforce hosted mutation-origin checks before writing consent state.
+
+## Consent Scopes
+
+Current scopes are defined in `apps/web/src/lib/legal/consent.ts`:
+
+| Scope | Revocable | Purpose |
+| --- | --- | --- |
+| `launch.legal` | No | Terms, privacy policy, and Health AI safety disclosure acceptance. |
+| `launch.health-data` | No | Consumer health-data notice consent required for launch use. |
+| `feature.health-ai` | Yes | Optional health-AI processing consent. |
+| `feature.health-commons-contribution` | Yes | Optional contribution of normalized results to Health Commons learning. |
+| `feature.connected-health-source` | Yes | Optional connected-source processing consent beyond explicit launch consent and connect action. |
+| `feature.whatsapp-messaging` | Yes | Optional WhatsApp messaging consent. |
 
 ## Gate Helpers
 
@@ -48,6 +62,7 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - `assertHostedLaunchRequiredConsentGranted`.
 
 Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection setup requires current launch-required consent before starting a provider OAuth flow; the user's explicit connect action supplies the feature intent for that source, so the connect flow does not require a second connected-source consent grant. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond launch consent plus an explicit user action.
+WhatsApp webhook handling is also a consent-writing path: `START` grants `feature.whatsapp-messaging`, `STOP` revokes it, and ordinary WhatsApp messages require the grant before processing.
 
 ## Privacy Notes
 

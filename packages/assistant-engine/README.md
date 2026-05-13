@@ -2,4 +2,6 @@
 
 Workspace-private headless assistant execution runtime for Murph.
 
-This package now owns the canonical assistant, vault, inbox, knowledge, and shared usecase surfaces consumed across the workspace. That includes the assistant turn runtime, Codex app-server provider execution path, direct CLI prompt/bootstrap guidance, assistant state/outbox/status/store surfaces, the local gateway adapter used by the daemon and hosted runtimes, plus the integrated vault/inbox service factories and shared usecase/query helpers that previously straddled a separate `vault-inbox` owner split. Provider-target normalization plus hosted provider preset/config utilities are owned by `@murphai/operator-config` and consumed here directly.
+This package owns headless assistant execution and assistant-specific tool surfaces. That includes the assistant turn runtime, Codex app-server provider execution path, direct CLI prompt/bootstrap guidance, assistant state/outbox/status/store surfaces, assistant automation, and the local gateway adapter used by the daemon and hosted runtimes.
+
+Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. Provider-target normalization plus hosted provider preset/config utilities are owned by `@murphai/operator-config` and consumed here directly.

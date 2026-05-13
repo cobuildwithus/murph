@@ -66,6 +66,7 @@ Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `OPENAI_API_KEY`
 
 Required worker vars:
 
@@ -111,7 +112,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` plus Worker-owned `OPENAI_API_KEY` for Codex hosted assistant execution through the Worker egress intercept; host Codex bridge/proxy env is not accepted
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the child runner receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
 - `HOSTED_AI_USAGE_REPORTING_SECRET` and `HOSTED_LOG_FINGERPRINT_SECRET` are
   Worker-owned platform secrets only. They must not be forwarded into the child
   runtime env; usage attribution is added at the Worker/web-control boundary

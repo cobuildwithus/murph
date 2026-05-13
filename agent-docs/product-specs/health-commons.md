@@ -1,17 +1,17 @@
 # Health Commons
 
-Last verified: 2026-04-30
+Last verified: 2026-05-13
 
 ## Current State
 
-Murph needs a public, living Health Commons for protocol pages, biomarker pages, evidence/source pages, exact protocol revisions, redirects/disambiguation, and aggregate community outcome summaries. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private runs, outcome cards, and cohort learning to exact protocol versions.
+Murph needs a public, living Health Commons for protocol pages, biomarker pages, evidence/source pages, exact protocol revisions, and redirects/disambiguation. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private runs, outcome cards, and future cohort learning to exact protocol versions.
 
 ## Product Boundary
 
 The Health Commons is not a private user vault, not a raw research warehouse, and not a feed of raw personal results.
 
 - Public reusable health knowledge belongs in `packages/health-commons/content/**` as typed pages and small manifests.
-- Generated runtime projections, catalog artifacts, and aggregate outcome summaries materialize under `packages/health-commons/generated/**` as ignored build artifacts.
+- Generated runtime projections and catalog artifacts materialize under `packages/health-commons/generated/**` as ignored build artifacts. Generated projections may include authored or placeholder community outcome fields, but run-derived aggregate summaries from opted-in Murph runs are future work.
 - Private user runs and private outcome cards continue to live outside the Health Commons, bound to exact commons keys and revisions.
 - Explicit public contributions may inform generated cohort summaries, but raw private run records never become article prose.
 - Large PDFs, screenshots, and extracted full text stay outside Git and are referenced by artifact manifests.
@@ -29,7 +29,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 | Source | `entityType: source_artifact` |
 | Source person | `entityType: source_person` |
 | Ambiguous name | `entityType: disambiguation` |
-| Aggregate community outcome summary | generated projection attached to biomarker and/or protocol entities |
+| Aggregate community outcome summary | future generated projection attached to biomarker and/or protocol entities after an explicit contribution pipeline exists |
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 Protocol pages may also include an optional `experimentOnboarding` block that describes how assistants should safely review context, screen for red flags, gather setup slots, and summarize the plan before creating a private run.
@@ -46,7 +46,7 @@ The Health Commons carries two different kinds of public truth and they must sta
 - **Literature-backed claims** describe what the cited sources say.
 - **Community outcome summaries** describe what opted-in Murph runs appear to show.
 
-Community outcome summaries must never silently rewrite the literature-backed page body. They should surface as generated blocks with clear caveats such as cohort size, confidence, trust-tier mix, and confounders or selection limits when known.
+Community outcome summaries must never silently rewrite the literature-backed page body. Today, generated Health Commons artifacts may carry authored or `coming_soon` placeholders only. When run-derived summaries exist, they should surface as generated blocks with clear caveats such as cohort size, confidence, trust-tier mix, and confounders or selection limits when known.
 
 If the contribution pool is too small, too noisy, or too privacy-sensitive, the correct output is no public summary.
 
@@ -71,7 +71,7 @@ Generated entities carry:
 - `recipeHash` for duplicate-protocol detection.
 - `catalogHash` for the generated catalog release.
 
-Private runs, outcome cards, and contributions should store commons references by key and revision instead of copying protocol prose. Aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
+Private runs, outcome cards, and future contributions should store commons references by key and revision instead of copying protocol prose. Future aggregate community summaries must be traceable back to the exact protocol revisions they summarize.
 
 ## Artifact Storage
 
@@ -86,4 +86,4 @@ The upload script must refuse unknown, permission-required, or non-redistributab
 3. Generated catalog output is deterministic and checkable in CI.
 4. Artifact manifests make Cloudflare/R2 storage possible without storing large copyrighted files in the repo.
 5. User experiment results can later reference exact commons revisions and contribute aggregate outcomes without rewriting literature truth.
-6. Public pages can show community outcome summaries without exposing raw personal data or confusing aggregate outcomes with source-backed claims.
+6. Public pages can later show community outcome summaries without exposing raw personal data or confusing aggregate outcomes with source-backed claims.

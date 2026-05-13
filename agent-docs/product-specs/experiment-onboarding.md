@@ -37,11 +37,11 @@ It may include:
 
 `contextReview.vaultChecks[].readHints` are command hints, not automations. They help the assistant choose the right existing read surfaces for a protocol, but the assistant still owns when to run them and should verify exact CLI shape when a hint is abbreviated or stale.
 
-## Start Intents, Not Silent Starts
+## Start Drafts Today, Start Intents Later
 
-- A hosted `Run Experiment` click should create a short-lived start intent, not an active experiment.
-- The assistant should resolve that intent into a protocol-aware onboarding conversation in the user's configured channel.
-- Public prompt copy may say something like "Hey Murph, I want to explore doing Norwegian 4x4 intervals," but the durable contract is the structured onboarding block plus the exact protocol revision, not a prefilled sentence.
+- Today, a hosted `Run Experiment` click opens channel-specific draft/contact options for the user to send, such as text, email, or Telegram.
+- The draft should point the assistant at the exact protocol and start a protocol-aware onboarding conversation in the user's configured channel.
+- A persisted short-lived start intent is the desired future contract. When that exists, it should carry the structured onboarding block plus the exact protocol revision instead of relying on a prefilled sentence as durable state.
 
 ## Revision-Preserving Handoff
 

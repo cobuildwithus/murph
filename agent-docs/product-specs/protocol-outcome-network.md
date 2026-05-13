@@ -1,16 +1,16 @@
 # Protocol Outcome Network
 
-Last verified: 2026-04-22
+Last verified: 2026-05-13
 
 ## Current State
 
-Murph already has the two ends of the loop: public protocol knowledge and private experiment runs. It needs a durable product contract for what happens after a run: outcome cards, sharing levels, contribution rules, cohort summaries, and social guardrails.
+Murph already has the two ends of the loop: public protocol knowledge and private experiment runs. Current code supports private outcome analysis and outcome-card copy. Sharing artifacts, contribution records, cohort summaries, and friend digests are target-state surfaces that still need product and implementation contracts before they are treated as shipped behavior.
 
 ## Product Thesis
 
 Murph starts as the easiest chat-first way to run personal health experiments.
 
-The compounding layer is a protocol outcome network:
+The intended compounding layer is a protocol outcome network:
 
 `exact protocol version -> private run -> completed outcome card -> opt-in contribution -> cohort learning -> next protocol discovery`
 
@@ -19,10 +19,16 @@ The assistant is the interface into this loop, not the full category by itself.
 ## Product Boundary
 
 - Private run data is the default and remains user-owned.
-- A completed outcome card is derived from one private run plus its exact protocol ref, measurement window, and confidence metadata.
-- Public Health Commons learning comes from explicit contributions, not silent default sharing.
+- A completed private outcome card is derived from one private run plus its exact protocol ref, measurement window, and confidence metadata.
+- Public Health Commons learning must come from explicit future contributions, not silent default sharing.
 - The first social object is the completed outcome card, not a biomarker leaderboard, profile score, or infinite feed.
 - Murph compares interventions and outcomes, not bodies in the abstract.
+
+## Implemented Now
+
+- Private browser-vault outcome analysis can summarize one user's run, biomarker deltas, confidence, and confounders.
+- CLI and web surfaces keep those results private by default.
+- Consent scopes reserve space for future Health Commons contribution, but there is not yet a shipped share/contribute/cohort pipeline.
 
 ## Canonical Objects
 
@@ -30,15 +36,15 @@ The assistant is the interface into this loop, not the full category by itself.
 | --- | --- |
 | Private run | Version-bound record of one user's experiment |
 | Outcome card | Concise result summary with deltas, confounders, and confidence |
-| Share artifact | Rendered or viewed form of an outcome card for friends, export, or later public contribution |
-| Contribution record | Permissioned normalized summary sent into public cohort learning |
-| Cohort summary | Aggregate outcome block shown on protocol or biomarker pages |
+| Share artifact | Target-state rendered or viewed form of an outcome card for friends, export, or later public contribution |
+| Contribution record | Target-state permissioned normalized summary sent into public cohort learning |
+| Cohort summary | Target-state aggregate outcome block shown on protocol or biomarker pages |
 | Protocol variant diff | Structured fork from a parent protocol with explicit changed fields |
 | Friend digest | Bounded pull surface that highlights a small number of relevant results |
 
 ## Sharing Levels
 
-Murph should support a clear ladder of sharing, from safest to most public:
+Murph should eventually support a clear ladder of sharing, from safest to most public:
 
 1. **Private self-comparison** is the default.
 2. **Anonymous cohort contribution** lets a user add a normalized result to public learning without exposing raw identity.
@@ -59,7 +65,7 @@ Useful trust labels include:
 - `confounder-noted`
 - `cohort-replicated`
 
-Outcome cards and cohort summaries should use confidence language such as `low`, `medium`, or `high`, plus plain-language notes about confounders or missing context when relevant.
+Outcome cards, and future cohort summaries, should use confidence language such as `low`, `medium`, or `high`, plus plain-language notes about confounders or missing context when relevant.
 
 ## Ranking And Social Rules
 
@@ -78,7 +84,7 @@ Outcome cards and cohort summaries should use confidence language such as `low`,
 ## Success Criteria
 
 1. Every completed experiment can produce a private outcome card that clearly says what changed.
-2. Users can keep results private, share them with selected friends, or contribute them anonymously without ambiguity about the privacy level.
-3. Public protocol and biomarker pages can show cohort-level summaries without exposing raw personal data.
+2. Users can keep results private now; future sharing and anonymous contribution flows must be unambiguous about the privacy level.
+3. Future public protocol and biomarker pages can show cohort-level summaries without exposing raw personal data.
 4. Shared results stay version-bound so comparisons mean the same thing across users and over time.
 5. Social mechanics remain consistent with the constitution: useful, privacy-bounded, and non-addictive.

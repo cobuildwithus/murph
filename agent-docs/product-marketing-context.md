@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-04-22*
+*Last updated: 2026-05-13*
 
 ## Product Overview
 
@@ -9,6 +9,8 @@
 **Consumer shorthand:** Try things with your body, see what actually worked, and learn from other people doing the same.
 
 **What it does:** Connect your wearable, browse or receive a protocol recommendation, run one bounded experiment through Telegram, iMessage, or email, and get a private outcome card showing what changed, what may have confounded it, and whether it looks worth repeating. Over time, Murph is building toward a living Health Commons where opt-in, structured results help people discover what works for bodies like theirs without turning health into a leaderboard.
+
+**Current implementation note:** Private browser-vault outcome analysis and outcome-card copy are the implemented product loop today. Selected-friend sharing, anonymous contribution records, and public cohort summaries are target-state surfaces, not current shipped behavior.
 
 **Product category:** Personal health experimentation / protocol outcome network
 
@@ -123,7 +125,7 @@ What we refuse to become:
 - One meaningful experiment at a time by default for cleaner attribution
 - Private outcome cards with biomarker deltas, confidence, and confounders
 - Opt-in contribution path from private result to anonymous cohort learning
-- Health Commons that combines literature-backed protocol pages with community outcome summaries
+- Health Commons that combines literature-backed protocol pages with future community outcome summaries
 - Structured protocol variants and forks instead of vague "I kind of tried this" posts
 - Chat-first interface in Telegram, iMessage, or email rather than a separate app
 - Anti-shame product design that rewards useful learning, not elite biomarkers
@@ -141,7 +143,7 @@ What we refuse to become:
 2. Start a private, bounded run tied to an exact protocol revision.
 3. Log only what matters for the run.
 4. Finish with a private outcome card showing what changed.
-5. Keep it private, share it with selected friends, or contribute it anonymously.
+5. Keep it private today; future sharing and contribution flows should be explicit and consent-bound.
 6. Use that result and the commons to decide what to try next.
 
 The first-class social object is the completed outcome card, not the biomarker itself and not a scrolling feed.
@@ -245,7 +247,7 @@ The first-class social object is the completed outcome card, not the biomarker i
 
 **Primary conversion action:** Connect wearable -> start first experiment.
 
-**Compounding loop:** Finish experiment -> review outcome card -> share or contribute if useful -> discover next protocol.
+**Compounding loop:** Finish experiment -> review private outcome card -> later share or contribute if useful once those consent-bound flows exist -> discover next protocol.
 
 ## Protocol Outcome Graph
 
@@ -259,8 +261,8 @@ Murph is not a flat library and not just a chat thread. The product graph is:
 - **Biomarkers** - measured outcomes with context, caveats, and expected latency
 - **Private runs** - one user's bounded execution of one exact protocol revision
 - **Outcome cards** - concise results derived from those runs
-- **Contribution records** - explicit permissioned summaries used for cohort learning
-- **Cohort summaries** - aggregate "what people saw" blocks on protocol and biomarker pages
+- **Contribution records** - target-state explicit permissioned summaries used for cohort learning
+- **Cohort summaries** - target-state aggregate "what people saw" blocks on protocol and biomarker pages
 - **Protocol variants and forks** - structured diffs that keep lineage clear instead of turning protocols into free-form posts
 - **Source people and source artifacts** - the literature, experts, and references behind each claim
 
