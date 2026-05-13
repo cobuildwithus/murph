@@ -2,8 +2,8 @@ import {
   startHostedWebhookNudgeWorkflow,
 } from "./webhook-workflow-start";
 import {
-  nudgeHostedRunnerUserBestEffortResult,
-} from "../hosted-runner/control";
+  nudgeHostedAssistantRunnerUserBestEffortResult,
+} from "../hosted-runner/assistant-nudge";
 import {
   readHostedMailboxItemOwnerById,
 } from "../hosted-mailbox/store";
@@ -232,7 +232,7 @@ async function tryNudgeHostedWebhookRunnerDirect(input: {
     };
   }
 
-  const result = await nudgeHostedRunnerUserBestEffortResult({
+  const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
     ...(input.aiUsageAllowDecision
       ? { aiUsageAllowDecision: input.aiUsageAllowDecision }
       : {}),

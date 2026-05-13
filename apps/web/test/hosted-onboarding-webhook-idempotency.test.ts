@@ -21,6 +21,22 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+  ) => {
+    void input;
+    return {
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+      usageGateDenied: false,
+    };
+  }),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
   startHostedWebhookNudgeWorkflow: vi.fn(),
@@ -42,6 +58,10 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -165,6 +185,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
+      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
+      usageGateDenied: false,
+    }));
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",

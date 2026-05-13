@@ -1,113 +1,120 @@
 import { createHash } from "node:crypto";
 
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { appendHostedDeviceSyncDirtyWake } from "./wake-service";
 
-const DEFAULT_NUDGE_LIMIT = 25;
+const DEFAULT_WAKE_LIMIT = 25;
 const DEFAULT_STALE_AFTER_MS = 30_000;
-const MAX_NUDGE_LIMIT = 250;
-const NUDGE_CONCURRENCY = 5;
-const NUDGE_TIMEOUT_MS = 5_000;
+const MAX_WAKE_LIMIT = 250;
+const WAKE_CONCURRENCY = 5;
 
 export interface HostedDeviceSyncDirtySweeperResult {
-  dirtyUsers: number;
-  nudgeAccepted: number;
-  nudgeAttempted: number;
-  nudgeLimit: number;
-  nudgeNotAccepted: number;
-  skippedDirtyUsers: number;
+  dirtyConnections: number;
+  skippedDirtyConnections: number;
   staleAfterMs: number;
+  wakeAppended: number;
+  wakeAttempted: number;
+  wakeLimit: number;
+  wakeNotAppended: number;
 }
 
 type HostedDeviceSyncDirtySweeperLogger = Pick<Console, "info" | "warn">;
+type HostedDeviceSyncDirtyWakeAppend = typeof appendHostedDeviceSyncDirtyWake;
 
 export async function runHostedDeviceSyncDirtySweeper(input: {
+  appendDirtyWake?: HostedDeviceSyncDirtyWakeAppend;
   logger?: HostedDeviceSyncDirtySweeperLogger;
   now?: Date;
   nudgeLimit?: number;
   staleAfterMs?: number;
-  store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDirtyUsersForSweep">;
+  store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDirtyConnectionsForSweep">;
 } = {}): Promise<HostedDeviceSyncDirtySweeperResult> {
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
-  const nudgeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_NUDGE_LIMIT, MAX_NUDGE_LIMIT);
+  const wakeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_WAKE_LIMIT, MAX_WAKE_LIMIT);
   const staleAfterMs = normalizeStaleAfterMs(input.staleAfterMs);
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
-  const dirtyUsers = await store.listDirtyUsersForSweep({
-    limit: nudgeLimit + 1,
+  const appendDirtyWake = input.appendDirtyWake ?? appendHostedDeviceSyncDirtyWake;
+  const dirtyConnections = await store.listDirtyConnectionsForSweep({
+    limit: wakeLimit + 1,
     staleBefore: new Date(now.getTime() - staleAfterMs),
   });
-  const selectedDirtyUsers = dirtyUsers.slice(0, nudgeLimit);
+  const selectedDirtyConnections = dirtyConnections.slice(0, wakeLimit);
+  const wakeOccurredAt = now.toISOString();
 
-  logger.info("Hosted device-sync dirty sweeper scanned dirty users.", {
-    dirtyUsers: dirtyUsers.length,
-    nudgeLimit,
-    selectedDirtyUsers: selectedDirtyUsers.length,
+  logger.info("Hosted device-sync dirty sweeper scanned dirty connections.", {
+    dirtyConnections: dirtyConnections.length,
+    selectedDirtyConnections: selectedDirtyConnections.length,
     staleAfterMs,
+    wakeLimit,
   });
 
-  let nudgeAccepted = 0;
-  let nudgeAttempted = 0;
-  let nudgeNotAccepted = 0;
+  let wakeAppended = 0;
+  let wakeAttempted = 0;
+  let wakeNotAppended = 0;
 
   await runWithConcurrency(
-    selectedDirtyUsers,
-    NUDGE_CONCURRENCY,
-    async (dirtyUser) => {
-      nudgeAttempted += 1;
-      const userFingerprint = fingerprintHostedDeviceSyncDirtyUser(dirtyUser.userId);
-      logger.warn("Hosted device-sync dirty sweeper nudging runner for dirty state.", {
-        dirtyConnectionCount: dirtyUser.dirtyConnectionCount.toString(),
-        latestDirtyAt: dirtyUser.latestDirtyAt,
+    selectedDirtyConnections,
+    WAKE_CONCURRENCY,
+    async (dirtyConnection) => {
+      wakeAttempted += 1;
+      const connectionFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.connectionId);
+      const userFingerprint = fingerprintHostedDeviceSyncDirtyValue(dirtyConnection.userId);
+      logger.warn("Hosted device-sync dirty sweeper appending device-sync wake for dirty state.", {
+        connectionFingerprint,
+        dirtyRevision: dirtyConnection.dirtyRevision.toString(),
+        latestDirtyAt: dirtyConnection.latestDirtyAt,
+        provider: dirtyConnection.provider,
         userFingerprint,
       });
-      const nudge = await nudgeHostedRunnerUserBestEffortResult({
-        context: "hosted-device-sync-dirty-sweeper",
-        timeoutMs: NUDGE_TIMEOUT_MS,
-        userId: dirtyUser.userId,
+      const wake = await appendDirtyWake({
+        connectionId: dirtyConnection.connectionId,
+        dedupeKey: `dirty-revision:${dirtyConnection.dirtyRevision.toString()}`,
+        eventType: dirtyConnection.latestEventType,
+        occurredAt: wakeOccurredAt,
+        provider: dirtyConnection.provider,
+        resourceCategory: dirtyConnection.latestResourceCategory,
+        traceId: null,
+        userId: dirtyConnection.userId,
       });
 
-      if (nudge.accepted) {
-        nudgeAccepted += 1;
-        logger.info("Hosted device-sync dirty sweeper runner nudge accepted.", {
-          alarmScheduled: nudge.alarmScheduled,
-          alreadyRunning: nudge.alreadyRunning,
-          immediateDriveStarted: nudge.immediateDriveStarted,
-          inFlight: nudge.inFlight,
-          nextAlarmAtPresent: nudge.nextAlarmAtPresent,
+      if (wake.wakeAppended) {
+        wakeAppended += 1;
+        logger.info("Hosted device-sync dirty sweeper device-sync wake appended.", {
+          connectionFingerprint,
           userFingerprint,
         });
         return;
       }
 
-      nudgeNotAccepted += 1;
-      logger.warn("Hosted device-sync dirty sweeper runner nudge was not accepted.", {
-        configured: nudge.configured,
-        errorCode: nudge.errorCode,
+      wakeNotAppended += 1;
+      logger.warn("Hosted device-sync dirty sweeper device-sync wake was not appended.", {
+        connectionFingerprint,
+        reason: wake.reason ?? null,
         userFingerprint,
       });
     },
   );
 
-  const skippedDirtyUsers = Math.max(0, dirtyUsers.length - selectedDirtyUsers.length);
-  if (skippedDirtyUsers > 0) {
-    logger.warn("Hosted device-sync dirty sweeper skipped dirty users after nudge limit.", {
-      nudgeLimit,
-      skippedDirtyUsers,
+  const skippedDirtyConnections = Math.max(0, dirtyConnections.length - selectedDirtyConnections.length);
+  if (skippedDirtyConnections > 0) {
+    logger.warn("Hosted device-sync dirty sweeper skipped dirty connections after wake limit.", {
+      skippedDirtyConnections,
+      wakeLimit,
     });
   }
 
   return {
-    dirtyUsers: dirtyUsers.length,
-    nudgeAccepted,
-    nudgeAttempted,
-    nudgeLimit,
-    nudgeNotAccepted,
-    skippedDirtyUsers,
+    dirtyConnections: dirtyConnections.length,
+    skippedDirtyConnections,
     staleAfterMs,
+    wakeAppended,
+    wakeAttempted,
+    wakeLimit,
+    wakeNotAppended,
   };
 }
 
@@ -144,9 +151,9 @@ async function runWithConcurrency<T>(
   }));
 }
 
-function fingerprintHostedDeviceSyncDirtyUser(userId: string): string {
+function fingerprintHostedDeviceSyncDirtyValue(value: string): string {
   return createHash("sha256")
-    .update(userId)
+    .update(value)
     .digest("hex")
     .slice(0, 16);
 }

@@ -25,7 +25,6 @@ import type {
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -386,6 +385,49 @@ export async function appendHostedDeviceSyncWake(input: {
   };
 }
 
+export async function appendHostedDeviceSyncDirtyWake(input: {
+  connectionId: string;
+  dedupeKey?: string | null;
+  eventType?: string | null;
+  occurredAt: string;
+  provider: string;
+  resourceCategory?: string | null;
+  store?: PrismaDeviceSyncControlPlaneStore;
+  traceId?: string | null;
+  userId: string;
+}): Promise<{ wakeAppended: boolean; reason?: string }> {
+  const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
+    prisma: getPrisma(),
+  });
+  const wake = buildHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    eventId: buildHostedDeviceSyncDirtyWakeEventId({
+      connectionId: input.connectionId,
+      dedupeKey: input.dedupeKey ?? null,
+      occurredAt: input.occurredAt,
+      provider: input.provider,
+      traceId: input.traceId ?? null,
+      userId: input.userId,
+    }),
+    hint: buildHostedDeviceSyncDirtyWakeHint(input),
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    source: "webhook-hint",
+    traceId: input.traceId ?? null,
+    userId: input.userId,
+  });
+
+  await persistHostedDeviceSyncWake({
+    wake,
+    store,
+    persist: async () => {},
+  });
+
+  return {
+    wakeAppended: true,
+  };
+}
+
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -448,7 +490,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  let runnerWakeRequested = false;
+  let mailboxItemId: string | null = null;
 
   await input.store.prisma.$transaction(async (tx) => {
     await input.store.createSignal({
@@ -474,7 +516,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       tx,
       userId: input.userId,
     });
-    runnerWakeRequested = dirty.shouldRequestWake;
 
     if (input.traceId) {
       const completed = await input.store.completeWebhookTrace(input.provider, input.traceId, input.claimToken, tx);
@@ -487,31 +528,35 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         });
       }
     }
+
+    if (dirty.shouldRequestWake) {
+      const wake = buildHostedDeviceSyncWake({
+        connectionId: input.connectionId,
+        eventId: buildHostedDeviceSyncDirtyWakeEventId({
+          connectionId: input.connectionId,
+          dedupeKey: null,
+          occurredAt: input.occurredAt,
+          provider: input.provider,
+          traceId: input.traceId,
+          userId: input.userId,
+        }),
+        hint: buildHostedDeviceSyncDirtyWakeHint(input),
+        occurredAt: input.occurredAt,
+        provider: input.provider,
+        source: "webhook-hint",
+        traceId: input.traceId,
+        userId: input.userId,
+      });
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
+      mailboxItemId = mailboxAppend.item.id;
+    }
   });
 
-  if (!runnerWakeRequested) {
-    return;
-  }
-
-  const nudgeLogMetadata = {
-    connectionId: input.connectionId,
-    provider: input.provider,
-    traceIdPresent: input.traceId !== null,
-  };
-
-  const nudge = await nudgeHostedRunnerUserBestEffortResult({
-    context: "hosted-device-sync-dirty-webhook",
-    timeoutMs: 5_000,
-    userId: input.userId,
-  });
-  if (!nudge.accepted) {
-    console.warn("Hosted device-sync dirty runner nudge was not accepted after durable acceptance.", {
-      connectionId: nudgeLogMetadata.connectionId,
-      configured: nudge.configured,
-      errorCode: nudge.errorCode,
-      provider: nudgeLogMetadata.provider,
-      traceIdPresent: nudgeLogMetadata.traceIdPresent,
-    });
+  if (mailboxItemId) {
+    await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId);
   }
 }
 
@@ -527,12 +572,54 @@ function buildHostedDeviceSyncSignalPayload(input: {
   };
 }
 
+function buildHostedDeviceSyncDirtyWakeHint(input: {
+  eventType?: string | null;
+  occurredAt: string;
+  resourceCategory?: string | null;
+  traceId?: string | null;
+}): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
+  return {
+    occurredAt: input.occurredAt,
+    ...(normalizeNullableString(input.eventType)
+      ? { eventType: normalizeNullableString(input.eventType) }
+      : {}),
+    ...(normalizeNullableString(input.resourceCategory)
+      ? { resourceCategory: normalizeNullableString(input.resourceCategory) }
+      : {}),
+    ...(normalizeNullableString(input.traceId)
+      ? { traceId: normalizeNullableString(input.traceId) }
+      : {}),
+  };
+}
+
+function buildHostedDeviceSyncDirtyWakeEventId(input: {
+  connectionId: string;
+  dedupeKey?: string | null;
+  occurredAt: string;
+  provider: string;
+  traceId?: string | null;
+  userId: string;
+}): string {
+  return [
+    "device-sync",
+    "webhook-hint",
+    input.userId,
+    input.provider,
+    input.connectionId,
+    normalizeNullableString(input.dedupeKey)
+      ?? normalizeNullableString(input.traceId)
+      ?? input.occurredAt,
+  ].join(":");
+}
+
 function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {
   switch (source) {
     case "connection-established":
       return "connected";
     case "disconnect":
       return "disconnected";
+    case "webhook-hint":
+      return "webhook_hint";
     case "scheduled-reconcile":
       return "reconcile_due";
     default:

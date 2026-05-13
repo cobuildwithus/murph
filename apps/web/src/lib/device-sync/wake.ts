@@ -9,6 +9,7 @@ import { toJsonRecord } from "./shared";
 export type HostedDeviceSyncWakeSource =
   | "connection-established"
   | "disconnect"
+  | "webhook-hint"
   | "scheduled-reconcile";
 
 export function buildHostedDeviceSyncWake(input: {
@@ -80,6 +81,8 @@ export function mapHostedDeviceSyncWakeReason(
       return "connected";
     case "disconnect":
       return "disconnected";
+    case "webhook-hint":
+      return "webhook_hint";
     case "scheduled-reconcile":
       return "reconcile_due";
     default:

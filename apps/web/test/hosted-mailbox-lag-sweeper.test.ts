@@ -1,11 +1,40 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+interface MockAssistantNudgeResult {
+  accepted: boolean;
+  alarmScheduled: boolean | null;
+  alreadyRunning: boolean | null;
+  configured: boolean;
+  errorCode: string | null;
+  immediateDriveStarted: boolean | null;
+  inFlight: boolean | null;
+  nextAlarmAtPresent: boolean | null;
+  usageGateDenied: boolean;
+}
+
 const mocks = vi.hoisted(() => ({
   groupBy: vi.fn(),
   hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
   mailboxFindFirst: vi.fn(),
+  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+  ): Promise<MockAssistantNudgeResult> => {
+    void input;
+    return {
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+      usageGateDenied: false,
+    };
+  }),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
+  nudgeHostedSystemRunnerUserBestEffortResult: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -14,6 +43,14 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-runner/system-nudge", () => ({
+  nudgeHostedSystemRunnerUserBestEffortResult: mocks.nudgeHostedSystemRunnerUserBestEffortResult,
 }));
 
 type LagSweeperModule = typeof import("../src/lib/hosted-mailbox/lag-sweeper");
@@ -49,6 +86,14 @@ describe("hosted mailbox lag sweeper", () => {
       inFlight: false,
       nextAlarmAtPresent: true,
     });
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
+      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
+      usageGateDenied: false,
+    }));
+    mocks.nudgeHostedSystemRunnerUserBestEffortResult.mockImplementation(async (input) => ({
+      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
+      conversationLagPresent: false,
+    }));
   });
 
   it("nudges lagged users from mailbox item high-water rows", async () => {
@@ -393,6 +438,103 @@ describe("hosted mailbox lag sweeper", () => {
         skippedLaggedUsers: 1,
       }),
     );
+  });
+
+  it("does not nudge the regular runner when assistant usage is capped for conversation-only lag", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 4n,
+        userId: "member_capped_lag",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "0",
+        },
+        userId: "member_capped_lag",
+      }),
+    ]);
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: null,
+      alreadyRunning: null,
+      configured: true,
+      errorCode: "AI_USAGE_GATE_DENIED",
+      immediateDriveStarted: null,
+      inFlight: null,
+      nextAlarmAtPresent: null,
+      usageGateDenied: true,
+    });
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger: buildLogger(),
+      now: new Date("2026-05-02T00:21:00.000Z"),
+    });
+
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "hosted-mailbox-lag-sweeper",
+      timeoutMs: 5000,
+      userId: "member_capped_lag",
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      nudgeAttempted: 1,
+      nudgeNotAccepted: 1,
+    });
+  });
+
+  it("does not nudge the regular runner when capped assistant lag is mixed with system lag", async () => {
+    mocks.groupBy.mockResolvedValue([
+      buildHighWater({
+        lane: "conversation",
+        maxSeq: 4n,
+        userId: "member_capped_mixed_lag",
+      }),
+      buildHighWater({
+        lane: "system",
+        maxSeq: 2n,
+        userId: "member_capped_mixed_lag",
+      }),
+    ]);
+    mocks.hostedWorkspaceFindMany.mockResolvedValue([
+      buildWorkspace({
+        redactedStatusJson: {
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        userId: "member_capped_mixed_lag",
+      }),
+    ]);
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
+      accepted: false,
+      alarmScheduled: null,
+      alreadyRunning: null,
+      configured: true,
+      errorCode: "AI_USAGE_GATE_DENIED",
+      immediateDriveStarted: null,
+      inFlight: null,
+      nextAlarmAtPresent: null,
+      usageGateDenied: true,
+    });
+
+    const result = await lagSweeper.runHostedMailboxLagSweeper({
+      logger: buildLogger(),
+      now: new Date("2026-05-02T00:21:00.000Z"),
+    });
+
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "hosted-mailbox-lag-sweeper",
+      timeoutMs: 5000,
+      userId: "member_capped_mixed_lag",
+    });
+    expect(mocks.nudgeHostedSystemRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      nudgeAttempted: 1,
+      nudgeNotAccepted: 1,
+    });
   });
 
   it("logs a warning when a lag nudge is not accepted", async () => {

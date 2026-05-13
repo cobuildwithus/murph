@@ -201,6 +201,58 @@ export class PrismaHostedDirtyConnectionStore {
     }));
   }
 
+  async listDirtyConnectionsForSweep(input: {
+    limit: number;
+    staleBefore: Date;
+  }): Promise<Array<{
+    connectionId: string;
+    dirtyRevision: bigint;
+    latestDirtyAt: string;
+    latestEventType: string | null;
+    latestResourceCategory: string | null;
+    latestTraceId: string | null;
+    provider: string;
+    userId: string;
+  }>> {
+    const limit = Math.max(1, Math.min(input.limit, 251));
+    const rows = await this.prisma.$queryRaw<Array<{
+      connection_id: string;
+      dirty_revision: bigint;
+      latest_dirty_at: Date;
+      latest_event_type: string | null;
+      latest_resource_category: string | null;
+      latest_trace_id: string | null;
+      provider: string;
+      user_id: string;
+    }>>(Prisma.sql`
+      select
+        "connection_id",
+        "dirty_revision",
+        "latest_dirty_at",
+        "latest_event_type",
+        "latest_resource_category",
+        "latest_trace_id",
+        "provider",
+        "user_id"
+      from "device_sync_dirty_connection"
+      where "dirty_revision" > "processed_revision"
+        and "latest_dirty_at" <= ${input.staleBefore}
+      order by "latest_dirty_at" asc, "connection_id" asc
+      limit ${limit}
+    `);
+
+    return rows.map((row) => ({
+      connectionId: row.connection_id,
+      dirtyRevision: row.dirty_revision,
+      latestDirtyAt: toIsoTimestamp(row.latest_dirty_at),
+      latestEventType: row.latest_event_type,
+      latestResourceCategory: row.latest_resource_category,
+      latestTraceId: row.latest_trace_id,
+      provider: row.provider,
+      userId: row.user_id,
+    }));
+  }
+
   async markDirtyConnectionProcessed(input: {
     connectionId: string;
     processedRevision: bigint;
