@@ -313,8 +313,6 @@ export async function sendAssistantMessageLocal(
             resolved.session.binding.conversationKey,
             resolveAssistantConversationLookupKey(input),
           ].filter((key): key is string => key !== null),
-          livePollEnabled:
-            shouldLivePollActiveTurnInputForMessage(input, executionContext),
           sessionId: resolved.session.sessionId,
           turnId: receipt.turnId,
           vault: input.vault,
@@ -465,7 +463,7 @@ export async function sendAssistantMessageLocal(
           let preProviderAdmissionCount = 0
           while (true) {
             const activeTurnInput = await activeTurnInputController?.admitAvailable({
-              pollIfIdle: true,
+              probeIfIdle: true,
               signal: currentInput.abortSignal,
             })
             if (activeTurnInput?.kind !== 'accepted') {
@@ -942,17 +940,6 @@ function resolveInitialUserPromptAcceptedTurnInputId(
   return initialInputs && initialInputs.length > 0
     ? null
     : DEFAULT_INITIAL_ACCEPTED_TURN_INPUT_ID
-}
-
-function shouldLivePollActiveTurnInputForMessage(
-  input: AssistantMessageInput,
-  executionContext: ReturnType<typeof normalizeAssistantExecutionContext>,
-): boolean {
-  return !(
-    executionContext?.hosted != null &&
-    input.deliveryDispatchMode === 'queue-only' &&
-    input.turnTrigger === 'automation-auto-reply'
-  )
 }
 
 async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
