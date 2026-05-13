@@ -30,6 +30,7 @@ function createDeployEnvironment() {
       vcpu: 1,
     },
     containerMaxInstances: 1000,
+    containerSshKey: null,
     hostedEmailSendBindingEnabled: true,
     logHeadSamplingRate: 1,
     maxEventAttempts: "3",

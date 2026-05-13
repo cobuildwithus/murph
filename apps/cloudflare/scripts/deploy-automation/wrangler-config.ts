@@ -14,6 +14,7 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
 );
 const CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
+const CONTAINER_SSH_COMPATIBILITY_FLAG = "containers_pid_namespace";
 
 function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
   if (maxInstances >= CONTAINER_ROLLOUT_STEP_PERCENTAGE.length) {
@@ -47,22 +48,33 @@ export function buildHostedWranglerDeployConfig(
   const buildRunnerContainerConfig = (input: {
     className: string;
     maxInstances: number;
-  }): Record<string, unknown> => ({
-    class_name: input.className,
-    image: "../../../Dockerfile.cloudflare-hosted-runner",
-    image_build_context: "..",
-    instance_type: environment.containerInstanceType,
-    max_instances: input.maxInstances,
-    rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
-    rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances),
-  });
+  }): Record<string, unknown> => {
+    const container: Record<string, unknown> = {
+      class_name: input.className,
+      image: "../../../Dockerfile.cloudflare-hosted-runner",
+      image_build_context: "..",
+      instance_type: environment.containerInstanceType,
+      max_instances: input.maxInstances,
+      rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances),
+    };
+
+    if (environment.containerSshKey) {
+      container.ssh = { enabled: true };
+      container.authorized_keys = [environment.containerSshKey];
+    }
+
+    return container;
+  };
 
   return {
     $schema: "../node_modules/wrangler/config-schema.json",
     name: environment.workerName,
     main: "../src/index.ts",
     compatibility_date: environment.compatibilityDate,
-    compatibility_flags: ["nodejs_compat"],
+    compatibility_flags: environment.containerSshKey
+      ? ["nodejs_compat", CONTAINER_SSH_COMPATIBILITY_FLAG]
+      : ["nodejs_compat"],
     placement: {
       mode: "smart",
     },
