@@ -113,7 +113,7 @@ type EnsureRunnerProgressResult =
   | {
       kind: "scheduled-short-retry";
       record: RunnerStateRecord;
-      runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>;
+      runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" | "unknown" }>;
     };
 
 export interface HostedRunnerUserDataDeletionResult {
@@ -503,6 +503,18 @@ export class HostedUserRunner {
       }
 
       const previousFence = record.writeFence;
+      if (isRunnerWriteFenceUnexpired(previousFence, Date.now())) {
+        const retryRecord = await this.stateStore.markWakePending({
+          preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
+        });
+        await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
+        return {
+          kind: "scheduled-short-retry",
+          record: retryRecord,
+          runtimeWake,
+        };
+      }
+
       const preempted = await this.stateStore.clearWriteFenceIfCurrent({
         attemptId: previousFence.attemptId,
         generation: String(previousFence.generation),
@@ -1384,6 +1396,9 @@ function buildEnsureRunnerProgressLogDetails(
     runtimeWakeAccepted: runtimeWake?.kind === "accepted",
     runtimeWakeResult: runtimeWake ? formatRunnerRuntimeWakeResult(runtimeWake) : null,
     staleWriteFencePreempted: progress.kind === "preempted-stale-fence",
+    writeFenceHeldAfterNotWakeable:
+      progress.kind === "scheduled-short-retry"
+      && runtimeWake?.kind === "not-wakeable",
     ...(progress.kind === "preempted-stale-fence"
       ? {
         previousAttemptId: progress.previousAttemptId,
@@ -1406,6 +1421,14 @@ function readEnsureRunnerProgressRuntimeWake(
     return progress.runtimeWake;
   }
   return null;
+}
+
+function isRunnerWriteFenceUnexpired(
+  writeFence: NonNullable<RunnerStateRecord["writeFence"]>,
+  nowMs: number,
+): boolean {
+  const expiresAtMs = Date.parse(writeFence.expiresAt);
+  return Number.isFinite(expiresAtMs) && nowMs < expiresAtMs;
 }
 
 function formatRunnerRuntimeWakeResult(result: RunnerRuntimeWakeResult): string {
