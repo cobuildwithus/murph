@@ -504,34 +504,6 @@ export class RunnerStateStore {
     };
   }
 
-  async recordWriteFenceWorkspaceCheckpoint(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean; record: RunnerStateRecord }> {
-    const meta = this.requireMetaRowSync();
-    const token = this.readWriteFenceTokenSync(meta);
-    if (
-      !token
-      || token.attemptId !== input.attemptId
-      || token.generation !== input.generation
-      || token.userId !== input.userId
-    ) {
-      return {
-        recorded: false,
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
-    meta.active_workspace_version = input.workspaceVersion;
-    this.writeMetaRowSync(meta);
-    return {
-      recorded: true,
-      record: this.readStateFromMetaSync(meta),
-    };
-  }
-
   private clearExpiredActiveRunSync(meta: RunnerMetaBundleRow, nowMs: number): boolean {
     const writeFence = this.readWriteFenceTokenSync(meta);
     if (!writeFence) {

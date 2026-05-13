@@ -64,3 +64,6 @@ Completed:
 - `pnpm --dir . exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/runner-container-runtime-callback.test.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/index-backpressure.test.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/helpers/hosted-local-dev-harness.test.ts --no-coverage`
 - `pnpm test:diff -- packages/assistant-runtime packages/hosted-execution apps/cloudflare agent-docs/references/hosted-runtime-protocol.md apps/cloudflare/README.md ARCHITECTURE.md`
 - `git diff --check`
+Status: completed
+Updated: 2026-05-13
+Completed: 2026-05-13

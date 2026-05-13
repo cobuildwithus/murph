@@ -2808,9 +2808,6 @@ function createRunnerOutboundEnv(
         async validateRuntimeWriteFence() {
           return true;
         },
-        async recordRuntimeWriteFenceWorkspaceCheckpoint() {
-          return { recorded: true };
-        },
       };
     },
   };
@@ -2888,12 +2885,6 @@ function createRunnerOutboundEnv(
               });
             }
             return true;
-          },
-          async recordRuntimeWriteFenceWorkspaceCheckpoint(input) {
-            if (typeof stub.recordRuntimeWriteFenceWorkspaceCheckpoint === "function") {
-              return await stub.recordRuntimeWriteFenceWorkspaceCheckpoint(input);
-            }
-            return { recorded: true };
           },
         };
       },

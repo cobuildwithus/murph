@@ -2207,7 +2207,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     finishRuntimeWriteFenceForSmoke: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),
-    recordRuntimeWriteFenceWorkspaceCheckpoint: vi.fn(async () => ({ recorded: true })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
 }

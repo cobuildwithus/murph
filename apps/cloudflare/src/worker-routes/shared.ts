@@ -42,12 +42,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
-  recordRuntimeWriteFenceWorkspaceCheckpoint?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runUntilIdleForTest?(input: {
     reason: HostedWorkspaceInvocationReason;

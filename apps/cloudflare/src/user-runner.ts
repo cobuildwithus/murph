@@ -383,16 +383,6 @@ export class HostedUserRunner {
     return { completed: result.completed };
   }
 
-  async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }> {
-    const result = await this.stateStore.recordWriteFenceWorkspaceCheckpoint(input);
-    return { recorded: result.recorded };
-  }
-
   async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
     const started = this.kickDrain({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,

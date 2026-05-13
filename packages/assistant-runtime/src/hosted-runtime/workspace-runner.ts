@@ -622,10 +622,7 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     result,
     runnerInput: input.input,
   });
-  if (
-    result.checkpointDeferred
-    && (result.stateChanged || Boolean(result.importResult.nextRetryAt))
-  ) {
+  if (isDeferredHostedMailboxImportDirty(result)) {
     await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
       snapshotRef: input.input.workspace?.snapshotRef ?? null,
       vaultRoot: input.input.vaultRoot,
@@ -766,12 +763,16 @@ function markHostedMailboxImportDirtyIfNeeded(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession,
   result: HostedMailboxImportCheckpointResult,
 ): void {
-  if (
-    result.checkpointDeferred
-    && (result.stateChanged || Boolean(result.importResult.nextRetryAt))
-  ) {
+  if (isDeferredHostedMailboxImportDirty(result)) {
     checkpointRequestBuilder.markRuntimeStateDirty();
   }
+}
+
+function isDeferredHostedMailboxImportDirty(
+  result: HostedMailboxImportCheckpointResult,
+): boolean {
+  return result.checkpointDeferred
+    && (result.stateChanged || Boolean(result.importResult.nextRetryAt));
 }
 
 function createHostedWorkspaceCanonicalWritePort(input: {
