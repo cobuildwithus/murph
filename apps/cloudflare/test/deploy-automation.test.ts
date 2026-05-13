@@ -494,6 +494,8 @@ describe("hosted deploy automation helpers", () => {
     for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
+      "CF_CONTAINER_SSH_KEY_NAME: ${{ vars.CF_CONTAINER_SSH_KEY_NAME }}",
+      "CF_CONTAINER_SSH_PUBLIC_KEY: ${{ vars.CF_CONTAINER_SSH_PUBLIC_KEY }}",
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
