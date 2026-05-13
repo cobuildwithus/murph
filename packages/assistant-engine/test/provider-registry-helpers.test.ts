@@ -354,6 +354,43 @@ describe('Codex assistant registry helpers', () => {
     },
     {
       expected: {
+        cachedInputTokens: 8,
+        inputTokens: 44,
+        outputTokens: 9,
+        totalTokens: 53,
+      },
+      expectedRawUsageJson: {
+        completion_tokens: 9,
+        prompt_tokens: 44,
+        prompt_tokens_details: {
+          cached_tokens: 8,
+        },
+        total_tokens: 53,
+      },
+      expectedSourcePath: 'params.usage',
+      name: 'OpenAI chat usage prompt token detail aliases',
+      rawEvents: [
+        {
+          params: {
+            turn: {
+              id: 'turn-chat-usage',
+              model: 'gpt-5.4',
+            },
+            usage: {
+              completion_tokens: 9,
+              prompt_tokens: 44,
+              prompt_tokens_details: {
+                cached_tokens: 8,
+              },
+              total_tokens: 53,
+            },
+          },
+          type: 'turn.completed',
+        },
+      ],
+    },
+    {
+      expected: {
         cacheWriteTokens: 2,
         cachedInputTokens: 4,
         inputTokens: 21,

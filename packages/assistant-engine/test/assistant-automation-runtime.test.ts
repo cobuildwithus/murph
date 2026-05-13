@@ -76,7 +76,6 @@ const runLoopMocks = vi.hoisted(() => ({
   recordAssistantDiagnosticEvent: vi.fn(),
   redactAssistantDisplayPath: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
-  recoverAssistantAutoReplies: vi.fn(),
   resolveAssistantStatePaths: vi.fn(),
   saveAssistantAutomationState: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
@@ -163,11 +162,6 @@ async function writeVaultFile(
 
 vi.mock('../src/assistant/automation/scanner.ts', () => ({
   scanAssistantAutomationOnce: runLoopMocks.scanAssistantAutomationOnce,
-}))
-
-vi.mock('../src/assistant/automation/startup-recovery.ts', () => ({
-  recoverAssistantAutoReplies:
-    runLoopMocks.recoverAssistantAutoReplies,
 }))
 
 vi.mock('@murphai/inbox-services', () => ({
@@ -996,16 +990,6 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation((vault: string) => vault.replace('/tmp/', '/redacted/'))
   runLoopMocks.refreshAssistantStatusSnapshot.mockReset().mockResolvedValue(undefined)
-  runLoopMocks.recoverAssistantAutoReplies
-    .mockReset()
-    .mockResolvedValue({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
   runLoopMocks.resolveAssistantStatePaths.mockReset().mockReturnValue({
     lockPath: '/tmp/assistant.lock',
   })
@@ -4533,16 +4517,6 @@ describe('assistant auto-reply runtime', () => {
     expect(result.replies).toMatchObject({
       failed: 0,
     })
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionContext,
-        inputSource: expect.objectContaining({
-          listInputCandidates: expect.any(Function),
-          listNewConversationInputs: expect.any(Function),
-          refresh: expect.any(Function),
-        }),
-      }),
-    )
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext,
@@ -4555,7 +4529,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('refreshes assistant input before recovery and scan', async () => {
+  it('refreshes assistant input before the normal scanner', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
@@ -4585,17 +4559,11 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
       .toBeLessThan(
-        runLoopMocks.recoverAssistantAutoReplies.mock.invocationCallOrder[0]!,
-      )
-    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
-      .toBeLessThan(
         runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
       )
   })
 
-  it('defers receipt recovery after fresh hosted queue-only replies', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-07T00:00:00.000Z'))
+  it('keeps fresh hosted queue-only replies on the scanner and outbox path', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
       routing: {
@@ -4620,7 +4588,6 @@ describe('assistant auto-reply runtime', () => {
     >('../src/assistant/automation/run-loop.ts')
 
     const result = await runLoop.runAssistantAutomationPass({
-      deferReceiptRecovery: true,
       deliveryDispatchMode: 'queue-only',
       executionContext: {
         hosted: {
@@ -4632,12 +4599,9 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(runLoopMocks.recoverAssistantAutoReplies).not.toHaveBeenCalled()
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledTimes(2)
     expect(result).toMatchObject({
-      deferredReceiptRecoveryWakeAt: '2026-05-07T00:00:00.000Z',
-      nextWakeAt: '2026-05-07T00:00:00.000Z',
-      nextWakeAtWithoutDeferredReceiptRecovery: null,
       progressed: true,
       replies: {
         checkpointRequired: true,
@@ -4647,7 +4611,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('runs deferred receipt recovery after the scan when no fresh reply is produced', async () => {
+  it('does not create reply work from failed receipts when the scanner is idle', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
       routing: {
@@ -4666,20 +4630,11 @@ describe('assistant auto-reply runtime', () => {
         skipped: 0,
       },
     })
-    runLoopMocks.recoverAssistantAutoReplies.mockResolvedValueOnce({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: true,
-      replied: 1,
-      skipped: 0,
-    })
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
 
     const result = await runLoop.runAssistantAutomationPass({
-      deferReceiptRecovery: true,
       deliveryDispatchMode: 'queue-only',
       executionContext: {
         hosted: {
@@ -4692,17 +4647,11 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledOnce()
-    expect(
-      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      runLoopMocks.recoverAssistantAutoReplies.mock.invocationCallOrder[0] ?? 0,
-    )
     expect(result).toMatchObject({
-      progressed: true,
+      progressed: false,
       replies: {
-        considered: 1,
-        replied: 1,
+        considered: 0,
+        replied: 0,
       },
     })
   })
@@ -4764,7 +4713,6 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(runLoopMocks.createIntegratedVaultServices).not.toHaveBeenCalled()
-    expect(runLoopMocks.recoverAssistantAutoReplies).not.toHaveBeenCalled()
     expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -7044,801 +6992,6 @@ describe('assistant auto-reply runtime', () => {
   })
 })
 
-describe('assistant auto-reply receipt recovery', () => {
-  it('retries a recent retry-safe failed auto-reply from persisted receipts', async () => {
-    const context = await createTempVaultContext('assistant-recovery-capture-')
-    tempRoots.push(context.parentRoot)
-    const capture = createCaptureDetail({
-      captureId: 'capture-1',
-    })
-    const stored = await stageInboxCaptureAssistantInputEvent({
-      capture,
-      vault: context.vaultRoot,
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        primaryCaptureId: 'capture-1',
-        captureIds: ['capture-1'],
-        primaryInputId: stored.inputId,
-        inputIds: [stored.inputId],
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(capture),
-      ),
-    })
-    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
-      advanceCursor: true,
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-      stopScanning: false,
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const events: Array<Record<string, unknown>> = []
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: stored.inputId,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      })),
-      inboxServices,
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      vault: context.vaultRoot,
-    })
-
-    expect(result).toEqual({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: true,
-      replied: 1,
-      skipped: 0,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
-    expect(events).toContainEqual({
-      type: 'reply.scan.started',
-      details: 'retrying up to 1 failed auto-reply input(s) from persisted receipts',
-    })
-  })
-
-  it('retries a captureless assistant input event from persisted receipts', async () => {
-    const vault = '/tmp/assistant-automation-recovery-input'
-    const stored = await upsertAssistantInputEvent({
-      vault,
-      event: {
-        content: {
-          text: 'retry this hosted input',
-          userMessageContent: [
-            {
-              text: 'retry this hosted input',
-              type: 'text',
-            },
-          ],
-        },
-        conversation: {
-          accountId: 'acct_1',
-          actorId: 'actor_1',
-          actorIsSelf: false,
-          source: 'linq',
-          threadId: 'thread_1',
-          threadIsDirect: true,
-        },
-        occurredAt: '2026-04-08T00:00:00.000Z',
-        receivedAt: '2026-04-08T00:00:01.000Z',
-        replyTarget: {
-          channel: 'linq',
-          messageId: 'msg_recovery_input',
-          threadId: 'thread_1',
-        },
-        sourceRef: {
-          dedupeKey: 'dedupe_recovery_input',
-          eventId: 'evt_recovery_input',
-          itemId: 'item_recovery_input',
-          kind: 'hosted-mailbox',
-          lane: 'conversation',
-          laneSeq: '101',
-          payloadSchema: 'payload.v1',
-          payloadSource: 'inline',
-          source: 'hosted-mailbox',
-          wakeSchema: 'wake.v1',
-        },
-      },
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        primaryCaptureId: stored.inputId,
-        captureIds: [stored.inputId],
-        primaryInputId: stored.inputId,
-        inputIds: [stored.inputId],
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn(async () => {
-        const error = new Error('missing capture')
-        Object.assign(error, { code: 'INBOX_CAPTURE_NOT_FOUND' })
-        throw error
-      }),
-    })
-    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
-      advanceCursor: true,
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-      stopScanning: false,
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['linq'], createAssistantInputCursor({
-        inputId: stored.inputId,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-        sourceKind: 'hosted-mailbox',
-        sourcePosition: stored.cursor.sourcePosition ?? null,
-      })),
-      inboxServices,
-      vault,
-    })
-
-    expect(result).toMatchObject({
-      considered: 1,
-      progressed: true,
-      replied: 1,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          firstInputId: stored.inputId,
-          inputIds: [stored.inputId],
-          optionalInboxCaptureIds: [],
-          items: [
-            expect.objectContaining({
-              inputCandidate: expect.objectContaining({
-                event: expect.objectContaining({
-                  inputId: stored.inputId,
-                }),
-              }),
-            }),
-          ],
-        }),
-      }),
-    )
-  })
-
-  it('waits for persisted auto-reply retry deadlines before retrying receipt recovery', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T00:00:10.000Z'))
-    try {
-      const context = await createTempVaultContext('assistant-recovery-retry-at-')
-      tempRoots.push(context.parentRoot)
-      const stored = await stageInboxCaptureAssistantInputEvent({
-        capture: createCaptureDetail({
-          captureId: 'capture-1',
-        }),
-        vault: context.vaultRoot,
-      })
-      replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-        createTurnReceipt({
-          primaryCaptureId: 'capture-1',
-          captureIds: ['capture-1'],
-          primaryInputId: stored.inputId,
-          inputIds: [stored.inputId],
-          timeline: [
-            {
-              at: '2026-04-08T00:00:00.000Z',
-              kind: 'turn.started',
-              detail: null,
-              metadata: {
-                autoReplyInputId: stored.inputId,
-                autoReplyInputIds: stored.inputId,
-                autoReplyCaptureId: 'capture-1',
-                autoReplyCaptureIds: 'capture-1',
-              },
-            },
-            {
-              at: '2026-04-08T00:00:05.000Z',
-              kind: 'turn.completed',
-              detail: 'write EPIPE',
-              metadata: {
-                autoReplyRetryAt: '2026-04-08T00:00:30.000Z',
-              },
-            },
-          ],
-        }),
-      ])
-      const recovery = await vi.importActual<
-        typeof import('../src/assistant/automation/startup-recovery.ts')
-      >('../src/assistant/automation/startup-recovery.ts')
-
-      const result = await recovery.recoverAssistantAutoReplies({
-        allowSelfAuthored: false,
-        autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-          inputId: stored.inputId,
-          occurredAt: '2026-04-08T00:00:00.000Z',
-        })),
-        inboxServices: createInboxServices(),
-        vault: context.vaultRoot,
-      })
-
-      expect(result).toEqual({
-        considered: 0,
-        failed: 0,
-        nextWakeAt: '2026-04-08T00:00:30.000Z',
-        progressed: false,
-        replied: 0,
-        skipped: 0,
-      })
-      expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('skips receipt recovery for terminal provider request validation failures', async () => {
-    const invalidToolOutputInputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: 'capture-invalid-tool-output',
-        kind: 'inbox-capture',
-        source: 'telegram',
-        version: null,
-      },
-    })
-    const invalidPreviousResponseInputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: 'capture-invalid-previous-response',
-        kind: 'inbox-capture',
-        source: 'telegram',
-        version: null,
-      },
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        turnId: 'turn-invalid-tool-output',
-        primaryCaptureId: 'capture-invalid-tool-output',
-        captureIds: ['capture-invalid-tool-output'],
-        primaryInputId: invalidToolOutputInputId,
-        inputIds: [invalidToolOutputInputId],
-        lastError: {
-          code: 'ASSISTANT_PROVIDER_FAILED',
-          message: 'input.3.output: Invalid input',
-        },
-      }),
-      createTurnReceipt({
-        turnId: 'turn-invalid-previous-response',
-        primaryCaptureId: 'capture-invalid-previous-response',
-        captureIds: ['capture-invalid-previous-response'],
-        primaryInputId: invalidPreviousResponseInputId,
-        inputIds: [invalidPreviousResponseInputId],
-        lastError: {
-          code: 'ASSISTANT_PROVIDER_FAILED',
-          message: 'assistant provider failed',
-        },
-        timeline: [
-          {
-            at: '2026-04-08T00:00:00.000Z',
-            kind: 'turn.started',
-            detail: null,
-            metadata: {
-              autoReplyInputId: invalidPreviousResponseInputId,
-              autoReplyInputIds: invalidPreviousResponseInputId,
-              autoReplyCaptureId: 'capture-invalid-previous-response',
-              autoReplyCaptureIds: 'capture-invalid-previous-response',
-            },
-          },
-          {
-            at: '2026-04-08T00:00:05.000Z',
-            kind: 'turn.completed',
-            detail: "Invalid 'previous_response_id': expected a Responses id",
-            metadata: {},
-          },
-        ],
-      }),
-    ])
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: invalidPreviousResponseInputId,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      })),
-      inboxServices: createInboxServices(),
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toEqual({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-  })
-
-  it('skips receipt recovery for ambiguous delivery failures', async () => {
-    const context = await createTempVaultContext('assistant-recovery-ambiguous-')
-    tempRoots.push(context.parentRoot)
-    const captureDetailsById = new Map(
-      ['capture-3', 'capture-4', 'capture-5'].map((captureId) => {
-        const capture = createCaptureDetail({
-          captureId,
-          occurredAt:
-            captureId === 'capture-5'
-              ? '2026-04-08T00:00:02.000Z'
-              : captureId === 'capture-4'
-                ? '2026-04-08T00:00:01.000Z'
-                : '2026-04-08T00:00:00.000Z',
-        })
-        return [captureId, capture] as const
-      }),
-    )
-    for (const capture of captureDetailsById.values()) {
-      await stageInboxCaptureAssistantInputEvent({
-        capture,
-        vault: context.vaultRoot,
-      })
-    }
-    const inputIdByCaptureId = new Map(
-      [...captureDetailsById.entries()].map(([captureId, capture]) => [
-        captureId,
-        createAssistantInputEventId({
-          sourceRef: {
-            captureId,
-            kind: 'inbox-capture',
-            source: capture.source,
-            version: null,
-          },
-        }),
-      ]),
-    )
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        turnId: 'turn-4',
-        primaryCaptureId: 'capture-4',
-        captureIds: ['capture-4'],
-        primaryInputId: inputIdByCaptureId.get('capture-4')!,
-        inputIds: [inputIdByCaptureId.get('capture-4')!],
-        updatedAt: '2026-04-08T00:00:08.000Z',
-        responsePreview: 'drafted response',
-      }),
-      createTurnReceipt({
-        turnId: 'turn-5',
-        primaryCaptureId: 'capture-5',
-        captureIds: ['capture-5'],
-        primaryInputId: inputIdByCaptureId.get('capture-5')!,
-        inputIds: [inputIdByCaptureId.get('capture-5')!],
-        updatedAt: '2026-04-08T00:00:07.000Z',
-        timeline: [
-          {
-            at: '2026-04-08T00:00:00.000Z',
-            kind: 'turn.started',
-            detail: null,
-            metadata: {
-              autoReplyInputId: inputIdByCaptureId.get('capture-5')!,
-              autoReplyInputIds: inputIdByCaptureId.get('capture-5')!,
-              autoReplyCaptureId: 'capture-5',
-              autoReplyCaptureIds: 'capture-5',
-            },
-          },
-          {
-            at: '2026-04-08T00:00:07.000Z',
-            kind: 'delivery.failed',
-            detail: 'delivery rejected',
-            metadata: {},
-          },
-        ],
-      }),
-      createTurnReceipt({
-        turnId: 'turn-3',
-        primaryCaptureId: 'capture-3',
-        captureIds: ['capture-3'],
-        primaryInputId: inputIdByCaptureId.get('capture-3')!,
-        inputIds: [inputIdByCaptureId.get('capture-3')!],
-        updatedAt: '2026-04-08T00:00:06.000Z',
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
-        createShowResult(
-          captureDetailsById.get(input.captureId) ??
-          createCaptureDetail({ captureId: input.captureId }),
-        ),
-      ),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: inputIdByCaptureId.get('capture-5')!,
-        occurredAt: '2026-04-08T00:00:02.000Z',
-      })),
-      inboxServices,
-      vault: context.vaultRoot,
-    })
-
-    expect(result).toEqual({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: true,
-      replied: 0,
-      skipped: 1,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
-  })
-
-  it('retries failed receipts ahead of the fixed auto-reply eligibility boundary', async () => {
-    const context = await createTempVaultContext('assistant-recovery-boundary-')
-    tempRoots.push(context.parentRoot)
-    const capture = createCaptureDetail({
-      captureId: 'capture-2',
-      occurredAt: '2026-04-08T00:00:02.000Z',
-    })
-    const stored = await stageInboxCaptureAssistantInputEvent({
-      capture,
-      vault: context.vaultRoot,
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        primaryCaptureId: 'capture-2',
-        captureIds: ['capture-2'],
-        primaryInputId: stored.inputId,
-        inputIds: [stored.inputId],
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(capture),
-      ),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: createAssistantInputEventId({
-          sourceRef: {
-            captureId: 'capture-1',
-            kind: 'inbox-capture',
-            source: 'telegram',
-            version: null,
-          },
-        }),
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      })),
-      inboxServices,
-      vault: context.vaultRoot,
-    })
-
-    expect(result).toEqual({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: true,
-      replied: 0,
-      skipped: 1,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
-  })
-
-  it('ignores legacy-only capture receipts without reading inbox captures', async () => {
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        primaryCaptureId: 'capture-missing',
-        captureIds: ['capture-missing', 'capture-later'],
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockImplementation(async (input: { captureId: string }) => {
-        if (input.captureId === 'capture-missing') {
-          throw Object.assign(new Error('not found'), {
-            code: 'INBOX_CAPTURE_NOT_FOUND',
-          })
-        }
-        return createShowResult(
-          createCaptureDetail({
-            captureId: input.captureId,
-            occurredAt: '2026-04-08T00:00:01.000Z',
-          }),
-        )
-      }),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: createAssistantInputEventId({
-          sourceRef: {
-            captureId: 'capture-later',
-            kind: 'inbox-capture',
-            source: 'telegram',
-            version: null,
-          },
-        }),
-        occurredAt: '2026-04-08T00:00:01.000Z',
-      })),
-      inboxServices,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toEqual({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(inboxServices.show).not.toHaveBeenCalled()
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-  })
-
-  it('ignores malformed or missing assistant input event receipt ids without reading inbox captures', async () => {
-    const missingInputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: 'capture-missing-event',
-        kind: 'inbox-capture',
-        source: 'telegram',
-        version: null,
-      },
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        turnId: 'turn-missing-event',
-        primaryCaptureId: 'capture-missing-event',
-        captureIds: ['capture-missing-event'],
-        primaryInputId: missingInputId,
-        inputIds: [missingInputId],
-        updatedAt: '2026-04-08T00:00:08.000Z',
-      }),
-      createTurnReceipt({
-        turnId: 'turn-malformed-input-id',
-        timeline: [
-          {
-            at: '2026-04-08T00:00:00.000Z',
-            kind: 'turn.started',
-            detail: null,
-            metadata: {
-              autoReplyInputId: 'capture-1',
-              autoReplyInputIds: 'capture-1',
-            },
-          },
-        ],
-        updatedAt: '2026-04-08T00:00:07.000Z',
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: missingInputId,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      })),
-      inboxServices,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toEqual({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(inboxServices.show).not.toHaveBeenCalled()
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-  })
-
-  it('ignores grouped receipt recovery when any assistant input event is missing', async () => {
-    const context = await createTempVaultContext('assistant-recovery-missing-group-')
-    tempRoots.push(context.parentRoot)
-    const primary = await stageInboxCaptureAssistantInputEvent({
-      capture: createCaptureDetail({
-        captureId: 'capture-primary',
-      }),
-      vault: context.vaultRoot,
-    })
-    const missingSecondaryInputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: 'capture-secondary',
-        kind: 'inbox-capture',
-        source: 'telegram',
-        version: null,
-      },
-    })
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        turnId: 'turn-missing-group-member',
-        primaryCaptureId: 'capture-primary',
-        captureIds: ['capture-primary', 'capture-secondary'],
-        primaryInputId: primary.inputId,
-        inputIds: [primary.inputId, missingSecondaryInputId],
-        updatedAt: '2026-04-08T00:00:08.000Z',
-      }),
-    ])
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: primary.inputId,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-      })),
-      inboxServices,
-      vault: context.vaultRoot,
-    })
-
-    expect(result).toEqual({
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
-    expect(inboxServices.show).not.toHaveBeenCalled()
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-  })
-
-  it('skips malformed or already-handled receipts and stops after the recovery limit', async () => {
-    const context = await createTempVaultContext('assistant-recovery-limit-')
-    tempRoots.push(context.parentRoot)
-    const captureDetailsById = new Map(
-      ['capture-handled', 'capture-recover', 'capture-later'].map((captureId) => {
-        const capture = createCaptureDetail({
-          captureId,
-          occurredAt:
-            captureId === 'capture-later'
-              ? '2026-04-08T00:00:01.000Z'
-              : '2026-04-08T00:00:00.000Z',
-        })
-        return [captureId, capture] as const
-      }),
-    )
-    const inputIdByCaptureId = new Map<string, string>()
-    for (const capture of captureDetailsById.values()) {
-      const stored = await stageInboxCaptureAssistantInputEvent({
-        capture,
-        vault: context.vaultRoot,
-      })
-      inputIdByCaptureId.set(capture.captureId, stored.inputId)
-    }
-    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
-      createTurnReceipt({
-        turnId: 'turn-no-start',
-        timeline: [
-          {
-            at: '2026-04-08T00:00:00.000Z',
-            kind: 'turn.completed',
-            detail: null,
-            metadata: {},
-          },
-        ],
-      }),
-      createTurnReceipt({
-        turnId: 'turn-empty-metadata',
-        timeline: [
-          {
-            at: '2026-04-08T00:00:00.000Z',
-            kind: 'turn.started',
-            detail: null,
-            metadata: {},
-          },
-        ],
-      }),
-      createTurnReceipt({
-        turnId: 'turn-handled',
-        primaryCaptureId: 'capture-handled',
-        captureIds: ['capture-handled'],
-        primaryInputId: inputIdByCaptureId.get('capture-handled')!,
-        inputIds: [inputIdByCaptureId.get('capture-handled')!],
-        updatedAt: '2026-04-08T00:00:08.000Z',
-      }),
-      createTurnReceipt({
-        turnId: 'turn-recover',
-        primaryCaptureId: 'capture-recover',
-        captureIds: ['capture-recover'],
-        primaryInputId: inputIdByCaptureId.get('capture-recover')!,
-        inputIds: [inputIdByCaptureId.get('capture-recover')!],
-        updatedAt: '2026-04-08T00:00:07.000Z',
-      }),
-      createTurnReceipt({
-        turnId: 'turn-later',
-        primaryCaptureId: 'capture-later',
-        captureIds: ['capture-later'],
-        primaryInputId: inputIdByCaptureId.get('capture-later')!,
-        inputIds: [inputIdByCaptureId.get('capture-later')!],
-        updatedAt: '2026-04-08T00:00:06.000Z',
-      }),
-    ])
-    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId.mockImplementation(
-      async (_vault: string, inputId: string) =>
-        inputId === inputIdByCaptureId.get('capture-handled')
-          ? createTerminalEvidence({ captureId: 'capture-handled' })
-          : null,
-    )
-    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValue({
-      advanceCursor: true,
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-      stopScanning: false,
-    })
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
-        createShowResult(
-          captureDetailsById.get(input.captureId) ??
-          createCaptureDetail({ captureId: input.captureId }),
-        ),
-      ),
-    })
-    const recovery = await vi.importActual<
-      typeof import('../src/assistant/automation/startup-recovery.ts')
-    >('../src/assistant/automation/startup-recovery.ts')
-
-    const result = await recovery.recoverAssistantAutoReplies({
-      allowSelfAuthored: false,
-      autoReply: createAutoReplyEntries(['telegram'], createAssistantInputCursor({
-        inputId: inputIdByCaptureId.get('capture-later')!,
-        occurredAt: '2026-04-08T00:00:01.000Z',
-      })),
-      inboxServices,
-      maxPerScan: 1,
-      vault: context.vaultRoot,
-    })
-
-    expect(result).toEqual({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: expect.any(String),
-      progressed: true,
-      replied: 1,
-      skipped: 0,
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          inputIds: [inputIdByCaptureId.get('capture-recover')!],
-          optionalInboxCaptureIds: [],
-        }),
-      }),
-    )
-  })
-})
 
 describe('assistant automation run loop', () => {
   it('runs one automation scan and returns the aggregated result', async () => {
@@ -7877,18 +7030,12 @@ describe('assistant automation run loop', () => {
       limit: undefined,
       signal: expect.any(AbortSignal),
     })
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledWith(
-      expect.objectContaining({
-        autoReply: [],
-        vault: '/tmp/assistant-automation-vault',
-      }),
-    )
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(runLoopMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledOnce()
     expect(release).toHaveBeenCalledOnce()
   })
 
-  it('runs inbox recovery and scanning before due cron jobs in a pass', async () => {
+  it('runs the normal scanner before due cron jobs in a pass', async () => {
     const inboxServices = createInboxServices({
       run: vi.fn().mockResolvedValue(undefined),
     })
@@ -7904,7 +7051,6 @@ describe('assistant automation run loop', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledOnce()
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
@@ -8804,7 +7950,7 @@ describe('assistant automation run loop', () => {
     )
   })
 
-  it('waits for the receipt recovery retry deadline instead of rescanning immediately on failures', async () => {
+  it('waits for the scanner retry deadline instead of rescanning immediately on failures', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
 
@@ -8823,23 +7969,6 @@ describe('assistant automation run loop', () => {
           }),
       ),
     })
-    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
-      createAutomationState({
-        autoReplyChannels: ['telegram'],
-        autoReplyEligibleAfter: createAssistantInputCursor({
-          inputId: 'capture-1',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-        }),
-      }),
-    )
-    runLoopMocks.recoverAssistantAutoReplies.mockResolvedValue({
-      considered: 1,
-      failed: 1,
-      nextWakeAt: '2026-04-09T00:00:10.000Z',
-      progressed: false,
-      replied: 0,
-      skipped: 0,
-    })
     runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
       scanStartedAt.push(Date.now())
       if (scanStartedAt.length === 2) {
@@ -8857,7 +7986,7 @@ describe('assistant automation run loop', () => {
         replies: {
           considered: 0,
           failed: 0,
-          nextWakeAt: null,
+          nextWakeAt: '2026-04-09T00:00:10.000Z',
           replied: 0,
           skipped: 0,
         },
@@ -8960,121 +8089,6 @@ describe('assistant automation run loop', () => {
     expect(result.reason).toBe('signal')
     expect(scanStartedAt).toHaveLength(2)
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(0)
-  })
-
-  it('re-runs receipt recovery on later scans until the loop goes idle', async () => {
-    const externalAbort = new AbortController()
-    const scanStartedAt: number[] = []
-    const inboxServices = createInboxServices({
-      run: vi.fn().mockImplementation(
-        async (
-          _input: { requestId: string | null; vault: string },
-          options: { signal: AbortSignal },
-        ) =>
-          await new Promise<void>((resolve) => {
-            options.signal.addEventListener('abort', () => resolve(), {
-              once: true,
-            })
-          }),
-      ),
-    })
-    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
-      createAutomationState({
-        autoReplyChannels: ['telegram'],
-        autoReplyEligibleAfter: createAssistantInputCursor({
-          inputId: 'capture-1',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-        }),
-      }),
-    )
-    runLoopMocks.recoverAssistantAutoReplies
-      .mockResolvedValueOnce({
-        considered: 1,
-        failed: 0,
-        nextWakeAt: null,
-        progressed: true,
-        replied: 1,
-        skipped: 0,
-      })
-      .mockResolvedValueOnce({
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        progressed: false,
-        replied: 0,
-        skipped: 0,
-      })
-    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
-      scanStartedAt.push(Date.now())
-      if (scanStartedAt.length === 2) {
-        externalAbort.abort()
-      }
-      return {
-        routing: {
-          considered: 0,
-          failed: 0,
-          nextWakeAt: null,
-          noAction: 0,
-          routed: 0,
-          skipped: 0,
-        },
-        replies: {
-          considered: 0,
-          failed: 0,
-          nextWakeAt: null,
-          replied: 0,
-          skipped: 0,
-        },
-      }
-    })
-    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
-      '../src/assistant/automation/run-loop.ts',
-    )
-
-    const result = await runLoop.runAssistantAutomation({
-      inboxServices,
-      once: false,
-      signal: externalAbort.signal,
-      startDaemon: true,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result.reason).toBe('signal')
-    expect(scanStartedAt).toHaveLength(2)
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledTimes(2)
-  })
-
-  it('includes the receipt recovery summary before the normal scan result', async () => {
-    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
-      createAutomationState({
-        autoReplyChannels: ['telegram'],
-        autoReplyEligibleAfter: createAssistantInputCursor({
-          inputId: 'capture-1',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-        }),
-      }),
-    )
-    runLoopMocks.recoverAssistantAutoReplies.mockResolvedValue({
-      considered: 1,
-      failed: 0,
-      nextWakeAt: null,
-      progressed: true,
-      replied: 1,
-      skipped: 0,
-    })
-    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
-      '../src/assistant/automation/run-loop.ts',
-    )
-
-    const result = await runLoop.runAssistantAutomation({
-      once: true,
-      startDaemon: false,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result.replyConsidered).toBe(2)
-    expect(result.replied).toBe(2)
-    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledOnce()
   })
 
   it('returns an error reason when the inbox daemon fails and aborts the loop', async () => {

@@ -140,6 +140,9 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
         output_tokens_details: {
           reasoning_tokens: 3,
         },
+        prompt_tokens_details: {
+          cached_tokens: 4,
+        },
         totalTokens: 15,
       },
       schema: ASSISTANT_USAGE_SCHEMA,
@@ -154,6 +157,9 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
       },
       output_tokens_details: {
         reasoning_tokens: 3,
+      },
+      prompt_tokens_details: {
+        cached_tokens: 4,
       },
       totalTokens: 15,
     },

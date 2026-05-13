@@ -1,7 +1,9 @@
 import { resolveMetricDefinition, resolveMetricInputKey, uniqueStrings } from "./catalog.ts";
 import {
+  listMurphAgePrioritySourceRoutes,
   resolveMurphAgeSourceRoute,
   type MurphAgeSourceRouteArtifactBoundary,
+  type MurphAgeSourceRouteId,
   type MurphAgeSourceRouteLayer,
 } from "./murph-age-source-routes.ts";
 import { normalizeUnit, unitsEquivalent } from "./normalize.ts";
@@ -20,6 +22,8 @@ export const MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.display-summa
 export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public-display-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v3" as const;
+export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
+  "murph.age.architecture-summary.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION =
@@ -225,6 +229,50 @@ export interface MurphAgeModelCardPolicy {
   scoreBearingSourceKinds: readonly string[];
   validationGate: MurphAgeValidationGateSummary;
   wearableScoreBearingAuthorized: boolean;
+}
+
+export type MurphAgeArchitectureLayerId =
+  | "clinical-lab-body"
+  | "function-cognition-context"
+  | "outcome-anchor"
+  | "product-display"
+  | "source-validation"
+  | "wearable-shadow";
+export type MurphAgeArchitectureLayerMode =
+  | "blocked"
+  | "context-only"
+  | "score-bearing-research"
+  | "shadow-only"
+  | "validation-only";
+
+export interface MurphAgeArchitectureLayerSummary {
+  blockedUntil: string;
+  blockerCodes: MurphAgeProductPromotionBlocker[];
+  candidateMetricKeys: string[];
+  contextMetricKeys: string[];
+  currentUse: string;
+  evidenceClasses: MurphAgeEvidenceClass[];
+  featureFamilies: string[];
+  layerId: MurphAgeArchitectureLayerId;
+  mode: MurphAgeArchitectureLayerMode;
+  modelCardIds: MurphAgeModelCardId[];
+  productAuthorized: false;
+  riskToAgeDisplayAuthorized: false;
+  scoreBearing: boolean;
+  scoreBearingMetricKeys: string[];
+  scoreContributionAuthorized: boolean;
+  shadowMetricKeys: string[];
+  sourceRouteIds: MurphAgeSourceRouteId[];
+}
+
+export interface MurphAgeArchitectureSummary {
+  layerOrder: MurphAgeArchitectureLayerId[];
+  layers: MurphAgeArchitectureLayerSummary[];
+  productDisplayAuthorized: false;
+  productPromotionAuthorized: false;
+  riskToAgeDisplayAuthorized: false;
+  schemaVersion: typeof MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION;
+  sourceRouteIdsByPriority: MurphAgeSourceRouteId[];
 }
 
 const MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS = new Set<MurphAgeValidationEvidenceTier>([
@@ -1334,7 +1382,7 @@ const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS = [
 const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS =
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS.map(completeWearableBridgeFeatureSpec);
 
-const MURPH_AGE_MODEL_CARD_POLICIES = [
+const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
   {
     acceptedBundleIds: ["function-context"],
     cardId: "function_context_no_risk",
@@ -1482,7 +1530,7 @@ const MURPH_AGE_MODEL_CARD_POLICIES = [
     },
     wearableScoreBearingAuthorized: false,
   },
-] satisfies readonly MurphAgeModelCardPolicy[];
+];
 
 const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICY_DEFINITIONS = [
   {
@@ -1757,6 +1805,15 @@ const MURPH_AGE_PUBLIC_METRIC_KEYS = new Set([
   ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 ]);
 
+const MURPH_AGE_ARCHITECTURE_LAYER_ORDER = [
+  "outcome-anchor",
+  "clinical-lab-body",
+  "function-cognition-context",
+  "wearable-shadow",
+  "source-validation",
+  "product-display",
+] as const satisfies readonly MurphAgeArchitectureLayerId[];
+
 export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
   return MURPH_AGE_MODEL_CARD_POLICIES.map(cloneMurphAgeModelCardPolicy);
 }
@@ -1771,6 +1828,171 @@ export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridge
 
 export function listMurphAgeInputBundleMetricKeys(): string[] {
   return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
+}
+
+export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
+  const sourceRouteIdsByPriority = listMurphAgePrioritySourceRoutes().map((route) => route.routeId);
+  const layers: MurphAgeArchitectureLayerSummary[] = [
+    architectureLayerFromPolicies({
+      blockedUntil: "Keep frozen until external or Murph-native validation supports product promotion and age display.",
+      currentUse: "Frozen research outcome-risk anchor for later biomarker, function, and wearable increments.",
+      layerId: "outcome-anchor",
+      mode: "score-bearing-research",
+      modelCardIds: ["r399_nhis_proxy_10y_acm_research"],
+      scoreContributionAuthorized: true,
+      sourceRouteIds: ["nhis-r399-outcome-anchor"],
+    }),
+    architectureLayerFromPolicies({
+      blockedUntil: "Keep research-only until lab/body increments transport across independent cohorts with calibrated uncertainty.",
+      currentUse: "Research-only clinical lab, blood-pressure, and body-composition risk cards.",
+      layerId: "clinical-lab-body",
+      mode: "score-bearing-research",
+      modelCardIds: ["lab9_bp_body_10y_acm_research", "lab5_bp_bmi_transport_research"],
+      scoreContributionAuthorized: true,
+      sourceRouteIds: [
+        "midus-biomarker-mortality",
+        "creles-transport-stress",
+        "nhanes-activity-shadow-lmf",
+        "nhanes-iii-lmf-sanity",
+        "nhanes-bench0-lab-body",
+      ],
+    }),
+    architectureLayerFromPolicies({
+      blockedUntil: "Function and cognition stay context-only until fresh cross-source falsification supports a score-bearing sidecar.",
+      contextMetricKeys: [...MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS],
+      currentUse: "Lead diagnostic sidecar candidate and explanation context, not a score-bearing product model.",
+      layerId: "function-cognition-context",
+      mode: "context-only",
+      modelCardIds: ["function_context_no_risk"],
+      scoreContributionAuthorized: false,
+      sourceRouteIds: ["mhas-harmonized-aging", "nshap-integrated-aging"],
+    }),
+    architectureLayerFromPolicies({
+      blockedUntil: "Wearables stay shadow-only until source-linked hard-outcome evidence validates residual increments over the anchor.",
+      contextMetricKeys: [...MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS],
+      currentUse: "Wearable bridge and shadow-increment candidates for activity, sleep, resting heart rate, and HRV.",
+      layerId: "wearable-shadow",
+      mode: "shadow-only",
+      modelCardIds: ["wearable_context_no_risk"],
+      scoreContributionAuthorized: false,
+      shadowMetricKeys: MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES.flatMap((policy) => policy.signalMetricKeys),
+      sourceRouteIds: sourceRouteIdsByPriority.filter((routeId) =>
+        resolveMurphAgeSourceRoute(routeId)?.layers.includes("wearable-shadow-increment") === true
+      ),
+    }),
+    {
+      blockedUntil: "Use only aggregate receipts and source cards until a source produces suppressed validation evidence.",
+      blockerCodes: [],
+      candidateMetricKeys: [],
+      contextMetricKeys: [],
+      currentUse: "Route-level source prioritization and external/transport validation planning.",
+      evidenceClasses: [],
+      featureFamilies: featureFamiliesForRoutes(sourceRouteIdsByPriority.filter((routeId) => {
+        const route = resolveMurphAgeSourceRoute(routeId);
+        return route?.layers.includes("transport-validation") === true
+          || route?.layers.includes("partner-aggregate-validation") === true;
+      })),
+      layerId: "source-validation",
+      mode: "validation-only",
+      modelCardIds: [],
+      productAuthorized: false,
+      riskToAgeDisplayAuthorized: false,
+      scoreBearing: false,
+      scoreBearingMetricKeys: [],
+      scoreContributionAuthorized: false,
+      shadowMetricKeys: [],
+      sourceRouteIds: sourceRouteIdsByPriority.filter((routeId) => {
+        const route = resolveMurphAgeSourceRoute(routeId);
+        return route?.layers.includes("transport-validation") === true
+          || route?.layers.includes("partner-aggregate-validation") === true;
+      }),
+    },
+    {
+      blockedUntil: "Do not expose Murph Age in product until a card is product-authorized with promotion evidence and risk-to-age display approval.",
+      blockerCodes: uniqueStrings(MURPH_AGE_MODEL_CARD_POLICIES.flatMap((policy) =>
+        listMurphAgeModelCardProductPromotionBlockers(policy)
+      )) as MurphAgeProductPromotionBlocker[],
+      candidateMetricKeys: [],
+      contextMetricKeys: [],
+      currentUse: "Global product display remains blocked.",
+      evidenceClasses: uniqueStrings(MURPH_AGE_MODEL_CARD_POLICIES.map((policy) => policy.evidenceClass)) as MurphAgeEvidenceClass[],
+      featureFamilies: [],
+      layerId: "product-display",
+      mode: "blocked",
+      modelCardIds: MURPH_AGE_MODEL_CARD_POLICIES.map((policy) => policy.cardId),
+      productAuthorized: false,
+      riskToAgeDisplayAuthorized: false,
+      scoreBearing: false,
+      scoreBearingMetricKeys: [],
+      scoreContributionAuthorized: false,
+      shadowMetricKeys: [],
+      sourceRouteIds: [],
+    },
+  ];
+
+  return {
+    layerOrder: [...MURPH_AGE_ARCHITECTURE_LAYER_ORDER],
+    layers,
+    productDisplayAuthorized: false,
+    productPromotionAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    schemaVersion: MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION,
+    sourceRouteIdsByPriority,
+  };
+}
+
+function architectureLayerFromPolicies(input: {
+  blockedUntil: string;
+  contextMetricKeys?: readonly string[];
+  currentUse: string;
+  layerId: MurphAgeArchitectureLayerId;
+  mode: MurphAgeArchitectureLayerMode;
+  modelCardIds: readonly MurphAgeModelCardId[];
+  scoreContributionAuthorized: boolean;
+  shadowMetricKeys?: readonly string[];
+  sourceRouteIds: readonly MurphAgeSourceRouteId[];
+}): MurphAgeArchitectureLayerSummary {
+  const policies = input.modelCardIds
+    .map((cardId) => MURPH_AGE_MODEL_CARD_POLICIES.find((policy) => policy.cardId === cardId) ?? null)
+    .filter((policy): policy is MurphAgeModelCardPolicy => policy !== null);
+  const scoreBearingMetricKeys = uniqueStrings(policies.flatMap((policy) => policy.scoreBearingMetricKeys));
+  const shadowMetricKeys = uniqueStrings(input.shadowMetricKeys ?? []);
+  const contextMetricKeys = uniqueStrings(input.contextMetricKeys ?? []);
+  return {
+    blockedUntil: input.blockedUntil,
+    blockerCodes: uniqueStrings(policies.flatMap((policy) =>
+      listMurphAgeModelCardProductPromotionBlockers(policy)
+    )) as MurphAgeProductPromotionBlocker[],
+    candidateMetricKeys: uniqueStrings([
+      ...scoreBearingMetricKeys,
+      ...shadowMetricKeys,
+      ...contextMetricKeys,
+    ]),
+    contextMetricKeys,
+    currentUse: input.currentUse,
+    evidenceClasses: uniqueStrings(policies.map((policy) => policy.evidenceClass)) as MurphAgeEvidenceClass[],
+    featureFamilies: featureFamiliesForRoutes(input.sourceRouteIds),
+    layerId: input.layerId,
+    mode: input.mode,
+    modelCardIds: [...input.modelCardIds],
+    productAuthorized: false,
+    riskToAgeDisplayAuthorized: false,
+    scoreBearing: policies.some((policy) => policy.scoreBearing),
+    scoreBearingMetricKeys,
+    scoreContributionAuthorized: input.scoreContributionAuthorized,
+    shadowMetricKeys,
+    sourceRouteIds: existingSourceRouteIds(input.sourceRouteIds),
+  };
+}
+
+function existingSourceRouteIds(routeIds: readonly MurphAgeSourceRouteId[]): MurphAgeSourceRouteId[] {
+  return uniqueStrings(routeIds.filter((routeId) => resolveMurphAgeSourceRoute(routeId) !== null)) as MurphAgeSourceRouteId[];
+}
+
+function featureFamiliesForRoutes(routeIds: readonly MurphAgeSourceRouteId[]): string[] {
+  return uniqueStrings(
+    routeIds.flatMap((routeId) => resolveMurphAgeSourceRoute(routeId)?.featureFamilies ?? []),
+  );
 }
 
 export function isMurphAgePublicFeatureKey(value: string): boolean {

@@ -250,7 +250,6 @@ describe("runHostedAssistantAutomation", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      createHostedAutomationRuntime(),
     );
 
     expect(result.redactedLogEntries).toEqual(
@@ -332,25 +331,11 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_automation_turn_input",
           kind: "runtime.timer",
-          occurredAt: "2026-04-23T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        {
-          forwardedEnv: {},
-          platform: {
-            artifactStore: {
-              get: vi.fn(async () => null),
-              put: vi.fn(async () => undefined),
-            },
-            effectsPort: {
-              readRawEmailMessage: vi.fn(async () => null),
-              sendEmail: vi.fn(async () => undefined),
-            },
-          },
-          platformEnv: {},
-        },
-      ),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    ),
     ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: null,
       progressed: true,
@@ -369,17 +354,15 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("passes deferred receipt recovery to hosted assistant automation passes", async () => {
+  it("runs hosted assistant automation through the queue-only scanner path", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
-      deferredReceiptRecoveryWakeAt: "2026-05-07T00:00:00.000Z",
       nextWakeAt: "2026-05-07T00:00:00.000Z",
-      nextWakeAtWithoutDeferredReceiptRecovery: "2026-05-07T16:00:00.000Z",
       progressed: true,
     });
 
     const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
-      "req_defer_recovery",
+      "req_queue_only_scanner",
       {
         hosted: {
           issueDeviceConnectLink: vi.fn(),
@@ -388,25 +371,20 @@ describe("runHostedAssistantAutomation", () => {
         },
       },
       {
-        eventId: "evt_defer_recovery",
+        eventId: "evt_queue_only_scanner",
         kind: "runtime.timer",
         occurredAt: "2026-05-07T00:00:00.000Z",
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      createHostedAutomationRuntime(),
       [],
-      true,
     );
 
     expect(result).toEqual(expect.objectContaining({
-      deferredReceiptRecoveryWakeAt: "2026-05-07T00:00:00.000Z",
       nextWakeAt: "2026-05-07T00:00:00.000Z",
-      nextWakeAtWithoutDeferredReceiptRecovery: "2026-05-07T16:00:00.000Z",
     }));
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
-        deferReceiptRecovery: true,
         deliveryDispatchMode: "queue-only",
       }),
     );
@@ -429,12 +407,11 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_automation_bootstrap",
           kind: "runtime.timer",
-          occurredAt: "2026-04-29T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        createHostedAutomationRuntime(),
-      ),
+        occurredAt: "2026-04-29T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    ),
     ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-08T01:00:00.000Z",
       progressed: false,
@@ -528,25 +505,11 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_projection_show",
           kind: "runtime.timer",
-          occurredAt: "2026-04-29T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        {
-          forwardedEnv: {},
-          platform: {
-            artifactStore: {
-              get: vi.fn(async () => null),
-              put: vi.fn(async () => undefined),
-            },
-            effectsPort: {
-              readRawEmailMessage: vi.fn(async () => null),
-              sendEmail: vi.fn(async () => undefined),
-            },
-          },
-          platformEnv: {},
-        },
-      ),
+        occurredAt: "2026-04-29T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    ),
     ).resolves.toEqual(expect.objectContaining({
       nextWakeAt: null,
       progressed: true,
@@ -626,7 +589,6 @@ describe("runHostedAssistantAutomation", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      createHostedAutomationRuntime(),
     );
 
     expect(result).toEqual(expect.objectContaining({
@@ -703,16 +665,13 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_automation_gap",
           kind: "runtime.timer",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        createHostedAutomationRuntime(),
-      ),
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    ),
     ).resolves.toEqual(expect.objectContaining({
-      deferredReceiptRecoveryWakeAt: null,
       nextWakeAt: expect.any(String),
-      nextWakeAtWithoutDeferredReceiptRecovery: expect.any(String),
       progressed: true,
       redactedLogEntries: [
         expect.objectContaining({
@@ -742,12 +701,11 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_automation_failure",
           kind: "runtime.timer",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        createHostedAutomationRuntime(),
-      ),
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    ),
     ).rejects.toThrow("automation failed");
   });
 });

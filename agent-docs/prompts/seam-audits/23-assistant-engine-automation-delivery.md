@@ -7,7 +7,7 @@ description: One-pass seam audit prompt for assistant-engine automations, cron, 
 ## Scope
 
 - `packages/assistant-engine/src/{assistant-automation.ts,assistant-cron.ts,assistant-outbox.ts}`
-- `packages/assistant-engine/src/assistant/automation/{run-loop.ts,scanner.ts,reply.ts,grouping.ts,shared.ts,runtime-lock.ts,startup-recovery.ts,prompt-builder.ts}`
+- `packages/assistant-engine/src/assistant/automation/{run-loop.ts,scanner.ts,reply.ts,grouping.ts,shared.ts,runtime-lock.ts,prompt-builder.ts}`
 - `packages/assistant-engine/src/assistant/{outbox.ts,delivery-service.ts,first-contact.ts,first-contact-welcome.ts,notification-turn.ts,food-auto-log-hooks.ts,active-experiment-context.ts,auto-reply-channels.ts}`
 - `packages/assistant-engine/src/assistant/outbox/{store.ts,dispatch-state.ts,retry-policy.ts,intents.ts,summary.ts}`
 - `packages/assistant-engine/src/assistant/cron/{store.ts,locking.ts,runtime-state.ts,notification-delivery.ts,schedule.ts,presets.ts}`

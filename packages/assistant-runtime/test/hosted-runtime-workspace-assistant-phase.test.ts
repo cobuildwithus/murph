@@ -359,7 +359,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        deferReceiptRecovery: true,
         preferredInputIds: ["ain_00000000000000000000000000000001"],
         skipDeviceSync: true,
       }),
@@ -374,7 +373,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        deferReceiptRecovery: true,
         skipDeviceSync: true,
       }),
     );
@@ -400,7 +398,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
       expect.objectContaining({
-        deferReceiptRecovery: false,
         skipDeviceSync: true,
       }),
     );
@@ -1063,17 +1060,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .toHaveBeenCalledTimes(1);
   });
 
-  it("omits only the deferred receipt-recovery wake after clean fast dispatch", async () => {
-    const deferredReceiptRecoveryWakeAt = "2026-05-08T02:28:11.758Z";
-    const nextWakeAtWithoutDeferredReceiptRecovery = "2026-05-08T16:00:00.000Z";
+  it("preserves the assistant wake after clean fast dispatch", async () => {
+    const assistantNextWakeAt = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
-      assistantAutomationDeferredReceiptRecoveryWakeAt: deferredReceiptRecoveryWakeAt,
-      assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
-        nextWakeAtWithoutDeferredReceiptRecovery,
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
-      nextWakeAt: deferredReceiptRecoveryWakeAt,
+      nextWakeAt: assistantNextWakeAt,
       parserProcessed: 0,
       postCheckpointRecord: null,
       redactedLogEntries: [],
@@ -1120,26 +1113,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: nextWakeAtWithoutDeferredReceiptRecovery,
+      nextWakeAt: assistantNextWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: nextWakeAtWithoutDeferredReceiptRecovery,
+        nextWakeAt: assistantNextWakeAt,
       }),
     }));
   });
 
   it("preserves a skipped non-assistant due wake after clean fast dispatch", async () => {
-    const deferredReceiptRecoveryWakeAt = "2026-05-08T02:28:11.758Z";
-    const nextWakeAtWithoutDeferredReceiptRecovery = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
-      assistantAutomationDeferredReceiptRecoveryWakeAt: deferredReceiptRecoveryWakeAt,
-      assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
-        nextWakeAtWithoutDeferredReceiptRecovery,
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
-      nextWakeAt: deferredReceiptRecoveryWakeAt,
+      nextWakeAt: "2026-05-08T16:00:00.000Z",
       parserProcessed: 0,
       postCheckpointRecord: null,
       redactedLogEntries: [],
