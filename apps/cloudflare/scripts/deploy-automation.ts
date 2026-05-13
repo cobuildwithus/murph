@@ -1,6 +1,7 @@
 export type {
   HostedContainerCustomInstanceType,
   HostedContainerInstanceType,
+  HostedContainerSshKey,
   HostedDeployAutomationEnvironment,
 } from "./deploy-automation/environment.ts";
 export { readHostedDeployAutomationEnvironment } from "./deploy-automation/environment.ts";

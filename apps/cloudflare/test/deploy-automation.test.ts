@@ -103,6 +103,8 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
 } as const;
+const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
 
 function findRunCommandsWithGitHubInputInterpolation(
   workflow: string,
@@ -818,6 +820,73 @@ describe("hosted deploy automation helpers", () => {
       memory_mib: 2048,
       vcpu: 0.5,
     });
+  });
+
+  it("renders an optional local container SSH public key without preserving comments", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_SSH_KEY_NAME: "debug-key",
+      CF_CONTAINER_SSH_PUBLIC_KEY: `${VALID_TEST_SSH_ED25519_PUBLIC_KEY} local-comment`,
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+    const config = buildHostedWranglerDeployConfig(environment) as {
+      compatibility_flags: string[];
+      containers: Array<{
+        authorized_keys?: Array<{ name: string; public_key: string }>;
+        ssh?: { enabled: boolean };
+      }>;
+    };
+
+    expect(config.compatibility_flags).toEqual(["nodejs_compat", "containers_pid_namespace"]);
+    expect(config.containers).toHaveLength(2);
+    for (const container of config.containers) {
+      expect(container.ssh).toEqual({ enabled: true });
+      expect(container.authorized_keys).toEqual([{
+        name: "debug-key",
+        public_key: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
+      }]);
+    }
+  });
+
+  it("rejects non-Ed25519 container SSH public keys", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_CONTAINER_SSH_PUBLIC_KEY:
+          "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCinvalid",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
+  });
+
+  it("rejects malformed Ed25519 container SSH public key bodies", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_CONTAINER_SSH_PUBLIC_KEY:
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMurphContainerDebugKey000000000000000",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
+  });
+
+  it("rejects container SSH key names that are not neutral slugs", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_CONTAINER_SSH_KEY_NAME: "Debug Key",
+        CF_CONTAINER_SSH_PUBLIC_KEY: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrowError(/CF_CONTAINER_SSH_KEY_NAME must be a neutral lowercase slug/u);
   });
 
   it("rejects invalid custom container instance JSON", () => {
