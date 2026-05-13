@@ -58,7 +58,6 @@ import {
   computeAssistantAutoReplyRetryAt,
   isAssistantAutoReplyRepairableConfigError,
   isAssistantProviderCapacityError,
-  readPendingAssistantAutoReplyRetryAtForGroup,
 } from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
@@ -878,17 +877,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
   const receipts = await readAssistantAutoReplyReceiptRecords(input)
-
-  const pendingRetryAt = readPendingAssistantAutoReplyRetryAtForGroup({
-    inputIds: input.group.inputIds,
-    receipts,
-  })
-  if (pendingRetryAt) {
-    return createDeferredSkipDecision(
-      'assistant auto-reply retry is not due yet',
-      { nextWakeAt: pendingRetryAt },
-    )
-  }
 
   if (input.receiptFallbackEnabled) {
     const handledReceipt = findHandledAutoReplyReceiptForGroup({

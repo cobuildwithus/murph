@@ -4,12 +4,8 @@ import {
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import { errorMessage } from '../shared.js'
-import {
-  computeAssistantAutomationRetryAt,
-  normalizeAssistantAutomationWakeAt,
-} from './shared.js'
+import { computeAssistantAutomationRetryAt } from './shared.js'
 
-export const AUTO_REPLY_RECEIPT_RETRY_AT_KEY = 'autoReplyRetryAt'
 export const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
 export const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
 
@@ -53,22 +49,6 @@ export function computeAssistantAutoReplyRetryAt(
   return null
 }
 
-export function readAssistantAutoReplyRetryAt(
-  receipt: AssistantTurnReceipt,
-): string | null {
-  for (let index = receipt.timeline.length - 1; index >= 0; index -= 1) {
-    const retryAt = receipt.timeline[index]?.metadata[AUTO_REPLY_RECEIPT_RETRY_AT_KEY]
-    const normalizedRetryAt = normalizeAssistantAutomationWakeAt(
-      typeof retryAt === 'string' ? retryAt : null,
-    )
-    if (normalizedRetryAt) {
-      return normalizedRetryAt
-    }
-  }
-
-  return null
-}
-
 export function compareAssistantAutoReplyReceiptRecency(
   left: AssistantTurnReceipt,
   right: AssistantTurnReceipt,
@@ -79,54 +59,6 @@ export function compareAssistantAutoReplyReceiptRecency(
   }
 
   return left.turnId.localeCompare(right.turnId)
-}
-
-export function readPendingAssistantAutoReplyRetryAtForGroup(input: {
-  inputIds: readonly string[]
-  nowMs?: number
-  receipts: readonly AssistantTurnReceipt[]
-}): string | null {
-  const targetInputIds = new Set(input.inputIds)
-  if (targetInputIds.size === 0) {
-    return null
-  }
-
-  const latestReceiptByInputId = new Map<string, AssistantTurnReceipt>()
-  for (const receipt of input.receipts) {
-    const metadata = readAssistantAutoReplyReceiptMetadata(receipt)
-    for (const inputId of metadata?.inputIds ?? []) {
-      if (!targetInputIds.has(inputId)) {
-        continue
-      }
-
-      const latest = latestReceiptByInputId.get(inputId)
-      if (
-        !latest ||
-        compareAssistantAutoReplyReceiptRecency(receipt, latest) > 0
-      ) {
-        latestReceiptByInputId.set(inputId, receipt)
-      }
-    }
-  }
-
-  let pendingRetryAt: string | null = null
-  const nowMs = input.nowMs ?? Date.now()
-  for (const receipt of latestReceiptByInputId.values()) {
-    if (receipt.status !== 'failed') {
-      continue
-    }
-
-    const retryAt = readAssistantAutoReplyRetryAt(receipt)
-    if (!retryAt || Date.parse(retryAt) <= nowMs) {
-      continue
-    }
-
-    if (!pendingRetryAt || Date.parse(retryAt) > Date.parse(pendingRetryAt)) {
-      pendingRetryAt = retryAt
-    }
-  }
-
-  return pendingRetryAt
 }
 
 export function readAssistantAutoReplyReceiptMetadata(
