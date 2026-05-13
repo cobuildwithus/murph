@@ -293,6 +293,9 @@ describe('assistant codex runtime', () => {
                 title: 'Murph',
                 version: '1.0.0',
               },
+              capabilities: {
+                experimentalApi: true,
+              },
             },
           })
           child.stdout.write(jsonLine({ id: 1, result: {} }))

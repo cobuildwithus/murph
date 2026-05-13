@@ -777,6 +777,9 @@ async function runCodexAppServerTurn(
           title: CODEX_RPC_CLIENT_TITLE,
           version: CODEX_RPC_CLIENT_VERSION,
         },
+        capabilities: {
+          experimentalApi: true,
+        },
       }),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'initialize',
