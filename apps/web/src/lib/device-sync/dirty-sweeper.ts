@@ -70,16 +70,30 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
         provider: dirtyConnection.provider,
         userFingerprint,
       });
-      const wake = await appendDirtyWake({
-        connectionId: dirtyConnection.connectionId,
-        dedupeKey: `dirty-revision:${dirtyConnection.dirtyRevision.toString()}`,
-        eventType: dirtyConnection.latestEventType,
-        occurredAt: wakeOccurredAt,
-        provider: dirtyConnection.provider,
-        resourceCategory: dirtyConnection.latestResourceCategory,
-        traceId: null,
-        userId: dirtyConnection.userId,
-      });
+      let wake;
+      try {
+        wake = await appendDirtyWake({
+          connectionId: dirtyConnection.connectionId,
+          dedupeKey: buildHostedDeviceSyncDirtySweepDedupeKey({
+            dirtyRevision: dirtyConnection.dirtyRevision,
+            occurredAt: wakeOccurredAt,
+          }),
+          eventType: dirtyConnection.latestEventType,
+          occurredAt: wakeOccurredAt,
+          provider: dirtyConnection.provider,
+          resourceCategory: dirtyConnection.latestResourceCategory,
+          traceId: null,
+          userId: dirtyConnection.userId,
+        });
+      } catch (error) {
+        wakeNotAppended += 1;
+        logger.warn("Hosted device-sync dirty sweeper device-sync wake append failed.", {
+          connectionFingerprint,
+          errorName: error instanceof Error ? error.name : "unknown",
+          userFingerprint,
+        });
+        return;
+      }
 
       if (wake.wakeAppended) {
         wakeAppended += 1;
@@ -116,6 +130,18 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
     wakeLimit,
     wakeNotAppended,
   };
+}
+
+function buildHostedDeviceSyncDirtySweepDedupeKey(input: {
+  dirtyRevision: bigint;
+  occurredAt: string;
+}): string {
+  return [
+    "dirty-revision",
+    input.dirtyRevision.toString(),
+    "sweep",
+    input.occurredAt,
+  ].join(":");
 }
 
 function normalizeLimit(value: number | null | undefined, fallback: number, max: number): number {

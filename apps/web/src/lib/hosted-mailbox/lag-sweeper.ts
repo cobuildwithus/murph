@@ -7,7 +7,6 @@ import {
 import type { PrismaClient } from "@prisma/client";
 
 import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
-import { nudgeHostedSystemRunnerUserBestEffortResult } from "../hosted-runner/system-nudge";
 import { getPrisma } from "../prisma";
 import {
   computeHostedMailboxLaneLag,
@@ -188,9 +187,7 @@ export async function runHostedMailboxLagSweeper(input: {
         timeoutMs: NUDGE_TIMEOUT_MS,
         userId,
       };
-      const nudge = hasHostedMailboxAssistantReplyLag(lagged)
-        ? await nudgeHostedAssistantRunnerUserBestEffortResult(nudgeInput)
-        : await nudgeHostedSystemRunnerUserBestEffortResult(nudgeInput);
+      const nudge = await nudgeHostedAssistantRunnerUserBestEffortResult(nudgeInput);
 
       if (nudge.accepted) {
         nudgeAccepted += 1;
@@ -269,12 +266,6 @@ function shouldNudgeHostedMailboxLaggedLane(input: {
 
   return ((lagAgeMs - FIRST_LAG_NUDGE_AFTER_MS) % LAG_NUDGE_REPEAT_MS)
     < LAG_NUDGE_WINDOW_MS;
-}
-
-function hasHostedMailboxAssistantReplyLag(
-  lagged: HostedMailboxLaggedUser,
-): boolean {
-  return lagged.lanes.some((lane) => lane.lag.lane === "conversation");
 }
 
 function selectRotatingNudgeWindow(input: {

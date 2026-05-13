@@ -34,7 +34,6 @@ const mocks = vi.hoisted(() => ({
     };
   }),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
-  nudgeHostedSystemRunnerUserBestEffortResult: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -47,10 +46,6 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 
 vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
   nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/system-nudge", () => ({
-  nudgeHostedSystemRunnerUserBestEffortResult: mocks.nudgeHostedSystemRunnerUserBestEffortResult,
 }));
 
 type LagSweeperModule = typeof import("../src/lib/hosted-mailbox/lag-sweeper");
@@ -89,10 +84,6 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
       ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
       usageGateDenied: false,
-    }));
-    mocks.nudgeHostedSystemRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      conversationLagPresent: false,
     }));
   });
 
@@ -529,7 +520,6 @@ describe("hosted mailbox lag sweeper", () => {
       timeoutMs: 5000,
       userId: "member_capped_mixed_lag",
     });
-    expect(mocks.nudgeHostedSystemRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       nudgeAttempted: 1,

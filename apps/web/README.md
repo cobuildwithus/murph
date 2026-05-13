@@ -14,7 +14,9 @@ Webhook and email ingress then hand execution off through a pointer-only Vercel
 Workflow whose step performs the narrow authenticated Cloudflare runner nudge.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
-that transaction, and best-effort nudges the runner to pull pending dirty rows.
+that transaction, and appends opaque wake pointers for clean-to-dirty
+transitions and bounded dirty-sweeper recovery while the dirty row remains the
+source of truth.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
@@ -576,8 +578,9 @@ The onboarding lane is intentionally thin:
   not a second execution lifecycle authority.
 - Cloudflare-bound execution from onboarding and exact message ingress appends
   canonical hosted mailbox input first. Device-sync webhook freshness records
-  dirty state first and uses direct runner nudges plus the dirty sweeper for
-  recovery.
+  dirty state first, appends opaque `device-sync.wake` mailbox pointers for
+  clean-to-dirty transitions and dirty-sweeper recovery, and keeps the dirty row
+  as the source of truth until the runner acks it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

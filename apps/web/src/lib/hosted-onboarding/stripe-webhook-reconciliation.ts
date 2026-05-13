@@ -1,6 +1,6 @@
 import { HostedStripeEventStatus, type PrismaClient } from "@prisma/client";
 
-import { nudgeHostedSystemRunnerUserBestEffortResult } from "../hosted-runner/system-nudge";
+import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -185,7 +185,7 @@ export async function nudgeHostedStripeWebhookActivationRunner(input: {
       hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionMemberId),
     },
   );
-  const result = await nudgeHostedSystemRunnerUserBestEffortResult({
+  const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
     context: "stripe.webhook:workflow",
     timeoutMs: input.timeoutMs,
     userId: hostedExecutionMemberId,

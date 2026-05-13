@@ -49,7 +49,7 @@ describe("hosted device-sync dirty sweeper", () => {
     });
     expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
       connectionId: "dsc_dirty_1",
-      dedupeKey: "dirty-revision:2",
+      dedupeKey: "dirty-revision:2:sweep:2026-05-05T00:01:00.000Z",
       eventType: "sleep.updated",
       occurredAt: "2026-05-05T00:01:00.000Z",
       provider: "oura",
@@ -134,6 +134,58 @@ describe("hosted device-sync dirty sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_dirty_2");
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_1");
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_2");
+  });
+
+  it("continues the sweep when one dirty wake append throws", async () => {
+    const logger = buildLogger();
+    const store = buildStore([
+      {
+        connectionId: "dsc_dirty_1",
+        dirtyRevision: 1n,
+        latestEventType: "sleep.updated",
+        latestDirtyAt: "2026-05-05T00:00:00.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: null,
+        provider: "oura",
+        userId: "member_dirty_1",
+      },
+      {
+        connectionId: "dsc_dirty_2",
+        dirtyRevision: 1n,
+        latestEventType: "sleep.updated",
+        latestDirtyAt: "2026-05-05T00:00:01.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: null,
+        provider: "oura",
+        userId: "member_dirty_2",
+      },
+    ]);
+    mocks.appendHostedDeviceSyncDirtyWake
+      .mockRejectedValueOnce(new Error("append failed"))
+      .mockResolvedValueOnce({
+        wakeAppended: true,
+      });
+
+    const result = await runHostedDeviceSyncDirtySweeper({
+      logger,
+      nudgeLimit: 2,
+      store,
+    });
+
+    expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      wakeAppended: 1,
+      wakeAttempted: 2,
+      wakeNotAppended: 1,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Hosted device-sync dirty sweeper device-sync wake append failed.",
+      expect.objectContaining({
+        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
+        errorName: "Error",
+        userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
+      }),
+    );
   });
 });
 

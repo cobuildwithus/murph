@@ -399,16 +399,17 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
   });
+  const eventId = buildHostedDeviceSyncDirtyWakeEventId({
+    connectionId: input.connectionId,
+    dedupeKey: input.dedupeKey ?? null,
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    traceId: input.traceId ?? null,
+    userId: input.userId,
+  });
   const wake = buildHostedDeviceSyncWake({
     connectionId: input.connectionId,
-    eventId: buildHostedDeviceSyncDirtyWakeEventId({
-      connectionId: input.connectionId,
-      dedupeKey: input.dedupeKey ?? null,
-      occurredAt: input.occurredAt,
-      provider: input.provider,
-      traceId: input.traceId ?? null,
-      userId: input.userId,
-    }),
+    eventId,
     hint: buildHostedDeviceSyncDirtyWakeHint(input),
     occurredAt: input.occurredAt,
     provider: input.provider,
@@ -505,7 +506,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       createdAt: input.acceptedAt,
       tx,
     });
-    const dirty = await input.store.upsertDirtyConnection({
+    const dirtyUpdate = await input.store.upsertDirtyConnection({
       connectionId: input.connectionId,
       dirtyAt: input.occurredAt,
       eventType: input.eventType,
@@ -529,12 +530,12 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       }
     }
 
-    if (dirty.shouldRequestWake) {
+    if (dirtyUpdate.shouldRequestWake) {
       const wake = buildHostedDeviceSyncWake({
         connectionId: input.connectionId,
         eventId: buildHostedDeviceSyncDirtyWakeEventId({
           connectionId: input.connectionId,
-          dedupeKey: null,
+          dedupeKey: `dirty-revision:${dirtyUpdate.dirty.dirtyRevision.toString()}`,
           occurredAt: input.occurredAt,
           provider: input.provider,
           traceId: input.traceId,
@@ -600,15 +601,20 @@ function buildHostedDeviceSyncDirtyWakeEventId(input: {
   traceId?: string | null;
   userId: string;
 }): string {
+  const fingerprint = sha256Hex(JSON.stringify({
+    connectionId: input.connectionId,
+    dedupeKey: normalizeNullableString(input.dedupeKey),
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    traceId: normalizeNullableString(input.traceId),
+    userId: input.userId,
+    version: 1,
+  })).slice(0, 32);
+
   return [
     "device-sync",
     "webhook-hint",
-    input.userId,
-    input.provider,
-    input.connectionId,
-    normalizeNullableString(input.dedupeKey)
-      ?? normalizeNullableString(input.traceId)
-      ?? input.occurredAt,
+    fingerprint,
   ].join(":");
 }
 

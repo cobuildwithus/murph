@@ -12,7 +12,6 @@ import {
   isHostedMailboxLaneCheckpointed,
 } from "../hosted-mailbox/lag";
 import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
-import { nudgeHostedSystemRunnerUserBestEffortResult } from "../hosted-runner/system-nudge";
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import {
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
@@ -45,17 +44,11 @@ export async function nudgeHostedWebhookMailboxItemStep(
     return;
   }
 
-  const result = input.source === "device-sync"
-    ? await nudgeHostedSystemRunnerUserBestEffortResult({
-        context: resolveHostedNudgeWorkflowContext(input.source),
-        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-        userId: mailboxItem.userId,
-      })
-    : await nudgeHostedAssistantRunnerUserBestEffortResult({
-        context: resolveHostedNudgeWorkflowContext(input.source),
-        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-        userId: mailboxItem.userId,
-      });
+  const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
+    context: resolveHostedNudgeWorkflowContext(input.source),
+    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+    userId: mailboxItem.userId,
+  });
 
   if (!result.accepted) {
     if ("usageGateDenied" in result && result.usageGateDenied) {

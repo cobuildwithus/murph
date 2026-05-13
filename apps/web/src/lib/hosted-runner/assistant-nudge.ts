@@ -12,6 +12,12 @@ export interface HostedAssistantRunnerUserNudgeBestEffortResult
   usageGateDenied: boolean;
 }
 
+type HostedAssistantRunnerNudgeUsageGateDecision =
+  | HostedAiUsageAllowDecision
+  | "denied"
+  | "unavailable"
+  | null;
+
 export async function nudgeHostedAssistantRunnerUserBestEffortResult(input: {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   context?: string;
@@ -37,6 +43,20 @@ export async function nudgeHostedAssistantRunnerUserBestEffortResult(input: {
     };
   }
 
+  if (aiUsageAllowDecision === "unavailable") {
+    return {
+      accepted: false,
+      alarmScheduled: null,
+      alreadyRunning: null,
+      configured: true,
+      errorCode: "AI_USAGE_GATE_UNAVAILABLE",
+      immediateDriveStarted: null,
+      inFlight: null,
+      nextAlarmAtPresent: null,
+      usageGateDenied: false,
+    };
+  }
+
   return {
     ...await nudgeHostedRunnerUserBestEffortResult({
       ...(aiUsageAllowDecision ? { aiUsageAllowDecision } : {}),
@@ -50,7 +70,7 @@ export async function nudgeHostedAssistantRunnerUserBestEffortResult(input: {
 
 async function createAllowedHostedAssistantRunnerNudgeDecision(input: {
   userId: string;
-}): Promise<HostedAiUsageAllowDecision | "denied" | null> {
+}): Promise<HostedAssistantRunnerNudgeUsageGateDecision> {
   try {
     const gate = await resolveHostedAiUsageGate({
       memberId: input.userId,
@@ -65,6 +85,6 @@ async function createAllowedHostedAssistantRunnerNudgeDecision(input: {
     console.warn("Hosted assistant runner nudge usage gate check failed.", {
       errorName: error instanceof Error ? error.name : "unknown",
     });
-    return "denied";
+    return "unavailable";
   }
 }
