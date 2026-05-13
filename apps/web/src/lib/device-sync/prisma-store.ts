@@ -253,6 +253,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.listDirtyUsersForSweep(input);
   }
 
+  async listDirtyConnectionsForSweep(input: {
+    limit: number;
+    staleBefore: Date;
+  }) {
+    return this.dirtyConnections.listDirtyConnectionsForSweep(input);
+  }
+
   async markDirtyConnectionProcessed(input: {
     connectionId: string;
     processedRevision: bigint;

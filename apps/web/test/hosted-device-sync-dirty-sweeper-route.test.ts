@@ -27,13 +27,13 @@ describe("hosted device-sync dirty sweeper cron route", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedDeviceSyncDirtySweeper.mockResolvedValue({
-      dirtyUsers: 1,
-      nudgeAccepted: 1,
-      nudgeAttempted: 1,
-      nudgeLimit: 25,
-      nudgeNotAccepted: 0,
-      skippedDirtyUsers: 0,
+      dirtyConnections: 1,
+      skippedDirtyConnections: 0,
       staleAfterMs: 30000,
+      wakeAppended: 1,
+      wakeAttempted: 1,
+      wakeLimit: 25,
+      wakeNotAppended: 0,
     });
   });
 
@@ -48,13 +48,13 @@ describe("hosted device-sync dirty sweeper cron route", () => {
     expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       sweeper: {
-        dirtyUsers: 1,
-        nudgeAccepted: 1,
-        nudgeAttempted: 1,
-        nudgeLimit: 25,
-        nudgeNotAccepted: 0,
-        skippedDirtyUsers: 0,
+        dirtyConnections: 1,
+        skippedDirtyConnections: 0,
         staleAfterMs: 30000,
+        wakeAppended: 1,
+        wakeAttempted: 1,
+        wakeLimit: 25,
+        wakeNotAppended: 0,
       },
     });
   });

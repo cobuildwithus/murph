@@ -61,16 +61,37 @@ const mocks = vi.hoisted(() => {
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: false,
-      alreadyRunning: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    })),
+    nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+      input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    ) => {
+      void input;
+      return {
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        configured: true,
+        errorCode: null,
+        immediateDriveStarted: false,
+        inFlight: false,
+        nextAlarmAtPresent: false,
+        usageGateDenied: false,
+      };
+    }),
+    nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
+      input?: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    ) => {
+      void input;
+      return {
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        configured: true,
+        errorCode: null,
+        immediateDriveStarted: false,
+        inFlight: false,
+        nextAlarmAtPresent: false,
+      };
+    }),
     resolveHostedAiUsageGate: vi.fn(async (): Promise<HostedAiUsageGateDecision> => ({
       allowed: true,
       billingPlanCode: "launch_monthly",
@@ -173,6 +194,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -392,6 +417,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
+      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
+      usageGateDenied: false,
+    }));
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",

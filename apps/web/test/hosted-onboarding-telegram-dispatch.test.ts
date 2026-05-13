@@ -19,16 +19,37 @@ const mocks = vi.hoisted(() => {
       inFlight: false,
       nextAlarmAtPresent: false,
     })),
-    nudgeHostedRunnerUserBestEffortResult: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: false,
-      alreadyRunning: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
-    })),
+    nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
+      input?: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    ) => {
+      void input;
+      return {
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        configured: true,
+        errorCode: null,
+        immediateDriveStarted: false,
+        inFlight: false,
+        nextAlarmAtPresent: false,
+      };
+    }),
+    nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+      input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    ) => {
+      void input;
+      return {
+        accepted: true,
+        alarmScheduled: false,
+        alreadyRunning: false,
+        configured: true,
+        errorCode: null,
+        immediateDriveStarted: false,
+        inFlight: false,
+        nextAlarmAtPresent: false,
+        usageGateDenied: false,
+      };
+    }),
     startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
       runId: "workflow-run-123",
     })),
@@ -138,6 +159,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
   startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
 }));
@@ -191,6 +216,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
+      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
+      usageGateDenied: false,
+    }));
     mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
       mailboxItemId: string;
     }) => ({

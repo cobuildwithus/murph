@@ -6,6 +6,25 @@ import {
   it,
   vi,
 } from "vitest";
+import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
+
+interface MockAssistantNudgeInput {
+  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
+  context?: string;
+  timeoutMs?: number;
+  userId: string;
+}
+interface MockAssistantNudgeResult {
+  accepted: boolean;
+  alarmScheduled: boolean | null;
+  alreadyRunning: boolean | null;
+  configured: boolean;
+  errorCode: string | null;
+  immediateDriveStarted: boolean | null;
+  inFlight: boolean | null;
+  nextAlarmAtPresent: boolean | null;
+  usageGateDenied: boolean;
+}
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
@@ -25,12 +44,36 @@ const mailboxStoreMocks = vi.hoisted(() => ({
   readHostedMailboxItemOwnerById: vi.fn(),
 }));
 
+const assistantNudgeMocks = vi.hoisted(() => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+    input: MockAssistantNudgeInput,
+  ): Promise<MockAssistantNudgeResult> => {
+    void input;
+    return {
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+      usageGateDenied: false,
+    };
+  }),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
   startHostedWebhookNudgeWorkflow: workflowMocks.startHostedWebhookNudgeWorkflow,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxItemOwnerById: mailboxStoreMocks.readHostedMailboxItemOwnerById,
+}));
+
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult:
+    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
@@ -51,6 +94,39 @@ describe("nudgeHostedRunnerBestEffort", () => {
     mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValue({
       id: "mailbox_123",
       userId: "user-123",
+    });
+    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockReset();
+    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => {
+      const client = vi.mocked(readHostedExecutionControlClientIfConfigured)(input.timeoutMs);
+      if (!client) {
+        return {
+          accepted: false,
+          alarmScheduled: null,
+          alreadyRunning: null,
+          configured: false,
+          errorCode: null,
+          immediateDriveStarted: null,
+          inFlight: null,
+          nextAlarmAtPresent: null,
+          usageGateDenied: false,
+        };
+      }
+      const result = input.aiUsageAllowDecision
+        ? await client.nudgeUserRunner(input.userId, {
+            aiUsageAllowDecision: input.aiUsageAllowDecision,
+          })
+        : await client.nudgeUserRunner(input.userId);
+      return {
+        accepted: result.accepted,
+        alarmScheduled: result.alarmScheduled,
+        alreadyRunning: result.alreadyRunning,
+        configured: true,
+        errorCode: null,
+        immediateDriveStarted: result.immediateDriveStarted ?? null,
+        inFlight: result.inFlight,
+        nextAlarmAtPresent: (result.nextAlarmAt ?? null) !== null,
+        usageGateDenied: false,
+      };
     });
   });
 

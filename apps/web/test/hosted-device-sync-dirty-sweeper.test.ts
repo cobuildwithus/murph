@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  nudgeHostedRunnerUserBestEffortResult: vi.fn(),
+  appendHostedDeviceSyncDirtyWake: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
+vi.mock("@/src/lib/device-sync/wake-service", () => ({
+  appendHostedDeviceSyncDirtyWake: mocks.appendHostedDeviceSyncDirtyWake,
 }));
 
 import {
@@ -15,24 +15,22 @@ import {
 describe("hosted device-sync dirty sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: true,
-      inFlight: false,
-      nextAlarmAtPresent: true,
+    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValue({
+      wakeAppended: true,
     });
   });
 
-  it("nudges users with stale pending dirty device-sync rows", async () => {
+  it("appends device-sync wakes for stale pending dirty device-sync rows", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
-        dirtyConnectionCount: 2n,
+        connectionId: "dsc_dirty_1",
+        dirtyRevision: 2n,
+        latestEventType: "sleep.updated",
         latestDirtyAt: "2026-05-05T00:00:00.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: "trace_dirty_1",
+        provider: "oura",
         userId: "member_dirty_1",
       },
     ]);
@@ -45,57 +43,68 @@ describe("hosted device-sync dirty sweeper", () => {
       store,
     });
 
-    expect(store.listDirtyUsersForSweep).toHaveBeenCalledWith({
+    expect(store.listDirtyConnectionsForSweep).toHaveBeenCalledWith({
       limit: 6,
       staleBefore: new Date("2026-05-05T00:00:30.000Z"),
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "hosted-device-sync-dirty-sweeper",
-      timeoutMs: 5000,
+    expect(mocks.appendHostedDeviceSyncDirtyWake).toHaveBeenCalledWith({
+      connectionId: "dsc_dirty_1",
+      dedupeKey: "dirty-revision:2",
+      eventType: "sleep.updated",
+      occurredAt: "2026-05-05T00:01:00.000Z",
+      provider: "oura",
+      resourceCategory: "sleep",
+      traceId: null,
       userId: "member_dirty_1",
     });
     expect(result).toEqual({
-      dirtyUsers: 1,
-      nudgeAccepted: 1,
-      nudgeAttempted: 1,
-      nudgeLimit: 5,
-      nudgeNotAccepted: 0,
-      skippedDirtyUsers: 0,
+      dirtyConnections: 1,
+      skippedDirtyConnections: 0,
       staleAfterMs: 30000,
+      wakeAppended: 1,
+      wakeAttempted: 1,
+      wakeLimit: 5,
+      wakeNotAppended: 0,
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper nudging runner for dirty state.",
+      "Hosted device-sync dirty sweeper appending device-sync wake for dirty state.",
       expect.objectContaining({
-        dirtyConnectionCount: "2",
+        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
+        dirtyRevision: "2",
         userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
       }),
     );
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_dirty_1");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_1");
   });
 
-  it("reports skipped dirty users and nudge failures without logging raw user ids", async () => {
+  it("reports skipped dirty connections and wake append failures without logging raw ids", async () => {
     const logger = buildLogger();
     const store = buildStore([
       {
-        dirtyConnectionCount: 1n,
+        connectionId: "dsc_dirty_1",
+        dirtyRevision: 1n,
+        latestEventType: "sleep.updated",
         latestDirtyAt: "2026-05-05T00:00:00.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: null,
+        provider: "oura",
         userId: "member_dirty_1",
       },
       {
-        dirtyConnectionCount: 1n,
+        connectionId: "dsc_dirty_2",
+        dirtyRevision: 1n,
+        latestEventType: "sleep.updated",
         latestDirtyAt: "2026-05-05T00:00:01.000Z",
+        latestResourceCategory: "sleep",
+        latestTraceId: null,
+        provider: "oura",
         userId: "member_dirty_2",
       },
     ]);
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: null,
-      alreadyRunning: null,
-      configured: true,
-      errorCode: "TimeoutError",
-      immediateDriveStarted: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
+    mocks.appendHostedDeviceSyncDirtyWake.mockResolvedValueOnce({
+      reason: "append_failed",
+      wakeAppended: false,
     });
 
     const result = await runHostedDeviceSyncDirtySweeper({
@@ -104,35 +113,42 @@ describe("hosted device-sync dirty sweeper", () => {
       store,
     });
 
-    expect(result.nudgeNotAccepted).toBe(1);
-    expect(result.skippedDirtyUsers).toBe(1);
+    expect(result.wakeNotAppended).toBe(1);
+    expect(result.skippedDirtyConnections).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper runner nudge was not accepted.",
-      {
-        configured: true,
-        errorCode: "TimeoutError",
+      "Hosted device-sync dirty sweeper device-sync wake was not appended.",
+      expect.objectContaining({
+        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
+        reason: "append_failed",
         userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
-      },
+      }),
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync dirty sweeper skipped dirty users after nudge limit.",
+      "Hosted device-sync dirty sweeper skipped dirty connections after wake limit.",
       {
-        nudgeLimit: 1,
-        skippedDirtyUsers: 1,
+        skippedDirtyConnections: 1,
+        wakeLimit: 1,
       },
     );
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_dirty_1");
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_dirty_2");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_1");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_dirty_2");
   });
 });
 
 function buildStore(rows: Array<{
-  dirtyConnectionCount: bigint;
+  connectionId: string;
+  dirtyRevision: bigint;
+  latestEventType: string | null;
   latestDirtyAt: string;
+  latestResourceCategory: string | null;
+  latestTraceId: string | null;
+  provider: string;
   userId: string;
 }>) {
   return {
-    listDirtyUsersForSweep: vi.fn(async () => rows),
+    listDirtyConnectionsForSweep: vi.fn(async () => rows),
   };
 }
 

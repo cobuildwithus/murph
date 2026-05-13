@@ -10,8 +10,37 @@ import {
   RetryableError,
 } from "workflow";
 
+interface MockAssistantNudgeResult {
+  accepted: boolean;
+  alarmScheduled: boolean | null;
+  alreadyRunning: boolean | null;
+  configured: boolean;
+  errorCode: string | null;
+  immediateDriveStarted: boolean | null;
+  inFlight: boolean | null;
+  nextAlarmAtPresent: boolean | null;
+  usageGateDenied: boolean;
+}
+
 const mocks = vi.hoisted(() => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
+    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+  ): Promise<MockAssistantNudgeResult> => {
+    void input;
+    return {
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+      usageGateDenied: false,
+    };
+  }),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
+  nudgeHostedSystemRunnerUserBestEffortResult: vi.fn(),
   readHostedMailboxItemCheckpointById: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
@@ -49,6 +78,14 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
+vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
+  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+}));
+
+vi.mock("@/src/lib/hosted-runner/system-nudge", () => ({
+  nudgeHostedSystemRunnerUserBestEffortResult: mocks.nudgeHostedSystemRunnerUserBestEffortResult,
+}));
+
 import { startHostedWebhookNudgeWorkflow } from "@/src/lib/hosted-onboarding/webhook-workflow-start";
 import {
   nudgeHostedWebhookMailboxItemStep,
@@ -77,6 +114,28 @@ describe("hosted onboarding webhook workflows", () => {
       alarmScheduled: false,
       alreadyRunning: false,
       configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+      usageGateDenied: false,
+    });
+    mocks.nudgeHostedSystemRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      conversationLagPresent: false,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
@@ -122,11 +181,12 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.readHostedMailboxItemCheckpointById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:telegram:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.readHostedWorkspace).toHaveBeenCalledTimes(1);
   });
 
@@ -138,11 +198,12 @@ describe("hosted onboarding webhook workflows", () => {
       source: "linq",
     })).resolves.toBeUndefined();
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:linq:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxItemCheckpointById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
@@ -163,11 +224,13 @@ describe("hosted onboarding webhook workflows", () => {
       source: "device-sync",
     })).resolves.toBeUndefined();
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedSystemRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "device-sync.wake:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("uses the email source label for email ingress wake retry workflows", async () => {
@@ -178,11 +241,12 @@ describe("hosted onboarding webhook workflows", () => {
       source: "email",
     })).resolves.toBeUndefined();
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "webhook:email:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("marks missing mailbox pointers fatal inside Workflow", async () => {
@@ -193,6 +257,7 @@ describe("hosted onboarding webhook workflows", () => {
       source: "linq",
     })).rejects.toBeInstanceOf(FatalError);
 
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -201,7 +266,7 @@ describe("hosted onboarding webhook workflows", () => {
       hostedMailboxConversationImportedSeq: "0",
       hostedMailboxSystemImportedSeq: "0",
     }));
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
       accepted: false,
       alarmScheduled: null,
       alreadyRunning: null,
@@ -210,12 +275,40 @@ describe("hosted onboarding webhook workflows", () => {
       immediateDriveStarted: null,
       inFlight: null,
       nextAlarmAtPresent: null,
+      usageGateDenied: false,
     });
 
     await expect(nudgeHostedWebhookMailboxItemStep({
       mailboxItemId: "mailbox_123",
       source: "linq",
     })).rejects.toBeInstanceOf(RetryableError);
+  });
+
+  it("does not retry or nudge when the assistant usage gate denies a workflow nudge", async () => {
+    mockMailboxProgressBehind();
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: false,
+      alarmScheduled: null,
+      alreadyRunning: null,
+      configured: true,
+      errorCode: "AI_USAGE_GATE_DENIED",
+      immediateDriveStarted: null,
+      inFlight: null,
+      nextAlarmAtPresent: null,
+      usageGateDenied: true,
+    });
+
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      source: "telegram",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "webhook:telegram:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("skips runner nudge for older mailbox pointers in the same lane", async () => {
@@ -242,6 +335,7 @@ describe("hosted onboarding webhook workflows", () => {
       lanes: ["conversation"],
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -254,6 +348,7 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -276,11 +371,13 @@ describe("hosted onboarding webhook workflows", () => {
       source: "device-sync",
     })).resolves.toBeUndefined();
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedSystemRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "device-sync.wake:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).toHaveBeenCalledWith({
       lanes: ["system"],
       userId: "member_123",
