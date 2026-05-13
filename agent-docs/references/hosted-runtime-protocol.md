@@ -236,6 +236,9 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime result carries the next fast mailbox retry wake so
 Cloudflare can promptly reinvoke the workspace.
+When no local import state changed, that retry wake is scheduling metadata only:
+it must not mark the restored workspace dirty or force an idle-shutdown
+checkpoint.
 Browser-vault refresh now enters through normal runtime work with the active
 write fence rather than a separate container refresh route, and failure or
 staleness cannot mutate runner checkpoint, reply, or wake state.

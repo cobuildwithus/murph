@@ -100,13 +100,20 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         text: reminderText,
       }),
     ]);
+    const workerStartedAt = new Date();
     await runHostedWorkerUntilIdle();
+    const workerCompletedAt = new Date();
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    const finalNextWakeAt = finalStatus.workspace?.nextWakeAt;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.workspace?.nextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
-    expect(finalStatus.workspace?.nextWakeAt).toSatisfy(isKualaLumpurMidnight);
+    expect(finalNextWakeAt).toBeDefined();
+    expect(resolvePossibleNextKualaLumpurMidnightsForWindow({
+      end: workerCompletedAt,
+      start: workerStartedAt,
+    })).toContain(finalNextWakeAt);
+    expect(finalNextWakeAt).toSatisfy(isKualaLumpurMidnight);
     expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
       expect.objectContaining({
         eventCode: "assistant.automation_detail",
@@ -263,6 +270,25 @@ function isKualaLumpurMidnight(value: unknown): boolean {
     second: "2-digit",
     timeZone: "Asia/Kuala_Lumpur",
   }).format(nextWake) === "00:00:00";
+}
+
+function resolvePossibleNextKualaLumpurMidnightsForWindow(input: {
+  end: Date;
+  start: Date;
+}): string[] {
+  return Array.from(new Set([
+    resolveNextKualaLumpurMidnightAfter(input.start),
+    resolveNextKualaLumpurMidnightAfter(input.end),
+  ]));
+}
+
+function resolveNextKualaLumpurMidnightAfter(now: Date): string {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const kualaLumpurOffsetMs = 8 * 60 * 60 * 1000;
+  const currentKualaLumpurMidnightUtcMs =
+    Math.floor((now.getTime() + kualaLumpurOffsetMs) / dayMs) * dayMs
+    - kualaLumpurOffsetMs;
+  return new Date(currentKualaLumpurMidnightUtcMs + dayMs).toISOString();
 }
 
 async function sleep(ms: number): Promise<void> {

@@ -122,7 +122,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     previousState,
     importResult.state,
   );
-  const shouldCheckpoint = stateChanged || Boolean(importResult.nextRetryAt);
+  const shouldCheckpoint = stateChanged;
 
   if (!shouldCheckpoint) {
     return {

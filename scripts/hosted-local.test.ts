@@ -133,6 +133,7 @@ describe("hosted-local harness", () => {
 
     expect(resolveHostedLocalProfile("worker-only").mode).toBe("debug");
     expect(result.env.MURPH_HOSTED_LOCAL_PROFILE).toBe("e2e:stub");
+    expect(result.env.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS).toBe("250");
     expect(result.env.MURPH_DEV_CODEX_BRIDGE).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
   });

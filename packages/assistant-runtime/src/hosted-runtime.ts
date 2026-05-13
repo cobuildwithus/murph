@@ -329,6 +329,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
     );
+    const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
+      resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
+    );
+    const mailboxBudgetExhausted = () =>
+      mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
     let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
     const runtimeLogContext = {
@@ -338,6 +343,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
       mailboxBudget.importItem(
+        item,
+        async (importItem, context) => {
+          assertRuntimeNotAborted();
+          const outcome = await options.importItem(importItem, context);
+          assertRuntimeNotAborted();
+          return outcome;
+        },
+        {
+          recordMessagingReturnTarget: (target) => {
+            hostedCliBridgeMessagingReturnTarget = target;
+          },
+          signal: runtimeAbortController.signal,
+        },
+      );
+    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+      foregroundMailboxBudget.importItem(
         item,
         async (importItem, context) => {
           assertRuntimeNotAborted();
@@ -368,15 +389,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (!runnerMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
+    const checkpointMetadata = {
+      attemptId: input.request.attemptId,
+      expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+      leaseGeneration: input.request.leaseGeneration,
+      nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+      nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+    };
     const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       createSnapshot: createAbortGuardedCheckpointSnapshot,
-      metadata: {
-        attemptId: input.request.attemptId,
-        expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
-        leaseGeneration: input.request.leaseGeneration,
-        nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-        nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-      },
+      metadata: checkpointMetadata,
     });
     const foregroundWorkspacePort = guardedWorkspacePort;
     const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
@@ -397,6 +419,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
+      foregroundImportItem: importForegroundMailboxItem,
+      foregroundLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
@@ -514,7 +538,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       runtimeStateDirty ||= result.runtimeStateDirty;
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
-        mailboxBudgetExhausted: mailboxBudget.exhausted,
+        mailboxBudgetExhausted: mailboxBudgetExhausted(),
         result,
         workspace: workspaceRead.workspace,
       });
@@ -542,7 +566,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               workspace: result.latestWorkspace ?? workspaceRead.workspace,
             });
             const nextProjection = buildHostedWorkspaceInvocationProjection({
-              mailboxBudgetExhausted: mailboxBudget.exhausted,
+              mailboxBudgetExhausted: mailboxBudgetExhausted(),
               result,
               workspace: accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
             });
@@ -566,13 +590,39 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeAbortSignal: runtimeAbortController.signal,
           workspacePort: foregroundWorkspacePort,
         });
+        checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
+        checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
+        checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
+        if (consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null)) {
+          idleWakeOrdinal += 1;
+          result = await runForegroundPass({
+            initialMailboxImport: null,
+            requestId: `${requestId}:checkpoint-wake:${idleWakeOrdinal}`,
+            workspace: checkpoint.workspace,
+          });
+          const nextProjection = buildHostedWorkspaceInvocationProjection({
+            mailboxBudgetExhausted: mailboxBudgetExhausted(),
+            result,
+            workspace: checkpoint.workspace,
+          });
+          accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
+            {
+              ...accumulatedProjection,
+              committedWorkspace: checkpoint.workspace,
+              redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
+            },
+            nextProjection,
+          );
+          runtimeStateDirty = result.runtimeStateDirty;
+          continue;
+        }
         return {
           ...(checkpoint.workspace.nextWakeAt === undefined
             ? {}
             : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
           redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
           status: resolveHostedWorkspaceInvocationStatus({
-            mailboxBudgetExhausted: mailboxBudget.exhausted,
+            mailboxBudgetExhausted: mailboxBudgetExhausted(),
             nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
           }),
         };
@@ -582,7 +632,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     }
     assertRuntimeNotAborted();
     const projection = buildHostedWorkspaceInvocationProjection({
-      mailboxBudgetExhausted: mailboxBudget.exhausted,
+      mailboxBudgetExhausted: mailboxBudgetExhausted(),
       result,
       workspace: workspaceRead.workspace,
     });
@@ -602,10 +652,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 }
 
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
+const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_DEADLINE_MARGIN_MS = 5_000;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type HostedRuntimeIdleCheckpointWaitResult = "deadline" | "idle" | "wake";
+
+function consumePendingHostedRuntimeWake(
+  runtimeWakeSignal: RuntimeWakeSignal | null,
+): boolean {
+  return runtimeWakeSignal?.consumePending() === true;
+}
 
 interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
@@ -1113,6 +1170,16 @@ function assertWorkspaceRunUserMatchesRequest(input: {
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {
   return value ?? 50;
+}
+
+function resolveHostedWorkspaceForegroundMailboxLimit(value: number | null | undefined): number {
+  return Math.max(
+    1,
+    Math.min(
+      DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT,
+      resolveHostedWorkspaceRunMailboxLimit(value),
+    ),
+  );
 }
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {

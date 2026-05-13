@@ -163,10 +163,16 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
+export type HostedWorkspaceRunnerMailboxImportItem = (
+  item: HostedMailboxResolvedImportItem,
+) => Promise<HostedMailboxItemImportOutcome>;
+
 export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
-  importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  foregroundImportItem?: HostedWorkspaceRunnerMailboxImportItem | null;
+  foregroundLimitPerLane?: number | null;
+  importItem: HostedWorkspaceRunnerMailboxImportItem;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -486,8 +492,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
           deferCheckpoint: true,
+          importItem: input.input.foregroundImportItem ?? input.input.importItem,
           input: input.input,
           lanes: ["conversation"],
+          limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
           requestId,
         });
         if (shouldRecordHostedForegroundMailboxImportResult(result)) {
@@ -586,8 +594,10 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   checkpointReason: HostedWorkspaceCheckpointReason;
   deferCheckpoint?: boolean;
+  importItem?: HostedWorkspaceRunnerMailboxImportItem | null;
   input: HostedWorkspaceRunnerInput;
   lanes?: readonly ("conversation" | "system")[];
+  limitPerLane?: number | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
 }): Promise<HostedMailboxImportCheckpointResult> {
@@ -606,9 +616,9 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
       }),
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
-    importItem: input.input.importItem,
+    importItem: input.importItem ?? input.input.importItem,
     lanes: input.lanes,
-    limitPerLane: input.input.limitPerLane,
+    limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,
     now: input.input.now,
     prefetch: input.prefetch ?? null,
@@ -771,8 +781,7 @@ function markHostedMailboxImportDirtyIfNeeded(
 function isDeferredHostedMailboxImportDirty(
   result: HostedMailboxImportCheckpointResult,
 ): boolean {
-  return result.checkpointDeferred
-    && (result.stateChanged || Boolean(result.importResult.nextRetryAt));
+  return result.checkpointDeferred && result.stateChanged;
 }
 
 function createHostedWorkspaceCanonicalWritePort(input: {

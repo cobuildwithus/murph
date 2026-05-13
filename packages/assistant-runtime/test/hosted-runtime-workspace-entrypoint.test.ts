@@ -429,6 +429,112 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground runtime wake imports conversation input after initial mailbox budget exhaustion", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-budget-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedSeqs: string[] = [];
+    const expectedImportedSeqs = Array.from({ length: 14 }, (_, index) => String(index + 1));
+    const mailboxItems = Array.from({ length: 13 }, (_, index) => {
+      const seq = String(index + 1);
+      return createMailboxItem({
+        id: `mailbox_item_entrypoint_foreground_budget_${seq.padStart(3, "0")}`,
+        laneSeq: seq,
+      });
+    });
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_budget",
+            budget: {
+              maxMailboxItems: 12,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/foreground-budget.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            events.push("assistant");
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_foreground_budget_014",
+              laneSeq: "14",
+              occurredAt: "2026-04-27T00:00:14.000Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.deepEqual(importedSeqs, expectedImportedSeqs);
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
+      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 11]);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("import:")),
+        expectedImportedSeqs.map((seq) => `import:${seq}`),
+      );
+      assert.ok(events.includes("snapshot:idle_shutdown:14"));
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "14",
+      );
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "14");
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "14",
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime wakes during the final idle checkpoint do not abort checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
@@ -522,6 +628,127 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
     } finally {
       checkpointResponse.resolve({
+        checkpointed: true,
+        workspace: createWorkspaceState({ version: "5" }),
+      });
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("runtime wakes during the final idle checkpoint drain after the checkpoint commits", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const firstCheckpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_checkpoint_wake_001",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
+                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-pending-${checkpointRequests.length}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push(`workspace.checkpoint:${request.expectedWorkspaceVersion}`);
+                checkpointRequests.push(request);
+                if (checkpointRequests.length === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_checkpoint_wake_002",
+                    laneSeq: "2",
+                  }));
+                  runtimeWakeSignal.notify();
+                  return await firstCheckpointResponse.promise;
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    snapshotRef: request.snapshotRef,
+                    version: "6",
+                  }),
+                };
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(checkpointRequests.length, 1);
+      });
+      firstCheckpointResponse.resolve({
+        checkpointed: true,
+        workspace: createWorkspaceState({
+          snapshotRef: checkpointRequests[0]!.snapshotRef,
+          version: "5",
+        }),
+      });
+
+      const result = await resultPromise;
+
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_wake_001",
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_wake_002",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "4",
+        "5",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) =>
+          request.redactedStatus?.hostedMailboxConversationImportedSeq
+        ),
+        ["1", "2"],
+      );
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.status, "idle");
+    } finally {
+      firstCheckpointResponse.resolve({
         checkpointed: true,
         workspace: createWorkspaceState({ version: "5" }),
       });
@@ -3693,7 +3920,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("returns mailbox retry wake for a pure retryable sidecar block after idle checkpointing", async () => {
+  test("returns mailbox retry wake for a pure retryable sidecar block without idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3711,15 +3938,8 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
-        async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
-          return {
-            snapshotRef: createBundleRef({
-              hash: "d".repeat(64),
-              key: "users/bundles/member-synthetic/workspace-sidecar-retry.bundle.json",
-              size: 512,
-            }),
-          };
+        async createCheckpointSnapshot() {
+          throw new Error("Retry-only mailbox scheduling should not snapshot unchanged state.");
         },
         async importItem(item) {
           imported.push(item.item.id);
@@ -3754,12 +3974,8 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetchPayload",
-        "snapshot:0",
-        "workspace.checkpoint",
       ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-      ]);
+      assert.deepEqual(checkpointRequests, []);
       const mailboxRetryWakeAt = result.nextWakeAt;
       assert.match(mailboxRetryWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
       assert.deepEqual(result, {
