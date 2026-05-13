@@ -4,6 +4,8 @@ import type {
 
 type ShutdownTimer = ReturnType<typeof setTimeout> | number
 
+export const DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT = 50
+
 export interface AssistantRunEvent {
   captureId?: string
   details?: string
@@ -305,7 +307,7 @@ function resolveAssistantAutomationWakeDelayMs(
 
 export function normalizeScanLimit(value?: number): number {
   if (!Number.isFinite(value) || typeof value !== 'number') {
-    return 50
+    return DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT
   }
 
   return Math.max(Math.trunc(value), 1)

@@ -53,6 +53,7 @@ const DEFAULT_TEST_ATTACHMENT_EVIDENCE = {
 const scannerReplyMocks = vi.hoisted(() => ({
   applyAssistantAutoReplyProcessResult: vi.fn(),
   createAssistantAutoReplyGroupContext: vi.fn(),
+  createAssistantAutoReplyReceiptReader: vi.fn(),
   processAssistantAutoReplyGroup: vi.fn(),
 }))
 
@@ -137,6 +138,8 @@ vi.mock('../src/assistant/automation/reply.ts', () => ({
     scannerReplyMocks.applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext:
     scannerReplyMocks.createAssistantAutoReplyGroupContext,
+  createAssistantAutoReplyReceiptReader:
+    scannerReplyMocks.createAssistantAutoReplyReceiptReader,
   processAssistantAutoReplyGroup: scannerReplyMocks.processAssistantAutoReplyGroup,
 }))
 
@@ -241,7 +244,7 @@ vi.mock('../src/assistant/conversation-ref.ts', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/assistant/provider-turn-recovery.ts', () => ({
+vi.mock('../src/assistant/provider-failure-diagnostics.ts', () => ({
   isAssistantProviderConnectionLostError:
     replyMocks.isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError: replyMocks.isAssistantProviderStalledError,
@@ -925,6 +928,11 @@ beforeEach(() => {
   scannerReplyMocks.createAssistantAutoReplyGroupContext
     .mockReset()
     .mockImplementation(createAutoReplyContextForTest)
+  scannerReplyMocks.createAssistantAutoReplyReceiptReader
+    .mockReset()
+    .mockImplementation(() => ({
+      readReceipts: vi.fn(async () => []),
+    }))
   scannerReplyMocks.processAssistantAutoReplyGroup.mockReset().mockResolvedValue({
     advanceCursor: true,
     failed: 0,
@@ -1227,52 +1235,6 @@ describe('assistant automation shared helpers', () => {
     localCleanup()
   })
 
-  it('counts failed auto-reply receipts against the retry budget', async () => {
-    const retry = await vi.importActual<
-      typeof import('../src/assistant/automation/auto-reply-retry.ts')
-    >('../src/assistant/automation/auto-reply-retry.ts')
-    const inputId = createAssistantInputEventId({
-      sourceRef: {
-        captureId: 'capture-budget',
-        kind: 'inbox-capture',
-        source: 'telegram',
-        version: null,
-      },
-    })
-
-    const budget = retry.resolveAssistantAutoReplyRetryBudget({
-      inputIds: [inputId],
-      receipts: [
-        createTurnReceipt({
-          turnId: 'turn-budget-1',
-          primaryCaptureId: 'capture-budget',
-          primaryInputId: inputId,
-          inputIds: [inputId],
-        }),
-        createTurnReceipt({
-          turnId: 'turn-budget-2',
-          primaryCaptureId: 'capture-budget',
-          primaryInputId: inputId,
-          inputIds: [inputId],
-        }),
-        createTurnReceipt({
-          turnId: 'turn-budget-completed',
-          primaryCaptureId: 'capture-budget',
-          primaryInputId: inputId,
-          inputIds: [inputId],
-          status: 'completed',
-        }),
-      ],
-      maxFailedAttempts: 2,
-    })
-
-    expect(budget).toEqual({
-      allowed: false,
-      failedAttempts: 2,
-      maxFailedAttempts: 2,
-    })
-  })
-
   it('waits for timeout completion or upstream abort', async () => {
     vi.useFakeTimers()
     const shared = await vi.importActual<typeof import('../src/assistant/automation/shared.ts')>(
@@ -1321,6 +1283,31 @@ describe('assistant automation scanner', () => {
         skipped: 0,
       },
     })
+  })
+
+  it('does not create groups when no live auto-reply candidates exist', async () => {
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([]),
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replies).toEqual({
+      considered: 0,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 0,
+    })
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup)
+      .not.toHaveBeenCalled()
   })
 
   it('scans auto-reply candidates from the supplied assistant input source', async () => {
@@ -4761,7 +4748,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('records retry exhaustion before provider execution when failed attempts hit the cap', async () => {
+  it('does not let failed receipts suppress scanner-owned auto-reply work', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -4785,15 +4772,11 @@ describe('assistant auto-reply runtime', () => {
       ),
     )
 
-    const events: Array<Record<string, unknown>> = []
     const result = await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
       enabledChannels: ['telegram'],
       inboxServices: createInboxServices(),
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
       requestId: null,
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
@@ -4804,30 +4787,21 @@ describe('assistant auto-reply runtime', () => {
       checkpointRequired: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
       stopScanning: false,
     })
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
-    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
         captureIds: ['capture-retry-cap'],
-        failedAttempts: 3,
-        inputIds: [context.firstInputId],
-        maxFailedAttempts: 3,
-        reason:
-          'auto-reply retry limit reached after 3 failed attempt(s); pausing automatic retries instead of retrying indefinitely.',
+        outcome: 'result',
       }))
-    expect(events).toContainEqual(expect.objectContaining({
-      details:
-        'auto-reply retry limit reached after 3 failed attempt(s); pausing automatic retries instead of retrying indefinitely.',
-      errorCode: 'ASSISTANT_AUTO_REPLY_RETRY_EXHAUSTED',
-      inputId: context.firstInputId,
-      type: 'input.reply-skipped',
-    }))
+    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
+      .not.toHaveBeenCalled()
   })
 
-  it('repairs handled receipts before applying the retry cap', async () => {
+  it('repairs handled receipts without treating failed receipts as retry state', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -4886,6 +4860,161 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
       .not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('defers provider work when a live group has a persisted retry delay that is not due', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:00:10.000Z'))
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const item = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-persisted-retry-delay',
+    }))
+    const context = reply.createAssistantAutoReplyGroupContext([item])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        completedAt: '2026-04-08T00:00:05.000Z',
+        inputIds: [context.firstInputId],
+        primaryCaptureId: 'capture-persisted-retry-delay',
+        primaryInputId: context.firstInputId,
+        turnId: 'turn-persisted-retry-delay',
+        updatedAt: '2026-04-08T00:00:05.000Z',
+        timeline: [
+          {
+            at: '2026-04-08T00:00:00.000Z',
+            detail: null,
+            kind: 'turn.started',
+            metadata: {
+              autoReplyInputId: context.firstInputId,
+              autoReplyInputIds: context.firstInputId,
+              autoReplyCaptureId: 'capture-persisted-retry-delay',
+              autoReplyCaptureIds: 'capture-persisted-retry-delay',
+            },
+          },
+          {
+            at: '2026-04-08T00:00:05.000Z',
+            detail: 'rate limited',
+            kind: 'turn.completed',
+            metadata: {
+              autoReplyRetryAt: '2026-04-08T00:05:00.000Z',
+            },
+          },
+        ],
+      }),
+    ])
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: '2026-04-08T00:05:00.000Z',
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(replyMocks.prepareAssistantAutoReplyInput).not.toHaveBeenCalled()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
+      .not.toHaveBeenCalled()
+  })
+
+  it('does not repair older handled receipt after a newer failed receipt', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const item = createReplyGroupItem(createCaptureSummary({
+      captureId: 'capture-persisted-retry-due',
+    }))
+    const context = reply.createAssistantAutoReplyGroupContext([item])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        completedAt: '2026-04-08T00:00:04.000Z',
+        inputIds: [context.firstInputId],
+        primaryCaptureId: 'capture-persisted-retry-due',
+        primaryInputId: context.firstInputId,
+        status: 'completed',
+        turnId: 'turn-persisted-retry-due-old-handled',
+        updatedAt: '2026-04-08T00:00:04.000Z',
+      }),
+      createTurnReceipt({
+        completedAt: '2026-04-08T00:00:05.000Z',
+        inputIds: [context.firstInputId],
+        primaryCaptureId: 'capture-persisted-retry-due',
+        primaryInputId: context.firstInputId,
+        turnId: 'turn-persisted-retry-due',
+        updatedAt: '2026-04-08T00:00:05.000Z',
+        timeline: [
+          {
+            at: '2026-04-08T00:00:00.000Z',
+            detail: null,
+            kind: 'turn.started',
+            metadata: {
+              autoReplyInputId: context.firstInputId,
+              autoReplyInputIds: context.firstInputId,
+              autoReplyCaptureId: 'capture-persisted-retry-due',
+              autoReplyCaptureIds: 'capture-persisted-retry-due',
+            },
+          },
+          {
+            at: '2026-04-08T00:00:05.000Z',
+            detail: 'rate limited',
+            kind: 'turn.completed',
+            metadata: {
+              autoReplyRetryAt: '2026-04-08T00:05:00.000Z',
+            },
+          },
+        ],
+      }),
+    ])
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-persisted-retry-due'],
+        outcome: 'result',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
+      .not.toHaveBeenCalled()
   })
 
   it('treats connection loss as a deferred retry state', async () => {

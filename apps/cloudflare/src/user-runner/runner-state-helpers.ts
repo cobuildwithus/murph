@@ -61,11 +61,7 @@ export function projectRunnerStateRecord(input: {
         workspaceVersion: input.meta.active_workspace_version,
       }
     : null;
-  const activeReason = writeFence?.kind === "idle_checkpoint"
-    ? "idle_shutdown_checkpoint"
-    : writeFence
-    ? "runtime"
-    : null;
+  const activeReason = writeFence ? "runtime" : null;
   const wakeAt = normalizeIsoDateOrNull(input.meta.wake_at);
   const backoffUntil = normalizeIsoDateOrNull(input.meta.backoff_until);
   const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
@@ -171,5 +167,5 @@ export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
 }
 
 function readWriteFenceKind(value: string | null): RunnerWriteFenceKind | null {
-  return value === "runtime" || value === "idle_checkpoint" ? value : null;
+  return value === "runtime" ? value : null;
 }

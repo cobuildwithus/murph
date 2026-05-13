@@ -41,7 +41,7 @@ const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
-const DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS = 300_000;
+const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
@@ -141,53 +141,6 @@ interface RunnerActiveOperationRecord {
   userId: string;
 }
 
-interface RunnerPendingIdleCheckpoint {
-  checkpointNextWakeAt: string | null;
-  runtime: HostedExecutionWorkspaceInvocationJobInput["runtime"];
-  timeoutMs: number;
-  userId: string;
-  workspaceVersion: string;
-}
-
-type RunnerIdleCheckpointLeaseAttempt =
-  | {
-      attemptId: string;
-      generation: string;
-      status: "acquired";
-    }
-  | {
-      status: "busy";
-    }
-  | {
-      status: "unavailable";
-    };
-
-interface RunnerContainerUserRunnerStubLike {
-  beginIdleCheckpointLease?(input: {
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion: string | null;
-  } | null>;
-  finishIdleCheckpointLease?(input: {
-    attemptId: string;
-    generation: string;
-    nextWakeAt?: string | null;
-    userId: string;
-  }): Promise<{ completed: boolean }>;
-}
-
-type RunnerContainerUserRunnerBeginLeaseStub =
-  RunnerContainerUserRunnerStubLike
-  & Required<Pick<RunnerContainerUserRunnerStubLike, "beginIdleCheckpointLease">>;
-
-type RunnerContainerUserRunnerFinishLeaseStub =
-  RunnerContainerUserRunnerStubLike
-  & Required<Pick<RunnerContainerUserRunnerStubLike, "finishIdleCheckpointLease">>;
-
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   enableInternet = true;
@@ -207,7 +160,6 @@ export class RunnerContainer extends Container {
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private currentLogContext: RunnerContainerLogContext | null = null;
-  private pendingIdleCheckpoint: RunnerPendingIdleCheckpoint | null = null;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
 
@@ -227,10 +179,8 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
-    this.pendingIdleCheckpoint = null;
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.withLifecycleLock(async () => {
-      this.pendingIdleCheckpoint = null;
       await this.stopWarmContainer();
     });
   }
@@ -403,47 +353,16 @@ export class RunnerContainer extends Container {
         return;
       }
 
-      const pendingIdleCheckpoint = this.pendingIdleCheckpoint;
-      let cleanupWarmContainer = true;
-      try {
-        if (pendingIdleCheckpoint) {
-          cleanupWarmContainer = await this.runPendingIdleCheckpoint(pendingIdleCheckpoint);
-        }
-      } catch (error) {
-        this.pendingIdleCheckpoint = null;
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: buildRunnerContainerMetadataOnlyErrorDetails(error),
-          level: "warn",
-          message: "Hosted execution container skipped idle-shutdown checkpoint during activity expiry.",
-          phase: "failed",
-          userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
-        });
-      } finally {
-        if (!cleanupWarmContainer) {
-          this.noteRunnerActivity("activity-expired-idle-checkpoint-deferred");
-          emitHostedExecutionStructuredLog({
-            component: "container",
-            details: {
-              lifecycleStage: "activity-expired-idle-checkpoint-deferred",
-            },
-            message: "Hosted execution container kept warm shell for deferred idle-shutdown checkpoint.",
-            phase: "container.ready",
-            userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
-          });
-          return;
-        }
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            lifecycleStage: "activity-expired-fallback-cleanup",
-          },
-          message: "Hosted execution container activity expired; running fallback cleanup.",
-          phase: "container.ready",
-          userId: pendingIdleCheckpoint?.userId ?? this.currentLogContext?.userId,
-        });
-        await this.stopWarmContainer({ failClosed: false });
-      }
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          lifecycleStage: "activity-expired-cleanup",
+        },
+        message: "Hosted execution container activity expired; running cleanup.",
+        phase: "container.ready",
+        userId: this.currentLogContext?.userId,
+      });
+      await this.stopWarmContainer({ failClosed: false });
     });
   }
 
@@ -613,11 +532,6 @@ export class RunnerContainer extends Container {
 
       const responsePayload = await response.json();
       const result = assertHostedExecutionRunnerJobResult(responsePayload, input.job);
-      this.rememberIdleCheckpointIfNeeded({
-        input,
-        result,
-        userId: routeUserId,
-      });
       completedSuccessfully = true;
       return result;
     } catch (error) {
@@ -663,156 +577,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private rememberIdleCheckpointIfNeeded(input: {
-    input: HostedExecutionContainerInvokeInput;
-    result: HostedExecutionRunnerJobResult;
-    userId: string;
-  }): void {
-    if (
-      input.input.job.kind !== HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND
-    ) {
-      return;
-    }
-
-    if (input.input.job.request.reason === "idle_shutdown_checkpoint") {
-      this.pendingIdleCheckpoint = null;
-      return;
-    }
-
-    if (input.result.status !== "failed") {
-      this.pendingIdleCheckpoint = {
-        checkpointNextWakeAt: input.result.nextWakeAt ?? null,
-        runtime: input.input.job.runtime,
-        timeoutMs: input.input.timeoutMs,
-        userId: input.userId,
-        workspaceVersion: input.input.job.request.workspaceVersion,
-      };
-      return;
-    }
-
-    this.pendingIdleCheckpoint = null;
-  }
-
-  private async runPendingIdleCheckpoint(
-    pending: RunnerPendingIdleCheckpoint,
-  ): Promise<boolean> {
-    const warmContainerReady = await this.openWarmContainerIfReady({
-      timeoutMs: pending.timeoutMs,
-      userId: pending.userId,
-    });
-    if (!warmContainerReady) {
-      this.pendingIdleCheckpoint = null;
-      return true;
-    }
-
-    let leaseAttempt: RunnerIdleCheckpointLeaseAttempt;
-    try {
-      leaseAttempt = await this.beginIdleCheckpointLease(pending);
-    } catch (error) {
-      this.pendingIdleCheckpoint = null;
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildRunnerContainerLeaseErrorDetails(error),
-        level: "warn",
-        message: "Hosted execution container could not begin idle-shutdown checkpoint lease.",
-        phase: "failed",
-        userId: pending.userId,
-      });
-      return true;
-    }
-    if (leaseAttempt.status === "busy") {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          lifecycleStage: "idle-checkpoint-lease-busy",
-        },
-        message: "Hosted execution container deferred idle-shutdown checkpoint because another write fence is active.",
-        phase: "scheduled",
-        userId: pending.userId,
-      });
-      return false;
-    }
-    if (leaseAttempt.status === "unavailable") {
-      this.pendingIdleCheckpoint = null;
-      return true;
-    }
-
-    const lease = leaseAttempt;
-    let nextWakeAt = pending.checkpointNextWakeAt;
-    const idleAbortController = new AbortController();
-    const activeOperation: RunnerActiveOperationRecord = {
-      attemptId: lease.attemptId,
-      leaseGeneration: lease.generation,
-      userId: pending.userId,
-    };
-    this.workspaceInvocationAbortController = idleAbortController;
-    this.workspaceInvocationActiveOperation = activeOperation;
-    try {
-      const result = await this.postRunnerRequest({
-        job: {
-          kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
-          request: {
-            attemptId: lease.attemptId,
-            checkpointNextWakeAt: pending.checkpointNextWakeAt,
-            leaseGeneration: lease.generation,
-            reason: "idle_shutdown_checkpoint",
-            userId: pending.userId,
-            workspaceVersion: pending.workspaceVersion,
-          },
-          runtime: pending.runtime,
-        },
-        signal: idleAbortController.signal,
-        timeoutMs: pending.timeoutMs,
-        userId: pending.userId,
-      });
-      nextWakeAt = result.nextWakeAt ?? pending.checkpointNextWakeAt;
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          idleShutdownCheckpointed: Boolean(result.idleShutdownCheckpointed),
-          idleShutdownCheckpointSkipped: result.idleShutdownCheckpointSkipped ?? null,
-          workspaceAttemptId: lease.attemptId,
-        },
-        message: "Hosted execution container ran pending idle-shutdown checkpoint.",
-        phase: "checkpoint",
-        userId: pending.userId,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted execution container idle-shutdown checkpoint failed best-effort.",
-        phase: "failed",
-        userId: pending.userId,
-      });
-    } finally {
-      if (this.workspaceInvocationAbortController === idleAbortController) {
-        this.workspaceInvocationAbortController = null;
-      }
-      if (this.workspaceInvocationActiveOperation === activeOperation) {
-        this.workspaceInvocationActiveOperation = null;
-      }
-      this.pendingIdleCheckpoint = null;
-      await this.finishIdleCheckpointLease({
-        attemptId: lease.attemptId,
-        generation: lease.generation,
-        nextWakeAt,
-        userId: pending.userId,
-      }).catch((error) => {
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: buildRunnerContainerMetadataOnlyErrorDetails(error),
-          level: "warn",
-          message: "Hosted execution container could not finish idle-shutdown checkpoint lease.",
-          phase: "failed",
-          userId: pending.userId,
-        });
-      });
-    }
-    return true;
-  }
-
   private async postRunnerRequest(input: {
     job: HostedExecutionRunnerJobInput;
     signal?: AbortSignal;
@@ -840,47 +604,6 @@ export class RunnerContainer extends Container {
       throw await classifyHostedRunnerContainerErrorResponse(response);
     }
     return assertHostedExecutionRunnerJobResult(await response.json(), input.job);
-  }
-
-  private async beginIdleCheckpointLease(
-    input: RunnerPendingIdleCheckpoint,
-  ): Promise<RunnerIdleCheckpointLeaseAttempt> {
-    const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
-    if (!hasBeginIdleCheckpointLease(stub)) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        level: "warn",
-        message: "Hosted execution container skipped idle-shutdown checkpoint because lease RPC is unavailable.",
-        phase: "failed",
-        userId: input.userId,
-      });
-      return { status: "unavailable" };
-    }
-    const lease = await stub.beginIdleCheckpointLease({
-      userId: input.userId,
-      workspaceVersion: input.workspaceVersion,
-    });
-    if (!lease) {
-      return { status: "busy" };
-    }
-    return {
-      attemptId: lease.attemptId,
-      generation: lease.generation,
-      status: "acquired",
-    };
-  }
-
-  private async finishIdleCheckpointLease(input: {
-    attemptId: string;
-    generation: string;
-    nextWakeAt: string | null;
-    userId: string;
-  }): Promise<void> {
-    const stub = readRunnerContainerUserRunnerStub(this.environment, input.userId);
-    if (!hasFinishIdleCheckpointLease(stub)) {
-      return;
-    }
-    await stub.finishIdleCheckpointLease(input);
   }
 
   private async ensureContainerReady(
@@ -1003,63 +726,6 @@ export class RunnerContainer extends Container {
     return true;
   }
 
-  private async openWarmContainerIfReady(
-    input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
-  ): Promise<boolean> {
-    const readinessStartedAt = Date.now();
-    const status = readContainerStatus(await this.getState());
-    const readyTimeoutMs = Math.min(input.timeoutMs, readRunnerReadyTimeoutMs(this.environment));
-
-    if (isRunnerContainerStopped(status)) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          readinessLatencyMs: Date.now() - readinessStartedAt,
-          startMode: "warm-only",
-          statusBeforeStart: status,
-        },
-        message: "Hosted execution container skipped warm-only idle checkpoint because no warm shell is available.",
-        phase: "container.ready",
-        userId: input.userId,
-      });
-      return false;
-    }
-
-    try {
-      await assertRunnerHealthy(this, readyTimeoutMs);
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          readinessLatencyMs: Date.now() - readinessStartedAt,
-          readinessTimeoutMs: readyTimeoutMs,
-          startMode: "warm-only",
-          statusBeforeStart: status,
-        },
-        message: "Hosted execution container is ready for warm-only idle checkpoint.",
-        phase: "container.ready",
-        userId: input.userId,
-      });
-      return true;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: {
-          readinessLatencyMs: Date.now() - readinessStartedAt,
-          readinessTimeoutMs: readyTimeoutMs,
-          startMode: "warm-only",
-          statusBeforeStart: status,
-        },
-        error,
-        level: "warn",
-        message: "Hosted execution container skipped warm-only idle checkpoint because warm health failed.",
-        phase: "container.ready",
-        userId: input.userId,
-      });
-      await this.stopWarmContainer({ failClosed: false });
-      return false;
-    }
-  }
-
   private async ensureSmokeContainerReady(timeoutMs: number): Promise<void> {
     const status = readContainerStatus(await this.getState());
 
@@ -1120,7 +786,6 @@ export class RunnerContainer extends Container {
     });
 
     try {
-      this.pendingIdleCheckpoint = null;
       await this.destroy();
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1159,7 +824,6 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
   }): Promise<void> {
     const failClosed = input?.failClosed ?? true;
-    this.pendingIdleCheckpoint = null;
     await this.destroyIfRunning({ failClosed });
   }
 
@@ -1603,36 +1267,6 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
     && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
-function readRunnerContainerUserRunnerStub(
-  env: RunnerContainerEnvironmentSource,
-  userId: string,
-): RunnerContainerUserRunnerStubLike | null {
-  const namespace = env.USER_RUNNER;
-  if (
-    !namespace
-    || typeof namespace !== "object"
-    || typeof (namespace as { getByName?: unknown }).getByName !== "function"
-  ) {
-    return null;
-  }
-
-  return (namespace as {
-    getByName(name: string): RunnerContainerUserRunnerStubLike;
-  }).getByName(userId);
-}
-
-function hasBeginIdleCheckpointLease(
-  stub: RunnerContainerUserRunnerStubLike | null,
-): stub is RunnerContainerUserRunnerBeginLeaseStub {
-  return typeof stub?.beginIdleCheckpointLease === "function";
-}
-
-function hasFinishIdleCheckpointLease(
-  stub: RunnerContainerUserRunnerStubLike | null,
-): stub is RunnerContainerUserRunnerFinishLeaseStub {
-  return typeof stub?.finishIdleCheckpointLease === "function";
-}
-
 function emitRunnerContainerLifecycleFailure(input: {
   context: RunnerContainerLogContext | null;
   destroyLatencyMs: number | null;
@@ -1906,7 +1540,7 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
   const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
 
   if (raw === undefined || raw === null || raw === "") {
-    return DEFAULT_RUNNER_IDLE_CHECKPOINT_DELAY_MS;
+    return DEFAULT_RUNNER_IDLE_TTL_MS;
   }
 
   if (typeof raw !== "string") {
@@ -1947,29 +1581,6 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
-}
-
-function buildRunnerContainerLeaseErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-  if (!diagnostics) {
-    return {};
-  }
-
-  return sanitizeHostedExecutionStructuredLogDetails({
-    ...buildRunnerContainerMetadataOnlyErrorDetails(error),
-    leaseErrorCausePreview: readHostedRunnerContainerDiagnosticFragment(
-      diagnostics.errorCause,
-      { redactEnvKeys: true },
-    ),
-    leaseErrorCodePreview: readHostedRunnerContainerDiagnosticFragment(
-      diagnostics.errorCodeDetail ?? diagnostics.errorCode,
-      { redactEnvKeys: false },
-    ),
-    leaseErrorDetailPreview: readHostedRunnerContainerDiagnosticFragment(
-      diagnostics.errorDetail,
-      { redactEnvKeys: true },
-    ),
-  }) ?? {};
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

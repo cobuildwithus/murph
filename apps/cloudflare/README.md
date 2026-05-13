@@ -90,9 +90,10 @@ path also runs it inside the apply step before artifact validation and upload.
 Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
+- `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
+  window before a dirty invocation checkpoints and returns
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000` for the native container shell
-  activity-expiry lifecycle that owns the best-effort idle-shutdown checkpoint
-  and normal teardown
+  activity-expiry cleanup lifecycle
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
@@ -127,12 +128,12 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 ## Runner Container Lifecycle
 
 The native Cloudflare container is a warm per-user shell. Successful workspace
-invocations that finish idle leave one pending idle-shutdown base checkpoint in
-container memory. When Cloudflare reports the container `sleepAfter` lifecycle
-expiry, the container takes a short Durable Object write-fence lease, posts one
-idle-shutdown checkpoint to the warm runner, and then tears down the shell.
-Fresh foreground work keeps using the Durable Object write fence and pending
-nudge state, so foreground input outranks idle checkpoint maintenance.
+invocations keep the same Durable Object write fence while the runtime waits for
+`HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS`, a coalesced wake, or the
+write-fence deadline. If local runtime state is dirty, the child checkpoints
+with reason `idle_shutdown` before returning success. When Cloudflare reports
+the container `sleepAfter` lifecycle expiry, the container only yields to an
+active foreground operation or tears down the warm shell.
 Each invocation still runs through an isolated child process with fresh
 invocation-local cache/temp roots, but child-to-worker effects use internal
 virtual hosts and write-fence headers instead of per-invocation
@@ -140,7 +141,7 @@ outbound proxy tokens or dynamically installed outbound handlers.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle
-activity expiry after any pending checkpoint work is attempted.
+activity expiry with no active foreground operation.
 
 Foreground liveness recovery is write-fenced instead of container-destroy
 driven. The legacy active-invocation heartbeat and container-stopped RPC shims

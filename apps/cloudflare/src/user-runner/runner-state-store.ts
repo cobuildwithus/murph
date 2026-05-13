@@ -214,9 +214,7 @@ export class RunnerStateStore {
     meta.active_attempt_id = attemptId;
     meta.active_expires_at = expiresAt;
     meta.active_generation = nextGeneration;
-    meta.active_kind = input.kind ?? (
-      input.reason === "idle_shutdown_checkpoint" ? "idle_checkpoint" : "runtime"
-    );
+    meta.active_kind = input.kind ?? "runtime";
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     if (meta.active_kind === "runtime") {
@@ -698,13 +696,10 @@ export class RunnerStateStore {
     if (
       !meta.active_attempt_id
       || !meta.active_started_at
-      || (meta.active_kind !== "runtime" && meta.active_kind !== "idle_checkpoint")
+      || meta.active_kind !== "runtime"
     ) {
       return null;
     }
-
-    const reason: HostedWorkspaceInvocationReason =
-      meta.active_kind === "idle_checkpoint" ? "idle_shutdown_checkpoint" : "nudge";
 
     return {
       attemptId: meta.active_attempt_id,
@@ -712,7 +707,7 @@ export class RunnerStateStore {
         ?? new Date(Date.parse(meta.active_started_at) + 30 * 60_000).toISOString(),
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
-      reason,
+      reason: "nudge",
       startedAt: meta.active_started_at,
       userId: meta.user_id,
       workerVersionId: null,

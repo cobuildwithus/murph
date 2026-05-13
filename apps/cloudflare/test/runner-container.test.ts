@@ -419,7 +419,7 @@ describe("RunnerContainer", () => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
-          message: "Hosted execution container activity expired; running fallback cleanup.",
+          message: "Hosted execution container activity expired; running cleanup.",
           phase: "container.ready",
         }),
       );
@@ -490,7 +490,7 @@ describe("RunnerContainer", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
-        message: "Hosted execution container activity expired; running fallback cleanup.",
+        message: "Hosted execution container activity expired; running cleanup.",
         phase: "container.ready",
       }),
     );
@@ -1557,179 +1557,24 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("clears pending idle checkpoints before explicit destroy can later expire activity", async () => {
-    const containerFetch = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify(createRunnerResult()), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
+  it("cleans up on activity expiry without posting an idle checkpoint job", async () => {
+    const containerFetch = vi.fn(async () => new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
     const destroy = vi.fn(async () => {});
     const { container } = createContainerDouble({
       containerFetch,
       destroy,
       initialStatus: "running",
     });
-    Object.assign(container, {
-      pendingIdleCheckpoint: {
-        checkpointNextWakeAt: null,
-        runtime: {},
-        timeoutMs: 30_000,
-        userId: "member_123",
-        workspaceVersion: "7",
-      },
-    });
 
-    await expect(container.destroyInstance()).resolves.toBeUndefined();
-    expect(destroy).toHaveBeenCalledTimes(1);
-
-    containerFetch.mockClear();
-    destroy.mockClear();
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
     expect(containerFetch).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("aborts an in-progress idle-shutdown checkpoint when explicit cleanup destroys the shell", async () => {
-    const runnerRequestSignal = createDeferred<AbortSignal>();
-    const runnerRequestAborted = createDeferred<void>();
-    const beginIdleCheckpointLease = vi.fn(async () => ({
-      attemptId: "attempt_idle_destroy",
-      generation: "17",
-      userId: "member_123",
-      workspaceVersion: "7",
-    }));
-    const finishIdleCheckpointLease = vi.fn(async () => ({
-      completed: true,
-    }));
-    const runnerStub = {
-      beginIdleCheckpointLease,
-      finishIdleCheckpointLease,
-    };
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-
-      const signal = init?.signal;
-      if (!(signal instanceof AbortSignal)) {
-        throw new Error("Expected idle checkpoint runner request to receive an abort signal.");
-      }
-      runnerRequestSignal.resolve(signal);
-      return await new Promise<never>((_resolve, reject) => {
-        signal.addEventListener("abort", () => {
-          runnerRequestAborted.resolve();
-          reject(signal.reason instanceof Error
-            ? signal.reason
-            : new Error("idle checkpoint runner request aborted"));
-        }, { once: true });
-      });
-    });
-    const { container, destroy } = createContainerDouble({
-      containerFetch,
-      env: {
-        USER_RUNNER: {
-          getByName: vi.fn(() => runnerStub),
-        },
-      },
-      initialStatus: "running",
-    });
-    Object.assign(container, {
-      pendingIdleCheckpoint: {
-        checkpointNextWakeAt: null,
-        runtime: {},
-        timeoutMs: 30_000,
-        userId: "member_123",
-        workspaceVersion: "7",
-      },
-    });
-
-    const activityExpiredPromise = container.onActivityExpired();
-    const signal = await runnerRequestSignal.promise;
-    expect(signal.aborted).toBe(false);
-
-    const destroyPromise = container.destroyInstance();
-    await runnerRequestAborted.promise;
-
-    await expect(activityExpiredPromise).resolves.toBeUndefined();
-    await expect(destroyPromise).resolves.toBeUndefined();
-    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
-      userId: "member_123",
-      workspaceVersion: "7",
-    });
-    expect(finishIdleCheckpointLease).toHaveBeenCalledWith({
-      attemptId: "attempt_idle_destroy",
-      generation: "17",
-      nextWakeAt: null,
-      userId: "member_123",
-    });
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the warm shell when an idle-shutdown checkpoint lease is busy", async () => {
-    const beginIdleCheckpointLease = vi.fn(async () => null);
-    const runnerStub = {
-      beginIdleCheckpointLease,
-    };
-    const { container, containerFetch, destroy } = createContainerDouble({
-      env: {
-        USER_RUNNER: {
-          getByName: vi.fn(() => runnerStub),
-        },
-      },
-      initialStatus: "running",
-    });
-    const renewActivityTimeout = vi.fn();
-    const pendingIdleCheckpoint = {
-      checkpointNextWakeAt: null,
-      runtime: {},
-      timeoutMs: 30_000,
-      userId: "member_123",
-      workspaceVersion: "7",
-    };
-    Object.assign(container, {
-      pendingIdleCheckpoint,
-      renewActivityTimeout,
-    });
-
-    await expect(container.onActivityExpired()).resolves.toBeUndefined();
-
-    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
-      userId: "member_123",
-      workspaceVersion: "7",
-    });
-    expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
-    expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    )).toBe(false);
-    expect((container as unknown as {
-      pendingIdleCheckpoint: typeof pendingIdleCheckpoint | null;
-    }).pendingIdleCheckpoint).toBe(pendingIdleCheckpoint);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        message: "Hosted execution container kept warm shell for deferred idle-shutdown checkpoint.",
-        phase: "container.ready",
-      }),
-    );
   });
 
   it("waits for explicit destroy to resolve through the native container lifecycle", async () => {
@@ -2072,7 +1917,7 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("300s");
   });
 
-  it("renews activity before an idle-shutdown checkpoint reaches the warm shell", async () => {
+  it("renews activity before a workspace invocation reaches the runner shell", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, containerFetch } = createContainerDouble();
     Object.assign(container, {
@@ -2083,8 +1928,8 @@ describe("RunnerContainer", () => {
       job: {
         kind: "workspace-invocation",
         request: {
-          ...createRunnerRequest("evt_idle_checkpoint_renew"),
-          reason: "idle_shutdown_checkpoint",
+          ...createRunnerRequest("evt_runtime_renew"),
+          reason: "nudge",
         },
       },
       timeoutMs: 60_000,

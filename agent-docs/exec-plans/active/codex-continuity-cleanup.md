@@ -322,27 +322,19 @@ Only remove the “recompute and refresh persisted thread instructions on ordina
 
 ## 12. Do not persist recovered Codex pointers on provider failure
 
-`provider-turn-recovery.ts` currently extracts a recovered provider session id from connection-lost/interrupted errors and saves it to the Murph session.  That is risky because it can advance Murph’s stored resume pointer without a successful turn finalization and without the hosted checkpoint path.
+Provider failure diagnostics now live in `provider-failure-diagnostics.ts`.
+They may extract a recovered provider session id from connection-lost/interrupted errors only to annotate `recoveredCodexThreadId` on the error context.
+They must not return, attach, or persist a recovered assistant session.
 
-Change:
+Hard-cut rule:
 
 ```ts
-recoverAssistantSessionAfterProviderFailure(...)
+annotateRecoveredCodexThreadIdForDiagnostics(error)
 ```
-
-from:
-
-```txt
-save recovered providerSessionId into session
-```
-
-to:
 
 ```txt
 attach recovered codexThreadId to error diagnostics only
 ```
-
-or delete it.
 
 Only `persistAssistantTurnAndSession` after successful provider completion should persist a new Codex resume pointer. `turn-finalizer.ts` already builds the next resume state from the successful provider result’s `providerSessionId`, route id, rollout path, and thread-instruction fingerprint.  After the migration, that should become:
 

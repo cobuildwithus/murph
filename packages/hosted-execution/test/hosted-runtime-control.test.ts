@@ -129,7 +129,6 @@ describe("hosted runtime control contracts", () => {
       "alarm",
       "retry",
       "manual",
-      "idle_shutdown_checkpoint",
     ]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
@@ -194,6 +193,8 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
+      deadlineAt: "2026-04-27T00:10:00.000Z",
+      idleCheckpointDelayMs: 180_000,
       leaseGeneration: "7",
       reason: "nudge",
       userId: "member_123",
@@ -204,23 +205,10 @@ describe("hosted runtime control contracts", () => {
         maxMailboxItems: 25,
         maxRuntimeMs: 30_000,
       },
+      deadlineAt: "2026-04-27T00:10:00.000Z",
+      idleCheckpointDelayMs: 180_000,
       leaseGeneration: "7",
       reason: "nudge",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
-    expect(parseHostedWorkspaceInvocationRequest({
-      attemptId: "attempt_2",
-      checkpointNextWakeAt: "2026-04-27T00:10:00.000Z",
-      leaseGeneration: "8",
-      reason: "idle_shutdown_checkpoint",
-      userId: "member_123",
-      workspaceVersion: "4",
-    })).toEqual({
-      attemptId: "attempt_2",
-      checkpointNextWakeAt: "2026-04-27T00:10:00.000Z",
-      leaseGeneration: "8",
-      reason: "idle_shutdown_checkpoint",
       userId: "member_123",
       workspaceVersion: "4",
     });
@@ -232,7 +220,7 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
       workspaceVersion: "4",
     })).toThrow(
-      "Hosted workspace invocation request checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+      "Hosted workspace invocation request.checkpointNextWakeAt is no longer supported.",
     );
     for (const field of [
       "committedSeq",
@@ -260,14 +248,12 @@ describe("hosted runtime control contracts", () => {
       })).toThrow(`Hosted workspace invocation request.${field} is no longer supported.`);
     }
     expect(parseHostedWorkspaceInvocationResult({
-      idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
         count: 1,
       },
       status: "idle",
     })).toEqual({
-      idleShutdownCheckpointed: true,
       nextWakeAt: null,
       redactedStatus: {
         count: 1,
@@ -280,34 +266,20 @@ describe("hosted runtime control contracts", () => {
       status: "scheduled",
     });
     expect(parseHostedWorkspaceInvocationResult({
-      idleShutdownCheckpointed: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
       status: "idle",
     })).toEqual({
-      idleShutdownCheckpointed: true,
       nextWakeAt: "2026-04-26T00:00:05.000Z",
-      status: "idle",
-    });
-    expect(parseHostedWorkspaceInvocationResult({
-      idleShutdownCheckpointSkipped: "container_not_warm",
-      status: "idle",
-    })).toEqual({
-      idleShutdownCheckpointSkipped: "container_not_warm",
       status: "idle",
     });
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointed: true,
-      status: "scheduled",
-    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointed requires status idle.");
+      status: "idle",
+    })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointed is no longer supported.");
     expect(() => parseHostedWorkspaceInvocationResult({
       idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
-      status: "scheduled",
-    })).toThrow("Hosted workspace invocation result idleShutdownCheckpointSkipped requires status idle.");
-    expect(() => parseHostedWorkspaceInvocationResult({
-      idleShutdownCheckpointed: true,
-      idleShutdownCheckpointSkipped: "container_not_warm",
       status: "idle",
-    })).toThrow("Hosted workspace invocation result cannot both checkpoint and skip idle shutdown checkpoint.");
+    })).toThrow("Hosted workspace invocation result.idleShutdownCheckpointSkipped is no longer supported.");
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {

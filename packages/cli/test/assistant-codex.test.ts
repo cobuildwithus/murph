@@ -144,6 +144,9 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           id: 1,
           method: 'initialize',
           params: {
+            capabilities: {
+              experimentalApi: true,
+            },
             clientInfo: {
               name: 'murph',
               title: 'Murph',

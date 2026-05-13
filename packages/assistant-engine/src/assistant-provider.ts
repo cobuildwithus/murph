@@ -1,5 +1,5 @@
 /**
- * Public assistant runtime helpers for UI progress, traces, recovery, and
+ * Public assistant runtime helpers for UI progress, traces, diagnostics, and
  * runtime-state inspection. Codex turn execution stays on internal Codex
  * surfaces instead of a provider plugin registry.
  *
@@ -9,7 +9,7 @@
  */
 
 export * from './assistant/provider-state.js'
-export * from './assistant/provider-turn-recovery.js'
+export * from './assistant/provider-failure-diagnostics.js'
 
 export interface AssistantProviderTraceUpdate {
   kind: 'assistant' | 'error' | 'status' | 'thinking'

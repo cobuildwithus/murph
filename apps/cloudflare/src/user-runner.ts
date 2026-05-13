@@ -333,7 +333,7 @@ export class HostedUserRunner {
     return (await this.stateStore.validateWriteFenceToken(input)).owns;
   }
 
-  async beginIdleCheckpointLease(input: {
+  async beginRuntimeWriteFenceForSmoke(input: {
     userId: string;
     workspaceVersion: string;
   }): Promise<RunnerWriteFenceToken | null> {
@@ -348,8 +348,8 @@ export class HostedUserRunner {
     try {
       token = await this.stateStore.beginWriteFence({
         expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "idle_checkpoint",
-        reason: "idle_shutdown_checkpoint",
+        kind: "runtime",
+        reason: "manual",
         userId: input.userId,
       });
     } catch (error) {
@@ -360,17 +360,15 @@ export class HostedUserRunner {
       await this.syncAlarm(activeRecord);
       return null;
     }
-    token = await this.stateStore.bindWriteFenceWorkspaceVersion({
+    return await this.stateStore.bindWriteFenceWorkspaceVersion({
       token,
       workspaceVersion: input.workspaceVersion,
     });
-    return token;
   }
 
-  async finishIdleCheckpointLease(input: {
+  async finishRuntimeWriteFenceForSmoke(input: {
     attemptId: string;
     generation: string;
-    nextWakeAt?: string | null;
     userId: string;
   }): Promise<{ completed: boolean }> {
     const result = await this.stateStore.clearWriteFenceIdentityAfterCompletion({
@@ -380,9 +378,6 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     if (result.completed) {
-      await this.stateStore.scheduleNextWake({
-        nextWakeAt: input.nextWakeAt ?? null,
-      });
       await this.syncAlarm(await this.stateStore.readState());
     }
     return { completed: result.completed };
@@ -435,7 +430,7 @@ export class HostedUserRunner {
     await this.stateStore.bindUser(input.userId);
     const token = await this.stateStore.beginWriteFence({
       expiresAt: "2000-01-01T00:00:00.000Z",
-      kind: input.reason === "idle_shutdown_checkpoint" ? "idle_checkpoint" : "runtime",
+      kind: "runtime",
       reason: input.reason ?? "manual",
       userId: input.userId,
     });
@@ -621,7 +616,6 @@ export class HostedUserRunner {
   }
 
   private async invokeWorkspaceRunner(input: {
-    checkpointNextWakeAt?: string | null;
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
@@ -649,9 +643,8 @@ export class HostedUserRunner {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.token.attemptId,
-        ...(input.reason === "idle_shutdown_checkpoint"
-          ? { checkpointNextWakeAt: input.checkpointNextWakeAt ?? null }
-          : {}),
+        deadlineAt: input.token.expiresAt,
+        idleCheckpointDelayMs: this.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
         reason: input.reason,
         userId: input.userId,

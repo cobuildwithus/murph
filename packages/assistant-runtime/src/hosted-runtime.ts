@@ -1,8 +1,4 @@
-import { access } from "node:fs/promises";
-import path from "node:path";
-
 import type {
-  HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
@@ -31,12 +27,6 @@ import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./hosted-runtime/mailbox-import.ts";
-import {
-  createEmptyHostedMailboxImportState,
-  readHostedMailboxImportState,
-  resolveHostedMailboxImportStatePath,
-  type HostedMailboxImportState,
-} from "./hosted-runtime/mailbox-state.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -56,12 +46,11 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   importHostedMailboxForWorkspaceRunner,
   runHostedWorkspaceUntilIdleOrBudget,
-  type HostedWorkspaceCheckpointRequestBuilder,
   type HostedWorkspaceRunnerInput,
+  type HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
-  tryOpenExistingWarmWorkspaceForIdleCheckpoint,
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
@@ -82,6 +71,9 @@ import {
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
+import {
+  readHostedRunnerCommitTimeoutMs,
+} from "./hosted-runtime/timeouts.ts";
 export {
   createCoalescingRuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
@@ -269,14 +261,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     throw new TypeError("Hosted workspace runtime job workspace port must support read.");
   }
 
-  if (input.request.reason !== "idle_shutdown_checkpoint" && !mailboxPort) {
+  if (!mailboxPort) {
     throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
   }
 
   assertHostedWorkspaceRuntimeBudgetSupported(input.request.budget?.maxRuntimeMs);
 
   const runtimeAbortController = new AbortController();
-  const isIdleShutdownCheckpoint = input.request.reason === "idle_shutdown_checkpoint";
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const assertRuntimeNotAborted = () => {
     return undefined;
@@ -318,80 +309,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assertRuntimeNotAborted();
       return snapshot;
     };
-  const runWarmOnlyIdleShutdownCheckpoint =
-    async (): Promise<HostedWorkspaceInvocationResult> => {
-      const workspaceRead = await raceHostedRuntimeCancellation(
-        workspacePort.read!(),
-        runtimeAbortController.signal,
-      );
-      assertRuntimeNotAborted();
-      if (!workspaceRunVersionMatchesRequest({
-        expectedWorkspaceVersion: input.request.workspaceVersion,
-        workspace: workspaceRead.workspace,
-      })) {
-        return {
-          idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
-          status: "idle",
-        };
-      }
-      assertWorkspaceRunUserMatchesRequest({
-        expectedUserId: input.request.userId,
-        workspace: workspaceRead.workspace,
-      });
-
-      const warmWorkspace = await tryOpenExistingWarmWorkspaceForIdleCheckpoint({
-        vaultRoot: options.vaultRoot,
-        workspace: workspaceRead.workspace,
-      });
-      if (!warmWorkspace.ok) {
-        return {
-          idleShutdownCheckpointSkipped: "warm_workspace_unavailable",
-          status: "idle",
-        };
-      }
-
-      hotRestoreCacheVaultRoot = warmWorkspace.restored.vaultRoot;
-      const checkpointNextWakeAt = Object.hasOwn(input.request, "checkpointNextWakeAt")
-        ? input.request.checkpointNextWakeAt ?? null
-        : workspaceRead.workspace?.nextWakeAt ?? null;
-      const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-        createSnapshot: createAbortGuardedCheckpointSnapshot,
-        metadata: {
-          attemptId: input.request.attemptId,
-          expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
-          leaseGeneration: input.request.leaseGeneration,
-          nextWakeAt: checkpointNextWakeAt,
-          nextWakeReason: workspaceRead.workspace?.nextWakeAt === checkpointNextWakeAt
-            ? workspaceRead.workspace?.nextWakeReason ?? null
-            : null,
-        },
-      });
-      const idleShutdownCheckpointWorkspacePort: typeof workspacePort = {
-        read: () => workspacePort.read!(),
-        checkpoint: (request) => workspacePort.checkpoint(request),
-      };
-
-      return await runHostedWorkspaceIdleShutdownCheckpoint({
-        assertRuntimeNotAborted,
-        checkpointRequestBuilder,
-        expectedUserId: input.request.userId,
-        runtimeAbortSignal: runtimeAbortController.signal,
-        onCheckpointValidated: recordHotRestoreCache,
-        readScheduledCancellationResult: () => null,
-        redactedStatus: await buildHostedIdleShutdownCheckpointRedactedStatus({
-          baseStatus: workspaceRead.workspace?.redactedStatus ?? null,
-          vaultRoot: warmWorkspace.restored.vaultRoot,
-        }),
-        workspacePort: idleShutdownCheckpointWorkspacePort,
-      });
-  };
 
   try {
-    if (isIdleShutdownCheckpoint) {
-      return await runWarmOnlyIdleShutdownCheckpoint();
-    }
-
-    let workspaceRead = await raceHostedRuntimeCancellation(
+    const workspaceRead = await raceHostedRuntimeCancellation(
       workspacePort.read(),
       runtimeAbortController.signal,
     );
@@ -446,32 +366,41 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (!runnerMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
+    const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: createAbortGuardedCheckpointSnapshot,
+      metadata: {
+        attemptId: input.request.attemptId,
+        expectedWorkspaceVersion: workspaceRead.workspace?.version ?? input.request.workspaceVersion,
+        leaseGeneration: input.request.leaseGeneration,
+        nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+        nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+      },
+    });
     const foregroundWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint(request) {
-        void request;
-        throw new Error("Foreground hosted runner must not checkpoint workspace.");
+        const response = await guardedWorkspacePort.checkpoint(request);
+        await recordHotRestoreCache(response);
+        return response;
       },
     };
-    const foregroundCheckpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder = {
-      async createRequest(requestInput) {
-        void requestInput;
-        throw new Error(
-          "Foreground hosted runner must not build workspace checkpoint snapshots.",
-        );
+    const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
+      read: () => guardedWorkspacePort.read!(),
+      async checkpoint() {
+        throw new TypeError("Foreground hosted runner must not checkpoint workspace.");
       },
     };
     const runnerPlatform = {
       ...guardedRuntime.platform,
       mailboxPort: runnerMailboxPort,
-      workspacePort: foregroundWorkspacePort,
+      workspacePort: foregroundRunnerWorkspacePort,
     };
     const foregroundRuntime = {
       ...guardedRuntime,
       platform: runnerPlatform,
     };
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
-      checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
+      checkpointRequestBuilder,
       expectedUserId: input.request.userId,
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
@@ -509,7 +438,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         },
         async () =>
           importHostedMailboxForWorkspaceRunner({
-            checkpointRequestBuilder: foregroundCheckpointRequestBuilder,
+            checkpointRequestBuilder,
             checkpointReason: "import",
             deferCheckpoint: true,
             input: baseRunnerInput,
@@ -541,181 +470,304 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...hostedCodexRuntime.runtimeEnv,
       ...(hostedCliBridge?.env ?? {}),
     };
-
-    let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
+    const runForegroundPass = async (passInput: {
+      initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
+      requestId: string;
+      workspace: HostedWorkspaceState | null;
+    }): Promise<HostedWorkspaceRunnerResult> => await raceHostedRuntimeCancellation(
+      withHostedProcessEnvironment(
+        {
+          envOverrides: runtimeEnv,
+          operatorHomeRoot: restored.operatorHomeRoot,
+          vaultRoot: restored.vaultRoot,
+        },
+        async () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            ...baseRunnerInput,
+            initialMailboxImport: passInput.initialMailboxImport,
+            requestId: passInput.requestId,
+            runAssistantPhase: (phaseInput) =>
+              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                ...phaseInput,
+                request: input.request,
+                restored,
+                runtime: foregroundRuntime,
+                runtimeEnv,
+                signal: runtimeAbortController.signal,
+              }),
+            workspace: passInput.workspace,
+          }),
+      ),
+      runtimeAbortController.signal,
+    );
+    const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
+      input.request.idleCheckpointDelayMs,
+    );
+    const checkpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
+      commitTimeoutMs: readHostedRunnerCommitTimeoutMs(runtime.commitTimeoutMs),
+      deadlineAt: input.request.deadlineAt ?? null,
+    });
+    let result: HostedWorkspaceRunnerResult;
+    let runtimeStateDirty = false;
+    let idleWakeOrdinal = 0;
     try {
-      result = await raceHostedRuntimeCancellation(
-        withHostedProcessEnvironment(
-          {
-            envOverrides: runtimeEnv,
-            operatorHomeRoot: restored.operatorHomeRoot,
-            vaultRoot: restored.vaultRoot,
-          },
-          async () =>
-            runHostedWorkspaceUntilIdleOrBudget({
-              ...baseRunnerInput,
-              initialMailboxImport,
-              runAssistantPhase: (phaseInput) =>
-                (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                  ...phaseInput,
-                  request: input.request,
-                  restored,
-                  runtime: foregroundRuntime,
-                  runtimeEnv,
-                  signal: runtimeAbortController.signal,
-                }),
-            }),
-        ),
-        runtimeAbortController.signal,
-      );
+      result = await runForegroundPass({
+        initialMailboxImport,
+        requestId,
+        workspace: workspaceRead.workspace,
+      });
+      runtimeStateDirty ||= result.runtimeStateDirty;
+      while (runtimeStateDirty) {
+        const projection = buildHostedWorkspaceInvocationProjection({
+          mailboxBudgetExhausted: mailboxBudget.exhausted,
+          result,
+          workspace: workspaceRead.workspace,
+        });
+        const checkpointWaitResult = await waitForHostedRuntimeIdleCheckpointWindow({
+          checkpointStartByMs,
+          idleCheckpointDelayMs,
+          runtimeAbortSignal: runtimeAbortController.signal,
+          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        });
+        if (checkpointWaitResult === "wake") {
+          idleWakeOrdinal += 1;
+          result = await runForegroundPass({
+            initialMailboxImport: null,
+            requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
+            workspace: result.latestWorkspace ?? workspaceRead.workspace,
+          });
+          runtimeStateDirty ||= result.runtimeStateDirty;
+          continue;
+        }
+
+        const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+          assertRuntimeNotAborted,
+          checkpointRequestBuilder,
+          expectedUserId: input.request.userId,
+          nextWakeAt: projection.nextWakeAt,
+          nextWakeReason: projection.nextWakeReason,
+          onCheckpointValidated: recordHotRestoreCache,
+          redactedStatus: projection.redactedStatus,
+          runtimeAbortSignal: runtimeAbortController.signal,
+          workspacePort: foregroundWorkspacePort,
+        });
+        return {
+          ...(checkpoint.workspace.nextWakeAt === undefined
+            ? {}
+            : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
+          redactedStatus: checkpoint.workspace.redactedStatus ?? projection.redactedStatus,
+          status: resolveHostedWorkspaceInvocationStatus({
+            mailboxBudgetExhausted: mailboxBudget.exhausted,
+            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+          }),
+        };
+      }
     } finally {
       await hostedCliBridge?.stop();
     }
     assertRuntimeNotAborted();
-    const committedWorkspace = result.latestWorkspace
-      ?? result.initialMailboxImport.checkpoint?.workspace
-      ?? workspaceRead.workspace;
-    const effectiveMailboxImport = result.latestMailboxImport;
-    if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
-      await recordHotRestoreCacheForSnapshotRef(committedWorkspace?.snapshotRef ?? null);
-    }
-    const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
-    const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
-      assistantPhaseResult: result.assistantPhaseResult,
-      committedWorkspace,
-      mailboxImportRetryAt,
+    const projection = buildHostedWorkspaceInvocationProjection({
+      mailboxBudgetExhausted: mailboxBudget.exhausted,
+      result,
+      workspace: workspaceRead.workspace,
     });
-    const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
-      effectiveMailboxImport.importResult,
-    );
-    const redactedStatus = {
-      ...mailboxRedactedStatus,
-      ...(result.assistantPhaseResult?.progressed === true
-        ? result.assistantPhaseResult.redactedStatus ?? {}
-        : {}),
-      hostedMailboxConversationImportedSeq:
-        mailboxRedactedStatus["hostedMailboxConversationImportedSeq"],
-      hostedMailboxSystemImportedSeq:
-        mailboxRedactedStatus["hostedMailboxSystemImportedSeq"],
-    };
+    if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
+      await recordHotRestoreCacheForSnapshotRef(
+        projection.committedWorkspace?.snapshotRef ?? null,
+      );
+    }
     return {
-      ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
-      redactedStatus,
-      status: resolveHostedWorkspaceInvocationStatus({
-        mailboxBudgetExhausted: mailboxBudget.exhausted,
-        nextWakeAt,
-      }),
+      ...(projection.nextWakeAt === undefined ? {} : { nextWakeAt: projection.nextWakeAt }),
+      redactedStatus: projection.redactedStatus,
+      status: projection.status,
     };
   } catch (error) {
     throw error;
   }
 }
 
-async function runHostedWorkspaceIdleShutdownCheckpoint(input: {
+const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
+const HOSTED_RUNTIME_DEADLINE_MARGIN_MS = 5_000;
+const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+type HostedRuntimeIdleCheckpointWaitResult = "deadline" | "idle" | "wake";
+
+interface HostedWorkspaceInvocationProjection {
+  committedWorkspace: HostedWorkspaceState | null;
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+  redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]>;
+  status: HostedWorkspaceInvocationResult["status"];
+}
+
+function buildHostedWorkspaceInvocationProjection(input: {
+  mailboxBudgetExhausted: boolean;
+  result: HostedWorkspaceRunnerResult;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceInvocationProjection {
+  const committedWorkspace = input.result.latestWorkspace
+    ?? input.result.initialMailboxImport.checkpoint?.workspace
+    ?? input.workspace;
+  const effectiveMailboxImport = input.result.latestMailboxImport;
+  const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
+  const nextWake = resolveHostedWorkspaceRunNextWake({
+    assistantPhaseResult: input.result.assistantPhaseResult,
+    committedWorkspace,
+    mailboxImportRetryAt,
+  });
+  const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
+    effectiveMailboxImport.importResult,
+  );
+  const redactedStatus = {
+    ...mailboxRedactedStatus,
+    ...(input.result.assistantPhaseResult?.progressed === true
+      ? input.result.assistantPhaseResult.redactedStatus ?? {}
+      : {}),
+    hostedMailboxConversationImportedSeq:
+      mailboxRedactedStatus["hostedMailboxConversationImportedSeq"],
+    hostedMailboxSystemImportedSeq:
+      mailboxRedactedStatus["hostedMailboxSystemImportedSeq"],
+  };
+
+  return {
+    committedWorkspace,
+    nextWakeAt: nextWake.nextWakeAt,
+    nextWakeReason: nextWake.nextWakeReason,
+    redactedStatus,
+    status: resolveHostedWorkspaceInvocationStatus({
+      mailboxBudgetExhausted: input.mailboxBudgetExhausted,
+      nextWakeAt: nextWake.nextWakeAt,
+    }),
+  };
+}
+
+function resolveHostedRuntimeIdleCheckpointDelayMs(value: number | null | undefined): number {
+  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
+    return Math.min(Math.trunc(value), HOSTED_RUNTIME_MAX_TIMER_DELAY_MS);
+  }
+
+  return DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS;
+}
+
+function resolveHostedRuntimeCheckpointStartByMs(input: {
+  commitTimeoutMs: number;
+  deadlineAt?: string | null;
+}): number | null {
+  if (!input.deadlineAt) {
+    return null;
+  }
+
+  const deadlineMs = Date.parse(input.deadlineAt);
+  if (!Number.isFinite(deadlineMs)) {
+    return null;
+  }
+
+  return deadlineMs - input.commitTimeoutMs - HOSTED_RUNTIME_DEADLINE_MARGIN_MS;
+}
+
+async function waitForHostedRuntimeIdleCheckpointWindow(input: {
+  checkpointStartByMs: number | null;
+  idleCheckpointDelayMs: number;
+  runtimeAbortSignal: AbortSignal;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+}): Promise<HostedRuntimeIdleCheckpointWaitResult> {
+  const nowMs = Date.now();
+  if (input.checkpointStartByMs !== null && input.checkpointStartByMs <= nowMs) {
+    return "deadline";
+  }
+
+  const deadlineDelayMs = input.checkpointStartByMs === null
+    ? null
+    : Math.max(0, input.checkpointStartByMs - nowMs);
+  const timeoutMs = Math.min(
+    input.idleCheckpointDelayMs,
+    deadlineDelayMs ?? input.idleCheckpointDelayMs,
+    HOSTED_RUNTIME_MAX_TIMER_DELAY_MS,
+  );
+  const timeoutResult: HostedRuntimeIdleCheckpointWaitResult =
+    deadlineDelayMs !== null && deadlineDelayMs <= input.idleCheckpointDelayMs
+      ? "deadline"
+      : "idle";
+
+  return await new Promise<HostedRuntimeIdleCheckpointWaitResult>((resolve, reject) => {
+    if (input.runtimeAbortSignal.aborted) {
+      reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal));
+      return;
+    }
+
+    let settled = false;
+    const wakeAbortController = new AbortController();
+    const timeout = setTimeout(() => {
+      settle(() => resolve(timeoutResult));
+    }, timeoutMs);
+    const abort = () => {
+      settle(() => reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal)));
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      input.runtimeAbortSignal.removeEventListener("abort", abort);
+      if (!wakeAbortController.signal.aborted) {
+        wakeAbortController.abort(
+          new DOMException("Hosted runtime idle checkpoint wait finished.", "AbortError"),
+        );
+      }
+    };
+    const settle = (finish: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      finish();
+    };
+
+    input.runtimeAbortSignal.addEventListener("abort", abort, { once: true });
+    input.runtimeWakeSignal?.wait(wakeAbortController.signal).then(
+      () => settle(() => resolve("wake")),
+      (error) => {
+        if (settled && wakeAbortController.signal.aborted) {
+          return;
+        }
+        settle(() => reject(error));
+      },
+    );
+  });
+}
+
+async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
-  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
   runtimeAbortSignal: AbortSignal;
   onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
-  readScheduledCancellationResult: () => HostedWorkspaceInvocationResult | null;
-  redactedStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
+  redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   workspacePort: HostedRuntimePlatform["workspacePort"];
-}): Promise<HostedWorkspaceInvocationResult> {
+}): Promise<HostedWorkspaceCheckpointResponse> {
   if (!input.workspacePort) {
-    throw new TypeError("Hosted idle-shutdown checkpoint requires workspace port support.");
+    throw new TypeError("Hosted runtime dirty workspace checkpoint requires workspace port support.");
   }
 
   input.assertRuntimeNotAborted();
   const checkpointRequest = await raceHostedRuntimeCancellation(
     Promise.resolve(input.checkpointRequestBuilder.createRequest({
+      nextWakeAt: input.nextWakeAt,
+      nextWakeReason: input.nextWakeReason,
       reason: "idle_shutdown",
       redactedStatus: input.redactedStatus ?? null,
     })),
     input.runtimeAbortSignal,
   );
   input.assertRuntimeNotAborted();
-  const checkpointPromise = input.workspacePort.checkpoint(checkpointRequest);
-  let checkpoint: Awaited<typeof checkpointPromise>;
-  try {
-    checkpoint = await raceHostedRuntimeCancellation(
-      checkpointPromise,
-      input.runtimeAbortSignal,
-    );
-  } catch (error) {
-    const scheduled = input.readScheduledCancellationResult();
-    if (!scheduled) {
-      throw error;
-    }
-    return scheduled;
-  }
+  const checkpoint = await raceHostedRuntimeCancellation(
+    input.workspacePort.checkpoint(checkpointRequest),
+    input.runtimeAbortSignal,
+  );
   input.assertRuntimeNotAborted();
   assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
-
-  return {
-    idleShutdownCheckpointed: true,
-    ...(checkpoint.workspace.nextWakeAt
-      ? { nextWakeAt: checkpoint.workspace.nextWakeAt }
-      : {}),
-    ...(checkpoint.workspace.redactedStatus
-      ? { redactedStatus: checkpoint.workspace.redactedStatus }
-      : {}),
-    status: "idle",
-  };
-}
-
-async function buildHostedIdleShutdownCheckpointRedactedStatus(input: {
-  baseStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
-  vaultRoot: string;
-}): Promise<HostedWorkspaceCheckpointRequest["redactedStatus"] | null> {
-  if (!await hostedMailboxImportStateFileExists(input.vaultRoot)) {
-    return cloneHostedRuntimeRedactedStatus(input.baseStatus);
-  }
-
-  const state = await readHostedMailboxImportState({
-    vaultRoot: input.vaultRoot,
-  });
-  return mergeHostedMailboxImportStateRedactedStatus({
-    baseStatus: input.baseStatus,
-    state,
-  });
-}
-
-async function hostedMailboxImportStateFileExists(vaultRoot: string): Promise<boolean> {
-  try {
-    await access(resolveHostedMailboxImportStatePath(vaultRoot));
-    return true;
-  } catch (error) {
-    if (isNodeFileNotFoundError(error)) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-function mergeHostedMailboxImportStateRedactedStatus(input: {
-  baseStatus: HostedWorkspaceCheckpointRequest["redactedStatus"] | null;
-  state: HostedMailboxImportState;
-}): HostedWorkspaceCheckpointRequest["redactedStatus"] {
-  return {
-    ...(input.baseStatus ?? {}),
-    hostedMailboxConversationImportedSeq: input.state.watermarks.conversation,
-    hostedMailboxSystemImportedSeq: input.state.watermarks.system,
-  };
-}
-
-function cloneHostedRuntimeRedactedStatus(
-  value: HostedWorkspaceCheckpointRequest["redactedStatus"] | null,
-): HostedWorkspaceCheckpointRequest["redactedStatus"] | null {
-  return value ? { ...value } : null;
-}
-
-function isNodeFileNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error
-    && "code" in error
-    && error.code === "ENOENT"
-  );
+  return checkpoint;
 }
 
 function assertIdleShutdownCheckpointAccepted(
@@ -771,7 +823,7 @@ function raceHostedRuntimeCancellation<T>(
         reject(error);
       },
     );
-	  });
+  });
 }
 
 function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
@@ -1001,41 +1053,84 @@ function resolveHostedWorkspaceInvocationStatus(input: {
   return "idle";
 }
 
-function resolveHostedWorkspaceRunNextWakeAt(input: {
+function resolveHostedWorkspaceRunNextWake(input: {
   assistantPhaseResult: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>[
     "assistantPhaseResult"
   ];
   committedWorkspace: HostedWorkspaceState | null;
   mailboxImportRetryAt?: string | null;
-}): string | null {
+}): {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+} {
   const mailboxImportRetryAt = input.mailboxImportRetryAt ?? null;
   if (
     input.assistantPhaseResult
     && Object.hasOwn(input.assistantPhaseResult, "nextWakeAt")
   ) {
-    return earliestHostedRuntimeWakeAt(input.assistantPhaseResult.nextWakeAt ?? null, mailboxImportRetryAt);
+    return selectEarliestHostedRuntimeWake([
+      {
+        at: input.assistantPhaseResult.nextWakeAt ?? null,
+        reason: input.assistantPhaseResult.nextWakeAt ? "assistant" : null,
+      },
+      {
+        at: mailboxImportRetryAt,
+        reason: mailboxImportRetryAt ? "mailbox" : null,
+      },
+    ]);
   }
 
-  return earliestHostedRuntimeWakeAt(input.committedWorkspace?.nextWakeAt ?? null, mailboxImportRetryAt);
+  return selectEarliestHostedRuntimeWake([
+    {
+      at: input.committedWorkspace?.nextWakeAt ?? null,
+      reason: input.committedWorkspace?.nextWakeReason ?? null,
+    },
+    {
+      at: mailboxImportRetryAt,
+      reason: mailboxImportRetryAt ? "mailbox" : null,
+    },
+  ]);
 }
 
-function earliestHostedRuntimeWakeAt(
-  left: string | null,
-  right: string | null,
-): string | null {
-  if (!left) {
-    return right;
+function selectEarliestHostedRuntimeWake(
+  candidates: readonly { at: string | null; reason: string | null }[],
+): {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+} {
+  let selected: { at: string; reason: string | null } | null = null;
+  for (const candidate of candidates) {
+    if (!candidate.at) {
+      continue;
+    }
+    if (
+      !selected
+      || compareHostedRuntimeWakeAt(candidate.at, selected.at) < 0
+    ) {
+      selected = {
+        at: candidate.at,
+        reason: candidate.reason,
+      };
+    }
   }
-  if (!right) {
-    return left;
-  }
+
+  return {
+    nextWakeAt: selected?.at ?? null,
+    nextWakeReason: selected?.reason ?? null,
+  };
+}
+
+function compareHostedRuntimeWakeAt(left: string, right: string): number {
   const leftMs = Date.parse(left);
   const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs) && !Number.isFinite(rightMs)) {
+    return 0;
+  }
   if (!Number.isFinite(leftMs)) {
-    return right;
+    return 1;
   }
   if (!Number.isFinite(rightMs)) {
-    return left;
+    return -1;
   }
-  return rightMs < leftMs ? right : left;
+  return leftMs - rightMs;
 }

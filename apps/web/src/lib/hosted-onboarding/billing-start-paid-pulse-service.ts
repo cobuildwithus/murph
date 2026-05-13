@@ -4,7 +4,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
+import { nudgeHostedSystemRunnerUserBestEffortResult } from "../hosted-runner/system-nudge";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -413,7 +413,7 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  await nudgeHostedRunnerUserBestEffortResult({
+  await nudgeHostedSystemRunnerUserBestEffortResult({
     context: "billing.start-paid-pulse",
     userId: input.memberId,
   });

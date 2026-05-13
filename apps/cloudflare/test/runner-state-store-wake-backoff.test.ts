@@ -88,15 +88,15 @@ describe("RunnerStateStore wake/backoff authority", () => {
     });
   });
 
-  it("does not let a stale idle-checkpoint lease clear the active write fence", async () => {
+  it("does not let a stale completion clear the active write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
     await store.bindUser("member_123");
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
-      kind: "idle_checkpoint",
-      reason: "idle_shutdown_checkpoint",
+      kind: "runtime",
+      reason: "manual",
       userId: "member_123",
     });
 

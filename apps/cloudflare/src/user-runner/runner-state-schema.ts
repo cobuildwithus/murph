@@ -134,9 +134,6 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
     `);
   }
   if (columns.includes("active_invocation_id")) {
-    const activeInvocationReason = columns.includes("active_invocation_reason")
-      ? "active_invocation_reason"
-      : "NULL";
     const activeInvocationStartedAt = columns.includes("active_invocation_started_at")
       ? "active_invocation_started_at"
       : "NULL";
@@ -150,8 +147,8 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
       SET
         active_attempt_id = COALESCE(active_attempt_id, active_invocation_id),
         active_kind = CASE
+          WHEN active_kind = 'idle_checkpoint' THEN 'runtime'
           WHEN active_kind IS NOT NULL THEN active_kind
-          WHEN ${activeInvocationReason} = 'idle_shutdown_checkpoint' THEN 'idle_checkpoint'
           WHEN active_invocation_id IS NOT NULL THEN 'runtime'
           ELSE NULL
         END,
@@ -167,15 +164,6 @@ function migrateLegacyRunnerState(sql: DurableObjectSqlStorageLike): void {
         WHEN active_generation > 0 THEN active_generation
         ELSE lease_generation
       END
-      WHERE singleton = 1
-    `);
-  }
-  if (columns.includes("idle_shutdown_checkpoint_due_at")) {
-    const nextWakeAt = columns.includes("next_wake_at") ? "next_wake_at" : "NULL";
-    sql.exec(`
-      UPDATE runner_meta
-      SET
-        wake_at = COALESCE(wake_at, ${nextWakeAt})
       WHERE singleton = 1
     `);
   }

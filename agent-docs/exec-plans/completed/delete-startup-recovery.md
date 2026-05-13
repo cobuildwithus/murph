@@ -28,7 +28,7 @@ Codex continuity is also already much cleaner: Murph has a small `CodexResumeSta
 
 The route guard is important and should stay: Murph only resumes a Codex thread if the stored route fingerprint exactly matches the current route fingerprint. 
 
-Provider failure recovery is also already in the right direction: it extracts a recovered provider session id only to attach `recoveredCodexThreadId` to error context, and returns `null` instead of persisting a recovered session. 
+Provider failure diagnostics are also already in the right direction: `annotateRecoveredCodexThreadIdForDiagnostics(error)` extracts a recovered provider session id only to attach `recoveredCodexThreadId` to error context. It returns no session and persists no recovered session.
 
 ## The final minimal architecture
 
@@ -388,3 +388,6 @@ A failed assistant turn receipt must never cause a new auto-reply provider turn.
 ```
 
 That is the final shape I’d recommend. It deletes the bespoke recovery architecture instead of trying to perfect it.
+Status: completed
+Updated: 2026-05-13
+Completed: 2026-05-13

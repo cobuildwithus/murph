@@ -1021,6 +1021,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
@@ -1055,7 +1064,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hostedOutboxDeliveryAttempted: 1,
       hostedOutboxDeliverySent: 1,
       hostedOutboxPendingDeliveryEffects: 1,
+      nextWakeAt: null,
     }));
+    expect(result.nextWakeAt).toBeNull();
     expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
   });

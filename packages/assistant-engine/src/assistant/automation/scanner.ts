@@ -23,6 +23,7 @@ import {
 import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
+  createAssistantAutoReplyReceiptReader,
   processAssistantAutoReplyGroup,
 } from './reply.js'
 import {
@@ -115,6 +116,9 @@ export async function scanAssistantAutomationOnce(input: {
     details: `${candidates.length} input(s)`,
   })
 
+  const receiptReader = createAssistantAutoReplyReceiptReader({
+    vault: input.vault,
+  })
   const inputSummaries = candidates.map((candidate) => candidate.summary)
   const candidatesByInputId = new Map(
     candidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
@@ -214,6 +218,7 @@ export async function scanAssistantAutomationOnce(input: {
       providerLongRunningCommandStallTimeoutMs:
         input.providerLongRunningCommandStallTimeoutMs,
       providerStallTimeoutMs: input.providerStallTimeoutMs,
+      receiptReader,
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,

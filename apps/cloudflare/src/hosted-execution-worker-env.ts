@@ -17,6 +17,7 @@ export interface HostedExecutionWorkerEnvironment {
   hostedCryptoEnv: string;
   hostedWebAllowHttpHosts?: readonly string[];
   hostedWebBaseUrl: string;
+  idleCheckpointDelayMs: number;
   maxEventAttempts: number;
   retryDelayMs: number;
   runnerReadyTimeoutMs: number;
@@ -98,6 +99,11 @@ export function readHostedExecutionWorkerEnvironment(
         requireOriginOnly: true,
         rejectHttpLoopbackInProduction: isProduction,
       },
+    ),
+    idleCheckpointDelayMs: parsePositiveInteger(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
+      180_000,
+      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
     ),
     maxEventAttempts: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),

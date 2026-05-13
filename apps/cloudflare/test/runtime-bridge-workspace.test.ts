@@ -385,7 +385,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -456,7 +456,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -495,7 +495,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -545,7 +545,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -617,7 +617,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },
@@ -705,7 +705,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       request: {
         attemptId: "attempt_1",
         leaseGeneration: "4",
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         userId: "member_1",
         workspaceVersion: "8",
       },

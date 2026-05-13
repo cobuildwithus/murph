@@ -10,7 +10,7 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
-} from '../provider-turn-recovery.js'
+} from '../provider-failure-diagnostics.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { sanitizeAssistantPortableStateString } from '../redaction.js'
@@ -54,10 +54,11 @@ import {
 import {
   AUTO_REPLY_RECEIPT_INPUT_ID_KEY,
   AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
+  compareAssistantAutoReplyReceiptRecency,
   computeAssistantAutoReplyRetryAt,
   isAssistantAutoReplyRepairableConfigError,
   isAssistantProviderCapacityError,
-  resolveAssistantAutoReplyRetryBudget,
+  readPendingAssistantAutoReplyRetryAtForGroup,
 } from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
@@ -94,6 +95,13 @@ import {
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
+
+type AssistantAutoReplyReceiptRecord =
+  Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
+
+export interface AssistantAutoReplyReceiptReader {
+  readReceipts(): Promise<readonly AssistantAutoReplyReceiptRecord[]>
+}
 
 export interface AssistantAutoReplyGroupContext {
   firstInputId: string
@@ -132,10 +140,6 @@ interface AssistantAutoReplySkipDecision {
   checkpointRequired?: true
   nextWakeAt: string | null
   reason: string
-  retryExhausted?: {
-    failedAttempts: number
-    maxFailedAttempts: number
-  }
   stopScanning: boolean
   terminalSuppression: boolean
 }
@@ -196,12 +200,6 @@ type AssistantAutoReplyOutcomeArtifact =
       kind: 'error'
       error: unknown
       failure: AssistantAutoReplyFailureSnapshot
-    }
-  | {
-      failedAttempts: number
-      kind: 'retry_exhausted'
-      maxFailedAttempts: number
-      reason: string
     }
   | { kind: 'result'; result: AssistantAutoReplySendResult }
 
@@ -285,6 +283,7 @@ export async function processAssistantAutoReplyGroup(input: {
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
+  receiptReader?: AssistantAutoReplyReceiptReader
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
@@ -348,14 +347,6 @@ export async function processAssistantAutoReplyGroup(input: {
   }
 }
 
-function formatAssistantAutoReplyRetryLimitReason(input: {
-  failedAttempts: number
-  maxFailedAttempts: number
-}): string {
-  const cappedAttempts = Math.max(input.failedAttempts, input.maxFailedAttempts)
-  return `auto-reply retry limit reached after ${cappedAttempts} failed attempt(s); pausing automatic retries instead of retrying indefinitely.`
-}
-
 async function resolveAssistantAutoReplyGroupOutcome(input: {
   allowSelfAuthored: boolean
   context: AssistantAutoReplyGroupContext
@@ -368,6 +359,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
+  receiptReader?: AssistantAutoReplyReceiptReader
   requestId: string | null
   signal?: AbortSignal
   sessionMaxAgeMs: number | null
@@ -382,6 +374,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     executionContext: input.executionContext,
     group: context,
     onEvent: input.onEvent,
+    receiptReader: input.receiptReader,
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
@@ -566,19 +559,6 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       })
       return { checkpointRequired: true }
     }
-    case 'retry_exhausted':
-      await writeAssistantAutoReplyRetryExhaustedEvidence({
-        captureIds: input.context.optionalInboxCaptureIds,
-        failedAttempts: input.outcome.artifact.failedAttempts,
-        inputIds: input.context.inputIds,
-        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
-        maxFailedAttempts: input.outcome.artifact.maxFailedAttempts,
-        reason: sanitizeAssistantAutoReplySuppressionReason(
-          input.outcome.artifact.reason,
-        ),
-        vault: input.vault,
-      })
-      return { checkpointRequired: true }
     case 'error':
       await writeAssistantChatErrorArtifacts({
         captureIds: input.context.optionalInboxCaptureIds,
@@ -643,16 +623,6 @@ function createSkippedDecisionOutcome(input: {
   decision: AssistantAutoReplySkipDecision
 }): AssistantAutoReplyGroupOutcome {
   if (input.decision.advanceCursor) {
-    if (input.decision.retryExhausted) {
-      return createRetryExhaustedGroupOutcome({
-        failedAttempts: input.decision.retryExhausted.failedAttempts,
-        inputCount: input.inputCount,
-        maxFailedAttempts: input.decision.retryExhausted.maxFailedAttempts,
-        reason: input.decision.reason,
-        stopScanning: input.decision.stopScanning,
-      })
-    }
-
     const outcome = createSkippedGroupOutcome({
       inputCount: input.inputCount,
       reason: input.decision.reason,
@@ -672,37 +642,6 @@ function createSkippedDecisionOutcome(input: {
     reason: input.decision.reason,
     stopScanning: input.decision.stopScanning,
   })
-}
-
-function createRetryExhaustedGroupOutcome(input: {
-  failedAttempts: number
-  inputCount: number
-  maxFailedAttempts: number
-  reason: string
-  stopScanning?: boolean
-}): AssistantAutoReplyGroupOutcome {
-  return {
-    advanceCursor: true,
-    artifact: {
-      failedAttempts: input.failedAttempts,
-      kind: 'retry_exhausted',
-      maxFailedAttempts: input.maxFailedAttempts,
-      reason: input.reason,
-    },
-    event: {
-      details: input.reason,
-      errorCode: 'ASSISTANT_AUTO_REPLY_RETRY_EXHAUSTED',
-      safeDetails: 'assistant auto-reply retry limit reached',
-      type: 'input.reply-skipped',
-    },
-    kind: 'skipped',
-    nextWakeAt: null,
-    stopScanning: input.stopScanning ?? false,
-    summary: createAssistantAutoReplyOutcomeSummary({
-      skipped: input.inputCount,
-    }),
-    terminalSuppression: false,
-  }
 }
 
 function createSkippedGroupOutcome(input: {
@@ -859,6 +798,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   executionContext?: AssistantExecutionContext | null
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
+  receiptReader?: AssistantAutoReplyReceiptReader
   receiptFallbackEnabled: boolean
   requestId: string | null
   signal?: AbortSignal
@@ -937,18 +877,25 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
   const primaryReplyInput = createAssistantAutoReplyPrimaryInput(primaryInput)
-  const receipts = input.receiptFallbackEnabled
-    ? await listAssistantTurnReceipts(
-        input.vault,
-        ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
-      )
-    : []
-  if (input.receiptFallbackEnabled) {
-    const handledReceipt = resolveAssistantAutoReplyHandledTurnReceipt(
-      receipts,
-      input.group.inputIds,
-      input.group.optionalInboxCaptureIds,
+  const receipts = await readAssistantAutoReplyReceiptRecords(input)
+
+  const pendingRetryAt = readPendingAssistantAutoReplyRetryAtForGroup({
+    inputIds: input.group.inputIds,
+    receipts,
+  })
+  if (pendingRetryAt) {
+    return createDeferredSkipDecision(
+      'assistant auto-reply retry is not due yet',
+      { nextWakeAt: pendingRetryAt },
     )
+  }
+
+  if (input.receiptFallbackEnabled) {
+    const handledReceipt = findHandledAutoReplyReceiptForGroup({
+      captureIds: input.group.optionalInboxCaptureIds,
+      inputIds: input.group.inputIds,
+      receipts,
+    })
     if (handledReceipt) {
       await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
         captureIds: input.group.optionalInboxCaptureIds,
@@ -997,14 +944,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
-  const retryBudget = resolveAssistantAutoReplyRetryBudget({
-    inputIds: input.group.inputIds,
-    receipts,
-  })
-  if (!retryBudget.allowed) {
-    return createRetryExhaustedSkipDecision(retryBudget)
-  }
-
   return {
     deliveryTarget: readAutoReplyDeliveryTarget(input.group),
     deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId({
@@ -1016,24 +955,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
     userMessageContent: preparedInput.userMessageContent,
-  }
-}
-
-function createRetryExhaustedSkipDecision(input: {
-  failedAttempts: number
-  maxFailedAttempts: number
-}): AssistantAutoReplySkipDecision {
-  return {
-    advanceCursor: true,
-    kind: 'skip',
-    nextWakeAt: null,
-    reason: formatAssistantAutoReplyRetryLimitReason(input),
-    retryExhausted: {
-      failedAttempts: input.failedAttempts,
-      maxFailedAttempts: input.maxFailedAttempts,
-    },
-    stopScanning: false,
-    terminalSuppression: false,
   }
 }
 
@@ -2417,80 +2338,137 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
   })
 }
 
-function resolveAssistantAutoReplyHandledTurnReceipt(
-  recentReceipts: ReadonlyArray<
-    Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
-  >,
-  inputIds: readonly string[],
-  legacyProjectionCaptureIds: readonly string[] = [],
-): AssistantAutoReplyTerminalSnapshot | null {
-  const primaryInputId = inputIds[0]
-  if (!primaryInputId) {
+export function createAssistantAutoReplyReceiptReader(input: {
+  vault: string
+}): AssistantAutoReplyReceiptReader {
+  let receipts:
+    | Promise<readonly AssistantAutoReplyReceiptRecord[]>
+    | null = null
+
+  return {
+    readReceipts() {
+      receipts ??= listAssistantTurnReceipts(
+        input.vault,
+        ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
+      )
+      return receipts
+    },
+  }
+}
+
+async function readAssistantAutoReplyReceiptRecords(input: {
+  receiptFallbackEnabled: boolean
+  receiptReader?: AssistantAutoReplyReceiptReader
+  vault: string
+}): Promise<readonly AssistantAutoReplyReceiptRecord[]> {
+  if (!input.receiptFallbackEnabled) {
+    return []
+  }
+
+  if (input.receiptReader) {
+    return input.receiptReader.readReceipts()
+  }
+
+  return listAssistantTurnReceipts(
+    input.vault,
+    ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT,
+  )
+}
+
+function findHandledAutoReplyReceiptForGroup(input: {
+  captureIds?: readonly string[]
+  inputIds: readonly string[]
+  receipts: readonly AssistantAutoReplyReceiptRecord[]
+}): AssistantAutoReplyTerminalSnapshot | null {
+  const captureIds = input.captureIds ?? []
+  let latestReceipt: AssistantAutoReplyReceiptRecord | null = null
+  for (const receipt of input.receipts) {
+    if (!assistantAutoReplyReceiptMatchesGroup({
+      captureIds,
+      inputIds: input.inputIds,
+      receipt,
+    })) {
+      continue
+    }
+
+    if (
+      !latestReceipt ||
+      compareAssistantAutoReplyReceiptRecency(receipt, latestReceipt) > 0
+    ) {
+      latestReceipt = receipt
+    }
+  }
+
+  if (
+    !latestReceipt ||
+    !(latestReceipt.status === 'completed' || latestReceipt.status === 'deferred')
+  ) {
     return null
   }
 
-  for (const receipt of recentReceipts) {
-    if (!(receipt.status === 'completed' || receipt.status === 'deferred')) {
+  return {
+    deliveryIntentId: normalizeNullableString(latestReceipt.deliveryIntentId),
+    groupCaptureIds: [...captureIds],
+    outcome: latestReceipt.status === 'deferred' ? 'deferred' : 'result',
+    recordedAt: latestReceipt.completedAt ?? latestReceipt.updatedAt,
+    sessionId: latestReceipt.sessionId,
+  }
+}
+
+function assistantAutoReplyReceiptMatchesGroup(input: {
+  captureIds: readonly string[]
+  inputIds: readonly string[]
+  receipt: AssistantAutoReplyReceiptRecord
+}): boolean {
+  const primaryInputId = input.inputIds[0]
+  if (!primaryInputId) {
+    return false
+  }
+
+  const receiptInputIds = new Set<string>()
+  const legacyReceiptCaptureIds = new Set<string>()
+  for (const event of input.receipt.timeline) {
+    if (
+      event.kind !== 'turn.started' &&
+      event.kind !== 'turn.input.accepted'
+    ) {
       continue
     }
 
-    const receiptInputIds = new Set<string>()
-    const legacyReceiptCaptureIds = new Set<string>()
-    for (const event of receipt.timeline) {
-      if (
-        event.kind !== 'turn.started' &&
-        event.kind !== 'turn.input.accepted'
-      ) {
-        continue
-      }
-
-      if (event.metadata[AUTO_REPLY_RECEIPT_INPUT_ID_KEY] === primaryInputId) {
-        receiptInputIds.add(primaryInputId)
-      }
-
-      const groupedInputIds = event.metadata[AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]
-        ?.split(',')
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0)
-
-      for (const inputId of groupedInputIds ?? []) {
-        receiptInputIds.add(inputId)
-      }
-
-      const legacyPrimaryCaptureId = event.metadata.autoReplyCaptureId
-      if (legacyPrimaryCaptureId) {
-        legacyReceiptCaptureIds.add(legacyPrimaryCaptureId)
-      }
-      const legacyGroupedCaptureIds = event.metadata.autoReplyCaptureIds
-        ?.split(',')
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0)
-      for (const captureId of legacyGroupedCaptureIds ?? []) {
-        legacyReceiptCaptureIds.add(captureId)
-      }
-    }
-    const receiptMatches = inputIds.every((inputId) =>
-      receiptInputIds.has(inputId),
-    ) || (
-      legacyProjectionCaptureIds.length > 0 &&
-      legacyProjectionCaptureIds.every((captureId) =>
-        legacyReceiptCaptureIds.has(captureId),
-      )
-    )
-    if (!receiptMatches) {
-      continue
+    if (event.metadata[AUTO_REPLY_RECEIPT_INPUT_ID_KEY] === primaryInputId) {
+      receiptInputIds.add(primaryInputId)
     }
 
-    return {
-      deliveryIntentId: normalizeNullableString(receipt.deliveryIntentId),
-      groupCaptureIds: [...legacyProjectionCaptureIds],
-      outcome: receipt.status === 'deferred' ? 'deferred' : 'result',
-      recordedAt: receipt.completedAt ?? receipt.updatedAt,
-      sessionId: receipt.sessionId,
+    const groupedInputIds = event.metadata[AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+
+    for (const inputId of groupedInputIds ?? []) {
+      receiptInputIds.add(inputId)
+    }
+
+    const legacyPrimaryCaptureId = event.metadata.autoReplyCaptureId
+    if (legacyPrimaryCaptureId) {
+      legacyReceiptCaptureIds.add(legacyPrimaryCaptureId)
+    }
+    const legacyGroupedCaptureIds = event.metadata.autoReplyCaptureIds
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+    for (const captureId of legacyGroupedCaptureIds ?? []) {
+      legacyReceiptCaptureIds.add(captureId)
     }
   }
 
-  return null
+  return input.inputIds.every((inputId) =>
+    receiptInputIds.has(inputId),
+  ) || (
+    input.captureIds.length > 0 &&
+    input.captureIds.every((captureId) =>
+      legacyReceiptCaptureIds.has(captureId),
+    )
+  )
 }
 
 function createDeferredSkipDecision(

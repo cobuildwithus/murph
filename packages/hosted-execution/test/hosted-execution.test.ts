@@ -439,7 +439,6 @@ describe("hosted execution coverage gaps", () => {
       "alarm",
       "retry",
       "manual",
-      "idle_shutdown_checkpoint",
     ]);
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",

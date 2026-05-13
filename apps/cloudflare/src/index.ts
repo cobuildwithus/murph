@@ -365,20 +365,19 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeWriteFence(input);
   }
 
-  async beginIdleCheckpointLease(input: {
+  async beginRuntimeWriteFenceForSmoke(input: {
     userId: string;
     workspaceVersion: string;
-  }): ReturnType<HostedUserRunner["beginIdleCheckpointLease"]> {
-    return this.runner.beginIdleCheckpointLease(input);
+  }): ReturnType<HostedUserRunner["beginRuntimeWriteFenceForSmoke"]> {
+    return this.runner.beginRuntimeWriteFenceForSmoke(input);
   }
 
-  async finishIdleCheckpointLease(input: {
+  async finishRuntimeWriteFenceForSmoke(input: {
     attemptId: string;
     generation: string;
-    nextWakeAt?: string | null;
     userId: string;
-  }): ReturnType<HostedUserRunner["finishIdleCheckpointLease"]> {
-    return this.runner.finishIdleCheckpointLease(input);
+  }): ReturnType<HostedUserRunner["finishRuntimeWriteFenceForSmoke"]> {
+    return this.runner.finishRuntimeWriteFenceForSmoke(input);
   }
 
   async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
@@ -661,13 +660,13 @@ async function runDeployContainerOpenAiInterceptSmokeWithFence(
 
   const userRunner = context.env.USER_RUNNER.getByName(userId);
   if (
-    typeof userRunner.beginIdleCheckpointLease !== "function"
-    || typeof userRunner.finishIdleCheckpointLease !== "function"
+    typeof userRunner.beginRuntimeWriteFenceForSmoke !== "function"
+    || typeof userRunner.finishRuntimeWriteFenceForSmoke !== "function"
   ) {
     throw new TypeError("Hosted user runner does not support deploy-smoke write fences.");
   }
 
-  const lease = await userRunner.beginIdleCheckpointLease({
+  const lease = await userRunner.beginRuntimeWriteFenceForSmoke({
     userId,
     workspaceVersion: DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION,
   });
@@ -686,10 +685,9 @@ async function runDeployContainerOpenAiInterceptSmokeWithFence(
       },
     });
   } finally {
-    await userRunner.finishIdleCheckpointLease({
+    await userRunner.finishRuntimeWriteFenceForSmoke({
       attemptId: lease.attemptId,
       generation: lease.generation,
-      nextWakeAt: null,
       userId,
     });
   }

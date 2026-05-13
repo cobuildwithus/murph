@@ -43,6 +43,11 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
 
   rejectRemovedHostedAssistantRuntimeField(
     record,
+    "checkpointNextWakeAt",
+    "Hosted assistant workspace runtime job request",
+  );
+  rejectRemovedHostedAssistantRuntimeField(
+    record,
     "run",
     "Hosted assistant workspace runtime job request",
   );
@@ -70,14 +75,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     record.reason,
     "Hosted assistant workspace runtime job request.reason",
   );
-  if (
-    record.checkpointNextWakeAt !== undefined
-    && reason !== "idle_shutdown_checkpoint"
-  ) {
-    throw new TypeError(
-      "Hosted assistant workspace runtime job request.checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
-    );
-  }
 
   return {
     attemptId: requireString(
@@ -92,13 +89,23 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
             "Hosted assistant workspace runtime job request.budget",
           ),
         }),
-    ...(record.checkpointNextWakeAt === undefined
+    ...(record.deadlineAt === undefined
       ? {}
       : {
-          checkpointNextWakeAt: readNullableString(
-            record.checkpointNextWakeAt,
-            "Hosted assistant workspace runtime job request.checkpointNextWakeAt",
+          deadlineAt: readNullableString(
+            record.deadlineAt,
+            "Hosted assistant workspace runtime job request.deadlineAt",
           ),
+        }),
+    ...(record.idleCheckpointDelayMs === undefined
+      ? {}
+      : {
+          idleCheckpointDelayMs: record.idleCheckpointDelayMs === null
+            ? null
+            : requirePositiveInteger(
+                record.idleCheckpointDelayMs,
+                "Hosted assistant workspace runtime job request.idleCheckpointDelayMs",
+              ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
@@ -430,7 +437,6 @@ function parseHostedWorkspaceInvocationReason(
 
   switch (reason) {
     case "alarm":
-    case "idle_shutdown_checkpoint":
     case "manual":
     case "nudge":
     case "retry":

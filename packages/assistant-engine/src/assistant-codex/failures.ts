@@ -245,7 +245,7 @@ export function buildCodexInterruptedError(input: {
 
   if (input.providerSessionId) {
     parts.push(
-      `Murph preserved provider thread ${input.providerSessionId}, so the next turn can resume it.`,
+      'Provider thread id was captured for diagnostics only. Retry the request when ready.',
     )
   }
 
@@ -286,7 +286,7 @@ export function buildCodexConnectionFailureMessage(input: {
 
   parts.push(
     input.providerSessionId
-      ? 'Murph preserved the provider thread and will try to resume it automatically on the next turn once connectivity returns.'
+      ? 'Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.'
       : 'Restore connectivity, then retry the request.',
   )
 
@@ -345,7 +345,7 @@ function buildCodexFailureMessage(input: {
 
     if (input.providerSessionId) {
       parts.push(
-        `Murph recovered provider thread ${input.providerSessionId}, so the next chat turn can resume it.`,
+        'Provider thread id was captured for diagnostics only. Send another message to retry the turn.',
       )
     } else {
       parts.push('Send another message to retry the turn.')

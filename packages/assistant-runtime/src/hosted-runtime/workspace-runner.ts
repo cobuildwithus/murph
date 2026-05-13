@@ -116,9 +116,11 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
   discardMailboxPostCheckpointEffects(): void;
+  hasRuntimeStateDirty(): boolean;
   latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
+  markRuntimeStateDirty(): void;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
@@ -204,6 +206,7 @@ export interface HostedWorkspaceRunnerResult {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
+  runtimeStateDirty: boolean;
 }
 
 export class HostedWorkspaceRunnerUserMismatchError extends Error {
@@ -292,6 +295,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       requestId: input.requestId,
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
+  markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
   if (input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -313,6 +317,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
+      runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
 
@@ -418,6 +423,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
+    runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
 
@@ -487,6 +493,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         if (shouldRecordHostedForegroundMailboxImportResult(result)) {
           input.checkpointRequestBuilder.recordCheckpointResult(result);
         }
+        markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
         await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           input: input.input,
@@ -615,7 +622,10 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     result,
     runnerInput: input.input,
   });
-  if (result.checkpointDeferred && result.stateChanged) {
+  if (
+    result.checkpointDeferred
+    && (result.stateChanged || Boolean(result.importResult.nextRetryAt))
+  ) {
     await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
       snapshotRef: input.input.workspace?.snapshotRef ?? null,
       vaultRoot: input.input.vaultRoot,
@@ -752,6 +762,18 @@ function shouldRecordHostedForegroundMailboxImportResult(
   );
 }
 
+function markHostedMailboxImportDirtyIfNeeded(
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession,
+  result: HostedMailboxImportCheckpointResult,
+): void {
+  if (
+    result.checkpointDeferred
+    && (result.stateChanged || Boolean(result.importResult.nextRetryAt))
+  ) {
+    checkpointRequestBuilder.markRuntimeStateDirty();
+  }
+}
+
 function createHostedWorkspaceCanonicalWritePort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -759,6 +781,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
 }): HostedCanonicalWritePort {
   return {
     async persistCanonicalWrite() {
+      input.checkpointRequestBuilder.markRuntimeStateDirty();
       await writeHostedForegroundCheckpointDeferredLog({
         checkpointPhase: "canonical_write",
         now: input.input.now,
@@ -778,8 +801,8 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
   platform: Pick<HostedWorkspaceRunnerPlatform, "logPort">;
   runtimeLogContext?: HostedRuntimeLogContext | null;
 }): Promise<void> {
-  void input.checkpointRequestBuilder;
   void input.initialMailboxImport;
+  input.checkpointRequestBuilder.markRuntimeStateDirty();
   await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "post_assistant",
     now: input.now,
@@ -798,6 +821,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
+  let runtimeStateDirty = false;
 
   return {
     createRequest(input) {
@@ -819,6 +843,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     discardMailboxPostCheckpointEffects() {
       mailboxPostCheckpointEffects.splice(0);
     },
+    hasRuntimeStateDirty() {
+      return runtimeStateDirty;
+    },
     latestMailboxImport() {
       return latestMailboxImport;
     },
@@ -828,6 +855,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     latestWorkspace() {
       return latestWorkspace;
     },
+    markRuntimeStateDirty() {
+      runtimeStateDirty = true;
+    },
     recordCheckpointResult(result) {
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
@@ -836,6 +866,7 @@ function createHostedWorkspaceCheckpointRequestSession(
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
+        runtimeStateDirty = false;
       }
     },
     recordWorkspaceCheckpoint(response) {
@@ -843,6 +874,7 @@ function createHostedWorkspaceCheckpointRequestSession(
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
+        runtimeStateDirty = false;
       }
     },
     takeMailboxPostCheckpointEffects() {
@@ -1154,9 +1186,9 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
   const checkpointReason = requireHostedWorkspaceAssistantPhaseCheckpointReason(
     input.assistantPhaseResult,
   );
-  void input.checkpointRequestBuilder;
   void input.expectedUserId;
   void input.initialMailboxImport;
+  input.checkpointRequestBuilder.markRuntimeStateDirty();
   await writeHostedForegroundCheckpointDeferredLog({
     checkpointPhase: "assistant",
     now: input.now,

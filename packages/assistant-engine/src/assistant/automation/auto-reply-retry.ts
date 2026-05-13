@@ -2,7 +2,7 @@ import type { AssistantTurnReceipt } from '@murphai/operator-config/assistant-cl
 import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
-} from '../provider-turn-recovery.js'
+} from '../provider-failure-diagnostics.js'
 import { errorMessage } from '../shared.js'
 import {
   computeAssistantAutomationRetryAt,
@@ -12,7 +12,6 @@ import {
 export const AUTO_REPLY_RECEIPT_RETRY_AT_KEY = 'autoReplyRetryAt'
 export const AUTO_REPLY_RECEIPT_INPUT_ID_KEY = 'autoReplyInputId'
 export const AUTO_REPLY_RECEIPT_INPUT_IDS_KEY = 'autoReplyInputIds'
-export const ASSISTANT_AUTO_REPLY_MAX_FAILED_ATTEMPTS = 3
 
 const ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS = 5 * 60 * 1000
@@ -21,12 +20,6 @@ const ASSISTANT_AUTO_REPLY_CONFIG_RETRY_DELAY_MS = 5 * 60 * 1000
 export interface AssistantAutoReplyReceiptMetadata {
   inputIds: readonly string[]
   primaryInputId: string
-}
-
-export interface AssistantAutoReplyRetryBudget {
-  allowed: boolean
-  failedAttempts: number
-  maxFailedAttempts: number
 }
 
 export function computeAssistantAutoReplyRetryAt(
@@ -76,6 +69,66 @@ export function readAssistantAutoReplyRetryAt(
   return null
 }
 
+export function compareAssistantAutoReplyReceiptRecency(
+  left: AssistantTurnReceipt,
+  right: AssistantTurnReceipt,
+): number {
+  const updatedAtComparison = left.updatedAt.localeCompare(right.updatedAt)
+  if (updatedAtComparison !== 0) {
+    return updatedAtComparison
+  }
+
+  return left.turnId.localeCompare(right.turnId)
+}
+
+export function readPendingAssistantAutoReplyRetryAtForGroup(input: {
+  inputIds: readonly string[]
+  nowMs?: number
+  receipts: readonly AssistantTurnReceipt[]
+}): string | null {
+  const targetInputIds = new Set(input.inputIds)
+  if (targetInputIds.size === 0) {
+    return null
+  }
+
+  const latestReceiptByInputId = new Map<string, AssistantTurnReceipt>()
+  for (const receipt of input.receipts) {
+    const metadata = readAssistantAutoReplyReceiptMetadata(receipt)
+    for (const inputId of metadata?.inputIds ?? []) {
+      if (!targetInputIds.has(inputId)) {
+        continue
+      }
+
+      const latest = latestReceiptByInputId.get(inputId)
+      if (
+        !latest ||
+        compareAssistantAutoReplyReceiptRecency(receipt, latest) > 0
+      ) {
+        latestReceiptByInputId.set(inputId, receipt)
+      }
+    }
+  }
+
+  let pendingRetryAt: string | null = null
+  const nowMs = input.nowMs ?? Date.now()
+  for (const receipt of latestReceiptByInputId.values()) {
+    if (receipt.status !== 'failed') {
+      continue
+    }
+
+    const retryAt = readAssistantAutoReplyRetryAt(receipt)
+    if (!retryAt || Date.parse(retryAt) <= nowMs) {
+      continue
+    }
+
+    if (!pendingRetryAt || Date.parse(retryAt) > Date.parse(pendingRetryAt)) {
+      pendingRetryAt = retryAt
+    }
+  }
+
+  return pendingRetryAt
+}
+
 export function readAssistantAutoReplyReceiptMetadata(
   receipt: AssistantTurnReceipt,
 ): AssistantAutoReplyReceiptMetadata | null {
@@ -119,39 +172,6 @@ export function readAssistantAutoReplyReceiptMetadata(
         primaryInputId: resolvedPrimaryInputId,
       }
     : null
-}
-
-export function resolveAssistantAutoReplyRetryBudget(input: {
-  inputIds: readonly string[]
-  maxFailedAttempts?: number
-  receipts: readonly AssistantTurnReceipt[]
-}): AssistantAutoReplyRetryBudget {
-  const maxFailedAttempts = normalizeAssistantAutoReplyMaxFailedAttempts(
-    input.maxFailedAttempts,
-  )
-  const targetInputIds = new Set(input.inputIds)
-  const failedAttempts = input.receipts.filter((receipt) => {
-    if (receipt.status !== 'failed') {
-      return false
-    }
-
-    const metadata = readAssistantAutoReplyReceiptMetadata(receipt)
-    return metadata?.inputIds.some((inputId) => targetInputIds.has(inputId)) === true
-  }).length
-
-  return {
-    allowed: failedAttempts < maxFailedAttempts,
-    failedAttempts,
-    maxFailedAttempts,
-  }
-}
-
-function normalizeAssistantAutoReplyMaxFailedAttempts(
-  value: number | null | undefined,
-): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.max(1, Math.trunc(value))
-    : ASSISTANT_AUTO_REPLY_MAX_FAILED_ATTEMPTS
 }
 
 export function isAssistantProviderCapacityError(error: unknown): boolean {

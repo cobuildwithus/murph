@@ -272,7 +272,7 @@ describe("RunnerStateStore schema guard", () => {
     await expect(store.readState()).resolves.toMatchObject({
       active: {
         attemptId: "workspace-invocation-1",
-        reason: "idle_shutdown_checkpoint",
+        reason: "runtime",
         workspaceVersion: "42",
       },
       leaseGeneration: 3,
@@ -283,7 +283,7 @@ describe("RunnerStateStore schema guard", () => {
         attemptId: "workspace-invocation-1",
         expiresAt: "2030-04-27T00:01:00.000Z",
         generation: 3,
-        kind: "idle_checkpoint",
+        kind: "runtime",
         workspaceVersion: "42",
       },
     });
