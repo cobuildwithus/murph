@@ -92,7 +92,11 @@ export interface HostedExecutionContainerStubLike {
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
-  wakeRuntime?(input: { userId: string }): Promise<RunnerRuntimeWakeResult | { accepted: boolean }>;
+  /**
+   * Legacy boolean wake result is deploy-skew compatibility only. Delete after
+   * old accepted-only containers are gone.
+   */
+  wakeRuntime?(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult | { accepted: boolean }>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -140,12 +144,14 @@ interface RunnerActiveOperationRecord {
   userId: string;
 }
 
+export interface RunnerRuntimeWakeInput {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+}
+
 export type RunnerRuntimeWakeResult =
-  | {
-      attemptId: string;
-      kind: "accepted";
-      leaseGeneration: string;
-    }
+  | { kind: "accepted" }
   | {
       kind: "not-wakeable";
       reason: "no-active-child";
@@ -219,9 +225,14 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async wakeRuntime(input: { userId: string }): Promise<RunnerRuntimeWakeResult> {
+  async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     const active = this.workspaceInvocationActiveOperation;
-    if (!active || active.userId !== input.userId) {
+    if (
+      !active
+      || active.userId !== input.userId
+      || active.attemptId !== input.attemptId
+      || active.leaseGeneration !== input.leaseGeneration
+    ) {
       return { kind: "not-wakeable", reason: "no-active-child" };
     }
 
@@ -254,11 +265,7 @@ export class RunnerContainer extends Container {
         });
       }
       if (response.ok && accepted) {
-        return {
-          attemptId: active.attemptId,
-          kind: "accepted",
-          leaseGeneration: active.leaseGeneration,
-        };
+        return { kind: "accepted" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {

@@ -52,6 +52,7 @@ import {
   invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerRuntimeWakeInput,
   type RunnerRuntimeWakeResult,
 } from "./runner-container.js";
 import { withSerializedLock } from "./serialized-lock.js";
@@ -97,11 +98,11 @@ type EnsureRunnerProgressResult =
     }
   | {
       drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "preempted-stale-fence-and-started";
+      kind: "preempted-stale-fence";
       previousAttemptId: string;
+      progressStarted: boolean;
       record: RunnerStateRecord;
       runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" }>;
-      started: boolean;
     }
   | {
       drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
@@ -407,7 +408,7 @@ export class HostedUserRunner {
     if (
       (
         progress.kind === "started"
-        || progress.kind === "preempted-stale-fence-and-started"
+        || progress.kind === "preempted-stale-fence"
       )
       && progress.drainPromise
     ) {
@@ -436,7 +437,10 @@ export class HostedUserRunner {
       || progress.kind === "runtime-wake-accepted";
     const immediateDriveStarted =
       progress.kind === "started"
-      || progress.kind === "preempted-stale-fence-and-started";
+      || (
+        progress.kind === "preempted-stale-fence"
+        && progress.drainPromise !== null
+      );
     const nextAlarmAt = progress.kind === "scheduled-short-retry"
       ? readRunnerRuntimeDueAt(progress.record)
       : readRunnerStateAlarmAt(progress.record);
@@ -456,7 +460,11 @@ export class HostedUserRunner {
 
     if (this.drainPromise) {
       const runtimeWake = record.writeFence
-        ? await this.wakeActiveRuntime(record.userId)
+        ? await this.wakeActiveRuntime({
+          attemptId: record.writeFence.attemptId,
+          leaseGeneration: String(record.writeFence.generation),
+          userId: record.userId,
+        })
         : null;
       await this.syncAlarm(record);
       return {
@@ -468,7 +476,11 @@ export class HostedUserRunner {
     }
 
     if (record.writeFence) {
-      const runtimeWake = await this.wakeActiveRuntime(record.userId);
+      const runtimeWake = await this.wakeActiveRuntime({
+        attemptId: record.writeFence.attemptId,
+        leaseGeneration: String(record.writeFence.generation),
+        userId: record.userId,
+      });
       if (runtimeWake.kind === "accepted") {
         await this.syncAlarm(record);
         return {
@@ -491,7 +503,7 @@ export class HostedUserRunner {
       }
 
       const previousFence = record.writeFence;
-      const preempted = await this.stateStore.preemptWriteFenceIfCurrent({
+      const preempted = await this.stateStore.clearWriteFenceIfCurrent({
         attemptId: previousFence.attemptId,
         generation: String(previousFence.generation),
         userId: record.userId,
@@ -510,11 +522,11 @@ export class HostedUserRunner {
       });
       return {
         drainPromise: this.drainPromise,
-        kind: "preempted-stale-fence-and-started",
+        kind: "preempted-stale-fence",
         previousAttemptId: previousFence.attemptId,
+        progressStarted: Boolean(started),
         record: preempted.record,
         runtimeWake,
-        started: Boolean(started),
       };
     }
 
@@ -849,7 +861,7 @@ export class HostedUserRunner {
     await this.state.storage.setAlarm(new Date(nextAlarmAt));
   }
 
-  private async wakeActiveRuntime(userId: string): Promise<RunnerRuntimeWakeResult> {
+  private async wakeActiveRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     if (!this.runnerContainerNamespace) {
       return { kind: "unknown", reason: "missing-container-binding" };
     }
@@ -857,7 +869,7 @@ export class HostedUserRunner {
     const container = this.runnerContainerNamespace.getByName(
       resolveHostedExecutionRunnerContainerName({
         source: this.runnerRuntimeEnvSource,
-        userId,
+        userId: input.userId,
       }),
     );
     if (!container.wakeRuntime) {
@@ -865,7 +877,7 @@ export class HostedUserRunner {
     }
 
     try {
-      return normalizeRunnerRuntimeWakeResult(await container.wakeRuntime({ userId }));
+      return normalizeRunnerRuntimeWakeResult(await container.wakeRuntime(input));
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -873,7 +885,7 @@ export class HostedUserRunner {
         level: "warn",
         message: "Hosted runner could not wake an active runtime best-effort.",
         phase: "scheduled",
-        userId,
+        userId: input.userId,
       });
       return { kind: "unknown", reason: "container-rpc-error" };
     }
@@ -1321,16 +1333,8 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResult {
   if (isObjectRecord(value)) {
-    if (
-      value.kind === "accepted"
-      && typeof value.attemptId === "string"
-      && typeof value.leaseGeneration === "string"
-    ) {
-      return {
-        attemptId: value.attemptId,
-        kind: "accepted",
-        leaseGeneration: value.leaseGeneration,
-      };
+    if (value.kind === "accepted") {
+      return { kind: "accepted" };
     }
     if (value.kind === "not-wakeable" && value.reason === "no-active-child") {
       return { kind: "not-wakeable", reason: "no-active-child" };
@@ -1343,12 +1347,8 @@ function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResu
           : "legacy-wake-result",
       };
     }
-    if (value.accepted === true) {
-      return {
-        attemptId: "legacy",
-        kind: "accepted",
-        leaseGeneration: "legacy",
-      };
+    if ("accepted" in value) {
+      return { kind: "unknown", reason: "legacy-wake-result" };
     }
   }
 
@@ -1376,13 +1376,19 @@ function buildEnsureRunnerProgressLogDetails(
       || progress.kind === "runtime-wake-accepted",
     immediateDriveStarted:
       progress.kind === "started"
-      || progress.kind === "preempted-stale-fence-and-started",
+      || (
+        progress.kind === "preempted-stale-fence"
+        && progress.drainPromise !== null
+      ),
     progressKind: progress.kind,
     runtimeWakeAccepted: runtimeWake?.kind === "accepted",
     runtimeWakeResult: runtimeWake ? formatRunnerRuntimeWakeResult(runtimeWake) : null,
-    staleWriteFencePreempted: progress.kind === "preempted-stale-fence-and-started",
-    ...(progress.kind === "preempted-stale-fence-and-started"
-      ? { previousAttemptId: progress.previousAttemptId }
+    staleWriteFencePreempted: progress.kind === "preempted-stale-fence",
+    ...(progress.kind === "preempted-stale-fence"
+      ? {
+        previousAttemptId: progress.previousAttemptId,
+        progressStarted: progress.progressStarted,
+      }
       : {}),
     wakePending: progress.record.wakePending,
   };
@@ -1394,7 +1400,7 @@ function readEnsureRunnerProgressRuntimeWake(
   if (
     progress.kind === "local-drain-active"
     || progress.kind === "runtime-wake-accepted"
-    || progress.kind === "preempted-stale-fence-and-started"
+    || progress.kind === "preempted-stale-fence"
     || progress.kind === "scheduled-short-retry"
   ) {
     return progress.runtimeWake;

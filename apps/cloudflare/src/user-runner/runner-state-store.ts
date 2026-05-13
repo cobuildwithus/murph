@@ -336,7 +336,7 @@ export class RunnerStateStore {
     };
   }
 
-  async preemptWriteFenceIfCurrent(input: {
+  async clearWriteFenceIfCurrent(input: {
     attemptId: string;
     generation: string;
     userId: string;
