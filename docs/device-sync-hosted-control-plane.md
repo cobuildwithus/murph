@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-05-05
+Last verified against repo layout: 2026-05-13
 
 ## Current split
 
@@ -173,7 +173,7 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 - `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP plus Junction-backed Garmin/Oura/Strava targets when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
 
 ### Hosted settings-authenticated routes
 

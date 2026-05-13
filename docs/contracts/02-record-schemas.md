@@ -2,7 +2,7 @@
 
 Status: frozen baseline plus health extension fence
 
-Canonical Zod contract sources live in `packages/contracts/src/zod.ts`. The JSON Schema surface in `packages/contracts/src/schemas.ts` and the artifacts in `packages/contracts/generated/` are derived from those Zod definitions.
+Canonical Zod contract sources live in `packages/contracts/src/zod.ts`. The JSON Schema surface in `packages/contracts/src/schemas.ts` and the artifacts in `packages/contracts/generated/` are derived from those Zod definitions. The code exports `ID_PREFIXES`, `EVENT_KINDS`, `SAMPLE_STREAMS`, and `schemaCatalog`; those exports are canonical when this human-readable contract needs refreshing.
 
 ## ID Policy
 
@@ -16,12 +16,15 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 | event | `evt` | canonical event record id |
 | sample | `smp` | canonical sample record id |
 | audit | `aud` | canonical audit record id |
+| automation | `automation` | automation frontmatter id |
+| scheduled log | `slog` | scheduled-log frontmatter id |
 | transform batch | `xfm` | import-batch id returned from sample-import and normalized device/provider import flows and used in raw paths |
 | document | `doc` | related id stored on document events |
 | meal | `meal` | related id stored on meal events |
 | experiment | `exp` | experiment page id and related event id |
 | provider | `prov` | provider page id |
 | food | `food` | regular-food page id |
+| recipe | `rcp` | recipe page id |
 | assessment | `asmt` | assessment response id and raw-assessment path id |
 | memory record | `mem` | record id stored inside `bank/memory.md` |
 | goal | `goal` | goal Markdown record id |
@@ -31,6 +34,7 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 | protocol | `prot` | private Health Commons-backed protocol adaptation id |
 | family member | `fam` | family-member Markdown record id |
 | genetic variant | `var` | genetic-variant Markdown record id |
+| workout format | `wfmt` | workout-format page id |
 
 ## Record Families
 
@@ -55,24 +59,17 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 
 ## Event Kinds
 
-| Kind | Required contract fields |
-| --- | --- |
-| `document` | `documentId`, `mimeType` |
-| `meal` | `mealId` |
-| `symptom` | `symptom`, `intensity` |
-| `note` | `note` |
-| `observation` | `metric`, `value`, `unit` |
-| `experiment_event` | `experimentId`, `experimentSlug`, `phase` |
-| `medication_intake` | `medicationName`, `dose`, `unit` |
-| `supplement_intake` | `supplementName`, `dose`, `unit` |
-| `activity_session` | `activityType`, `durationMinutes` |
-| `sleep_session` | `startAt`, `endAt`, `durationMinutes` |
-| `intervention_session` | `interventionType` |
-| `encounter` | `encounterType`, `location` |
-| `procedure` | `procedure`, `status` |
-| `test` | `testName`, `resultStatus` |
-| `adverse_effect` | `substance`, `effect`, `severity` |
-| `exposure` | `exposureType`, `substance` |
+The canonical event-kind list is `EVENT_KINDS` in
+`packages/contracts/src/constants.ts`. Current kinds are:
+
+`adverse_effect`, `body_measurement`, `document`, `encounter`, `exposure`,
+`meal`, `measurement`, `symptom`, `note`, `observation`, `experiment_event`,
+`experiment_context`, `medication_intake`, `procedure`,
+`supplement_intake`, `test`, `activity_session`, `sleep_session`, and
+`intervention_session`.
+
+Kind-specific required fields live in the Zod contracts and generated JSON
+Schemas. Do not update this document by guessing those fields from CLI options.
 
 Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
@@ -89,6 +86,7 @@ Blood tests do not define a separate canonical record family. `blood-test` remai
 | Stream | Required contract fields |
 | --- | --- |
 | `heart_rate` | `value`, `unit: "bpm"` |
+| `spo2` | `value`, `unit: "%"` |
 | `hrv` | `value`, `unit: "ms"` |
 | `steps` | `value`, `unit: "count"` |
 | `sleep_stage` | `stage`, `startAt`, `endAt`, `durationMinutes`, `unit: "stage"` |
@@ -110,6 +108,12 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `providerId`, `slug`, `title`, `status`, `specialty`, `organization`
 - Food frontmatter:
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
+- Automation frontmatter:
+  `schemaVersion`, `docType`, `automationId`, `slug`, `title`, `status`, schedule fields, and prompt/delivery policy fields
+- Scheduled-log frontmatter:
+  `schemaVersion`, `docType`, `scheduledLogId`, `slug`, `title`, `status`, schedule fields, and log template fields
+- Recipe frontmatter:
+  `schemaVersion`, `docType`, `recipeId`, `slug`, `title`, `status`, ingredients, steps, and optional nutrition or linking fields
 - Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
   `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
 - Memory frontmatter:
@@ -137,11 +141,18 @@ Health artifact filenames are reserved here. They do not become valid generated 
 - `event-record.schema.json`
 - `sample-record.schema.json`
 - `audit-record.schema.json`
+- `inbox-capture-record.schema.json`
+- `metric-sample-record.schema.json`
+- `preferences-document.schema.json`
+- `frontmatter-automation.schema.json`
 - `frontmatter-core.schema.json`
 - `frontmatter-journal-day.schema.json`
 - `frontmatter-experiment.schema.json`
 - `frontmatter-food.schema.json`
 - `frontmatter-provider.schema.json`
+- `frontmatter-recipe.schema.json`
+- `frontmatter-scheduled-log.schema.json`
+- `frontmatter-workout-format.schema.json`
 - `assessment-response.schema.json`
 - `frontmatter-goal.schema.json`
 - `frontmatter-condition.schema.json`

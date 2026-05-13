@@ -1,20 +1,20 @@
 # Product Sense
 
-Last verified: 2026-04-22
+Last verified: 2026-05-13
 
 ## Current Posture
 
 - Murph is the experiment layer for personal health, not primarily a generic chatbot, dashboard, or vault product.
-- The core loop is: choose a protocol, run a bounded experiment, review what changed, then decide whether to share or contribute the result.
+- The core loop is: choose a protocol, run a bounded experiment, review what changed, then decide what to do next. Sharing and contribution are future consent-bound extensions, not current default behavior.
 - The assistant is the easiest interface into that loop; the compounding layer is the protocol outcome network and living Health Commons.
 - Product behavior should help people learn from interventions and from people like them without turning health into status theater.
 
 ## First-Class Product Objects
 
-- Public Health Commons pages for protocols, biomarkers, sources, and aggregate outcomes
+- Public Health Commons pages for protocols, biomarkers, and sources, with aggregate outcomes as a future contribution-backed layer
 - Private experiment runs bound to exact protocol revisions
 - Completed outcome cards derived from those runs
-- Opt-in cohort summaries and protocol-variant learning built from contributed outcomes
+- Future opt-in cohort summaries and protocol-variant learning built from contributed outcomes
 
 ## Guardrails
 

@@ -1,6 +1,6 @@
 # Device Provider Contribution Kit
 
-Last verified: 2026-04-03
+Last verified: 2026-05-13
 
 ## Purpose
 
@@ -353,8 +353,10 @@ pnpm test:coverage
 ## Current reference providers
 
 Use the existing providers as concrete examples of different integration shapes:
-- Garmin: OAuth plus polling-first reconcile, activity detail descriptors, and women-health support
+- Junction: shared OAuth/proxy target for configured sources such as Garmin and Fitbit
+- Garmin: Junction-backed OAuth plus polling-first reconcile, activity detail descriptors, and women-health support
 - WHOOP: OAuth plus webhooks, recovery and workout payloads, and delete fan-in
 - Oura: OAuth plus polling-first reconcile, optional webhook verification and admin support, and rich daily readiness or sleep families
+- Strava: direct OAuth plus activity/workout imports and direct webhook signing
 
 Study those implementations before inventing a new provider-specific pattern.

@@ -1,8 +1,8 @@
 # Pulse Trial Start Paid Pulse
 
-Last verified: 2026-05-06
+Last verified: 2026-05-13
 
-Status: Planned
+Status: Implemented
 
 ## Goal
 
@@ -32,19 +32,20 @@ Pulse Trial already exists as a checkout offer on the normal Pulse plan:
 - trial allowance: `2.50 USD` hosted AI usage
 - paid Pulse allowance: `10.00 USD` hosted AI usage per month
 
-The current exhausted-trial UX is incomplete:
+The exhausted-trial path is implemented:
 
 - `resolveHostedAiUsageGate` returns `allowed: false`,
   `reason: "ai_usage_limit_exceeded"`, and
-  `userNotice.code: "trial_usage_limit_reached"`.
-- `/home` renders a usage-limit banner for exhausted trial usage.
-- The banner action currently routes to Settings.
-- Settings displays trial status but does not offer a trial-to-paid action.
-- The existing plan-upgrade service rejects trial users because it only supports
-  paid Pulse to Edge.
-
-That creates a dead end for a trial user who wants to pay now and keep Murph
-replying.
+  `userNotice.code: "trial_usage_limit_reached"` when trial usage is exhausted.
+- `/home` renders the usage-limit banner and can call
+  `POST /api/settings/billing/start-paid-pulse` through the hosted usage-limit
+  action.
+- Settings can also start the same flow.
+- The route enforces hosted mutation-origin checks, requires the Murph hosted
+  app session, rejects suspended or ineligible members, and delegates to
+  `startHostedPulseTrialPaidPlan`.
+- Murph grants the normal paid Pulse allowance only after Stripe reconciliation
+  observes the paid invoice state.
 
 ## Product Policy
 
@@ -113,9 +114,9 @@ Relevant Stripe docs:
 - Checkout Session create API: https://docs.stripe.com/api/checkout/sessions/create
 - Hosted Invoice Page: https://docs.stripe.com/billing/invoices/hosted
 
-## Backend Design
+## Backend Contract
 
-Add one target-specific route:
+The target-specific route is:
 
 ```txt
 POST /api/settings/billing/start-paid-pulse
@@ -212,7 +213,7 @@ customer and exposes a usable Stripe-hosted payment URL.
 
 ## Service Algorithm
 
-Add a dedicated service, for example:
+The dedicated service is:
 
 ```ts
 async function startHostedPulseTrialPaidPlan(input): Promise<HostedPulseTrialStartPaidResult>;

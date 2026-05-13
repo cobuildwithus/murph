@@ -28,7 +28,7 @@
 
 ## Deferred Complexity
 
-- No SQLite as canonical storage. SQLite is allowed only for rebuildable local/runtime projections under `.runtime/**`.
+- No SQLite as canonical health storage. Rebuildable SQLite projections belong under `.runtime/projections/**`. Durable non-canonical operational SQLite is allowed only for explicitly owned runtime stores with migrations and a documented snapshot/backup policy, such as device-sync control and credential state under `.runtime/operations/device-sync/state.sqlite`.
 - Lexical search is allowed through the query projection.
 - Vector search is deferred unless it is explicitly added to the contract.
 - No OCR-heavy lab parser.

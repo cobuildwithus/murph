@@ -1,10 +1,10 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-05-06
+Last verified: 2026-05-13
 
 ## Goal
 
-Add a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
+Maintain a clean Edge-to-Pulse plan switch that relies on Stripe for billing state, timing, invoices, and future subscription changes.
 
 The product behavior is:
 
@@ -16,20 +16,23 @@ The product behavior is:
 
 ## Current State
 
-The app currently supports only Pulse-to-Edge in-app upgrades.
+The app supports both the Pulse-to-Edge upgrade and the explicit Edge-to-Pulse
+scheduled switch:
 
 - `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
 - `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
-- `/settings` computes and renders only `canUpgradeToEdge`.
+- `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
+- `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
 - `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
 
-There is no explicit app-owned Edge-to-Pulse path today.
+The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
+transitions still stay out of scope.
 
 ## First-Version Scope
 
-Keep the first version intentionally narrow.
+Keep the implemented first version intentionally narrow.
 
-Build exactly one transition:
+The supported transition is:
 
 - Edge paid subscription to Pulse at renewal.
 

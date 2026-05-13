@@ -38,6 +38,10 @@ The summary should explain the actual protocol in plain language. It is not a re
 - **Bryan Johnson sauna:** High-heat dry sauna daily after a workout with groin ice, where stacking intense heat on exercise doubles the demand on heart and blood vessels to move heat out.
 - **Caffeine curfew:** All caffeine before late morning or 8 hours before bed, where less residual caffeine near bedtime lets adenosine — the brain's built-up sleep-pressure signal — work without interference.
 - **Cold plunge:** Brief head-out immersion in measured cold water, where sudden cold forces a noradrenaline surge and drives blood inward to defend core temperature.
+
+## Draft Repair Note
+
+Hidden draft protocol pages may still contain summaries that violate these rules. Do not use hidden draft summaries as calibration examples. Repair the `summary:` field before publishing or making a protocol visible in `/experiments`.
 - **Consistent wake time:** Same wake time every day within a narrow window, where a steady morning anchor keeps the body clock from drifting so sleep pressure and circadian timing line up more predictably each night.
 - **Daily step floor:** A daily minimum step count, where a visible floor ensures enough steady low-grade cardiovascular and weight-bearing load for the body to adapt to rather than lose.
 - **Digital sunset:** No personal screens for the last 30–60 minutes before bed, where removing late light, stimulating content, and notification loops lets arousal drop so the brain can shift toward sleep.

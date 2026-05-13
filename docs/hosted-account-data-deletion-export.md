@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-05-07
+Last verified: 2026-05-13
 
 ## Purpose
 
@@ -62,6 +62,8 @@ That account metadata export includes:
 - Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
 - Hosted workspace metadata with object keys and bundle hashes replaced by presence flags.
 - AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
+- AI usage period snapshots with allowance totals, period windows, and billing-state metadata needed to explain current quota state.
+- Device connect intents as metadata/counts only; connect assertion, nonce, and routing internals stay omitted.
 - Per-store row limits and truncation metadata. Each multi-row export query returns at most 250 rows for this MVP.
 
 The account metadata export explicitly omits:
@@ -106,6 +108,7 @@ The account metadata export explicitly omits:
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
+| `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
 | `prisma.hosted_invite` | Live delete | Metadata/counts | Deletes invite codes and channel metadata owned by the member. |
 | `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
@@ -113,6 +116,7 @@ The account metadata export explicitly omits:
 | `prisma.device_connection` | Live delete | Metadata/counts | Revokes providers where possible, then deletes connection rows and encrypted token bundles. |
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
+| `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |

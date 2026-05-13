@@ -107,10 +107,20 @@ vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [-
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
+vault-cli capture add --vault <path> [--media <path> ...] [--label <text>] [--body-site <text>] [--collection <text>] [--related-id <id> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
+vault-cli capture import-json --vault <path> --input @file.json|- [--request-id <id>]
+vault-cli capture show <id-or-label> --vault <path> [--request-id <id>]
+vault-cli capture list --vault <path> [--from <date>] [--to <date>] [--label <text>] [--body-site <text>] [--collection <text>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
+vault-cli capture manifest <id-or-label> --vault <path> [--request-id <id>]
 vault-cli meal add --vault <path> [--input @file.json|-] [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--ingredient <text> ...] [--nutrition-calories <n>] [--nutrition-protein-grams <n>] [--nutrition-carbs-grams <n>] [--nutrition-fat-grams <n>] [--nutrition-fiber-grams <n>] [--nutrition-source <source>] [--nutrition-confidence <level>] [--nutrition-source-detail <text>] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-ingredients] [--clear-nutrition] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli measurement add --vault <path> [--metric <name> ...] [--value <number> ...] [--unit <unit> ...] [--qualifier <key=value> ...] [--measurement-note <text> ...] [--media <path> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
+vault-cli measurement import-json --vault <path> --input @file.json|- [--request-id <id>]
+vault-cli measurement show <id> --vault <path> [--request-id <id>]
+vault-cli measurement list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli measurement manifest <id> --vault <path> [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
@@ -235,6 +245,8 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
+- `capture` is a dated media-evidence noun layered on canonical event records plus immutable raw capture attachments.
+- `measurement` is the primary scalar-measurement noun for numeric body, vitals, performance, and custom metrics.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
 - `intake` exposes `import | show | list | manifest | raw | project`.
 - `samples` exposes `add | import-json | import-csv | csv profile | csv import | summarize | show | list | batch show | batch list`.
@@ -263,7 +275,7 @@ Registry-backed readable/list surfaces may expose noun-specific filters where th
 Every command now uses native `incur` command definitions directly:
 
 1. `incur` validates positional arguments and named options against the command schema.
-2. The handler receives parsed `args` and `options` and delegates exactly one boundary call to `core`, `importers`, or `query`.
+2. The handler receives parsed `args` and `options` and delegates to the owning boundary surface for that noun. Current owners include `core`, `importers`, `query`, `vault-usecases`, `inbox-services`, `device-syncd`, `assistant-cli`/`assistant-engine`, and gateway packages. Canonical health writes still terminate in `packages/core`.
 3. The handler returns the command-specific payload directly.
 4. Plain `--format json` writes that payload body directly to stdout.
 5. `--full-output --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.

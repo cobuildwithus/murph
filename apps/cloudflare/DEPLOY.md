@@ -65,9 +65,11 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `OPENAI_API_KEY`
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
+`OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 
 ## Optional Vars
 
@@ -94,7 +96,7 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls runner container activity expiry. The warm RunnerContainer attempts one best-effort idle-shutdown checkpoint from the activity-expiry hook before teardown; there is no separate Durable Object checkpoint scheduler.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/deadline/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 
 `CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is
@@ -185,19 +187,20 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 ## Optional Secrets
 
-Hosted assistant provider secrets:
+Hosted assistant provider and channel secrets:
 
-- `OPENAI_API_KEY` when the hosted assistant should call OpenAI through Codex. The deploy secret stays in the Worker; the runner container receives only the hosted injected-credential placeholder and Cloudflare injects the real key through the HTTPS egress intercept.
-- `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_PHONE_NUMBER_ID` when those hosted runtime integrations are enabled. These are also Worker-owned intercept credentials, not raw child-container env.
+- `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_PHONE_NUMBER_ID` when those hosted runtime integrations are enabled. These are Worker-owned intercept credentials, not raw child-container env.
 
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the child runtime env.
 - `HOSTED_LOG_FINGERPRINT_SECRET` when Worker-owned log fingerprinting is enabled. This secret must stay out of child runtime env.
 - `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET` and optional
-  `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID` when Cloudflare should accept
-  short-lived signed web allow decisions on foreground runner nudges before
-  falling back to the live web usage gate
+  `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID` for legacy signed allow-decision
+  compatibility metadata. Current Cloudflare runner start authority does not
+  depend on these values and does not fall back to a live web usage-gate call;
+  web must gate before append/nudge, and runtime/provider spend enforcement
+  still happens before model calls.
 
 Opt-in execution integrations:
 

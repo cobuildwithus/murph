@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-05-02
+Last verified: 2026-05-13
 
 ## Purpose
 
@@ -187,8 +187,9 @@ to Codex.
 - Hosted execution is a thin containerized runner over the same local runtime
   input spine. It restores the encrypted workspace, imports hosted mailbox rows,
   stages `AssistantInputEvent` records, runs the local scanner/active-turn
-  machinery, checkpoints accepted input, drains outbox effects, and writes the
-  updated workspace checkpoint.
+  machinery, and keeps dirty runtime state local until the runtime-owned
+  idle/deadline/scheduled-wake `idle_shutdown` checkpoint writes the updated
+  workspace checkpoint.
 - Mailbox import progress is not assistant handling progress. If a deploy,
   Durable Object reset, or runner restart lands after mailbox import has
   checkpointed, the next hosted invocation must still replay assistant handling
