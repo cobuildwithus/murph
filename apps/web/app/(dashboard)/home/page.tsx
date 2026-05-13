@@ -33,6 +33,7 @@ export default async function HomePage({
 } = {}) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedPageAuthSnapshot();
+  const usageGateCheckedAt = new Date();
   const [showDeviceStep, usageGate, completionDialog] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member: auth.authenticatedMember,
@@ -40,6 +41,7 @@ export default async function HomePage({
     auth.authenticatedMember
       ? resolveHostedAiUsageGate({
           memberId: auth.authenticatedMember.id,
+          now: usageGateCheckedAt,
           prisma: getPrisma(),
         })
       : Promise.resolve(null),
@@ -53,6 +55,9 @@ export default async function HomePage({
     && usageGate.userNotice
       ? usageGate.userNotice
       : null;
+  const usageLimitResetAt = usageLimitNotice && usageGate && !usageGate.allowed
+    ? usageGate.retryAfter
+    : null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -67,7 +72,11 @@ export default async function HomePage({
       ) : null}
 
       {usageLimitNotice ? (
-        <UsageLimitBanner noticeCode={usageLimitNotice.code} />
+        <UsageLimitBanner
+          noticeCode={usageLimitNotice.code}
+          now={usageGateCheckedAt}
+          resetAt={usageLimitResetAt}
+        />
       ) : null}
 
       <OnboardingSteps
