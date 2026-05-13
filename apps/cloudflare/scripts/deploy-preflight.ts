@@ -36,8 +36,8 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "production",
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
-const PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL = "gpt-5.4-mini";
-const PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT = "low";
+const PRODUCTION_HOSTED_ASSISTANT_MODEL = "gpt-5.5";
+const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -254,19 +254,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (
     hostedAssistantModel
-    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL
+    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_MODEL
   ) {
     errors.push(
-      `production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_MODEL}.`,
+      `production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_MODEL}.`,
     );
   }
 
   if (
     hostedAssistantReasoningEffort
-    !== PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT
+    !== PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT
   ) {
     errors.push(
-      `production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_HOT_REPLY_REASONING_EFFORT}.`,
+      `production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT}.`,
     );
   }
 
