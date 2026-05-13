@@ -503,10 +503,10 @@ test('executeCodexAppServerTurn interrupts the child and records the provider th
     }),
     (error: unknown) => {
       assert.equal((error as { code?: string }).code, 'ASSISTANT_CODEX_INTERRUPTED')
-      assert.equal(
-        (error as { context?: { providerSessionId?: string } }).context?.providerSessionId,
-        'thread-abort-public',
-      )
+      const context = (error as { context?: Record<string, unknown> }).context ?? {}
+      assert.equal(context.codexThreadIdPresent, true)
+      assert.equal('codexThreadId' in context, false)
+      assert.equal('providerSessionId' in context, false)
       return true
     },
   )

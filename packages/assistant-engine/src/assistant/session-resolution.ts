@@ -2,6 +2,10 @@ import {
   normalizeAssistantBackendTarget,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import {
+  parseAssistantSessionRecord,
+  type AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   compactAssistantProviderConfigInput,
@@ -19,7 +23,9 @@ import type {
 } from './service-contracts.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
-import { normalizeAssistantSessionSnapshot } from './provider-state.js'
+import {
+  serializeAssistantConversationForPersistence,
+} from './conversation-persistence.js'
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -194,7 +200,7 @@ export function applyHostedDefaultTargetToResolvedSession(
     return resolved
   }
 
-  const projectedSession = normalizeAssistantSessionSnapshot({
+  const projectedSession = normalizeAssistantConversationSnapshot({
     ...resolved.session,
     codexTarget: defaultTarget,
     target: defaultTarget,
@@ -212,12 +218,20 @@ export function applyHostedDefaultTargetToResolvedSession(
 
   return {
     ...resolved,
-    session: normalizeAssistantSessionSnapshot({
+    session: normalizeAssistantConversationSnapshot({
       ...projectedSession,
       codexResume: null,
       resumeState: null,
     }),
   }
+}
+
+function normalizeAssistantConversationSnapshot(
+  session: AssistantSession,
+): AssistantSession {
+  return parseAssistantSessionRecord(
+    serializeAssistantConversationForPersistence(session),
+  )
 }
 
 export function resolveAssistantSessionTarget(input: {

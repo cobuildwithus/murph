@@ -10,7 +10,9 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { quarantineAssistantStateFile } from './quarantine.js'
-import { serializeAssistantSessionForPersistence } from './provider-state.js'
+import {
+  serializeAssistantConversationForPersistence,
+} from './conversation-persistence.js'
 import {
   ensureAssistantStateDirectory,
   isMissingFileError,
@@ -35,7 +37,7 @@ export function extractAssistantSessionSecretsForPersistence(
   secrets: AssistantSessionSecrets | null
 } {
   const persisted = assistantPersistedSessionSchema.parse({
-    ...serializeAssistantSessionForPersistence(session),
+    ...serializeAssistantConversationForPersistence(session),
   })
 
   return {

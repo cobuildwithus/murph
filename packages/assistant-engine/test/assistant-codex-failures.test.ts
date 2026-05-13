@@ -117,7 +117,7 @@ describe('assistant Codex failure helpers', () => {
         codexFailureDetailPresent: true,
         codexFailureStage: 'turn_failed',
         providerActionCount: 2,
-        codexThreadId: 'thread-1',
+        codexThreadIdPresent: true,
         retryable: false,
       },
       message:
@@ -136,7 +136,7 @@ describe('assistant Codex failure helpers', () => {
       context: {
         codexFailureStage: 'interrupted',
         interrupted: true,
-        codexThreadId: null,
+        codexThreadIdPresent: false,
         retryable: false,
       },
       message: 'Codex app-server was interrupted.',
@@ -158,7 +158,7 @@ describe('assistant Codex failure helpers', () => {
         codexFailureStage: 'turn_failed',
         codexTurnStatus: 'failed',
         providerActionCount: 0,
-        codexThreadId: 'thread-usage-limit',
+        codexThreadIdPresent: true,
         providerUsageLimit: true,
         retryable: false,
       },
@@ -181,7 +181,7 @@ describe('assistant Codex failure helpers', () => {
         codexExitCode: 1,
         codexFailureStage: 'process_exit',
         providerActionCount: 1,
-        codexThreadId: null,
+        codexThreadIdPresent: true,
         providerUsageLimit: true,
         retryable: false,
       },
@@ -242,7 +242,7 @@ describe('assistant Codex failure helpers', () => {
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
         providerActionCount: 1,
-        codexThreadId: 'thread-sigint',
+        codexThreadIdPresent: true,
       },
       message: expect.stringContaining('signal SIGINT.'),
     })
@@ -305,7 +305,7 @@ describe('assistant Codex failure helpers', () => {
         codexSignalPresent: true,
         codexStderrPresent: false,
         providerActionCount: 3,
-        codexThreadId: null,
+        codexThreadIdPresent: true,
         retryable: false,
       },
       message: 'Codex app-server failed. signal SIGTERM.',
@@ -322,13 +322,16 @@ describe('assistant Codex failure helpers', () => {
     expect(connectionLoss).toMatchObject({
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
-        codexThreadId: 'thread-stream-diagnostics',
+        codexThreadIdPresent: true,
         recoverableConnectionLoss: true,
         retryable: true,
       },
       message:
         'Codex app-server lost its connection while waiting for the model. exit code 1. connection closed before response.completed Codex thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
     })
+    expect(JSON.stringify(connectionLoss.context)).not.toContain(
+      'thread-stream-diagnostics',
+    )
     expectNoRecoveredThreadResumeClaim(connectionLoss.message)
 
     expect(readNodeErrorCode(null)).toBeNull()

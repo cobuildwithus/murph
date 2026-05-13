@@ -43,8 +43,8 @@ import {
 } from './turn-finalizer.js'
 import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
-  readAssistantSessionResumeState,
-} from './provider-state.js'
+  readAssistantCodexResume,
+} from './conversation-persistence.js'
 import {
   appendAssistantTurnReceiptEvent,
   createAssistantTurnReceipt,
@@ -790,7 +790,7 @@ export async function updateAssistantSessionOptionsLocal(input: {
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
     nextProviderOptions.continuityFingerprint
-  const currentResumeState = readAssistantSessionResumeState(session.session)
+  const currentResumeState = readAssistantCodexResume(session.session)
 
   return saveAssistantSession(input.vault, {
     ...session.session,

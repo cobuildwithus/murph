@@ -12,8 +12,8 @@ import {
 import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  readAssistantSessionResumeState,
-} from './provider-state.js'
+  readAssistantCodexResume,
+} from './conversation-persistence.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
@@ -124,7 +124,7 @@ export async function persistAssistantTurnAndSession(input: {
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
     codexThreadId: input.providerResult.codexThreadId,
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
-    sessionResumeState: readAssistantSessionResumeState(input.session),
+    sessionResumeState: readAssistantCodexResume(input.session),
   })
 
   const savedSession = await state.sessions.save({

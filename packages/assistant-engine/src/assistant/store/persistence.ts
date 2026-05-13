@@ -32,9 +32,8 @@ import {
 } from '../shared.js'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
-  normalizeAssistantSessionSnapshot,
-  serializeAssistantSessionForPersistence,
-} from '../provider-state.js'
+  serializeAssistantConversationForPersistence,
+} from '../conversation-persistence.js'
 import {
   extractAssistantSessionSecretsForPersistence,
   mergeAssistantSessionSecrets,
@@ -96,7 +95,7 @@ export async function readAssistantSession(input: {
 
   let persistedSession: AssistantSession
   try {
-    persistedSession = normalizeAssistantSessionSnapshot(
+    persistedSession = normalizeAssistantConversationSnapshot(
       parseAssistantSessionRecord(JSON.parse(raw)),
     )
   } catch (error) {
@@ -125,7 +124,7 @@ export async function writeAssistantSession(
   session: AssistantSession,
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
-  const normalized = normalizeAssistantSessionSnapshot(session)
+  const normalized = normalizeAssistantConversationSnapshot(session)
   const {
     persisted: redactedSession,
     secrets,
@@ -365,7 +364,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 function normalizeAssistantSessionForWrite(
   session: AssistantSession | z.infer<typeof assistantPersistedSessionSchema>,
 ) {
-  const normalized = normalizeAssistantSessionSnapshot(
+  const normalized = normalizeAssistantConversationSnapshot(
     'provider' in session
       ? {
           ...session,
@@ -375,7 +374,7 @@ function normalizeAssistantSessionForWrite(
         }
       : parseAssistantSessionRecord(session),
   )
-  return serializeAssistantSessionForPersistence(normalized)
+  return serializeAssistantConversationForPersistence(normalized)
 }
 
 export async function persistResolvedSession(
@@ -414,7 +413,7 @@ export async function persistResolvedSession(
     return session
   }
 
-  const updated = normalizeAssistantSessionSnapshot(
+  const updated = normalizeAssistantConversationSnapshot(
     parseAssistantSessionRecord(
       normalizeAssistantSessionForWrite({
         ...session,
@@ -427,6 +426,14 @@ export async function persistResolvedSession(
   await writeAssistantSession(paths, updated)
   await synchronizeAssistantIndexes(paths, updated, session)
   return updated
+}
+
+function normalizeAssistantConversationSnapshot(
+  session: AssistantSession,
+): AssistantSession {
+  return parseAssistantSessionRecord(
+    serializeAssistantConversationForPersistence(session),
+  )
 }
 
 export async function loadAndPersistResolvedSession(input: {

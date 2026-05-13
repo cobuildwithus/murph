@@ -8,7 +8,7 @@
  * provider-traces directly.
  */
 
-export * from './assistant/provider-state.js'
+export * from './assistant/conversation-persistence.js'
 export * from './assistant/provider-failure-diagnostics.js'
 
 export interface AssistantProviderTraceUpdate {

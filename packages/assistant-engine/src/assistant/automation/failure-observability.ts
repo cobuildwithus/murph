@@ -46,14 +46,15 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'codexFailureStage',
   'codexSignalPresent',
   'codexStderrPresent',
+  'codexThreadIdPresent',
   'codexTurnStatus',
   'errorCode',
   'interrupted',
   'providerActionCount',
-  'codexThreadId',
   'providerStalled',
   'providerUsageLimit',
   'recoverableConnectionLoss',
+  'recoveredCodexThreadIdPresent',
   'retryAfterSeconds',
   'retryable',
   'status',
@@ -117,8 +118,7 @@ function annotateMissingCodexFailureContext(input: {
 function hasCodexFailureContext(context: Record<string, unknown>): boolean {
   return Object.keys(context).some((key) =>
     key.startsWith('codex') ||
-    key === 'providerActionCount' ||
-    key === 'codexThreadId',
+    key === 'providerActionCount',
   )
 }
 

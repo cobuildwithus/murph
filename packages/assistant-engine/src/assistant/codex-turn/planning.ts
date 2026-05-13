@@ -32,12 +32,12 @@ import {
 import { createAssistantMemoryTurnContextEnv } from '../memory/turn-context.js'
 import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
 import {
-  resolveAssistantProviderResumeKey,
+  resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
 } from '../codex-resume-binding.js'
 import {
-  readAssistantSessionResumeState,
-} from '../provider-state.js'
+  readAssistantCodexResume,
+} from '../conversation-persistence.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -292,7 +292,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = resolveAssistantRouteResumeBinding({
     route: input.route,
-    sessionResumeState: readAssistantSessionResumeState(input.session),
+    sessionResumeState: readAssistantCodexResume(input.session),
   })
   const routeProviderCapabilities = resolveCodexAssistantTargetCapabilities({
     ...input.route.providerOptions,
@@ -305,7 +305,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
       ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantProviderResumeKey({
+          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
             resumeState: resumeBinding,
           }),
         })

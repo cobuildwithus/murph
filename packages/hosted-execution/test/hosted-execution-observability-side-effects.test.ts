@@ -494,6 +494,7 @@ describe("hosted execution observability", () => {
           codexFailureStage: "process_exit",
           codexStderrPresent: true,
           connectionLost: false,
+          codexThreadId: "codex-thread-fixture",
           providerActionCount: 2,
           providerSessionId: "provider-session-fixture",
           retryable: false,
@@ -517,6 +518,20 @@ describe("hosted execution observability", () => {
       assistantNotificationProviderSessionIdPresent: true,
     }));
     expect(JSON.stringify(details)).not.toContain("provider-session-fixture");
+    expect(JSON.stringify(details)).not.toContain("codex-thread-fixture");
+
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runtime",
+      error,
+      message: "notification failed",
+      phase: "wake.running",
+    });
+    expect(record.details).toEqual(expect.objectContaining({
+      codexThreadIdPresent: true,
+      providerSessionIdPresent: true,
+    }));
+    expect(JSON.stringify(record)).not.toContain("provider-session-fixture");
+    expect(JSON.stringify(record)).not.toContain("codex-thread-fixture");
   });
 
   it("redacts Telegram identifiers from safe error details when the error code is Telegram-specific", () => {

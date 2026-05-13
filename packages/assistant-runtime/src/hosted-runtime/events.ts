@@ -1015,7 +1015,6 @@ function readHostedAssistantCodexAppServerTimingTrace(
     details,
     "codexTimingThreadIdPresent",
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingThreadIdPresent")
-      ?? readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingCodexThreadIdPresent")
       ?? readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingProviderSessionIdPresent"),
   );
   maybeSetHostedAssistantProviderDiagnosticDetail(
