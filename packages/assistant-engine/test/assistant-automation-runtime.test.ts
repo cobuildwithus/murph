@@ -4939,7 +4939,7 @@ describe('assistant auto-reply runtime', () => {
       .not.toHaveBeenCalled()
   })
 
-  it('does not repair older handled receipt after a newer failed receipt', async () => {
+  it('repairs handled receipts even when a newer failed receipt exists', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -5005,20 +5005,22 @@ describe('assistant auto-reply runtime', () => {
 
     expect(result).toMatchObject({
       advanceCursor: true,
+      checkpointRequired: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 1,
-      skipped: 0,
+      replied: 0,
+      skipped: 1,
       stopScanning: false,
     })
-    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
         captureIds: ['capture-persisted-retry-due'],
+        inputIds: [context.firstInputId],
         outcome: 'result',
       }))
-    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
-      .not.toHaveBeenCalled()
   })
 
   it('treats connection loss as a deferred retry state', async () => {

@@ -2371,6 +2371,10 @@ function findHandledAutoReplyReceiptForGroup(input: {
   const captureIds = input.captureIds ?? []
   let latestReceipt: AssistantAutoReplyReceiptRecord | null = null
   for (const receipt of input.receipts) {
+    if (!(receipt.status === 'completed' || receipt.status === 'deferred')) {
+      continue
+    }
+
     if (!assistantAutoReplyReceiptMatchesGroup({
       captureIds,
       inputIds: input.inputIds,
@@ -2388,8 +2392,7 @@ function findHandledAutoReplyReceiptForGroup(input: {
   }
 
   if (
-    !latestReceipt ||
-    !(latestReceipt.status === 'completed' || latestReceipt.status === 'deferred')
+    !latestReceipt
   ) {
     return null
   }
