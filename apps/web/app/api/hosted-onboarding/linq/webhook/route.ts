@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -42,6 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody,
+      scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       signature,
       timestamp,
     });
@@ -62,6 +65,14 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 async function readHostedLinqWebhookRawBody(request: Request): Promise<string> {
   try {

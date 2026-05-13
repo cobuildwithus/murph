@@ -46,10 +46,11 @@ export type {
   HostedStripeWebhookResponse,
 } from "./webhook-service-types";
 
-const HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS = 750;
+type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   signature: string | null;
   timestamp: string | null;
   prisma?: PrismaClient;
@@ -138,11 +139,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       source: "linq",
       userId: plan.wakeUserId,
     });
-    await maybeSendHostedLinqIngressReadReceipt({
+    const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       plan,
       signal: input.signal,
       wakeHandoff,
     });
+    if (input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(sendReadReceipt);
+    } else {
+      await sendReadReceipt();
+    }
 
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
@@ -186,14 +192,12 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
   const wakeHandoffStarted = input.wakeHandoff?.started === true;
   const wakeHandoffWorkflowStarted = input.wakeHandoff?.workflowStarted ?? false;
-  const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
       chatIdPresent: true,
       directRunnerNudgeStatus,
       responseReason,
-      timeoutMs,
       wakeHandoffReason,
       wakeHandoffStarted,
       wakeHandoffWorkflowStarted,
@@ -216,7 +220,6 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     const result = await sendHostedLinqReadReceipt({
       chatId,
       signal: input.signal,
-      timeoutMs,
     });
 
     finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {

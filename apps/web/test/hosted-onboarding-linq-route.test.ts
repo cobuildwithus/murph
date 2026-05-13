@@ -76,6 +76,7 @@ describe("hosted onboarding Linq webhook route", () => {
       rawBody: JSON.stringify({
         ok: true,
       }),
+      scheduleAfterResponse: expect.any(Function),
       signature: "sha256=test",
       timestamp: "1711278000",
     });
@@ -115,6 +116,65 @@ describe("hosted onboarding Linq webhook route", () => {
         signalAbortedBeforeReturn: false,
       }),
     );
+  });
+
+  it("routes scheduled Linq webhook follow-up work through Next after", async () => {
+    let scheduled = false;
+    mocks.handleHostedOnboardingLinqWebhook.mockImplementationOnce((input: {
+      scheduleAfterResponse?: (task: () => Promise<void>) => void;
+    }) => {
+      input.scheduleAfterResponse?.(() => {
+        scheduled = true;
+        return Promise.resolve();
+      });
+
+      return Promise.resolve({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    });
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(scheduled).toBe(true);
+  });
+
+  it("falls back to fire-and-forget scheduled follow-up work when Next after throws", async () => {
+    let scheduled = false;
+    mocks.after.mockImplementationOnce(() => {
+      throw new Error("after unavailable");
+    });
+    mocks.handleHostedOnboardingLinqWebhook.mockImplementationOnce((input: {
+      scheduleAfterResponse?: (task: () => Promise<void>) => void;
+    }) => {
+      input.scheduleAfterResponse?.(() => {
+        scheduled = true;
+        return Promise.resolve();
+      });
+
+      return Promise.resolve({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    });
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(scheduled).toBe(true);
   });
 
   it("maps in-progress receipt retries to a retryable 503 response", async () => {
