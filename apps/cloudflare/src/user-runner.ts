@@ -547,7 +547,7 @@ export class HostedUserRunner {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          nextWakePresent: result.nextWakeAt !== null,
+          nextWakePresent: result.nextWakeAt != null,
           workspaceAttemptId: token.attemptId,
           workspaceStatus: result.status,
         },
