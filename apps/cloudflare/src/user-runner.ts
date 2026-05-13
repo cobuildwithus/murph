@@ -79,17 +79,12 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
+const LOCAL_DRAIN_START_GRACE_MS = 2_000;
 
 type EnsureRunnerProgressResult =
   | {
       kind: "idle";
       record: RunnerStateRecord;
-    }
-  | {
-      drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "local-drain-active";
-      record: RunnerStateRecord;
-      runtimeWake: RunnerRuntimeWakeResult | null;
     }
   | {
       kind: "runtime-wake-accepted";
@@ -100,7 +95,6 @@ type EnsureRunnerProgressResult =
       drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
       kind: "preempted-stale-fence";
       previousAttemptId: string;
-      progressStarted: boolean;
       record: RunnerStateRecord;
       runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" }>;
     }
@@ -108,9 +102,9 @@ type EnsureRunnerProgressResult =
       drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
       kind: "started";
       record: RunnerStateRecord;
-      started: boolean;
     }
   | {
+      deferredFreshLocalDrain?: boolean;
       kind: "scheduled-short-retry";
       record: RunnerStateRecord;
       runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" | "unknown" }>;
@@ -179,6 +173,7 @@ export class HostedUserRunner {
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
   private drainPromise: Promise<HostedWorkspaceInvocationResult> | null = null;
+  private readonly retiredDrainPromises = new WeakSet<Promise<HostedWorkspaceInvocationResult>>();
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -433,14 +428,13 @@ export class HostedUserRunner {
     progress: EnsureRunnerProgressResult,
   ): HostedRunnerNudgeResult {
     const alreadyRunning =
-      progress.kind === "local-drain-active"
-      || progress.kind === "runtime-wake-accepted";
+      progress.kind === "runtime-wake-accepted";
     const immediateDriveStarted =
-      progress.kind === "started"
-      || (
-        progress.kind === "preempted-stale-fence"
-        && progress.drainPromise !== null
-      );
+      (
+        progress.kind === "started"
+        || progress.kind === "preempted-stale-fence"
+      )
+      && progress.drainPromise !== null;
     const nextAlarmAt = progress.kind === "scheduled-short-retry"
       ? readRunnerRuntimeDueAt(progress.record)
       : readRunnerStateAlarmAt(progress.record);
@@ -457,23 +451,6 @@ export class HostedUserRunner {
 
   private async ensureRunnerProgress(input: RunnerDrainInput): Promise<EnsureRunnerProgressResult> {
     const record = await this.stateStore.readState();
-
-    if (this.drainPromise) {
-      const runtimeWake = record.writeFence
-        ? await this.wakeActiveRuntime({
-          attemptId: record.writeFence.attemptId,
-          leaseGeneration: String(record.writeFence.generation),
-          userId: record.userId,
-        })
-        : null;
-      await this.syncAlarm(record);
-      return {
-        drainPromise: this.drainPromise,
-        kind: "local-drain-active",
-        record,
-        runtimeWake,
-      };
-    }
 
     if (record.writeFence) {
       const runtimeWake = await this.wakeActiveRuntime({
@@ -502,41 +479,43 @@ export class HostedUserRunner {
         };
       }
 
-      const previousFence = record.writeFence;
-      if (isRunnerWriteFenceUnexpired(previousFence, Date.now())) {
+      if (this.shouldDeferFreshLocalDrainPreemption(record)) {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
         return {
+          deferredFreshLocalDrain: true,
           kind: "scheduled-short-retry",
           record: retryRecord,
           runtimeWake,
         };
       }
 
+      const previousFence = record.writeFence;
       const preempted = await this.stateStore.clearWriteFenceIfCurrent({
         attemptId: previousFence.attemptId,
         generation: String(previousFence.generation),
         userId: record.userId,
         wakeAt: new Date().toISOString(),
       });
-      await this.syncAlarm(preempted.record);
 
       if (!preempted.preempted) {
+        await this.syncAlarm(preempted.record);
         return await this.ensureRunnerProgress(input);
       }
 
-      const started = this.kickDrain({
+      this.retireCurrentDrainPromise();
+      await this.syncAlarm(preempted.record);
+
+      const drainPromise = this.kickDrain({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: input.reason,
-        wait: false,
       });
       return {
-        drainPromise: this.drainPromise,
+        drainPromise,
         kind: "preempted-stale-fence",
         previousAttemptId: previousFence.attemptId,
-        progressStarted: Boolean(started),
         record: preempted.record,
         runtimeWake,
       };
@@ -548,17 +527,27 @@ export class HostedUserRunner {
       return { kind: "idle", record: due.record };
     }
 
-    const started = this.kickDrain({
+    this.retireCurrentDrainPromise();
+    const drainPromise = this.kickDrain({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       reason: due.reason === "retry" ? "retry" : input.reason,
-      wait: false,
     });
     return {
-      drainPromise: this.drainPromise,
+      drainPromise,
       kind: "started",
       record: due.record,
-      started: Boolean(started),
     };
+  }
+
+  private shouldDeferFreshLocalDrainPreemption(record: RunnerStateRecord): boolean {
+    if (!this.drainPromise || !record.writeFence) {
+      return false;
+    }
+    const startedAt = Date.parse(record.writeFence.startedAt);
+    if (!Number.isFinite(startedAt)) {
+      return false;
+    }
+    return Date.now() - startedAt < LOCAL_DRAIN_START_GRACE_MS;
   }
 
   async runUntilIdleForTest(input: {
@@ -601,17 +590,11 @@ export class HostedUserRunner {
     };
   }
 
-  private kickDrain(input: RunnerDrainInput & {
-    wait: true;
-  }): Promise<HostedWorkspaceInvocationResult> | boolean;
-  private kickDrain(input: RunnerDrainInput & {
-    wait: false;
-  }): boolean;
-  private kickDrain(input: RunnerDrainInput & {
-    wait: boolean;
-  }): Promise<HostedWorkspaceInvocationResult> | boolean {
+  private kickDrain(
+    input: RunnerDrainInput,
+  ): Promise<HostedWorkspaceInvocationResult> | null {
     if (this.drainPromise) {
-      return input.wait ? false : false;
+      return null;
     }
 
     const drain = this.runDrainLoop(input)
@@ -621,10 +604,6 @@ export class HostedUserRunner {
         }
       });
     this.drainPromise = drain;
-
-    if (input.wait) {
-      return drain;
-    }
 
     try {
       this.state.waitUntil?.(drain);
@@ -639,9 +618,20 @@ export class HostedUserRunner {
       });
     }
     void drain.catch(async (error) => {
+      if (this.retiredDrainPromises.has(drain)) {
+        return;
+      }
       await this.scheduleRetryAfterFailure(error);
     });
-    return true;
+    return drain;
+  }
+
+  private retireCurrentDrainPromise(): void {
+    if (!this.drainPromise) {
+      return;
+    }
+    this.retiredDrainPromises.add(this.drainPromise);
+    this.drainPromise = null;
   }
 
   private async runDrainLoop(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
@@ -705,10 +695,27 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
         workspaceVersion,
       });
-      await this.stateStore.clearWriteFenceAfterCompletion({
+      const completed = await this.stateStore.clearWriteFenceAfterCompletion({
         finishedAt: new Date().toISOString(),
         token,
       });
+      if (!completed.completed) {
+        await this.syncAlarm(completed.record);
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            workspaceAttemptId: token.attemptId,
+            workspaceStatus: result.status,
+          },
+          message: "Hosted runner ignored stale runtime wake completion.",
+          phase: "checkpoint",
+          userId: initialRecord.userId,
+        });
+        return {
+          nextWakeAt: readRunnerStateAlarmAt(completed.record),
+          status: "scheduled",
+        };
+      }
       await this.scheduleAfterRuntimeWake({ result });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -730,7 +737,25 @@ export class HostedUserRunner {
         retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
       });
       if (!failed.failed) {
-        throw error;
+        await this.syncAlarm(failed.record);
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            workspaceAttemptId: token.attemptId,
+            workspaceWriteFenceGeneration: token.generation,
+            workspaceReason: input.reason,
+            workspaceVersion,
+          },
+          level: "warn",
+          message: "Hosted runner ignored stale runtime wake failure.",
+          phase: "failed",
+          userId: initialRecord.userId,
+        });
+        return {
+          nextWakeAt: readRunnerStateAlarmAt(failed.record),
+          status: "scheduled",
+        };
       }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -1383,26 +1408,28 @@ function buildEnsureRunnerProgressLogDetails(
 ): HostedExecutionStructuredLogDetails {
   const runtimeWake = readEnsureRunnerProgressRuntimeWake(progress);
   return {
-    alreadyRunning:
-      progress.kind === "local-drain-active"
-      || progress.kind === "runtime-wake-accepted",
+    alreadyRunning: progress.kind === "runtime-wake-accepted",
     immediateDriveStarted:
-      progress.kind === "started"
-      || (
-        progress.kind === "preempted-stale-fence"
-        && progress.drainPromise !== null
-      ),
+      (
+        progress.kind === "started"
+        || progress.kind === "preempted-stale-fence"
+      )
+      && progress.drainPromise !== null,
     progressKind: progress.kind,
     runtimeWakeAccepted: runtimeWake?.kind === "accepted",
     runtimeWakeResult: runtimeWake ? formatRunnerRuntimeWakeResult(runtimeWake) : null,
+    freshLocalDrainPreemptionDeferred:
+      progress.kind === "scheduled-short-retry"
+      && progress.deferredFreshLocalDrain === true,
     staleWriteFencePreempted: progress.kind === "preempted-stale-fence",
     writeFenceHeldAfterNotWakeable:
       progress.kind === "scheduled-short-retry"
-      && runtimeWake?.kind === "not-wakeable",
+      && runtimeWake?.kind === "not-wakeable"
+      && progress.deferredFreshLocalDrain !== true,
     ...(progress.kind === "preempted-stale-fence"
       ? {
         previousAttemptId: progress.previousAttemptId,
-        progressStarted: progress.progressStarted,
+        progressStarted: progress.drainPromise !== null,
       }
       : {}),
     wakePending: progress.record.wakePending,
@@ -1413,22 +1440,13 @@ function readEnsureRunnerProgressRuntimeWake(
   progress: EnsureRunnerProgressResult,
 ): RunnerRuntimeWakeResult | null {
   if (
-    progress.kind === "local-drain-active"
-    || progress.kind === "runtime-wake-accepted"
+    progress.kind === "runtime-wake-accepted"
     || progress.kind === "preempted-stale-fence"
     || progress.kind === "scheduled-short-retry"
   ) {
     return progress.runtimeWake;
   }
   return null;
-}
-
-function isRunnerWriteFenceUnexpired(
-  writeFence: NonNullable<RunnerStateRecord["writeFence"]>,
-  nowMs: number,
-): boolean {
-  const expiresAtMs = Date.parse(writeFence.expiresAt);
-  return Number.isFinite(expiresAtMs) && nowMs < expiresAtMs;
 }
 
 function formatRunnerRuntimeWakeResult(result: RunnerRuntimeWakeResult): string {
