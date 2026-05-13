@@ -991,6 +991,7 @@ describe("buildWranglerVarArgs", () => {
   it("emits only allowlisted non-empty values", () => {
     expect(
       buildWranglerVarArgs({
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "250",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "127.0.0.1",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
@@ -1005,8 +1006,6 @@ describe("buildWranglerVarArgs", () => {
       }),
     ).toEqual([
       "--var",
-      "HOSTED_EXECUTION_RUNNER_HOST_ALIAS:127.0.0.1",
-      "--var",
       "HOSTED_WEB_BASE_URL:http://localhost:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
@@ -1018,6 +1017,10 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
       "--var",
       "NODE_ENV:test",
+      "--var",
+      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:250",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_HOST_ALIAS:127.0.0.1",
       "--var",
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS:60000",
       "--var",

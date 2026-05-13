@@ -1,4 +1,5 @@
 export interface RuntimeWakeSignal {
+  consumePending(): boolean;
   notify(): void;
   wait(signal?: AbortSignal | null): Promise<void>;
 }
@@ -22,6 +23,13 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   };
 
   return {
+    consumePending() {
+      if (!pending || waiters.size > 0) {
+        return false;
+      }
+      pending = false;
+      return true;
+    },
     notify() {
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {

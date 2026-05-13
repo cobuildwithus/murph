@@ -68,6 +68,14 @@
       "path": "fixtures/sample-imports/meals/meal-audio-placeholder.txt"
     },
     {
+      "id": "capture-json",
+      "path": "fixtures/sample-imports/captures/captures.json"
+    },
+    {
+      "id": "measurement-json",
+      "path": "fixtures/sample-imports/measurements/measurement.json"
+    },
+    {
       "id": "heart-rate-csv",
       "path": "fixtures/sample-imports/samples/heart-rate.csv"
     },
@@ -112,6 +120,14 @@
     {
       "id": "meal-add",
       "path": "fixtures/golden-outputs/meal-add"
+    },
+    {
+      "id": "capture-add",
+      "path": "fixtures/golden-outputs/capture-add"
+    },
+    {
+      "id": "measurement-add",
+      "path": "fixtures/golden-outputs/measurement-add"
     },
     {
       "id": "workout-add",
