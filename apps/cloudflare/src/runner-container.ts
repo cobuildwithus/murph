@@ -37,6 +37,9 @@ const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
+const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
+const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
@@ -203,14 +206,18 @@ export class RunnerContainer extends Container {
 
     this.noteRunnerActivity("runtime-wake");
     try {
+      const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
       const response = await this.containerFetch(
         RUNNER_RUNTIME_WAKE_URL,
         {
           method: "POST",
+          signal: runtimeWakeSignal,
         },
       );
       const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
-      await consumeRunnerContainerResponseBody(response);
+      await drainRunnerContainerMetadataResponseBody(response, {
+        signal: runtimeWakeSignal,
+      });
       if (!response.ok || !accepted) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -1379,31 +1386,52 @@ async function assertRunnerHealthy(
   signal?: AbortSignal,
 ): Promise<void> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const abortSignal = signal
+    ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
+    : timeoutSignal;
   const response = await container.containerFetch(
     RUNNER_HEALTH_URL,
     {
       method: "GET",
-      signal: signal
-        ? combineRunnerContainerAbortSignals(signal, timeoutSignal)
-        : timeoutSignal,
+      signal: abortSignal,
     },
   );
 
   const responseOk = response.ok;
-  await consumeRunnerContainerResponseBody(response);
+  await drainRunnerContainerMetadataResponseBody(response, {
+    signal: abortSignal,
+  });
 
   if (!responseOk) {
     throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
   }
 }
 
-async function consumeRunnerContainerResponseBody(response: Response): Promise<void> {
-  if (response.body === null || response.bodyUsed) {
+async function drainRunnerContainerMetadataResponseBody(
+  response: Response,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  const body = response.body;
+  if (body === null || response.bodyUsed) {
     return;
   }
 
-  // Cloudflare Containers decrements containerFetch in-flight activity after the returned body is consumed.
-  await response.arrayBuffer();
+  // Cloudflare Containers decrements containerFetch in-flight activity after small metadata bodies are drained.
+  let bytesRead = 0;
+  const drainTimeoutSignal = AbortSignal.timeout(RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS);
+  const drainSignal = options.signal
+    ? combineRunnerContainerAbortSignals(options.signal, drainTimeoutSignal)
+    : drainTimeoutSignal;
+  await body.pipeTo(new WritableStream<Uint8Array>({
+    write(chunk) {
+      bytesRead += chunk.byteLength;
+      if (bytesRead > RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES) {
+        throw new Error("Runner container metadata response body exceeded the drain limit.");
+      }
+    },
+  }), {
+    signal: drainSignal,
+  });
 }
 
 function readContainerStatus(state: unknown): string | null {
