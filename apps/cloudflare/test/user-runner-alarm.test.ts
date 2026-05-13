@@ -154,8 +154,8 @@ describe("HostedUserRunner wake scheduling", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
-    const wakeRuntime = vi.fn(async () => ({ accepted: true }));
-    const { invoke, runner } = createRunnerHarness({
+    const wakeRuntime = vi.fn(async () => ({ kind: "accepted" as const }));
+    const { invoke, runner, sql } = createRunnerHarness({
       invocationResults: [firstInvocation.promise],
       wakeRuntime,
       workspace: createWorkspaceState({ version: "7" }),
@@ -175,7 +175,12 @@ describe("HostedUserRunner wake scheduling", () => {
       inFlight: true,
     });
 
-    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    const activeFence = readRunnerMeta(sql);
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: activeFence.active_attempt_id,
+      leaseGeneration: String(activeFence.active_generation),
+      userId: "member_123",
+    });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
@@ -229,7 +234,11 @@ describe("HostedUserRunner wake scheduling", () => {
     });
     await flushWaitUntil();
 
-    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: "attempt_stale",
+      leaseGeneration: "2",
+      userId: "member_123",
+    });
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
       leaseGeneration: "3",
@@ -296,7 +305,11 @@ describe("HostedUserRunner wake scheduling", () => {
       nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
 
-    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: "attempt_unknown",
+      leaseGeneration: "2",
+      userId: "member_123",
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: "attempt_unknown",
@@ -904,6 +917,7 @@ function createWorkspaceState(
 function readRunnerMeta(sql: TestSqlStorageLike): {
   active_attempt_id: string | null;
   active_expires_at: string | null;
+  active_generation: number;
   backoff_until: string | null;
   failure_count: number;
   last_error_at: string | null;
@@ -913,6 +927,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   return sql.exec<{
     active_attempt_id: string | null;
     active_expires_at: string | null;
+    active_generation: number;
     backoff_until: string | null;
     failure_count: number;
     last_error_at: string | null;
@@ -921,6 +936,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   }>(
     `SELECT active_attempt_id,
             active_expires_at,
+            active_generation,
             backoff_until,
             failure_count,
             last_error_at,
