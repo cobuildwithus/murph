@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedAiUsageAllowDecision: vi.fn(),
@@ -23,8 +23,15 @@ import {
 } from "@/src/lib/hosted-runner/assistant-nudge";
 
 describe("hosted assistant runner nudge", () => {
+  const consoleWarn = vi.spyOn(console, "warn");
+
+  afterAll(() => {
+    consoleWarn.mockRestore();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    consoleWarn.mockImplementation(() => undefined);
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
       allowed: true,
     });
@@ -85,6 +92,22 @@ describe("hosted assistant runner nudge", () => {
       accepted: false,
       errorCode: "AI_USAGE_GATE_DENIED",
       usageGateDenied: true,
+    });
+
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("reports transient usage gate failures as retryable nudge failures", async () => {
+    mocks.resolveHostedAiUsageGate.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(nudgeHostedAssistantRunnerUserBestEffortResult({
+      context: "webhook:telegram:direct",
+      timeoutMs: 5000,
+      userId: "member_retry",
+    })).resolves.toMatchObject({
+      accepted: false,
+      errorCode: "AI_USAGE_GATE_UNAVAILABLE",
+      usageGateDenied: false,
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();

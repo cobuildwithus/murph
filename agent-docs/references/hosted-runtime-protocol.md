@@ -21,10 +21,11 @@ The live ownership split is:
   same durable nudge workflow.
   Device-sync webhook freshness is different: web records per-webhook
   trace/audit facts, upserts per-connection dirty resources/revisions,
-  completes trace acceptance in the same transaction, and best-effort nudges the
-  runner directly. The runtime pulls pending dirty rows through the required
-  signed dirty-pending callback and acks checkpoint-safe handoff through the
-  required dirty-ack callback.
+  completes trace acceptance in the same transaction, and appends opaque wake
+  pointers for clean-to-dirty transitions and bounded dirty-sweeper recovery.
+  The runtime pulls pending dirty rows through the required signed dirty-pending
+  callback and acks checkpoint-safe handoff through the required dirty-ack
+  callback.
   Stripe webhook ingress verifies the raw Stripe request locally, records only
   minimal receipt state in Postgres, and may start a separate Vercel Workflow
   with only the Stripe event id to retry reconciliation plus any activation
@@ -82,16 +83,17 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 ```
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
-row into a bounded `AssistantInputEvent`, checkpoints the mailbox staged
-watermark, and only then makes one best-effort inbox projection attempt while
-the decoded wake is still in memory. Projection status is logged and local inbox
-artifacts may help the same invocation, but hosted runtime must not take a
-separate workspace checkpoint just to persist projection/cache cleanup. Failed
-projection is not durably retried by hosted runtime unless a future executor
-adds enough typed remote projection reference data to reconstruct the work
-without raw payload duplication. Inbox capture and parser state remain useful
-projections for search, display, attachment enrichment, and debugging, but
-hosted callers must not stage hidden runtime-only inbox rows to make Codex
+row into a bounded `AssistantInputEvent`, stages it in local runtime state,
+marks the active invocation dirty, and checkpoints that dirty state only at the
+final runtime-owned idle/deadline checkpoint. Best-effort inbox projection may
+run while the decoded wake is still in memory. Projection status is logged and
+local inbox artifacts may help the same invocation, but hosted runtime must not
+take a separate workspace checkpoint just to persist projection/cache cleanup.
+Failed projection is not durably retried by hosted runtime unless a future
+executor adds enough typed remote projection reference data to reconstruct the
+work without raw payload duplication. Inbox capture and parser state remain
+useful projections for search, display, attachment enrichment, and debugging,
+but hosted callers must not stage hidden runtime-only inbox rows to make Codex
 admission succeed.
 Invocation-local Worker routes such as artifact writes, browser-vault replica
 writes, provider effects, and mailbox payload decode authorize the current
@@ -166,14 +168,19 @@ Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and runner
 nudges only coalesce pending work.
 
-Hosted device-sync webhook freshness does not append mailbox work and does not
-start the pointer nudge workflow. The route claims the exact provider trace,
-writes sparse audit/signal facts, widens the per-connection dirty row and safe
-dirty resource/window map, completes the trace in the same transaction, then
-best-effort nudges the user runner. The dirty sweeper is the bounded recovery
-backstop for missed direct nudges. The runtime must support dirty-pending and
-dirty-ack callbacks; dirty ack means the dirty revision was handed off into the
-checkpointed local device-sync job store, not that upstream provider sync
+Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
+completion. The route claims the exact provider trace, writes sparse
+audit/signal facts, widens the per-connection dirty row and safe dirty
+resource/window map, completes the trace in the same transaction, and appends an
+opaque `device-sync.wake` mailbox pointer only when the dirty row transitions
+from clean to dirty. The pointer workflow may retry the runner nudge by mailbox
+item id; it must not carry provider payloads or become the device-sync queue.
+The dirty sweeper is the bounded recovery backstop for dirty rows that remain
+pending after a missed, denied, or insufficient wake: each sweep attempt for a
+still-dirty revision appends a fresh opaque wake pointer so an already-imported
+pointer cannot make recovery one-shot. The runtime must support dirty-pending
+and dirty-ack callbacks; dirty ack means the dirty revision was handed off into
+the checkpointed local device-sync job store, not that upstream provider sync
 succeeded. Connection-established and disconnect lifecycle commands may still
 use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
@@ -214,27 +221,28 @@ authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
 Fetching after restore keeps user messages appended during restore visible to
 the same invocation instead of hiding them behind a stale pre-restore read. The
-runtime stages decoded conversation rows as assistant input, checkpoints
-immediately after staging, and attempts inbox projection once as a
-post-checkpoint enrichment effect before assistant admission. Projection status
-is logged and artifacts remain rebuildable best-effort state rather than a
-reason to take another workspace checkpoint, so failed or slow projection does
-not delay the staged mailbox watermark and does not imply a durable retry queue.
-Successful projection may make parsed or bounded attachment evidence available
-to the same assistant turn.
+runtime stages decoded conversation rows as assistant input, marks the active
+invocation dirty, and checkpoints that local runtime state at the final
+idle/deadline checkpoint. Foreground runtime work may defer intermediate
+checkpoints; the active invocation remains dirty until the runtime-owned
+idle/deadline checkpoint succeeds. Projection status is logged and artifacts
+remain rebuildable best-effort state rather than a reason to take another
+workspace checkpoint, so failed or slow projection does not block assistant
+admission and does not imply a durable retry queue. Successful projection may
+make parsed or bounded attachment evidence available to the same assistant turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
-watermarks, and the runtime/checkpoint result carries the next fast mailbox
-retry wake so Cloudflare can promptly reinvoke the workspace.
+watermarks, and the runtime result carries the next fast mailbox retry wake so
+Cloudflare can promptly reinvoke the workspace.
 Cloudflare does not treat runtime-reported deferred checkpoint state as scheduler
-state. Quiet successful foreground completion records pending warm checkpoint
-state in RunnerContainer memory, and the public runtime result contract does not
-carry a deferred-checkpoint scheduler hint. The next foreground wake uses the
-normal UserRunner write fence and outranks idle maintenance because activity
-expiry yields while a workspace invocation is active. Browser-vault refresh now
-enters through normal runtime work with the active write fence rather than a
-separate container refresh route, and failure or staleness cannot mutate runner
+state. RunnerContainer never records pending checkpoint intent in memory, and
+the public runtime result contract does not carry a deferred-checkpoint
+scheduler hint. The next foreground wake uses the normal UserRunner write fence
+and outranks activity-expiry cleanup because activity expiry is cleanup-only and
+yields while a workspace invocation is active. Browser-vault refresh now enters
+through normal runtime work with the active write fence rather than a separate
+container refresh route, and failure or staleness cannot mutate runner
 checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
@@ -263,23 +271,25 @@ instead of terminal. Non-idempotent POST sends still fail closed unless the
 provider confirms a safe retry contract.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
-worker isolate, or runner container resets after mailbox import checkpointing
-but before assistant handling, the next invocation starts with an advanced
-mailbox watermark and no new fetched items. That must still run the assistant
+worker isolate, or runner container resets after local mailbox staging but
+before the final runtime-owned idle/deadline checkpoint succeeds, the next
+invocation reimports from the web-owned mailbox because the staged watermark was
+never checkpointed. If reset happens after a successful final checkpoint but
+before terminal handling, the next invocation must still run the assistant
 phase, because replay authority comes from staged assistant input plus missing
 terminal auto-reply evidence, not from mailbox import progress.
 
 Mailbox import has no provider-visible pre-assistant side-effect phase.
-Provider-visible cleanup and read acknowledgement must not run between import
-checkpoint and assistant admission. Local inbox projection and parser enrichment
-may run after the import checkpoint and before assistant admission because they
-only update rebuildable local projection artifacts and `AssistantInputEvent`
+Provider-visible cleanup and read acknowledgement must not run between local
+mailbox staging and assistant admission. Local inbox projection and parser
+enrichment may run after local staging and before assistant admission because
+they only update rebuildable local projection artifacts and `AssistantInputEvent`
 projection metadata. These projection updates must not request an additional
 workspace checkpoint. Linq inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
-drained through the hosted provider-cleanup retry state after the next workspace
-checkpoint.
+drained through the hosted provider-cleanup retry state after the next successful
+runtime-owned idle/deadline workspace checkpoint.
 
 The hosted workspace checkpoint ref may be a full/base workspace bundle, a
 working `{base, delta}` ref, or a legacy layered `{base, hot}` ref. Full/base

@@ -282,7 +282,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
           .replace(/\bBearer\s+\S+/giu, "Bearer [redacted]")
           .replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
       : null),
-  sha256Hex: vi.fn(),
+  sha256Hex: vi.fn(() => "a".repeat(64)),
   toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
   toJsonRecord: vi.fn((value: unknown) => value),
 }));
@@ -1268,7 +1268,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         connectionId: "dsc_123",
-        eventId: "device-sync:webhook-hint:user-123:oura:dsc_123:trace_123",
+        eventId: expect.stringMatching(/^device-sync:webhook-hint:[0-9a-f]{32}$/u),
         kind: "device-sync.wake",
         provider: "oura",
         reason: "webhook_hint",
@@ -1276,6 +1276,10 @@ describe("appendHostedDeviceSyncWake", () => {
       }),
       tx: mocks.prismaTx,
     });
+    const wakeEventId = mocks.appendHostedMailboxEnvelope.mock.calls[0]?.[0]?.envelope.eventId;
+    expect(wakeEventId).not.toContain("user-123");
+    expect(wakeEventId).not.toContain("dsc_123");
+    expect(wakeEventId).not.toContain("trace_123");
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
       source: "device-sync",
