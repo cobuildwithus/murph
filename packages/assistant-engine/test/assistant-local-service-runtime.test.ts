@@ -2559,7 +2559,8 @@ test('active-turn controller retries boundary admission after non-fatal input-av
   }
 })
 
-test('active-turn controller can rely on input-available notifications instead of boundary polling', async () => {
+test('active-turn controller only probes input after explicit notification or provider boundary', async () => {
+  vi.useFakeTimers()
   const {
     createAssistantActiveTurnInputController,
     notifyAssistantActiveTurnInputAvailable,
@@ -2588,11 +2589,10 @@ test('active-turn controller can rely on input-available notifications instead o
           },
         ],
       }
-	    },
-	    boundaryAdmissionEnabled: false,
-	    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
-	    livePollEnabled: false,
-	    sessionId: 'session-test',
+    },
+    boundaryAdmissionEnabled: false,
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
   })
@@ -2606,6 +2606,10 @@ test('active-turn controller can rely on input-available notifications instead o
   })
 
   try {
+    await vi.advanceTimersByTimeAsync(1500)
+    assert.deepEqual(admissions, [])
+    expect(steer).not.toHaveBeenCalled()
+
     assert.equal(await controller.admit({
       phase: 'request_boundary',
       sessionId: 'session-test',
@@ -2664,7 +2668,7 @@ test('active-turn controller can rely on input-available notifications instead o
   }
 })
 
-test('active-turn controller can poll store-backed input before provider execution', async () => {
+test('active-turn controller can probe store-backed input before provider execution', async () => {
   const {
     createAssistantActiveTurnInputController,
   } = await import('../src/assistant/active-turn-input-controller.ts')
@@ -2689,14 +2693,13 @@ test('active-turn controller can poll store-backed input before provider executi
     boundaryAdmissionEnabled: false,
     conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
     eventAdmissionEnabled: false,
-    livePollEnabled: false,
     sessionId: 'session-test',
     turnId: 'turn-active',
     vault: '/vaults/test',
   })
 
   try {
-    assert.deepEqual(await controller.admitAvailable({ pollIfIdle: true }), {
+    assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
       acceptedInputs: [
         {
           id: 'hook-polled',

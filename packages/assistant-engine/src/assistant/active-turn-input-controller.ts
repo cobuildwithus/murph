@@ -56,7 +56,6 @@ class AssistantActiveTurnInputController {
   private fatalAdmissionError: unknown = null
   private inputAvailableAdmission: Promise<AssistantActiveTurnInputAdmissionResult | undefined> | null = null
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
-  private livePump: Promise<void> | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private completion:
     | {
@@ -74,7 +73,6 @@ class AssistantActiveTurnInputController {
       }) => Promise<void>
       boundaryAdmissionEnabled?: boolean
       eventAdmissionEnabled?: boolean
-      livePollEnabled?: boolean
       sessionId: string
       turnId: string
       vault: string
@@ -116,10 +114,10 @@ class AssistantActiveTurnInputController {
       return Promise.resolve(undefined)
     }
 
-    return this.pollInputAvailable(input)
+    return this.runInputAvailableAdmission(input)
   }
 
-  private pollInputAvailable(input?: {
+  private runInputAvailableAdmission(input?: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     return this.admitAvailableInput({
@@ -148,7 +146,6 @@ class AssistantActiveTurnInputController {
     }
 
     this.liveProviderTurn = input
-    this.startLiveInputPump()
     this.tryStartLiveSteers()
 
     return () => {
@@ -175,7 +172,7 @@ class AssistantActiveTurnInputController {
   }
 
   async admitAvailable(input?: {
-    pollIfIdle?: boolean
+    probeIfIdle?: boolean
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     this.throwFatalAdmissionError()
@@ -186,11 +183,11 @@ class AssistantActiveTurnInputController {
 
     await this.waitForInputAvailableAdmission()
     const notifiedAdmission = await this.admitPending()
-    if (notifiedAdmission?.kind === 'accepted' || input?.pollIfIdle !== true) {
+    if (notifiedAdmission?.kind === 'accepted' || input?.probeIfIdle !== true) {
       return notifiedAdmission
     }
 
-    await this.pollInputAvailable({ signal: input.signal })
+    await this.runInputAvailableAdmission({ signal: input.signal })
     return await this.admitPending()
   }
 
@@ -437,31 +434,6 @@ class AssistantActiveTurnInputController {
     }
   }
 
-  private startLiveInputPump(): void {
-    if (
-      this.livePump ||
-      !this.input.admissionHook ||
-      this.input.livePollEnabled === false
-    ) {
-      return
-    }
-
-    this.livePump = (async () => {
-      while (!this.closed && this.liveProviderTurn) {
-        await delayActiveTurnInputPumpTick()
-        if (this.closed || !this.liveProviderTurn) {
-          break
-        }
-        await this.notifyInputAvailable().catch(() => undefined)
-      }
-    })().finally(() => {
-      this.livePump = null
-      if (!this.closed && this.liveProviderTurn) {
-        this.startLiveInputPump()
-      }
-    })
-  }
-
   private async handleInputAvailableAdmissionError(error: unknown): Promise<void> {
     if (!isAssistantActiveTurnInputCheckpointRejectedError(error)) {
       return
@@ -486,7 +458,6 @@ export function createAssistantActiveTurnInputController(input: {
   boundaryAdmissionEnabled?: boolean
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean
-  livePollEnabled?: boolean
   sessionId: string
   turnId: string
   vault: string
@@ -495,7 +466,7 @@ export function createAssistantActiveTurnInputController(input: {
     AssistantActiveTurnInputAdmissionResult | undefined
   >
   admitAvailable(input?: {
-    pollIfIdle?: boolean
+    probeIfIdle?: boolean
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
@@ -512,7 +483,6 @@ export function createAssistantActiveTurnInputController(input: {
     admissionHook: input.admissionHook,
     boundaryAdmissionEnabled: input.boundaryAdmissionEnabled,
     eventAdmissionEnabled: input.eventAdmissionEnabled,
-    livePollEnabled: input.livePollEnabled,
     sessionId: input.sessionId,
     turnId: input.turnId,
     vault: input.vault,
@@ -813,13 +783,4 @@ function buildManualAcceptedActiveTurnInputAdmission(input: {
     transcriptText: null,
     userMessageContent: buildQueuedActiveTurnUserMessageContent([input.input]),
   }
-}
-
-async function delayActiveTurnInputPumpTick(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, 1000)
-    if (typeof timer === 'object' && typeof timer.unref === 'function') {
-      timer.unref()
-    }
-  })
 }
