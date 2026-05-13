@@ -4862,9 +4862,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
-  it('defers provider work when a live group has a persisted retry delay that is not due', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T00:00:10.000Z'))
+  it('ignores failed receipt retry metadata when scanner owns retry', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
@@ -4920,15 +4918,21 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
+      advanceCursor: true,
+      checkpointRequired: true,
       failed: 0,
-      nextWakeAt: '2026-04-08T00:05:00.000Z',
-      replied: 0,
-      skipped: 1,
-      stopScanning: true,
+      nextWakeAt: null,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
     })
-    expect(replyMocks.prepareAssistantAutoReplyInput).not.toHaveBeenCalled()
-    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenCalledOnce()
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-persisted-retry-delay'],
+        outcome: 'result',
+      }))
     expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
       .not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)

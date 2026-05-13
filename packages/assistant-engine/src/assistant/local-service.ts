@@ -64,10 +64,6 @@ import {
   type AssistantProviderThreadScope,
 } from './provider-turn-runner.js'
 import {
-  AUTO_REPLY_RECEIPT_RETRY_AT_KEY,
-  computeAssistantAutoReplyRetryAt,
-} from './automation/auto-reply-retry.js'
-import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
@@ -709,9 +705,6 @@ export async function sendAssistantMessageLocal(
           }),
         )
 
-        const autoReplyRetryAt = input.turnTrigger === 'automation-auto-reply'
-          ? computeAssistantAutoReplyRetryAt(error, Date.parse(failedAt))
-          : null
         await runAssistantTurnBestEffort(() =>
           finalizeAssistantTurnReceipt({
             vault: input.vault,
@@ -722,9 +715,7 @@ export async function sendAssistantMessageLocal(
             error: normalizedError,
             response: responseText,
             completedAt: failedAt,
-            metadata: autoReplyRetryAt
-              ? { [AUTO_REPLY_RECEIPT_RETRY_AT_KEY]: autoReplyRetryAt }
-              : null,
+            metadata: null,
           }),
         )
 
