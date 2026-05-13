@@ -33,7 +33,7 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
     planningMocks.resolveAssistantCliSurfaceBootstrapContext,
 }))
 
-vi.mock('../src/assistant/provider-registry.js', () => ({
+vi.mock('../src/assistant/codex-runtime.js', () => ({
   resolveCodexAssistantTargetCapabilities:
     planningMocks.resolveCodexAssistantTargetCapabilities,
 }))
@@ -45,14 +45,14 @@ vi.mock('../src/assistant/vault-overview.js', () => ({
 
 import {
   resolveAssistantRouteTurnPlan,
-  type AssistantProviderTurnResolvedExecutionProfile,
-} from '../src/assistant/provider-turn/planning.js'
+  type AssistantCodexTurnResolvedExecutionProfile,
+} from '../src/assistant/codex-turn/planning.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import type { AssistantActiveTurnProviderHistory } from '../src/assistant/active-turn-history.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
-import type { CodexThreadIdentity } from '../src/assistant/provider-route.js'
+import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 afterEach(() => {
   runtimeMocks.listGeneratedAssistantProtocolIndexEntries.mockReset()
@@ -68,7 +68,7 @@ describe('assistant protocol index planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
@@ -109,7 +109,7 @@ describe('assistant protocol index planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
@@ -153,7 +153,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(resumedPlan.resumeProviderSessionId).toBe('thread-resume')
+    expect(resumedPlan.resumeCodexThreadId).toBe('thread-resume')
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
@@ -174,7 +174,7 @@ describe('assistant protocol index planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
@@ -225,7 +225,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(resumedPlan.resumeProviderSessionId).toBe('thread-active-turn')
+    expect(resumedPlan.resumeCodexThreadId).toBe('thread-active-turn')
     expect(resumedPlan.refreshThreadInstructions).toBe(false)
     expect(resumedPlan.activeTurnMessages).toEqual([
       {
@@ -237,7 +237,7 @@ describe('assistant protocol index planning', () => {
         role: 'assistant',
       },
     ])
-    expect(resumedPlan.providerContinuation).toEqual({
+    expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
     })
   })
@@ -252,7 +252,7 @@ describe('assistant protocol index planning', () => {
     const session = createSession({
       turnCount: 1,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
@@ -294,7 +294,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resumeProviderSessionId).toBeNull()
+      expect(plan.resumeCodexThreadId).toBeNull()
       expect('conversationMessages' in plan).toBe(false)
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -311,7 +311,7 @@ describe('assistant protocol index planning', () => {
     const session = createSession({
       turnCount: 1,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'isolated-thread',
       toolProfile: 'provider-turn',
@@ -345,7 +345,7 @@ describe('assistant protocol index planning', () => {
         sharedPlan: createSharedPlan(),
       })
 
-      expect(plan.resumeProviderSessionId).toBeNull()
+      expect(plan.resumeCodexThreadId).toBeNull()
       expect('conversationMessages' in plan).toBe(false)
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -358,7 +358,7 @@ describe('assistant protocol index planning', () => {
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
-    const executionProfile: AssistantProviderTurnResolvedExecutionProfile = {
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
@@ -383,7 +383,7 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(plan.resumeProviderSessionId).toBeNull()
+    expect(plan.resumeCodexThreadId).toBeNull()
     expect(plan.refreshThreadInstructions).toBe(true)
     expect(plan.developerInstructions).toContain('bootstrap contract')
     expect(

@@ -13,7 +13,7 @@ import {
 } from '@murphai/health-commons/runtime'
 import {
   resolveCodexAssistantTargetCapabilities,
-} from '../provider-registry.js'
+} from '../codex-runtime.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
 import {
   resolveAssistantCliSurfaceBootstrapContext,
@@ -24,7 +24,7 @@ import {
 } from '../execution-context.js'
 import {
   type CodexThreadIdentity,
-} from '../provider-route.js'
+} from '../codex-thread-route.js'
 import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
@@ -34,7 +34,7 @@ import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
 import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
-} from '../provider-binding.js'
+} from '../codex-resume-binding.js'
 import {
   readAssistantSessionResumeState,
 } from '../provider-state.js'
@@ -57,7 +57,7 @@ import {
   type AssistantActiveTurnProviderHistoryMessage,
 } from '../active-turn-history.js'
 import type {
-  AssistantProviderContinuation,
+  AssistantCodexContinuation,
 } from '../active-turn-input-journal.js'
 import { normalizeNullableString } from '../shared.js'
 
@@ -69,9 +69,9 @@ export interface AssistantRouteTurnPlan {
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   freshThreadFallback?: AssistantRouteFreshThreadFallbackPlan
   onboardingGuidanceInjected: boolean
-  providerContinuation: AssistantProviderContinuation
+  codexContinuation: AssistantCodexContinuation
   refreshThreadInstructions: boolean
-  resumeProviderSessionId: string | null
+  resumeCodexThreadId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
   }
@@ -100,86 +100,86 @@ export interface AssistantPromptTimeContext {
   currentTimeZone: string
 }
 
-export type AssistantProviderTurnPromptProfile =
+export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'notification-decision'
 
-export type AssistantProviderTurnToolProfile =
+export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
 
-export type AssistantProviderThreadScope =
+export type AssistantCodexThreadScope =
   | 'session-thread'
   | 'isolated-thread'
 
-export type AssistantProviderTurnNativeResumePolicy =
+export type AssistantCodexTurnNativeResumePolicy =
   | 'default'
   | 'disabled'
 
-export interface AssistantProviderTurnExecutionProfile {
-  nativeResumePolicy?: AssistantProviderTurnNativeResumePolicy
-  promptProfile?: AssistantProviderTurnPromptProfile
-  threadScope?: AssistantProviderThreadScope
-  toolProfile?: AssistantProviderTurnToolProfile
+export interface AssistantCodexTurnExecutionProfile {
+  nativeResumePolicy?: AssistantCodexTurnNativeResumePolicy
+  promptProfile?: AssistantCodexTurnPromptProfile
+  threadScope?: AssistantCodexThreadScope
+  toolProfile?: AssistantCodexTurnToolProfile
 }
 
-export interface AssistantProviderTurnThreadScopeProfile
-  extends AssistantProviderTurnExecutionProfile {}
+export interface AssistantCodexTurnThreadScopeProfile
+  extends AssistantCodexTurnExecutionProfile {}
 
-export type AssistantProviderTurnResolvedExecutionProfile =
-  Required<Omit<AssistantProviderTurnExecutionProfile, 'nativeResumePolicy'>>
+export type AssistantCodexTurnResolvedExecutionProfile =
+  Required<Omit<AssistantCodexTurnExecutionProfile, 'nativeResumePolicy'>>
 
-export interface AssistantProviderThreadPlan {
+export interface AssistantCodexThreadPlan {
   onboardingGuidanceInjected: boolean
-  resumeProviderSessionId: string | null
+  resumeCodexThreadId: string | null
   shouldInjectBootstrapContext: boolean
 }
 
-export interface AssistantProviderTurnExecutionPlan {
+export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   activeTurnHistory: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
-  profile: AssistantProviderTurnResolvedExecutionProfile
+  profile: AssistantCodexTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }
 
-export interface AssistantProviderAttemptPlan {
+export interface AssistantCodexAttemptPlan {
   attemptCount: number
   route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
 
-export function resolveAssistantProviderThreadPlan(input: {
-  candidateResumeProviderSessionId: string | null
+export function resolveAssistantCodexThreadPlan(input: {
+  candidateResumeCodexThreadId: string | null
   onboardingGuidanceOpen: boolean
-  promptProfile: AssistantProviderTurnPromptProfile
-}): AssistantProviderThreadPlan {
-  const resumeProviderSessionId = input.candidateResumeProviderSessionId
-  const shouldInjectBootstrapContext = resumeProviderSessionId === null
+  promptProfile: AssistantCodexTurnPromptProfile
+}): AssistantCodexThreadPlan {
+  const resumeCodexThreadId = input.candidateResumeCodexThreadId
+  const shouldInjectBootstrapContext = resumeCodexThreadId === null
   const onboardingGuidanceInjected =
     input.promptProfile === 'conversation' &&
     input.onboardingGuidanceOpen
 
   return {
     onboardingGuidanceInjected,
-    resumeProviderSessionId,
+    resumeCodexThreadId,
     shouldInjectBootstrapContext,
   }
 }
 
-function resolveAssistantProviderTurnExecutionProfile(
+function resolveAssistantCodexTurnExecutionProfile(
   input: {
-    profile: AssistantProviderTurnThreadScopeProfile | null | undefined
+    profile: AssistantCodexTurnThreadScopeProfile | null | undefined
     turnTrigger: AssistantTurnTrigger | null | undefined
   },
-): AssistantProviderTurnResolvedExecutionProfile {
-  const threadScope = resolveAssistantProviderThreadScope({
+): AssistantCodexTurnResolvedExecutionProfile {
+  const threadScope = resolveAssistantCodexThreadScope({
     profile: input.profile,
     turnTrigger: input.turnTrigger,
   })
@@ -191,10 +191,10 @@ function resolveAssistantProviderTurnExecutionProfile(
   }
 }
 
-export function resolveAssistantProviderThreadScope(input: {
-  profile?: AssistantProviderTurnThreadScopeProfile | null
+export function resolveAssistantCodexThreadScope(input: {
+  profile?: AssistantCodexTurnThreadScopeProfile | null
   turnTrigger?: AssistantTurnTrigger | null
-}): AssistantProviderThreadScope {
+}): AssistantCodexThreadScope {
   if (
     input.profile?.threadScope === 'isolated-thread' ||
     input.profile?.nativeResumePolicy === 'disabled'
@@ -217,17 +217,17 @@ export function resolveAssistantProviderThreadScope(input: {
   return 'session-thread'
 }
 
-export async function buildAssistantProviderTurnExecutionPlan(input: {
+export async function buildCodexTurnExecutionPlan(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnThreadScopeProfile | null
+  profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   turnCreatedAt: string
   turnId: string
-}): Promise<AssistantProviderTurnExecutionPlan> {
+}): Promise<AssistantCodexTurnExecutionPlan> {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
   const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
@@ -236,7 +236,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-  const profile = resolveAssistantProviderTurnExecutionProfile({
+  const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
     turnTrigger: input.input.turnTrigger,
   })
@@ -256,11 +256,11 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
   }
 }
 
-export async function buildCodexProviderAttemptPlan(input: {
+export async function buildCodexTurnAttemptPlan(input: {
   attemptCount: number
-  executionPlan: AssistantProviderTurnExecutionPlan
+  executionPlan: AssistantCodexTurnExecutionPlan
   session: AssistantSession
-}): Promise<AssistantProviderAttemptPlan> {
+}): Promise<AssistantCodexAttemptPlan> {
   const route = input.executionPlan.route
   return {
     attemptCount: input.attemptCount,
@@ -283,7 +283,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   input: AssistantMessageInput
-  profile: AssistantProviderTurnResolvedExecutionProfile
+  profile: AssistantCodexTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   session: AssistantSession
@@ -300,25 +300,25 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const activeTurnHistory = input.activeTurnHistory ?? null
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
-  const candidateResumeProviderSessionId =
+  const candidateResumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
-      ? resolveAssistantEffectiveProviderResumeSessionId({
-          resumeProviderSessionId: resolveAssistantProviderResumeKey({
+      ? resolveAssistantEffectiveCodexResumeThreadId({
+          resumeCodexThreadId: resolveAssistantProviderResumeKey({
             resumeState: resumeBinding,
           }),
         })
       : null
-  const threadPlan = resolveAssistantProviderThreadPlan({
-    candidateResumeProviderSessionId,
+  const threadPlan = resolveAssistantCodexThreadPlan({
+    candidateResumeCodexThreadId,
     onboardingGuidanceOpen: input.sharedPlan.onboardingGuidanceOpen,
     promptProfile: input.profile.promptProfile,
   })
-  const resumeProviderSessionId = threadPlan.resumeProviderSessionId
+  const resumeCodexThreadId = threadPlan.resumeCodexThreadId
   const shouldInjectBootstrapContext = threadPlan.shouldInjectBootstrapContext
   const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const shouldPrepareFreshThreadFallback = resumeProviderSessionId !== null
+  const shouldPrepareFreshThreadFallback = resumeCodexThreadId !== null
   const shouldPrepareAnyBootstrapContext =
     shouldPrepareBootstrapContext || shouldPrepareFreshThreadFallback
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
@@ -436,10 +436,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         injectOnboardingGuidance: shouldInjectOnboardingGuidance,
       })
     : null
-  const refreshThreadInstructions = resumeProviderSessionId === null
+  const refreshThreadInstructions = resumeCodexThreadId === null
   const systemPrompt = systemPromptResult.prompt
   const developerInstructions =
-    resumeProviderSessionId === null
+    resumeCodexThreadId === null
       ? buildDeveloperInstructions(systemPromptResult)
       : null
   const turnContextPrompt = normalizeNullableString(
@@ -467,11 +467,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     diagnosticsPolicy,
     freshThreadFallback,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
-    providerContinuation: resolveAssistantProviderContinuation({
-      resumeProviderSessionId,
+    codexContinuation: resolveAssistantCodexContinuation({
+      resumeCodexThreadId,
     }),
     refreshThreadInstructions,
-    resumeProviderSessionId,
+    resumeCodexThreadId,
     sessionContext: shouldPrepareBootstrapContext
       ? {
           binding: input.session.binding,
@@ -552,10 +552,10 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
   }
 }
 
-function resolveAssistantProviderContinuation(input: {
-  resumeProviderSessionId: string | null
-}): AssistantProviderContinuation {
-  if (input.resumeProviderSessionId) {
+function resolveAssistantCodexContinuation(input: {
+  resumeCodexThreadId: string | null
+}): AssistantCodexContinuation {
+  if (input.resumeCodexThreadId) {
     return {
       kind: 'provider-state-optimization',
     }
@@ -566,8 +566,8 @@ function resolveAssistantProviderContinuation(input: {
   }
 }
 
-function resolveAssistantEffectiveProviderResumeSessionId(input: {
-  resumeProviderSessionId: string | null
+function resolveAssistantEffectiveCodexResumeThreadId(input: {
+  resumeCodexThreadId: string | null
 }): string | null {
-  return normalizeNullableString(input.resumeProviderSessionId)
+  return normalizeNullableString(input.resumeCodexThreadId)
 }

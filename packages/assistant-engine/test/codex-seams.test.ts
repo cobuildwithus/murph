@@ -18,7 +18,7 @@ import {
 } from '../src/assistant/provider-progress.ts'
 import {
   annotateRecoveredCodexThreadIdForDiagnostics,
-  extractRecoveredProviderSessionId,
+  extractRecoveredCodexThreadId,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
   isAssistantProviderStalledError,
@@ -30,30 +30,30 @@ import {
   doesAssistantResumeBindingMatchRoute,
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
-} from '../src/assistant/provider-binding.ts'
+} from '../src/assistant/codex-resume-binding.ts'
 import {
   normalizeAssistantSessionResumeState,
   readAssistantCodexRolloutRelativePath,
   readAssistantProviderResumeRouteId,
-  readAssistantProviderSessionId,
+  readAssistantCodexThreadId,
   readAssistantSessionResumeState,
   serializeAssistantSessionForPersistence,
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionCodexRolloutRelativePath,
-  writeAssistantSessionProviderSessionId,
+  writeAssistantSessionCodexThreadId,
   writeAssistantSessionThreadInstructionsFingerprint,
 } from '../src/assistant/provider-state.ts'
 import {
   buildCodexThreadIdentity,
   type CodexThreadIdentity,
-} from '../src/assistant/provider-route.ts'
+} from '../src/assistant/codex-thread-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
-const codexProviderSessionId = '00000000-0000-4000-8000-000000000123'
+const codexThreadId = '00000000-0000-4000-8000-000000000123'
 const codexRolloutRelativePath =
-  `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexProviderSessionId}.jsonl`
+  `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${codexThreadId}.jsonl`
 
 afterEach(async () => {
   await Promise.all(
@@ -66,7 +66,7 @@ afterEach(async () => {
   )
 })
 
-describe('assistant provider seam helpers', () => {
+describe('assistant Codex seam helpers', () => {
   it('stabilizes hosted Codex homes without dropping explicit local Codex home identity', () => {
     const firstHostedRoute = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
@@ -103,7 +103,7 @@ describe('assistant provider seam helpers', () => {
 
   it('matches resume bindings only when the stored route id matches exactly', () => {
     const previousResumeState = {
-      providerSessionId: 'provider_session_alpha',
+      threadId: 'provider_session_alpha',
       resumeRouteId: 'route-primary',
     }
     const rotatedRoute = createRoute({
@@ -155,13 +155,13 @@ describe('assistant provider seam helpers', () => {
     cleanupPaths.push(parentRoot)
 
     const session = createAssistantSession({
-      providerSessionId: 'provider_session_old',
+      codexThreadId: 'provider_session_old',
       resumeRouteId: 'route-primary',
     })
     const error = {
       context: {
         connectionLost: true,
-        providerSessionId: ' provider_session_new ',
+        codexThreadId: ' provider_session_new ',
       },
     }
 
@@ -181,7 +181,7 @@ describe('assistant provider seam helpers', () => {
   it('keeps provider failure diagnostics metadata-only and ignores non-recoverable states', () => {
     const skipped = {
       context: {
-        providerSessionId: 'provider_session_current',
+        codexThreadId: 'provider_session_current',
       },
     }
     annotateRecoveredCodexThreadIdForDiagnostics(skipped)
@@ -191,7 +191,7 @@ describe('assistant provider seam helpers', () => {
     const error = {
       context: {
         connectionLost: true,
-        providerSessionId: 'provider_session_recovered',
+        codexThreadId: 'provider_session_recovered',
         requestId: 'req_123',
       },
     }
@@ -206,7 +206,7 @@ describe('assistant provider seam helpers', () => {
     const interrupted = {
       context: {
         interrupted: true,
-        providerSessionId: ' provider_session_interrupted ',
+        codexThreadId: ' provider_session_interrupted ',
       },
     }
     annotateRecoveredCodexThreadIdForDiagnostics(interrupted)
@@ -282,7 +282,7 @@ describe('assistant provider seam helpers', () => {
   it('normalizes resumable state and only persists explicit resume state', () => {
     expect(
       normalizeAssistantSessionResumeState({
-        providerSessionId: '   ',
+        threadId: '   ',
         resumeRouteId: ' route-primary ',
       }),
     ).toBeNull()
@@ -292,13 +292,13 @@ describe('assistant provider seam helpers', () => {
       resumeState: {
         rolloutRelativePath: codexRolloutRelativePath,
         routeFingerprint: 'route-resume',
-        threadId: codexProviderSessionId,
+        threadId: codexThreadId,
       },
     })
     expect(persisted.codexResume).toEqual({
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-resume',
-      threadId: codexProviderSessionId,
+      threadId: codexThreadId,
     })
     expect(readAssistantCodexRolloutRelativePath(persisted)).toBe(codexRolloutRelativePath)
 
@@ -321,10 +321,10 @@ describe('assistant provider seam helpers', () => {
       threadId: 'canonical-thread',
     })
     expect(writeAssistantProviderResumeRouteId(null, null)).toBeNull()
-    expect(writeAssistantSessionProviderSessionId(null, null)).toBeNull()
+    expect(writeAssistantSessionCodexThreadId(null, null)).toBeNull()
     expect(
       writeAssistantProviderResumeRouteId(
-        writeAssistantSessionProviderSessionId(null, null),
+        writeAssistantSessionCodexThreadId(null, null),
         'route-only',
       ),
     ).toBeNull()
@@ -333,38 +333,38 @@ describe('assistant provider seam helpers', () => {
         {
           rolloutRelativePath: codexRolloutRelativePath,
           routeFingerprint: 'route-resume',
-          threadId: codexProviderSessionId,
+          threadId: codexThreadId,
         },
         `thread-instructions-v1:${'c'.repeat(64)}:${'d'.repeat(64)}`,
       ),
     ).toEqual({
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-resume',
-      threadId: codexProviderSessionId,
+      threadId: codexThreadId,
     })
     expect(
       writeAssistantSessionCodexRolloutRelativePath(
         {
           routeFingerprint: 'route-resume',
-          threadId: codexProviderSessionId,
+          threadId: codexThreadId,
         },
         codexRolloutRelativePath,
       ),
     ).toEqual({
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-resume',
-      threadId: codexProviderSessionId,
+      threadId: codexThreadId,
     })
     expect(
       resolveAssistantResumeStateFromProviderTurn({
         codexRolloutRelativePath,
-        providerSessionId: codexProviderSessionId,
+        codexThreadId: codexThreadId,
         routeFingerprint: 'route-resume',
       }),
     ).toEqual({
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-resume',
-      threadId: codexProviderSessionId,
+      threadId: codexThreadId,
     })
 
     const missingTargetSession = createAssistantSession()
@@ -380,21 +380,21 @@ describe('assistant provider seam helpers', () => {
       context: {
         connectionLost: true,
         interrupted: true,
-        providerSessionId: ' provider_session_recovered ',
+        codexThreadId: ' provider_session_recovered ',
         providerStalled: true,
       },
     }
 
-    expect(extractRecoveredProviderSessionId(error)).toBe('provider_session_recovered')
+    expect(extractRecoveredCodexThreadId(error)).toBe('provider_session_recovered')
     expect(isAssistantProviderConnectionLostError(error)).toBe(true)
     expect(isAssistantProviderInterruptedError(error)).toBe(true)
     expect(isAssistantProviderStalledError(error)).toBe(true)
-    expect(extractRecoveredProviderSessionId({ context: { providerSessionId: '   ' } })).toBeNull()
+    expect(extractRecoveredCodexThreadId({ context: { codexThreadId: '   ' } })).toBeNull()
   })
 
   it('rejects route drift even when unrelated provider options stay compatible', () => {
     const resumeState = {
-      providerSessionId: 'provider_session_alpha',
+      threadId: 'provider_session_alpha',
       resumeRouteId: 'route-primary',
     }
 
@@ -420,7 +420,7 @@ describe('assistant provider seam helpers', () => {
     expect(
       doesAssistantResumeBindingMatchRoute({
         resumeState: {
-          providerSessionId: 'provider_session_beta',
+          threadId: 'provider_session_beta',
           resumeRouteId: 'route-primary',
         },
         route: createRoute({
@@ -450,7 +450,7 @@ describe('assistant provider seam helpers', () => {
     expect(
       doesAssistantResumeBindingMatchRoute({
         resumeState: {
-          providerSessionId: 'provider_session_alpha',
+          threadId: 'provider_session_alpha',
           resumeRouteId: '   ',
         },
         route: createRoute(),
@@ -461,7 +461,7 @@ describe('assistant provider seam helpers', () => {
       resolveAssistantRouteResumeBinding({
         route: createRoute(),
         sessionResumeState: {
-          providerSessionId: 'provider_session_alpha',
+          threadId: 'provider_session_alpha',
           resumeRouteId: null,
         },
       }),
@@ -504,14 +504,14 @@ function createProviderOptions(
 }
 
 function createAssistantSession(input?: {
-  providerSessionId?: string | null
+  codexThreadId?: string | null
   resumeRouteId?: string | null
 }): AssistantSession {
   const resumeState =
-    input?.providerSessionId || input?.resumeRouteId
+    input?.codexThreadId || input?.resumeRouteId
       ? {
           routeFingerprint: input?.resumeRouteId ?? null,
-          threadId: input?.providerSessionId ?? '',
+          threadId: input?.codexThreadId ?? '',
         }
       : null
   const target = {

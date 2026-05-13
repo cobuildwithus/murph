@@ -14,7 +14,7 @@ import {
   type AssistantCatalogModel,
   type AssistantModelCapabilities,
   type AssistantProviderCapabilities,
-} from './provider-registry.js'
+} from './codex-runtime.js'
 import { createCatalogModel } from './providers/catalog.js'
 
 export type CodexCatalogModel = AssistantCatalogModel

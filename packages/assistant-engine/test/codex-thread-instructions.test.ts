@@ -14,7 +14,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   executeCodexAssistantTurnAttempt,
-} from '../src/assistant/providers/registry.ts'
+} from '../src/assistant/codex-runtime.ts'
 import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
 } from '../src/assistant/providers/codex-cli.ts'
@@ -89,7 +89,7 @@ describe('Codex thread instructions', () => {
         turnContextPrompt: 'Current Murph runtime context.',
       },
       refreshThreadInstructions: false,
-      resumeProviderSessionId: 'thread-resume',
+      resumeCodexThreadId: 'thread-resume',
       systemPrompt: 'Stable Murph instructions.',
       turnContextPrompt: 'Current Murph runtime context.',
       userPrompt: 'Continue.',
@@ -119,7 +119,7 @@ describe('Codex thread instructions', () => {
         env: {},
         developerInstructions: 'Stable Murph instructions.',
         refreshThreadInstructions: false,
-        resumeProviderSessionId: 'thread-resume',
+        resumeCodexThreadId: 'thread-resume',
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),
@@ -176,7 +176,7 @@ describe('Codex thread instructions', () => {
           turnContextPrompt: 'Current Murph runtime context.',
         },
         refreshThreadInstructions: false,
-        resumeProviderSessionId: 'stale-thread',
+        resumeCodexThreadId: 'stale-thread',
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),

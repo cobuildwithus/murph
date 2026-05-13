@@ -78,7 +78,7 @@ export interface AssistantActiveTurnLiveProviderSteerInput {
 
 export interface AssistantActiveTurnLiveProviderTurn {
   interrupt(): Promise<void>
-  providerSessionId: string
+  codexThreadId: string
   providerTurnId: string
   sessionId: string
   steer(input: AssistantActiveTurnLiveProviderSteerInput): Promise<void>

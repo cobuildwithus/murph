@@ -50,7 +50,7 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
   'errorCode',
   'interrupted',
   'providerActionCount',
-  'providerSessionId',
+  'codexThreadId',
   'providerStalled',
   'providerUsageLimit',
   'recoverableConnectionLoss',
@@ -118,7 +118,7 @@ function hasCodexFailureContext(context: Record<string, unknown>): boolean {
   return Object.keys(context).some((key) =>
     key.startsWith('codex') ||
     key === 'providerActionCount' ||
-    key === 'providerSessionId',
+    key === 'codexThreadId',
   )
 }
 

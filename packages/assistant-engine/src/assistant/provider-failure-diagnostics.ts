@@ -5,20 +5,20 @@ export function annotateRecoveredCodexThreadIdForDiagnostics(
     return
   }
 
-  const providerSessionId = extractRecoveredProviderSessionId(error)
-  if (!providerSessionId) {
+  const codexThreadId = extractRecoveredCodexThreadId(error)
+  if (!codexThreadId) {
     return
   }
 
-  attachRecoveredProviderSessionId(error, providerSessionId)
+  attachRecoveredCodexThreadId(error, codexThreadId)
 }
 
-export function extractRecoveredProviderSessionId(error: unknown): string | null {
+export function extractRecoveredCodexThreadId(error: unknown): string | null {
   const context = readAssistantProviderErrorContext(error)
-  const providerSessionId = context?.providerSessionId
+  const codexThreadId = context?.codexThreadId
   return (
-    typeof providerSessionId === 'string' && providerSessionId.trim().length > 0
-      ? providerSessionId.trim()
+    typeof codexThreadId === 'string' && codexThreadId.trim().length > 0
+      ? codexThreadId.trim()
       : null
   )
 }
@@ -70,9 +70,9 @@ function readAssistantProviderErrorContext(
   )
 }
 
-function attachRecoveredProviderSessionId(
+function attachRecoveredCodexThreadId(
   error: unknown,
-  providerSessionId: string,
+  codexThreadId: string,
 ): void {
   if (!error || typeof error !== 'object') {
     return
@@ -81,6 +81,6 @@ function attachRecoveredProviderSessionId(
   const currentContext = readAssistantProviderErrorContext(error) ?? {}
   ;(error as { context?: Record<string, unknown> }).context = {
     ...currentContext,
-    recoveredCodexThreadId: providerSessionId,
+    recoveredCodexThreadId: codexThreadId,
   }
 }

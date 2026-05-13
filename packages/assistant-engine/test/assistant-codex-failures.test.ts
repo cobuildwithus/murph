@@ -19,8 +19,8 @@ import {
 
 describe('assistant Codex failure helpers', () => {
   function expectNoRecoveredThreadResumeClaim(message: string): void {
-    expect(message).not.toMatch(/preserved.*provider thread/iu)
-    expect(message).not.toMatch(/recovered.*provider thread/iu)
+    expect(message).not.toMatch(/preserved.*Codex thread/iu)
+    expect(message).not.toMatch(/recovered.*Codex thread/iu)
     expect(message).not.toMatch(/resume it/iu)
   }
 
@@ -108,7 +108,7 @@ describe('assistant Codex failure helpers', () => {
       buildCodexTurnFailedError({
         fallback: '  model returned an invalid terminal event  ',
         providerActionCount: 2,
-        providerSessionId: 'thread-1',
+        codexThreadId: 'thread-1',
         status: 'failed',
       }),
     ).toMatchObject({
@@ -117,7 +117,7 @@ describe('assistant Codex failure helpers', () => {
         codexFailureDetailPresent: true,
         codexFailureStage: 'turn_failed',
         providerActionCount: 2,
-        providerSessionId: 'thread-1',
+        codexThreadId: 'thread-1',
         retryable: false,
       },
       message:
@@ -128,7 +128,7 @@ describe('assistant Codex failure helpers', () => {
       buildCodexTurnFailedError({
         fallback: null,
         providerActionCount: 0,
-        providerSessionId: null,
+        codexThreadId: null,
         status: 'interrupted',
       }),
     ).toMatchObject({
@@ -136,7 +136,7 @@ describe('assistant Codex failure helpers', () => {
       context: {
         codexFailureStage: 'interrupted',
         interrupted: true,
-        providerSessionId: null,
+        codexThreadId: null,
         retryable: false,
       },
       message: 'Codex app-server was interrupted.',
@@ -148,7 +148,7 @@ describe('assistant Codex failure helpers', () => {
       buildCodexTurnFailedError({
         fallback: 'Quota exceeded. Check your plan and billing details.',
         providerActionCount: 0,
-        providerSessionId: 'thread-usage-limit',
+        codexThreadId: 'thread-usage-limit',
         status: 'failed',
       }),
     ).toMatchObject({
@@ -158,7 +158,7 @@ describe('assistant Codex failure helpers', () => {
         codexFailureStage: 'turn_failed',
         codexTurnStatus: 'failed',
         providerActionCount: 0,
-        providerSessionId: 'thread-usage-limit',
+        codexThreadId: 'thread-usage-limit',
         providerUsageLimit: true,
         retryable: false,
       },
@@ -171,7 +171,7 @@ describe('assistant Codex failure helpers', () => {
         code: 1,
         fallback: 'Purchase more credits before retrying.',
         providerActionCount: 1,
-        providerSessionId: 'thread-process-exit',
+        codexThreadId: 'thread-process-exit',
         signal: null,
         stderr: '',
       }),
@@ -181,7 +181,7 @@ describe('assistant Codex failure helpers', () => {
         codexExitCode: 1,
         codexFailureStage: 'process_exit',
         providerActionCount: 1,
-        providerSessionId: null,
+        codexThreadId: null,
         providerUsageLimit: true,
         retryable: false,
       },
@@ -234,7 +234,7 @@ describe('assistant Codex failure helpers', () => {
         code: null,
         fallback: null,
         providerActionCount: 1,
-        providerSessionId: 'thread-sigint',
+        codexThreadId: 'thread-sigint',
         signal: 'SIGINT',
         stderr: '',
       }),
@@ -242,7 +242,7 @@ describe('assistant Codex failure helpers', () => {
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
         providerActionCount: 1,
-        providerSessionId: 'thread-sigint',
+        codexThreadId: 'thread-sigint',
       },
       message: expect.stringContaining('signal SIGINT.'),
     })
@@ -250,18 +250,18 @@ describe('assistant Codex failure helpers', () => {
     expect(
       buildCodexInterruptedError({
         providerActionCount: 0,
-        providerSessionId: 'thread-interrupted-diagnostics',
+        codexThreadId: 'thread-interrupted-diagnostics',
         signal: 'SIGTERM',
       }),
     ).toMatchObject({
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       message:
-        'Codex app-server was interrupted. signal SIGTERM. Provider thread id was captured for diagnostics only. Retry the request when ready.',
+        'Codex app-server was interrupted. signal SIGTERM. Codex thread id was captured for diagnostics only. Retry the request when ready.',
     })
     expectNoRecoveredThreadResumeClaim(
       buildCodexInterruptedError({
         providerActionCount: 0,
-        providerSessionId: 'thread-interrupted-diagnostics',
+        codexThreadId: 'thread-interrupted-diagnostics',
         signal: 'SIGTERM',
       }).message,
     )
@@ -270,18 +270,18 @@ describe('assistant Codex failure helpers', () => {
       buildCodexConnectionFailureMessage({
         code: null,
         fallback: null,
-        providerSessionId: 'thread-connection-diagnostics',
+        codexThreadId: 'thread-connection-diagnostics',
         signal: 'SIGTERM',
         stderr: '',
       }),
     ).toBe(
-      'Codex app-server lost its connection while waiting for the model. signal SIGTERM. Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
+      'Codex app-server lost its connection while waiting for the model. signal SIGTERM. Codex thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
     )
     expectNoRecoveredThreadResumeClaim(
       buildCodexConnectionFailureMessage({
         code: null,
         fallback: null,
-        providerSessionId: 'thread-connection-diagnostics',
+        codexThreadId: 'thread-connection-diagnostics',
         signal: 'SIGTERM',
         stderr: '',
       }),
@@ -292,7 +292,7 @@ describe('assistant Codex failure helpers', () => {
         code: null,
         fallback: null,
         providerActionCount: 3,
-        providerSessionId: 'thread-terminal',
+        codexThreadId: 'thread-terminal',
         signal: 'SIGTERM',
         stderr: '',
       }),
@@ -305,7 +305,7 @@ describe('assistant Codex failure helpers', () => {
         codexSignalPresent: true,
         codexStderrPresent: false,
         providerActionCount: 3,
-        providerSessionId: null,
+        codexThreadId: null,
         retryable: false,
       },
       message: 'Codex app-server failed. signal SIGTERM.',
@@ -315,19 +315,19 @@ describe('assistant Codex failure helpers', () => {
       code: 1,
       fallback: 'connection closed before response.completed',
       providerActionCount: 1,
-      providerSessionId: 'thread-stream-diagnostics',
+      codexThreadId: 'thread-stream-diagnostics',
       signal: null,
       stderr: '',
     })
     expect(connectionLoss).toMatchObject({
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
-        providerSessionId: 'thread-stream-diagnostics',
+        codexThreadId: 'thread-stream-diagnostics',
         recoverableConnectionLoss: true,
         retryable: true,
       },
       message:
-        'Codex app-server lost its connection while waiting for the model. exit code 1. connection closed before response.completed Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
+        'Codex app-server lost its connection while waiting for the model. exit code 1. connection closed before response.completed Codex thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
     })
     expectNoRecoveredThreadResumeClaim(connectionLoss.message)
 

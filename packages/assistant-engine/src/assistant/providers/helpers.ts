@@ -43,10 +43,10 @@ function hasAssistantProviderUsableNativeResume(
     return false
   }
 
-  const resumeProviderSessionId = normalizeNullableString(
-    input.resumeProviderSessionId,
+  const resumeCodexThreadId = normalizeNullableString(
+    input.resumeCodexThreadId,
   )
-  if (!resumeProviderSessionId) {
+  if (!resumeCodexThreadId) {
     return false
   }
 
@@ -54,7 +54,7 @@ function hasAssistantProviderUsableNativeResume(
     return false
   }
 
-  void resumeProviderSessionId
+  void resumeCodexThreadId
   return true
 }
 

@@ -19,7 +19,7 @@ export interface AssistantProviderTraceUpdate {
 }
 
 export interface AssistantProviderTraceEvent {
-  providerSessionId: string | null
+  codexThreadId: string | null
   updates: readonly AssistantProviderTraceUpdate[]
 }
 

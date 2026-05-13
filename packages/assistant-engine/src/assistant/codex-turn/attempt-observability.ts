@@ -1,7 +1,7 @@
 import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
-} from '../provider-route.js'
+} from '../codex-thread-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
   fingerprintHostedAssistantContextValue,
@@ -12,12 +12,12 @@ import {
   appendAssistantTurnReceiptEvent,
 } from '../turns.js'
 
-export async function recordProviderAttemptStarted(input: {
+export async function recordCodexAttemptStarted(input: {
   activeTurnMessagesPresent: boolean
   attemptCount: number
   at: string
-  hasResumeProviderSessionId: boolean
-  providerContinuationKind: string
+  hasResumeCodexThreadId: boolean
+  codexContinuationKind: string
   refreshThreadInstructions: boolean
   route: CodexThreadIdentity
   sessionId: string
@@ -52,9 +52,9 @@ export async function recordProviderAttemptStarted(input: {
       model: input.route.providerOptions.model,
       modelProvider: input.route.providerOptions.modelProvider,
       reasoningEffort: input.route.providerOptions.reasoningEffort,
-      providerContinuationKind: input.providerContinuationKind,
+      codexContinuationKind: input.codexContinuationKind,
       refreshThreadInstructions: input.refreshThreadInstructions,
-      hasResumeProviderSessionId: input.hasResumeProviderSessionId,
+      hasResumeCodexThreadId: input.hasResumeCodexThreadId,
       activeTurnMessagesPresent: input.activeTurnMessagesPresent,
     },
     counterDeltas: {
@@ -64,14 +64,14 @@ export async function recordProviderAttemptStarted(input: {
   })
 }
 
-export async function recordProviderPlan(input: {
+export async function recordCodexPlan(input: {
   activeTurnHistoryMessageCount: number
   activeTurnHistoryPresent: boolean
   at: string
-  providerContinuation: string
+  codexContinuation: string
   providerRequestOrdinal: number | null
   refreshThreadInstructions: boolean
-  resumeProviderSessionIdPresent: boolean
+  resumeCodexThreadIdPresent: boolean
   route: CodexThreadIdentity
   sessionId: string
   turnId: string
@@ -96,8 +96,8 @@ export async function recordProviderPlan(input: {
       sessionId: input.sessionId,
       routeFingerprint,
       providerRequestOrdinal: input.providerRequestOrdinal,
-      providerContinuation: input.providerContinuation,
-      resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
+      codexContinuation: input.codexContinuation,
+      resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
       refreshThreadInstructions: input.refreshThreadInstructions,
       activeTurnHistoryPresent: input.activeTurnHistoryPresent,
       activeTurnHistoryMessageCount: input.activeTurnHistoryMessageCount,
@@ -142,7 +142,7 @@ function buildProviderPlanPathDiagnostics(input: {
   }
 }
 
-export async function recordProviderAttemptSucceeded(input: {
+export async function recordCodexAttemptSucceeded(input: {
   activityLabels?: readonly string[]
   attemptCount: number
   route: CodexThreadIdentity
@@ -171,7 +171,7 @@ export async function recordProviderAttemptSucceeded(input: {
   })
 }
 
-export async function recordProviderAttemptFailed(input: {
+export async function recordCodexAttemptFailed(input: {
   activityLabels?: readonly string[]
   attemptCount: number
   detail: string

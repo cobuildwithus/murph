@@ -171,7 +171,7 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
 
   try {
     onTraceEvent({
-      providerSessionId: null,
+      codexThreadId: null,
       rawEvent: {
         schema: HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA,
         type: HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE,

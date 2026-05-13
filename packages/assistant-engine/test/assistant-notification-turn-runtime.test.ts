@@ -13,7 +13,7 @@ import { createAssistantModelTarget } from '@murphai/operator-config/assistant-b
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
-import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
+import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import type {
   AssistantTurnSharedPlan,
@@ -44,7 +44,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/execution-context.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
-  vi.doUnmock('../src/assistant/provider-turn-runner.js')
+  vi.doUnmock('../src/assistant/codex-turn-runner.js')
   vi.doUnmock('../src/assistant/service-usage.js')
   vi.doUnmock('../src/assistant/turn-finalizer.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
@@ -151,7 +151,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       kind: 'succeeded',
       providerTurn: providerResult,
     })),
@@ -206,8 +206,8 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -400,7 +400,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       kind: 'succeeded',
       providerTurn: providerResult,
     })),
@@ -452,8 +452,8 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -560,7 +560,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       kind: 'succeeded',
       providerTurn: providerResult,
     })),
@@ -611,8 +611,8 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -687,7 +687,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async (input) => {
+    executeCodexTurnWithRecovery: vi.fn(async (input) => {
       assert.equal(input.input.turnTrigger, 'automation-cron')
       assert.equal(input.input.workingDirectory, undefined)
       return {
@@ -742,8 +742,8 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -805,7 +805,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
       session: providerSession,
     })
     const mocks = {
-      executeProviderTurnWithRecovery: vi.fn(async (input) => {
+      executeCodexTurnWithRecovery: vi.fn(async (input) => {
         assert.equal(input.input.workingDirectory, undefined)
         assert.equal(input.plan.requestedWorkingDirectory, '/proc/self/cwd')
         return {
@@ -858,8 +858,8 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
         })),
       }
     })
-    vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-      executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+    vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+      executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
     }))
     vi.doMock('../src/assistant/service-usage.js', () => ({
       recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -891,7 +891,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
 
     expect(result.response).toBeNull()
     expect(result.decision.kind).toBe('skip')
-    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
   } finally {
     process.chdir(previousCwd)
     await rm(vault, {
@@ -942,7 +942,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       kind: 'succeeded',
       providerTurn: providerResult,
     })),
@@ -993,8 +993,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -1065,7 +1065,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     },
   })
   const mocks = {
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       error: providerError,
       kind: 'failed_terminal',
       route,
@@ -1112,8 +1112,8 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -1192,7 +1192,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeProviderTurnWithRecovery: vi.fn(async () => ({
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
       kind: 'succeeded',
       providerTurn: providerResult,
     })),
@@ -1243,8 +1243,8 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
@@ -1481,7 +1481,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 
 function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
-  providerSessionId?: string | null
+  codexThreadId?: string | null
   response?: string
   route?: CodexThreadIdentity
   session?: AssistantSession
@@ -1508,11 +1508,11 @@ function createProviderResult(input?: {
   return {
     attemptCount: 1,
     provider: 'codex-cli',
-    providerContinuation: {
+    codexContinuation: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
-    providerSessionId: input?.providerSessionId ?? 'provider-session-1',
+    codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [],
     response: input?.response ?? 'provider response',
     route: input?.route ?? createRoute(),

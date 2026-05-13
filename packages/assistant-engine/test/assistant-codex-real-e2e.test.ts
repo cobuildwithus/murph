@@ -250,7 +250,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
           codexFailureStage: 'turn_failed',
           codexTurnStatus: 'failed',
           providerActionCount: 2,
-          providerSessionId: 'thread_sensitive_123',
+          codexThreadId: 'thread_sensitive_123',
         },
       },
     )

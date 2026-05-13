@@ -9,7 +9,7 @@ import type {
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
-import type { CodexThreadIdentity } from "../src/assistant/provider-route.ts";
+import type { CodexThreadIdentity } from "../src/assistant/codex-thread-route.ts";
 import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
 import type {
   AssistantTurnSharedPlan,
@@ -471,7 +471,7 @@ describe("assistant usage recording seam", () => {
       },
       providerResult: createProviderResult({
         attemptCount: 3,
-        providerSessionId: "provider-session-42",
+        codexThreadId: "provider-session-42",
         route: createRoute({ routeId: "route-usage" }),
         usage: {
           apiKeyEnv: " RUNTIME_KEY ",
@@ -1669,7 +1669,7 @@ describe("assistant turn finalizer seam", () => {
         providerOptions: createProviderOptions({
           model: "gpt-5-mini",
         }),
-        providerSessionId: "provider-session-existing",
+        codexThreadId: "provider-session-existing",
         response: "Here is the summary.",
         route: createRoute({ routeId: "route-backup" }),
         session,
@@ -1751,7 +1751,7 @@ describe("assistant turn finalizer seam", () => {
       }),
       persistUserPromptToTranscript: false,
       providerResult: createProviderResult({
-        providerSessionId: "provider-session-existing",
+        codexThreadId: "provider-session-existing",
         response: "raw provider output",
         route: createRoute({ routeId: "route-notification" }),
         session,
@@ -1816,7 +1816,7 @@ describe("assistant turn finalizer seam", () => {
         persistUserPromptOnFailure: false,
       }),
       providerResult: createProviderResult({
-        providerSessionId: "provider-session-new",
+        codexThreadId: "provider-session-new",
         response: "Here is the reply.",
         route: createRoute({ routeId: "route-auto-reply" }),
         session,
@@ -1870,7 +1870,7 @@ describe("assistant turn finalizer seam", () => {
         persistUserPromptOnFailure: false,
       }),
       providerResult: createProviderResult({
-        providerSessionId: "provider-session-new",
+        codexThreadId: "provider-session-new",
         response: "Here is the revised answer.",
         route: createRoute({ routeId: "route-active-continuation" }),
         session,
@@ -1989,7 +1989,7 @@ describe("assistant turn finalizer seam", () => {
         persistUserPromptOnFailure: true,
       }),
       providerResult: createProviderResult({
-        providerSessionId: "provider-session-new",
+        codexThreadId: "provider-session-new",
         route: createRoute({ routeId: "route-new" }),
         session,
       }),
@@ -2021,7 +2021,7 @@ describe("assistant turn finalizer seam", () => {
       },
       plan: createSharedPlan(),
       providerResult: createProviderResult({
-        providerSessionId: "provider-session-fallback",
+        codexThreadId: "provider-session-fallback",
         route: createRoute({ routeId: "route-fallback" }),
         session,
       }),
@@ -2215,7 +2215,7 @@ function createSharedPlan(input?: {
 function createProviderResult(input?: {
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
-  providerSessionId?: string | null;
+  codexThreadId?: string | null;
   rawEvents?: unknown[];
   response?: string;
   route?: CodexThreadIdentity;
@@ -2242,11 +2242,11 @@ function createProviderResult(input?: {
   return {
     attemptCount: input?.attemptCount ?? 1,
     provider: "codex-cli",
-    providerContinuation: {
+    codexContinuation: {
       kind: "explicit-structured-history",
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
-    providerSessionId: input?.providerSessionId ?? "provider-session-1",
+    codexThreadId: input?.codexThreadId ?? "provider-session-1",
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),

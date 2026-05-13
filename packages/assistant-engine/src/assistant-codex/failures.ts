@@ -89,13 +89,13 @@ export function isFailedCodexTurnStatus(status: string | null): boolean {
 export function buildCodexTurnFailedError(input: {
   fallback: string | null
   providerActionCount: number
-  providerSessionId: string | null
+  codexThreadId: string | null
   status: string | null
 }): VaultCliError {
   if (input.status?.toLowerCase() === 'interrupted') {
     return buildCodexInterruptedError({
       providerActionCount: input.providerActionCount,
-      providerSessionId: input.providerSessionId,
+      codexThreadId: input.codexThreadId,
       signal: null,
     })
   }
@@ -118,7 +118,7 @@ export function buildCodexTurnFailedError(input: {
       codexFailureStage: 'turn_failed',
       codexTurnStatus: input.status,
       providerActionCount: input.providerActionCount,
-      providerSessionId: input.providerSessionId,
+      codexThreadId: input.codexThreadId,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
       retryable: false,
     },
@@ -129,7 +129,7 @@ export function buildCodexFailure(input: {
   code: number | null
   fallback: string | null
   providerActionCount: number
-  providerSessionId: string | null
+  codexThreadId: string | null
   signal: NodeJS.Signals | null
   stderr: string
 }): VaultCliError {
@@ -166,7 +166,7 @@ export function buildCodexFailure(input: {
       ...(input.signal ? { codexSignalPresent: true } : {}),
       providerActionCount: input.providerActionCount,
       ...(usageLimit ? { providerUsageLimit: true } : {}),
-      providerSessionId: connectionLost ? input.providerSessionId : null,
+      codexThreadId: connectionLost ? input.codexThreadId : null,
       recoverableConnectionLoss: connectionLost,
       retryable: connectionLost,
     },
@@ -193,14 +193,14 @@ export function buildCodexProcessExitError(input: {
   code: number | null
   fallback: string | null
   providerActionCount: number
-  providerSessionId: string | null
+  codexThreadId: string | null
   signal: NodeJS.Signals | null
   stderr: string
 }): VaultCliError {
   if (input.abortRequested || input.signal === 'SIGINT') {
     return buildCodexInterruptedError({
       providerActionCount: input.providerActionCount,
-      providerSessionId: input.providerSessionId,
+      codexThreadId: input.codexThreadId,
       signal: input.signal,
     })
   }
@@ -234,7 +234,7 @@ export function buildCodexStdinFailureFallback(input: {
 
 export function buildCodexInterruptedError(input: {
   providerActionCount: number
-  providerSessionId: string | null
+  codexThreadId: string | null
   signal: NodeJS.Signals | null
 }): VaultCliError {
   const parts = ['Codex app-server was interrupted.']
@@ -243,9 +243,9 @@ export function buildCodexInterruptedError(input: {
     parts.push(`signal ${input.signal}.`)
   }
 
-  if (input.providerSessionId) {
+  if (input.codexThreadId) {
     parts.push(
-      'Provider thread id was captured for diagnostics only. Retry the request when ready.',
+      'Codex thread id was captured for diagnostics only. Retry the request when ready.',
     )
   }
 
@@ -257,7 +257,7 @@ export function buildCodexInterruptedError(input: {
       ...(input.signal ? { codexSignalPresent: true } : {}),
       interrupted: true,
       providerActionCount: input.providerActionCount,
-      providerSessionId: input.providerSessionId,
+      codexThreadId: input.codexThreadId,
       retryable: false,
     },
   )
@@ -266,7 +266,7 @@ export function buildCodexInterruptedError(input: {
 export function buildCodexConnectionFailureMessage(input: {
   code: number | null
   fallback: string | null
-  providerSessionId: string | null
+  codexThreadId: string | null
   signal: NodeJS.Signals | null
   stderr: string
 }): string {
@@ -285,8 +285,8 @@ export function buildCodexConnectionFailureMessage(input: {
   }
 
   parts.push(
-    input.providerSessionId
-      ? 'Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.'
+    input.codexThreadId
+      ? 'Codex thread id was captured for diagnostics only. Restore connectivity, then retry the request.'
       : 'Restore connectivity, then retry the request.',
   )
 
@@ -296,13 +296,13 @@ export function buildCodexConnectionFailureMessage(input: {
 export function buildCodexResumeStaleMessage(input: {
   fallback: string | null
 }): string {
-  const parts = ['Codex app-server could not resume the saved provider thread.']
+  const parts = ['Codex app-server could not resume the saved Codex thread.']
 
   if (input.fallback) {
     parts.push(input.fallback)
   }
 
-  parts.push('Murph should start a fresh provider thread for this turn.')
+  parts.push('Murph should start a fresh Codex thread for this turn.')
 
   return parts.join(' ')
 }
@@ -315,7 +315,7 @@ export function readNodeErrorCode(error: unknown): string | null {
 function buildCodexFailureMessage(input: {
   code: number | null
   fallback: string | null
-  providerSessionId: string | null
+  codexThreadId: string | null
   signal: NodeJS.Signals | null
   stderr: string
 }): string {
@@ -343,9 +343,9 @@ function buildCodexFailureMessage(input: {
       parts.push(detail)
     }
 
-    if (input.providerSessionId) {
+    if (input.codexThreadId) {
       parts.push(
-        'Provider thread id was captured for diagnostics only. Send another message to retry the turn.',
+        'Codex thread id was captured for diagnostics only. Send another message to retry the turn.',
       )
     } else {
       parts.push('Send another message to retry the turn.')

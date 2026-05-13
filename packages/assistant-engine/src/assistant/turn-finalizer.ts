@@ -20,7 +20,7 @@ import {
 } from './transcript-audit.js'
 import {
   readCodexThreadRouteFingerprint,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -34,13 +34,13 @@ export type AssistantProviderResumeStateAction =
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   codexRolloutRelativePath?: string | null
-  providerSessionId: string | null
+  codexThreadId: string | null
   routeFingerprint: string
 }): AssistantSession['resumeState'] {
   return buildCodexResumeState({
     rolloutRelativePath: input.codexRolloutRelativePath,
     routeFingerprint: input.routeFingerprint,
-    threadId: input.providerSessionId,
+    threadId: input.codexThreadId,
   })
 }
 
@@ -122,7 +122,7 @@ export async function persistAssistantTurnAndSession(input: {
   const nextResumeState = resolveAssistantNextResumeState({
     action: input.providerResumeStateAction,
     codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
-    providerSessionId: input.providerResult.providerSessionId,
+    codexThreadId: input.providerResult.codexThreadId,
     routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
     sessionResumeState: readAssistantSessionResumeState(input.session),
   })
@@ -146,7 +146,7 @@ export async function persistAssistantTurnAndSession(input: {
 function resolveAssistantNextResumeState(input: {
   action: AssistantProviderResumeStateAction
   codexRolloutRelativePath?: string | null
-  providerSessionId: string | null
+  codexThreadId: string | null
   routeFingerprint: string
   sessionResumeState: AssistantSession['resumeState']
 }): AssistantSession['resumeState'] {
@@ -158,7 +158,7 @@ function resolveAssistantNextResumeState(input: {
     case 'persist-from-provider-turn':
       return resolveAssistantResumeStateFromProviderTurn({
         codexRolloutRelativePath: input.codexRolloutRelativePath,
-        providerSessionId: input.providerSessionId,
+        codexThreadId: input.codexThreadId,
         routeFingerprint: input.routeFingerprint,
       })
   }

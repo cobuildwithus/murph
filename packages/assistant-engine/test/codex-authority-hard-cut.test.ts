@@ -20,7 +20,7 @@ async function readWorkspacePackageSource(relativePath: string): Promise<string>
 
 describe('Codex authority hard cut', () => {
   it('does not short-circuit assistant turns through hosted device-connect heuristics', async () => {
-    const source = await readAssistantEngineSource('provider-turn-runner.ts')
+    const source = await readAssistantEngineSource('codex-turn-runner.ts')
 
     expect(source).not.toContain('maybeHandleAssistantHostedDeviceConnect')
     expect(source).not.toContain("from './hosted-device-connect.js'")

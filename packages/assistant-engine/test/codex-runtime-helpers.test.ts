@@ -40,17 +40,17 @@ import {
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
-  recordProviderAttemptStarted,
-  recordProviderPlan,
-} from '../src/assistant/provider-turn/attempt-observability.ts'
+  recordCodexAttemptStarted,
+  recordCodexPlan,
+} from '../src/assistant/codex-turn/attempt-observability.ts'
 import {
   executeCodexAssistantTurnAttempt,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
-} from '../src/assistant/providers/registry.ts'
-import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
+} from '../src/assistant/codex-runtime.ts'
+import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
@@ -144,12 +144,12 @@ describe('Codex assistant registry helpers', () => {
       routeId: 'route-1',
     }
 
-    await recordProviderAttemptStarted({
+    await recordCodexAttemptStarted({
       activeTurnMessagesPresent: true,
       attemptCount: 2,
       at: '2026-05-04T00:00:00.000Z',
-      hasResumeProviderSessionId: true,
-      providerContinuationKind: 'provider-state-optimization',
+      hasResumeCodexThreadId: true,
+      codexContinuationKind: 'provider-state-optimization',
       refreshThreadInstructions: false,
       route,
       sessionId: 'session-1',
@@ -177,11 +177,11 @@ describe('Codex assistant registry helpers', () => {
         data: {
           activeTurnMessagesPresent: true,
           attempt: 2,
-          hasResumeProviderSessionId: true,
+          hasResumeCodexThreadId: true,
           model: 'gpt-5.4',
           modelProvider: 'vercel-ai-gateway',
           provider: 'codex-cli',
-          providerContinuationKind: 'provider-state-optimization',
+          codexContinuationKind: 'provider-state-optimization',
           reasoningEffort: 'high',
           refreshThreadInstructions: false,
           routeFingerprint: 'route-1',
@@ -193,11 +193,11 @@ describe('Codex assistant registry helpers', () => {
     ).toEqual({
       activeTurnMessagesPresent: true,
       attempt: 2,
-      hasResumeProviderSessionId: true,
+      hasResumeCodexThreadId: true,
       model: 'gpt-5.4',
       modelProvider: 'vercel-ai-gateway',
       provider: 'codex-cli',
-      providerContinuationKind: 'provider-state-optimization',
+      codexContinuationKind: 'provider-state-optimization',
       reasoningEffort: 'high',
       refreshThreadInstructions: false,
       routeFingerprint: 'route-1',
@@ -222,14 +222,14 @@ describe('Codex assistant registry helpers', () => {
       routeId: 'route-plan',
     }
 
-    await recordProviderPlan({
+    await recordCodexPlan({
       activeTurnHistoryMessageCount: 3,
       activeTurnHistoryPresent: true,
       at: '2026-05-04T00:10:24.000Z',
-      providerContinuation: 'provider-state-optimization',
+      codexContinuation: 'provider-state-optimization',
       providerRequestOrdinal: 1,
       refreshThreadInstructions: false,
-      resumeProviderSessionIdPresent: true,
+      resumeCodexThreadIdPresent: true,
       route,
       sessionId: 'session-plan',
       turnId: 'turn-plan',
@@ -249,10 +249,10 @@ describe('Codex assistant registry helpers', () => {
           activeTurnHistoryPresent: true,
           activeTurnHistoryMessageCount: 3,
           codexHomeHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
-          providerContinuation: 'provider-state-optimization',
+          codexContinuation: 'provider-state-optimization',
           providerRequestOrdinal: 1,
           refreshThreadInstructions: false,
-          resumeProviderSessionIdPresent: true,
+          resumeCodexThreadIdPresent: true,
           routeFingerprint: 'route-plan',
           sessionId: 'session-plan',
           vaultRootHash: expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
@@ -998,7 +998,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        resumeProviderSessionId: 'codex-session-1',
+        resumeCodexThreadId: 'codex-session-1',
         systemPrompt: 'You are Murph.',
         userPrompt: '  What changed today?  ',
         workingDirectory: '/tmp/provider-tests',
@@ -1010,7 +1010,7 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        resumeProviderSessionId: 'codex-session-1',
+        resumeCodexThreadId: 'codex-session-1',
         sessionContext: {
           binding,
         },
@@ -1165,7 +1165,7 @@ describe('Codex assistant registry helpers', () => {
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
       provider: 'codex-cli',
-      providerSessionId: 'provider-session-1',
+      codexThreadId: 'provider-session-1',
       rawEvents: [],
       response: 'Completed.',
       stderr: '',
@@ -1209,10 +1209,10 @@ describe('Codex assistant registry helpers', () => {
           finalMessage: executionResult.response,
           jsonEvents: executionResult.rawEvents,
           providerActionCount: 1,
-          sessionId: executionResult.providerSessionId,
+          sessionId: executionResult.codexThreadId,
           stderr: executionResult.stderr,
           stdout: executionResult.stdout,
-          threadId: executionResult.providerSessionId,
+          threadId: executionResult.codexThreadId,
           turnId: 'turn-1',
         }
       },
@@ -1324,7 +1324,7 @@ describe('Codex assistant registry helpers', () => {
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
-      resumeProviderSessionId: 'stale-thread',
+      resumeCodexThreadId: 'stale-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1349,7 +1349,7 @@ describe('Codex assistant registry helpers', () => {
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')
     }
-    expect(attempt.result.providerContinuation).toEqual({
+    expect(attempt.result.codexContinuation).toEqual({
       kind: 'thread-start',
     })
     expect(traceEvents).toHaveLength(1)
@@ -1433,7 +1433,7 @@ describe('Codex assistant registry helpers', () => {
         },
       ],
       providerActionCount: 0,
-      providerSessionId: 'corrupt-thread',
+      codexThreadId: 'corrupt-thread',
       providerTurnId: 'turn-invalid-output',
     })
 
@@ -1455,7 +1455,7 @@ describe('Codex assistant registry helpers', () => {
       onTraceEvent: (event) => {
         traceEvents.push(event)
       },
-      resumeProviderSessionId: 'corrupt-thread',
+      resumeCodexThreadId: 'corrupt-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1480,10 +1480,10 @@ describe('Codex assistant registry helpers', () => {
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')
     }
-    expect(attempt.result.providerContinuation).toEqual({
+    expect(attempt.result.codexContinuation).toEqual({
       kind: 'thread-start',
     })
-    expect(attempt.result.providerSessionId).toBe('fresh-thread-after-invalid-output')
+    expect(attempt.result.codexThreadId).toBe('fresh-thread-after-invalid-output')
     expect(traceEvents).toHaveLength(2)
     expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
       codexInvalidOutputErrorCode: 'ASSISTANT_CODEX_FAILED',
@@ -1549,7 +1549,7 @@ describe('Codex assistant registry helpers', () => {
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: rawEvents,
       providerActionCount: 1,
-      providerSessionId: 'corrupt-thread',
+      codexThreadId: 'corrupt-thread',
       providerTurnId: 'turn-invalid-output',
     })
 
@@ -1558,7 +1558,7 @@ describe('Codex assistant registry helpers', () => {
         provider: 'codex-cli',
       }),
       freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeProviderSessionId: 'corrupt-thread',
+      resumeCodexThreadId: 'corrupt-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1578,10 +1578,10 @@ describe('Codex assistant registry helpers', () => {
     if (!attempt.ok) {
       throw new Error('expected successful provider attempt')
     }
-    expect(attempt.result.providerContinuation).toEqual({
+    expect(attempt.result.codexContinuation).toEqual({
       kind: 'thread-start',
     })
-    expect(attempt.result.providerSessionId).toBe(
+    expect(attempt.result.codexThreadId).toBe(
       'fresh-thread-after-provider-action-invalid-output',
     )
   })
@@ -1642,7 +1642,7 @@ describe('Codex assistant registry helpers', () => {
         },
       ],
       providerActionCount: 0,
-      providerSessionId: 'resume-thread',
+      codexThreadId: 'resume-thread',
       providerTurnId: 'turn-failed',
     })
 
@@ -1654,7 +1654,7 @@ describe('Codex assistant registry helpers', () => {
         provider: 'codex-cli',
       }),
       freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeProviderSessionId: 'resume-thread',
+      resumeCodexThreadId: 'resume-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1729,7 +1729,7 @@ describe('Codex assistant registry helpers', () => {
         },
       ],
       providerActionCount: 0,
-      providerSessionId: 'resume-thread',
+      codexThreadId: 'resume-thread',
       providerTurnId: 'turn-failed',
     })
 
@@ -1741,7 +1741,7 @@ describe('Codex assistant registry helpers', () => {
         provider: 'codex-cli',
       }),
       freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeProviderSessionId: 'resume-thread',
+      resumeCodexThreadId: 'resume-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1799,7 +1799,7 @@ describe('Codex assistant registry helpers', () => {
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: [{ method: 'turn/completed' }],
       providerActionCount: 2,
-      providerSessionId: 'corrupt-thread',
+      codexThreadId: 'corrupt-thread',
       providerTurnId: 'turn-invalid-output',
     })
 
@@ -1811,7 +1811,7 @@ describe('Codex assistant registry helpers', () => {
         provider: 'codex-cli',
       }),
       freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeProviderSessionId: 'corrupt-thread',
+      resumeCodexThreadId: 'corrupt-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })
@@ -1858,7 +1858,7 @@ describe('Codex assistant registry helpers', () => {
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: [{ method: 'turn/completed' }],
       providerActionCount: 0,
-      providerSessionId: 'corrupt-venice-thread',
+      codexThreadId: 'corrupt-venice-thread',
       providerTurnId: 'turn-invalid-output',
     })
 
@@ -1871,7 +1871,7 @@ describe('Codex assistant registry helpers', () => {
         VENICE_API_KEY: sentinel,
       },
       freshThreadFallback: TEST_FRESH_THREAD_FALLBACK,
-      resumeProviderSessionId: 'corrupt-venice-thread',
+      resumeCodexThreadId: 'corrupt-venice-thread',
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
     })

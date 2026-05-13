@@ -153,10 +153,10 @@ describe("hosted local Codex container continuity e2e", () => {
     expect(idleShutdownStatus.inFlight).toBe(false);
     expect(idleShutdownStatus.lastErrorCode ?? null).toBeNull();
     const idleSession = await readCodexSessionFromStatus(idleShutdownStatus, "idle");
-    expect(idleSession.providerSessionId).toMatch(
+    expect(idleSession.codexThreadId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
     );
-    expect(idleSession.codexRolloutRelativePath).toContain(idleSession.providerSessionId);
+    expect(idleSession.codexRolloutRelativePath).toContain(idleSession.codexThreadId);
     expect(idleSession.rolloutText.length).toBeGreaterThan(0);
 
     const providerRequestCountBeforeSecondTurn = countAssistantProviderResponsesApiRequests();
@@ -187,7 +187,7 @@ describe("hosted local Codex container continuity e2e", () => {
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const secondSession = await readCodexSessionFromStatus(finalStatus, "second");
-    expect(secondSession.providerSessionId).toBe(idleSession.providerSessionId);
+    expect(secondSession.codexThreadId).toBe(idleSession.codexThreadId);
     expect(secondSession.codexRolloutRelativePath).toBe(idleSession.codexRolloutRelativePath);
     expect(secondSession.rolloutText.length).toBeGreaterThanOrEqual(idleSession.rolloutText.length);
     await expect(readFile(secondSession.shimRolloutPath, "utf8"))
@@ -370,7 +370,7 @@ async function readCodexSessionFromStatus(
   label: string,
 ): Promise<{
   codexRolloutRelativePath: string;
-  providerSessionId: string;
+  codexThreadId: string;
   rolloutText: string;
   shimRolloutPath: string;
 }> {
@@ -385,16 +385,16 @@ async function readCodexSessionFromStatus(
 
     const parsed = parseJsonObject(await readFile(path.join(sessionsDirectory, fileName), "utf8"));
     const resumeState = readRecord(parsed.resumeState);
-    const providerSessionId = readOptionalString(resumeState?.providerSessionId);
+    const codexThreadId = readOptionalString(resumeState?.threadId);
     const codexRolloutRelativePath = readOptionalString(resumeState?.codexRolloutRelativePath);
 
-    if (!providerSessionId || !codexRolloutRelativePath) {
+    if (!codexThreadId || !codexRolloutRelativePath) {
       continue;
     }
 
     return {
       codexRolloutRelativePath,
-      providerSessionId,
+      codexThreadId,
       rolloutText: await readFile(
         path.join(restored.operatorHomeRoot, ".codex-hosted", codexRolloutRelativePath),
         "utf8",

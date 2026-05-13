@@ -8,7 +8,7 @@ import { normalizeNullableString } from './shared.js'
 import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 
 export function resolveAssistantProviderResumeKey(input: {
   resumeState: unknown
