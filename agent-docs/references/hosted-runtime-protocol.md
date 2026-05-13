@@ -235,8 +235,8 @@ unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime result carries the next fast mailbox retry wake so
 Cloudflare can promptly reinvoke the workspace.
-Cloudflare does not treat runtime-reported deferred checkpoint state as scheduler
-state. RunnerContainer never records pending checkpoint intent in memory, and
+Cloudflare does not own or schedule checkpoints for deferred foreground
+progress. RunnerContainer never records pending checkpoint intent in memory, and
 the public runtime result contract does not carry a deferred-checkpoint
 scheduler hint. The next foreground wake uses the normal UserRunner write fence
 and outranks activity-expiry cleanup because activity expiry is cleanup-only and
