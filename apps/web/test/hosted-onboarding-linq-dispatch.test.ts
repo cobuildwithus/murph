@@ -148,7 +148,6 @@ function expectHostedLinqReadReceiptSent(chatId = "chat_123"): void {
   expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
     chatId,
     signal: undefined,
-    timeoutMs: 750,
   });
 }
 
@@ -1242,6 +1241,66 @@ https://join.example.test/join/code_first_text`);
       "failed",
       expect.objectContaining({
         errorName: "Error",
+        responseReason: "wake-appended-active-member",
+        wakeHandoffStarted: true,
+        wakeHandoffWorkflowStarted: true,
+      }),
+    );
+  });
+
+  it("can schedule active-member Linq read receipts after the webhook response", async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_scheduled_read_receipt",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(scheduledTasks).toHaveLength(1);
+
+    await scheduledTasks[0]?.();
+
+    expectHostedLinqReadReceiptSent();
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "sent",
+      expect.objectContaining({
+        httpStatus: 204,
         responseReason: "wake-appended-active-member",
         wakeHandoffStarted: true,
         wakeHandoffWorkflowStarted: true,
