@@ -271,8 +271,8 @@ function uniqueArray<TSchema extends z.ZodTypeAny>(
     maxItems?: number;
     uniqueItems?: boolean;
   } = {},
-): z.ZodType<z.output<TSchema>[]> {
-  let schema = z.array(itemSchema);
+): z.ZodArray<TSchema> {
+  let schema: z.ZodArray<TSchema> = z.array(itemSchema);
 
   if (options.minItems !== undefined) {
     schema = schema.min(options.minItems);
