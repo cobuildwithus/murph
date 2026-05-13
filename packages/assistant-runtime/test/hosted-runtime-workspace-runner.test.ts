@@ -1530,6 +1530,147 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("runtime wake notifies staged input when a later mailbox item blocks", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_initial_before_block",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const admissions: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_blocked_later",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "1") {
+            return { status: "imported" };
+          }
+          if (item.item.laneSeq === "3") {
+            return {
+              reasonCode: "synthetic.retryable-block",
+              retryable: true,
+              status: "blocked",
+            };
+          }
+
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `late same-conversation input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_blocked_later",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_active_turn_blocked_later",
+          leaseGeneration: "4",
+          workspaceVersion: "0",
+        },
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          const controller = createAssistantActiveTurnInputController({
+            admissionHook: async (input) => {
+              admissions.push(input.phase);
+              return {
+                kind: "no-new-input",
+              };
+            },
+            conversationKeys: ["channel:linq|identity:acct_1|thread:thread_1"],
+            sessionId: "session-runner-active-turn-blocked-later",
+            turnId: "turn-runner-active-turn-blocked-later",
+            vault: vaultRoot,
+          });
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_before_block",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_late_blocked",
+            laneSeq: "3",
+            occurredAt: "2026-04-26T00:00:03.000Z",
+          }));
+          try {
+            runtimeWakeSignal.notify();
+            await waitForCondition(() => importedSeqs.includes("3"));
+            await waitForCondition(() => admissions.length === 1);
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          } finally {
+            controller.close();
+          }
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1", "2", "3"]);
+      assert.deepEqual(admissions, ["input_available"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+      assert.deepEqual(logRequests[1]?.entries[0]?.redactedJson, {
+        blockCodes: ["synthetic.retryable-block"],
+        blockedCount: 1,
+        checkpointDeferred: true,
+        checkpointed: false,
+        conversationSeqEnd: "2",
+        conversationSeqStart: "1",
+        fetchedCount: 2,
+        importedCount: 1,
+        laneCount: 1,
+        retryableBlockedCount: 1,
+        stateChanged: true,
+        systemSeqEnd: "0",
+        systemSeqStart: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("aborts without a later workspace checkpoint when active-turn admission checkpoint is rejected", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
