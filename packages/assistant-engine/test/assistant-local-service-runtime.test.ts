@@ -2606,6 +2606,7 @@ test('active-turn controller only probes input after explicit notification or pr
   })
 
   try {
+    assert.equal(vi.getTimerCount(), 0)
     await vi.advanceTimersByTimeAsync(1500)
     assert.deepEqual(admissions, [])
     expect(steer).not.toHaveBeenCalled()
@@ -2789,6 +2790,141 @@ test('active-turn controller reruns input-available admission for in-flight noti
         },
       ],
     })
+  } finally {
+    firstAdmissionRelease.resolve()
+    releaseLiveTurn()
+    controller.close()
+  }
+})
+
+test('active-turn controller reruns input-available admission after an accepted in-flight notification', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputAvailable,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const firstAdmissionStarted = createDeferred<void>()
+  const firstAdmissionRelease = createDeferred<void>()
+  const phases: string[] = []
+  const knownInputSnapshots: string[][] = []
+  const steer = vi.fn(async () => undefined)
+  let ordinal = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      phases.push(input.phase)
+      knownInputSnapshots.push([...(input.knownInputIds ?? [])])
+      ordinal += 1
+      const id = `hook-${ordinal}`
+      const prompt = `Rerun accepted hook input ${ordinal}`
+      const result = {
+        acceptedInputs: [
+          {
+            id,
+            promptFallbackReason: 'missing-content-ref' as const,
+            promptFallbackText: prompt,
+            source: 'assistant-input' as const,
+          },
+        ],
+        kind: 'accepted' as const,
+        prompt,
+        transcriptText: `Rerun accepted hook transcript ${ordinal}`,
+        userMessageContent: [
+          {
+            text: prompt,
+            type: 'text' as const,
+          },
+        ],
+      }
+      if (ordinal === 1) {
+        firstAdmissionStarted.resolve()
+        await firstAdmissionRelease.promise
+      }
+      return result
+    },
+    boundaryAdmissionEnabled: false,
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    providerSessionId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    const firstNotification = notifyAssistantActiveTurnInputAvailable({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      vault: '/vaults/test',
+    })
+    await firstAdmissionStarted.promise
+    const secondNotification = notifyAssistantActiveTurnInputAvailable({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      vault: '/vaults/test',
+    })
+    await Promise.resolve()
+    assert.deepEqual(phases, ['input_available'])
+
+    firstAdmissionRelease.resolve()
+    const [firstResult, secondResult] = await Promise.all([
+      firstNotification,
+      secondNotification,
+    ])
+    assert.deepEqual(phases, ['input_available', 'input_available'])
+    assert.deepEqual(knownInputSnapshots, [[], ['hook-1']])
+    assert.equal(firstResult?.kind, 'accepted')
+    assert.equal(secondResult?.kind, 'accepted')
+    expect(steer).toHaveBeenCalledTimes(2)
+    assert.deepEqual(await controller.admit({
+      phase: 'commit_barrier',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Rerun accepted hook input 1',
+          source: 'assistant-input',
+        },
+        {
+          id: 'hook-2',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Rerun accepted hook input 2',
+          source: 'assistant-input',
+        },
+      ],
+      deliveryReplyToMessageId: undefined,
+      deliveryIdempotencyKey: undefined,
+      kind: 'accepted',
+      prompt: 'Rerun accepted hook input 1\n\nRerun accepted hook input 2',
+      providerAlreadySteered: true,
+      receiptMetadata: undefined,
+      transcriptText: 'Rerun accepted hook transcript 1\n\nRerun accepted hook transcript 2',
+      userMessageContent: [
+        {
+          text: 'Rerun accepted hook input 1',
+          type: 'text',
+        },
+        {
+          text: 'Rerun accepted hook input 2',
+          type: 'text',
+        },
+      ],
+    })
+    assert.equal(await controller.admitAvailable(), undefined)
   } finally {
     firstAdmissionRelease.resolve()
     releaseLiveTurn()

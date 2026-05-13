@@ -12,6 +12,7 @@ import {
   AssistantActiveTurnInputCheckpointRejectedError,
   createAssistantActiveTurnInputController,
   createAssistantOutboxIntent,
+  createStoreBackedAssistantInputSource,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import type {
@@ -1372,6 +1373,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const admissions: string[] = [];
+    const liveSteerInputs: unknown[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -1429,17 +1431,58 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase() {
           events.push("assistant:start");
+          const inputSource = createStoreBackedAssistantInputSource({
+            vault: vaultRoot,
+          });
           const controller = createAssistantActiveTurnInputController({
             admissionHook: async (input) => {
               admissions.push(input.phase);
+              const candidates = await inputSource.listNewConversationInputs({
+                conversation: {
+                  accountId: "acct_1",
+                  actorId: "actor_1",
+                  actorIsSelf: false,
+                  source: "linq",
+                  threadId: "thread_1",
+                  threadIsDirect: true,
+                },
+                knownInputIds: input.knownInputIds,
+                knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+                signal: input.signal,
+              });
+              if (candidates.inputs.length === 0) {
+                return {
+                  kind: "no-new-input",
+                };
+              }
+              const text = candidates.inputs
+                .map((candidate) => candidate.event.transcriptText ?? candidate.event.text)
+                .filter((value): value is string => typeof value === "string")
+                .join("\n\n");
               return {
-                kind: "no-new-input",
+                acceptedInputs: candidates.inputs.map((candidate) => candidate.acceptedInput),
+                kind: "accepted",
+                prompt: text,
+                transcriptText: text,
+                userMessageContent: candidates.inputs.flatMap(
+                  (candidate) => candidate.event.userMessageContent ?? [],
+                ),
               };
             },
             conversationKeys: ["channel:linq|identity:acct_1|thread:thread_1"],
             sessionId: "session-runner-active-turn",
             turnId: "turn-runner-active-turn",
             vault: vaultRoot,
+          });
+          const releaseLiveTurn = controller.registerLiveProviderTurn({
+            interrupt: async () => undefined,
+            providerSessionId: "provider-session-runner-active-turn",
+            providerTurnId: "provider-turn-runner-active-turn",
+            sessionId: "session-runner-active-turn",
+            steer: async (input) => {
+              liveSteerInputs.push(input);
+            },
+            turnId: "turn-runner-active-turn",
           });
           items.push(createMailboxItem({
             id: "mailbox_item_runner_late",
@@ -1456,11 +1499,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             runtimeWakeSignal.notify();
             await waitForCondition(() => importedSeqs.includes("3"));
             await waitForCondition(() => admissions.length === 1);
+            await waitForCondition(() => liveSteerInputs.length === 1);
             return {
               checkpointReason: "canonical_runtime_commit",
               progressed: true,
             };
           } finally {
+            releaseLiveTurn();
             controller.close();
           }
         },
@@ -1477,6 +1522,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
       assert.deepEqual(admissions, ["input_available"]);
+      assert.equal(liveSteerInputs.length, 1);
+      assert.deepEqual(liveSteerInputs[0], {
+        prompt: "late same-conversation input 2\n\nlate same-conversation input 3",
+        userMessageContent: [
+          {
+            text: "late same-conversation input 2",
+            type: "text",
+          },
+          {
+            text: "late same-conversation input 3",
+            type: "text",
+          },
+        ],
+      });
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
