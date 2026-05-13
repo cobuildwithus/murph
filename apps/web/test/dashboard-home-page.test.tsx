@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { cloneElement, createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
@@ -91,6 +91,8 @@ const MEMBER = {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -110,6 +112,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 test("HomePage hides the connect devices card when device sync is already active", async () => {
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValueOnce(false);
 
@@ -123,6 +129,10 @@ test("HomePage hides the connect devices card when device sync is already active
   assert.match(markup, /Start an experiment/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls[0]?.[0]?.member, MEMBER);
   assert.equal(mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.memberId, MEMBER.id);
+  assert.equal(
+    mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.now.toISOString(),
+    "2026-05-26T12:00:00.000Z",
+  );
 });
 
 test("HomePage shows a usage-limit upgrade banner when assistant usage is exhausted", async () => {
@@ -147,9 +157,37 @@ test("HomePage shows a usage-limit upgrade banner when assistant usage is exhaus
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /You are out of included usage/);
-  assert.match(markup, /Upgrade to Edge/);
+  assert.match(markup, /hit this month/);
+  assert.match(markup, /Resets in 6 days/);
+  assert.match(markup, /Upgrade to Edge for more/);
   assert.match(markup, /type="button"/);
+});
+
+test("HomePage shows a monthly usage reset countdown when assistant usage is exhausted", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    billingPlanCode: "launch_edge_monthly",
+    limitUsdMicros: 25_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 25_000_000n,
+    userNotice: {
+      code: "edge_usage_limit_reached",
+      message:
+        "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /hit this month/);
+  assert.match(markup, /Resets in 6 days/);
+  assert.match(markup, /Murph will start replying again when your plan resets/);
 });
 
 test("HomePage shows Start Pulse directly when trial credits are exhausted", async () => {
@@ -173,8 +211,8 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Trial credits are used up/);
-  assert.match(markup, /Start Pulse/);
-  assert.doesNotMatch(markup, /Start Pulse plan/);
+  assert.match(markup, /Your trial credits are used up/);
+  assert.match(markup, /Start Pulse to keep Murph replying/);
+  assert.doesNotMatch(markup, /Start your Pulse plan/);
   assert.doesNotMatch(markup, /href="\/settings"/);
 });

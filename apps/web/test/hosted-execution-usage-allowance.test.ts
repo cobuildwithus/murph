@@ -302,6 +302,52 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("starts a fresh calendar allowance period automatically after the previous month ends", async () => {
+    const nextPeriodStart = new Date("2026-05-01T00:00:00.000Z");
+    const nextPeriodEnd = new Date("2026-06-01T00:00:00.000Z");
+    const prisma = createGatePrisma({
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        periodEnd: nextPeriodEnd,
+        periodStart: nextPeriodStart,
+        spentUsdMicros: 0n,
+      },
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 10_000_000n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: nextPeriodStart,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 10_000_000n,
+      periodEnd: nextPeriodEnd,
+      periodStart: nextPeriodStart,
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        limitUsdMicros: 10_000_000n,
+        memberId: "member_123",
+        periodEnd: nextPeriodEnd,
+        periodStart: nextPeriodStart,
+        spentUsdMicros: 0n,
+      }),
+      where: {
+        memberId_periodStart: {
+          memberId: "member_123",
+          periodStart: nextPeriodStart,
+        },
+      },
+    }));
+  });
+
   it("uses the Edge usage limit notice when an Edge member is over limit", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",

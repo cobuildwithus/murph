@@ -7,7 +7,16 @@ import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usa
 
 interface UsageLimitBannerProps {
   noticeCode: HostedAiUsageGateNoticeCode;
+  now?: Date | null;
+  resetAt?: Date | null;
 }
+
+const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
+  "edge_usage_limit_reached",
+  "pulse_upgrade_edge",
+]);
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const usageLimitBannerCopy: Record<
   HostedAiUsageGateNoticeCode,
@@ -19,32 +28,29 @@ const usageLimitBannerCopy: Record<
 > = {
   edge_usage_limit_reached: {
     action: "View settings",
-    body:
-      "Your included assistant usage is used up for this month. Murph will resume when the allowance resets.",
-    title: "Assistant usage is paused",
+    body: "Murph will start replying again when your plan resets.",
+    title: "You've hit this month's limit",
   },
   pulse_upgrade_edge: {
     action: "Upgrade to Edge",
-    body:
-      "Your monthly assistant usage is used up. Upgrade to Edge to keep Murph replying now.",
-    title: "You are out of included usage",
+    body: "Upgrade to Edge for more, or wait for your reset.",
+    title: "You've hit this month's limit",
   },
   trial_conversion_pending: {
     action: "Open billing",
-    body:
-      "Your trial has ended and billing is still settling. Open billing if you want to keep Murph replying now.",
-    title: "Trial billing is updating",
+    body: "Billing is still finishing up. Open it to keep Murph replying.",
+    title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
     action: "Start Pulse",
-    body:
-      "Start your Pulse plan now to keep Murph replying.",
-    title: "Trial credits are used up",
+    body: "Start Pulse to keep Murph replying.",
+    title: "Your trial credits are used up",
   },
 };
 
-export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
+export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerProps) {
   const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
+  const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
 
   return (
     <section
@@ -52,10 +58,12 @@ export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
       className="flex flex-col gap-5 rounded-lg border border-[#c4a882]/25 border-l-[3px] border-l-[#7a8c6e] bg-[rgba(255,252,246,0.9)] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
     >
       <div className="min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Monthly allowance
-        </p>
-        <h2 className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
+        {resetLabel ? (
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+            {resetLabel}
+          </p>
+        ) : null}
+        <h2 className="mt-2 font-serif text-xl font-semibold tracking-tight text-foreground">
           {copy.title}
         </h2>
         <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted-foreground">
@@ -82,4 +90,28 @@ export function UsageLimitBanner({ noticeCode }: UsageLimitBannerProps) {
       )}
     </section>
   );
+}
+
+function formatUsageResetCountdown(input: {
+  noticeCode: HostedAiUsageGateNoticeCode;
+  now?: Date | null;
+  resetAt?: Date | null;
+}): string | null {
+  if (!resettableMonthlyNoticeCodes.has(input.noticeCode)) {
+    return null;
+  }
+
+  const nowTime = input.now instanceof Date ? input.now.getTime() : Number.NaN;
+  const resetTime = input.resetAt instanceof Date ? input.resetAt.getTime() : Number.NaN;
+  if (!Number.isFinite(nowTime) || !Number.isFinite(resetTime) || resetTime <= nowTime) {
+    return null;
+  }
+
+  const remainingMs = resetTime - nowTime;
+  if (remainingMs < MS_PER_DAY) {
+    return "Resets in under a day";
+  }
+
+  const remainingDays = Math.ceil(remainingMs / MS_PER_DAY);
+  return `Resets in ${remainingDays} ${remainingDays === 1 ? "day" : "days"}`;
 }
