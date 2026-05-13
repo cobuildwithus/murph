@@ -116,11 +116,13 @@ describe("HostedUserRunner wake scheduling", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({ kind: "accepted" as const }));
     const { invoke, runner, sql } = createRunnerHarness({
       invocationResults: [
         firstInvocation.promise,
         { nextWakeAt: null, status: "idle" },
       ],
+      wakeRuntime,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser("member_123");
@@ -196,14 +198,14 @@ describe("HostedUserRunner wake scheduling", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   });
 
-  it("keeps an unexpired write fence when no active runtime child is wakeable", async () => {
+  it("replaces an unexpired write fence when no active runtime child is wakeable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const wakeRuntime = vi.fn(async () => ({
       kind: "not-wakeable" as const,
       reason: "no-active-child" as const,
     }));
-    const { alarms, invoke, runner, sql } = createRunnerHarness({
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       wakeRuntime,
       workspace: createWorkspaceState({ version: "9" }),
     });
@@ -228,35 +230,41 @@ describe("HostedUserRunner wake scheduling", () => {
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
       alreadyRunning: false,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+      immediateDriveStarted: true,
+      inFlight: true,
+      nextAlarmAt: FIXED_NOW,
     });
+    await flushWaitUntil();
 
     expect(wakeRuntime).toHaveBeenCalledWith({
       attemptId: "attempt_stale",
       leaseGeneration: "2",
       userId: "member_123",
     });
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      leaseGeneration: "3",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "9",
+    });
+    expect(invoke.mock.calls[0]?.[0].job.request.attemptId).not.toBe("attempt_stale");
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: "attempt_stale",
-      active_expires_at: "2026-04-27T00:01:00.000Z",
+      active_attempt_id: null,
       backoff_until: null,
       failure_count: 0,
-      last_invocation_at: null,
-      wake_at: "2026-04-27T00:00:01.000Z",
+      last_invocation_at: FIXED_NOW,
+      wake_at: null,
     });
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
           alreadyRunning: false,
-          immediateDriveStarted: false,
+          immediateDriveStarted: true,
           runtimeWakeResult: "not-wakeable:no-active-child",
-          staleWriteFencePreempted: false,
-          writeFenceHeldAfterNotWakeable: true,
+          staleWriteFencePreempted: true,
+          writeFenceHeldAfterNotWakeable: false,
         }),
         message: "Hosted runner nudge accepted.",
       }),
@@ -372,6 +380,276 @@ describe("HostedUserRunner wake scheduling", () => {
       wake_at: "2026-04-27T00:00:01.000Z",
     });
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+  });
+
+  it("defers preempting a fresh local drain before the container child is registered", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "not-wakeable" as const,
+      reason: "no-active-child" as const,
+    }));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [firstInvocation.promise],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const activeFence = readRunnerMeta(sql);
+
+    const secondNudge = await runner.nudgeHostedRunner();
+    expect(secondNudge).toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAt: expect.any(String),
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: activeFence.active_attempt_id,
+      leaseGeneration: String(activeFence.active_generation),
+      userId: "member_123",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: activeFence.active_attempt_id,
+      wake_at: secondNudge.nextAlarmAt,
+    });
+    expect(alarms.at(-1)).toBe(secondNudge.nextAlarmAt);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alreadyRunning: false,
+          freshLocalDrainPreemptionDeferred: true,
+          immediateDriveStarted: false,
+          progressKind: "scheduled-short-retry",
+          runtimeWakeResult: "not-wakeable:no-active-child",
+          staleWriteFencePreempted: false,
+          writeFenceHeldAfterNotWakeable: false,
+        }),
+        message: "Hosted runner nudge accepted.",
+      }),
+    );
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+  });
+
+  it("replaces a stale local drain when the exact active child is not wakeable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "not-wakeable" as const,
+      reason: "no-active-child" as const,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [
+        firstInvocation.promise,
+        { nextWakeAt: null, status: "idle" },
+      ],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const staleFence = readRunnerMeta(sql);
+    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: true,
+      nextAlarmAt: expect.any(String),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: staleFence.active_attempt_id,
+      leaseGeneration: String(staleFence.active_generation),
+      userId: "member_123",
+    });
+    expect(invoke.mock.calls[1]?.[0].job.request).toMatchObject({
+      leaseGeneration: "2",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "21",
+    });
+    expect(invoke.mock.calls[1]?.[0].job.request.attemptId).not.toBe(
+      staleFence.active_attempt_id,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alreadyRunning: false,
+          immediateDriveStarted: true,
+          progressKind: "preempted-stale-fence",
+          runtimeWakeResult: "not-wakeable:no-active-child",
+          staleWriteFencePreempted: true,
+          writeFenceHeldAfterNotWakeable: false,
+        }),
+        message: "Hosted runner nudge accepted.",
+      }),
+    );
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => {
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "hosted.runner",
+          message: "Hosted runner ignored stale runtime wake completion.",
+        }),
+      );
+    });
+  });
+
+  it("ignores a stale local drain failure after replacement progress completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "not-wakeable" as const,
+      reason: "no-active-child" as const,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [
+        firstInvocation.promise,
+        { nextWakeAt: null, status: "idle" },
+      ],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+
+    firstInvocation.reject(new Error("stale container failed"));
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "hosted.runner",
+          details: expect.objectContaining({
+            errorCode: "runtime_error",
+            errorDetailPresent: true,
+            errorMessage: "Hosted execution runtime failed.",
+            errorName: "Error",
+            workspaceReason: "nudge",
+            workspaceVersion: "21",
+          }),
+          message: "Hosted runner ignored stale runtime wake failure.",
+          phase: "failed",
+        }),
+      );
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 0,
+      wake_at: null,
+    });
+  });
+
+  it("keeps a newer replacement drain when stale preemption loses the fence race", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const replacementInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const delayedWake = createDeferred<{
+      kind: "not-wakeable";
+      reason: "no-active-child";
+    }>();
+    const wakeResults: Array<
+      Promise<{ kind: "not-wakeable"; reason: "no-active-child" }>
+      | { kind: "not-wakeable"; reason: "no-active-child" }
+    > = [
+      delayedWake.promise,
+      { kind: "not-wakeable", reason: "no-active-child" },
+      { kind: "not-wakeable", reason: "no-active-child" },
+    ];
+    const wakeRuntime = vi.fn(async () => {
+      const next = wakeResults.shift();
+      if (!next) {
+        throw new Error("Unexpected runtime wake call.");
+      }
+      return await next;
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [
+        firstInvocation.promise,
+        replacementInvocation.promise,
+      ],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const staleFence = readRunnerMeta(sql);
+    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+
+    const stalePreemption = runner.nudgeHostedRunner();
+    await vi.waitFor(() => expect(wakeRuntime).toHaveBeenCalledTimes(1));
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    const replacementFence = readRunnerMeta(sql);
+    expect(replacementFence.active_attempt_id).not.toBe(staleFence.active_attempt_id);
+
+    delayedWake.resolve({ kind: "not-wakeable", reason: "no-active-child" });
+    await expect(stalePreemption).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: false,
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledTimes(3);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: replacementFence.active_attempt_id,
+      wake_at: expect.any(String),
+    });
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    replacementInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
   });
 
   it("returns a busy idle-checkpoint lease result behind an active write fence", async () => {

@@ -144,12 +144,13 @@ The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle
 activity expiry with no active foreground operation.
 
-Foreground liveness recovery is write-fenced instead of container-destroy
-driven. The legacy active-invocation heartbeat and container-stopped RPC shims
-are retained only for deployed-caller compatibility until 2026-05-25 and return
-inert responses. Live runner side effects validate the runtime write fence;
-pending nudges wait for the active request to finish, while stale persisted
-write fences recover through the Durable Object alarm and hard timeout path.
+Foreground progress recovery is write-fenced instead of container-destroy
+driven. A write fence is commit authority, not liveness proof; the exact wake,
+replacement, ambiguous-wake, and fresh-startup retry contract is documented in
+`agent-docs/references/hosted-runtime-protocol.md`. The legacy active-invocation
+heartbeat and container-stopped RPC shims are retained only for deployed-caller
+compatibility until 2026-05-25 and return inert responses. Live runner side
+effects validate the runtime write fence.
 
 ## Deploy Artifacts
 
