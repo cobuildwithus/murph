@@ -1,8 +1,5 @@
 import { Container, type StopParams } from "@cloudflare/containers";
 import {
-  type HostedAssistantWorkspaceRuntimeJobResult,
-} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
-import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
@@ -29,7 +26,6 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
-  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
 
 const RUNNER_PORT = 8080;
@@ -577,35 +573,6 @@ export class RunnerContainer extends Container {
     }
   }
 
-  private async postRunnerRequest(input: {
-    job: HostedExecutionRunnerJobInput;
-    signal?: AbortSignal;
-    timeoutMs: number;
-    userId: string;
-  }): Promise<HostedExecutionRunnerJobResult> {
-    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-    const requestSignal = input.signal
-      ? combineRunnerContainerAbortSignals(input.signal, timeoutSignal)
-      : timeoutSignal;
-    const response = await this.containerFetch(
-      RUNNER_EXECUTE_URL,
-      {
-        body: JSON.stringify({
-          job: input.job,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-        signal: requestSignal,
-      },
-    );
-    if (!response.ok) {
-      throw await classifyHostedRunnerContainerErrorResponse(response);
-    }
-    return assertHostedExecutionRunnerJobResult(await response.json(), input.job);
-  }
-
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
@@ -901,12 +868,6 @@ function registerHostedRunnerContainerOutboundInterception(
   legacyContainerClass.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 }
 
-export async function invokeHostedExecutionContainerRunner(
-  input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
-): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-export async function invokeHostedExecutionContainerRunner(
-  input: HostedExecutionContainerRunnerInput,
-): Promise<HostedExecutionRunnerJobResult>;
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
 ): Promise<HostedExecutionRunnerJobResult> {
@@ -1389,14 +1350,6 @@ function parseHostedExecutionContainerInvokeInput(
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId,
   };
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
 }
 
 function requireString(value: unknown, label: string): string {
