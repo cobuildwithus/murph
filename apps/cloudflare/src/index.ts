@@ -972,6 +972,7 @@ async function handleTestStartStuckInvocationRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId) as UserRunnerDurableObjectStubLike & {
     startStuckInvocationForTest(input: {
+      expiresInMs?: number;
       reason?: HostedWorkspaceInvocationReason;
       userId: string;
     }): Promise<HostedRunnerStuckInvocationTestResult>;
@@ -980,10 +981,28 @@ async function handleTestStartStuckInvocationRoute(
   if (reason === "invalid") {
     return json({ error: "Unsupported test stuck invocation reason." }, 400);
   }
+  const expiresInMs = parseTestPositiveInteger(
+    context.url.searchParams.get("expiresInMs"),
+  );
+  if (expiresInMs === "invalid") {
+    return json({ error: "Unsupported test stuck invocation expiry." }, 400);
+  }
   return json(await stub.startStuckInvocationForTest({
+    ...(expiresInMs === null ? {} : { expiresInMs }),
     ...(reason ? { reason } : {}),
     userId,
   }));
+}
+
+function parseTestPositiveInteger(value: string | null): number | "invalid" | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return "invalid";
+  }
+  return parsed;
 }
 
 async function handleRunnerNudgeRoute(

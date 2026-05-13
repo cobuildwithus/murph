@@ -49,6 +49,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   }): Promise<HostedWorkspaceInvocationResult>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   startStuckInvocationForTest?(input: {
+    expiresInMs?: number;
     reason?: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;

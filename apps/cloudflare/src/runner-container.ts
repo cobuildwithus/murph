@@ -92,7 +92,7 @@ export interface HostedExecutionContainerStubLike {
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
-  wakeRuntime?(input: { userId: string }): Promise<{ accepted: boolean }>;
+  wakeRuntime?(input: { userId: string }): Promise<RunnerRuntimeWakeResult | { accepted: boolean }>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -139,6 +139,27 @@ interface RunnerActiveOperationRecord {
   leaseGeneration: string;
   userId: string;
 }
+
+export type RunnerRuntimeWakeResult =
+  | {
+      attemptId: string;
+      kind: "accepted";
+      leaseGeneration: string;
+    }
+  | {
+      kind: "not-wakeable";
+      reason: "no-active-child";
+    }
+  | {
+      kind: "unknown";
+      reason:
+        | "active-child-rejected"
+        | "container-rpc-error"
+        | "container-rpc-timeout"
+        | "legacy-wake-result"
+        | "missing-container-binding"
+        | "missing-wake-method";
+    };
 
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
@@ -198,10 +219,10 @@ export class RunnerContainer extends Container {
     }
   }
 
-  async wakeRuntime(input: { userId: string }): Promise<{ accepted: boolean }> {
+  async wakeRuntime(input: { userId: string }): Promise<RunnerRuntimeWakeResult> {
     const active = this.workspaceInvocationActiveOperation;
     if (!active || active.userId !== input.userId) {
-      return { accepted: false };
+      return { kind: "not-wakeable", reason: "no-active-child" };
     }
 
     this.noteRunnerActivity("runtime-wake");
@@ -232,7 +253,14 @@ export class RunnerContainer extends Container {
           userId: input.userId,
         });
       }
-      return { accepted };
+      if (response.ok && accepted) {
+        return {
+          attemptId: active.attemptId,
+          kind: "accepted",
+          leaseGeneration: active.leaseGeneration,
+        };
+      }
+      return { kind: "unknown", reason: "active-child-rejected" };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -245,7 +273,13 @@ export class RunnerContainer extends Container {
         phase: "scheduled",
         userId: input.userId,
       });
-      return { accepted: false };
+      if (
+        error instanceof DOMException
+        && error.name === "TimeoutError"
+      ) {
+        return { kind: "unknown", reason: "container-rpc-timeout" };
+      }
+      return { kind: "unknown", reason: "container-rpc-error" };
     }
   }
 
