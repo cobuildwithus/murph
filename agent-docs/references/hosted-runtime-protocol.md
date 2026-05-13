@@ -221,29 +221,24 @@ authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
 Fetching after restore keeps user messages appended during restore visible to
 the same invocation instead of hiding them behind a stale pre-restore read. The
-runtime stages decoded conversation rows as assistant input, marks the active
-invocation dirty, and checkpoints that local runtime state at the final
-idle/deadline checkpoint. Foreground runtime work may defer intermediate
-checkpoints; the active invocation remains dirty until the runtime-owned
-idle/deadline checkpoint succeeds. Projection status is logged and artifacts
-remain rebuildable best-effort state rather than a reason to take another
-workspace checkpoint, so failed or slow projection does not block assistant
-admission and does not imply a durable retry queue. Successful projection may
-make parsed or bounded attachment evidence available to the same assistant turn.
+runtime stages decoded conversation rows as assistant input and marks the active
+invocation dirty. Foreground runtime work may defer intermediate checkpoints.
+The active invocation remains dirty until the runtime-owned
+idle/deadline/scheduled-wake checkpoint succeeds. RunnerContainer never records
+pending checkpoint intent. Activity expiry is cleanup-only. Projection status
+is logged and artifacts remain rebuildable best-effort state rather than a
+reason to take another workspace checkpoint, so failed or slow projection does
+not block assistant admission and does not imply a durable retry queue.
+Successful projection may make parsed or bounded attachment evidence available
+to the same assistant turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
 watermarks, and the runtime result carries the next fast mailbox retry wake so
 Cloudflare can promptly reinvoke the workspace.
-Cloudflare does not own or schedule checkpoints for deferred foreground
-progress. RunnerContainer never records pending checkpoint intent in memory, and
-the public runtime result contract does not carry a deferred-checkpoint
-scheduler hint. The next foreground wake uses the normal UserRunner write fence
-and outranks activity-expiry cleanup because activity expiry is cleanup-only and
-yields while a workspace invocation is active. Browser-vault refresh now enters
-through normal runtime work with the active write fence rather than a separate
-container refresh route, and failure or staleness cannot mutate runner
-checkpoint, reply, or wake state.
+Browser-vault refresh now enters through normal runtime work with the active
+write fence rather than a separate container refresh route, and failure or
+staleness cannot mutate runner checkpoint, reply, or wake state.
 Conversation import is discovery, not assistant handling:
 mailbox watermarks prove only that source input was staged. A conversation input remains
 pending until the assistant runtime writes durable terminal auto-reply evidence
