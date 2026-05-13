@@ -1917,6 +1917,41 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("300s");
   });
 
+  it("consumes readiness health responses so warm containers can become idle", async () => {
+    const healthResponse = new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return healthResponse;
+        }
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+      initialStatus: "running",
+    });
+
+    await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_health_body_consumed"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    expect(healthResponse.bodyUsed).toBe(true);
+  });
+
   it("renews activity before a workspace invocation reaches the runner shell", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, containerFetch } = createContainerDouble();

@@ -210,6 +210,7 @@ export class RunnerContainer extends Container {
         },
       );
       const accepted = response.headers.get("x-runtime-wake-accepted") === "1";
+      await consumeRunnerContainerResponseBody(response);
       if (!response.ok || !accepted) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -1388,9 +1389,21 @@ async function assertRunnerHealthy(
     },
   );
 
-  if (!response.ok) {
+  const responseOk = response.ok;
+  await consumeRunnerContainerResponseBody(response);
+
+  if (!responseOk) {
     throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
   }
+}
+
+async function consumeRunnerContainerResponseBody(response: Response): Promise<void> {
+  if (response.body === null || response.bodyUsed) {
+    return;
+  }
+
+  // Cloudflare Containers decrements containerFetch in-flight activity after the returned body is consumed.
+  await response.arrayBuffer();
 }
 
 function readContainerStatus(state: unknown): string | null {
