@@ -520,6 +520,7 @@ describe('assistant auto-reply failure observability', () => {
           ignored: 'drop me',
           providerActionCount: 2,
           codexThreadId: 'provider-session-1',
+          codexThreadIdPresent: true,
           retryable: false,
           status: '429',
           upstreamErrorMessage:
@@ -545,9 +546,9 @@ describe('assistant auto-reply failure observability', () => {
       codexFailureDetailPresent: true,
       codexFailureStage: 'process_exit',
       codexStderrPresent: false,
+      codexThreadIdPresent: true,
       outboxIntentId: 'outbox-1',
       providerActionCount: 2,
-      codexThreadId: 'provider-session-1',
       retryable: false,
       status: '429',
       upstreamErrorMessage:
@@ -557,6 +558,7 @@ describe('assistant auto-reply failure observability', () => {
     expect(snapshot.message).toContain('<HOME_DIR>')
     expect(snapshot.message).not.toContain('super-secret-token')
     expect(snapshot.message).not.toContain(syntheticHomePath)
+    expect(JSON.stringify(snapshot.context)).not.toContain('provider-session-1')
   })
 
   it('classifies quota and billing exhaustion as provider usage limits', () => {
@@ -687,7 +689,6 @@ describe('assistant auto-reply failure observability', () => {
       safeSummary: 'assistant provider failed',
     })
     expect(snapshot.context).toEqual({
-      codexThreadId: ['<HOME_DIR>/tmp', 'Assistant reply failed.'],
       retryable: 'yes',
     })
   })

@@ -490,6 +490,73 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("accepts legacy hosted provider plan diagnostic keys", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_plan_legacy_keys",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_plan_legacy",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_legacy_keys",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-provider-plan-diagnostics.v1",
+          type: "assistant.provider.plan",
+          activeTurnHistoryCount: 1,
+          activeTurnHistoryPresent: true,
+          providerContinuation: "provider-state-optimization",
+          providerRequestOrdinal: 2,
+          refreshThreadInstructions: false,
+          resumeProviderSessionIdPresent: true,
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_provider_plan_legacy_keys",
+      level: "info",
+      message: "Hosted assistant provider plan captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        activeTurnHistoryCount: 1,
+        activeTurnHistoryPresent: true,
+        codexContinuation: "provider-state-optimization",
+        providerPlanKind: "provider.plan",
+        providerRequestOrdinal: 2,
+        refreshThreadInstructions: false,
+        requestId: "req_legacy_keys",
+        resumeCodexThreadIdPresent: true,
+        workingDirectoryKind: "hosted-stable-proc-cwd",
+      }),
+    });
+    expect(entry?.redacted).not.toHaveProperty("codexThreadId");
+    expect(entry?.redacted).not.toHaveProperty("providerContinuation");
+    expect(entry?.redacted).not.toHaveProperty("resumeProviderSessionIdPresent");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",

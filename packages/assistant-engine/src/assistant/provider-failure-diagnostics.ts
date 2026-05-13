@@ -2,15 +2,23 @@ export function annotateRecoveredCodexThreadIdForDiagnostics(
   error: unknown,
 ): void {
   if (!shouldAnnotateRecoveredCodexThreadIdForDiagnostics(error)) {
+    sanitizePublicCodexThreadDiagnostics(error, {
+      recoveredCodexThreadIdPresent: false,
+    })
     return
   }
 
   const codexThreadId = extractRecoveredCodexThreadId(error)
   if (!codexThreadId) {
+    sanitizePublicCodexThreadDiagnostics(error, {
+      recoveredCodexThreadIdPresent: false,
+    })
     return
   }
 
-  attachRecoveredCodexThreadId(error, codexThreadId)
+  sanitizePublicCodexThreadDiagnostics(error, {
+    recoveredCodexThreadIdPresent: true,
+  })
 }
 
 export function extractRecoveredCodexThreadId(error: unknown): string | null {
@@ -70,17 +78,40 @@ function readAssistantProviderErrorContext(
   )
 }
 
-function attachRecoveredCodexThreadId(
+function sanitizePublicCodexThreadDiagnostics(
   error: unknown,
-  codexThreadId: string,
+  options: {
+    recoveredCodexThreadIdPresent: boolean
+  },
 ): void {
   if (!error || typeof error !== 'object') {
     return
   }
 
-  const currentContext = readAssistantProviderErrorContext(error) ?? {}
+  const currentContext = readAssistantProviderErrorContext(error)
+  if (!currentContext) {
+    return
+  }
+
+  const {
+    codexThreadId,
+    recoveredCodexThreadId,
+    ...safeContext
+  } = currentContext
+  const codexThreadIdPresent =
+    typeof codexThreadId === 'string' && codexThreadId.trim().length > 0
+  const previousRecoveredCodexThreadIdPresent =
+    typeof recoveredCodexThreadId === 'string' &&
+    recoveredCodexThreadId.trim().length > 0
+
   ;(error as { context?: Record<string, unknown> }).context = {
-    ...currentContext,
-    recoveredCodexThreadId: codexThreadId,
+    ...safeContext,
+    ...('codexThreadId' in currentContext
+      ? { codexThreadIdPresent }
+      : {}),
+    ...(options.recoveredCodexThreadIdPresent ||
+      previousRecoveredCodexThreadIdPresent
+      ? { recoveredCodexThreadIdPresent: true }
+      : {}),
   }
 }

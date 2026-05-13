@@ -1,15 +1,22 @@
 import {
   assistantAskResultSchema,
+  parseAssistantSessionRecord,
   type AssistantAskResult,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { normalizeAssistantSessionSnapshot } from './provider-state.js'
+import {
+  serializeAssistantConversationForPersistence,
+} from './conversation-persistence.js'
 import { redactAssistantSessionForDisplay } from './redaction.js'
 
 export function serializeAssistantSessionForResult(
   session: AssistantSession,
 ): AssistantSession {
-  return redactAssistantSessionForDisplay(normalizeAssistantSessionSnapshot(session))
+  return redactAssistantSessionForDisplay(
+    parseAssistantSessionRecord(
+      serializeAssistantConversationForPersistence(session),
+    ),
+  )
 }
 
 export function normalizeAssistantAskResultForReturn(

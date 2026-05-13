@@ -15,7 +15,9 @@ import {
   createAssistantBinding,
   type AssistantBindingPatch,
 } from './bindings.js'
-import { normalizeAssistantSessionSnapshot } from './provider-state.js'
+import {
+  serializeAssistantConversationForPersistence,
+} from './conversation-persistence.js'
 import {
   conversationRefFromLocator,
 } from './conversation-ref.js'
@@ -472,10 +474,18 @@ async function saveAssistantSessionAtPaths(
     paths,
     sessionId: session.sessionId,
   })
-  const parsed = normalizeAssistantSessionSnapshot(session)
+  const parsed = normalizeAssistantConversationSnapshot(session)
   await writeAssistantSession(paths, parsed)
   await synchronizeAssistantIndexes(paths, parsed, existing)
   return parsed
+}
+
+function normalizeAssistantConversationSnapshot(
+  session: AssistantSession,
+): AssistantSession {
+  return parseAssistantSessionRecord(
+    serializeAssistantConversationForPersistence(session),
+  )
 }
 
 function parseAssistantTranscriptEntries(

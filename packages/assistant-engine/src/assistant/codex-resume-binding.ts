@@ -10,7 +10,7 @@ import {
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
 
-export function resolveAssistantProviderResumeKey(input: {
+export function resolveAssistantCodexResumeThreadId(input: {
   resumeState: unknown
 }): string | null {
   const resumeState = normalizeCodexResumeState(input.resumeState)

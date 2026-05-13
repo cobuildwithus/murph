@@ -57,6 +57,13 @@ const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
 ];
 const HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN =
   /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie|^(?:bundleRefKey|refKey)$/iu;
+const HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS = {
+  codexThreadId: "codexThreadIdPresent",
+  providerSessionId: "providerSessionIdPresent",
+  recoveredCodexThreadId: "recoveredCodexThreadIdPresent",
+  resumeCodexThreadId: "resumeCodexThreadIdPresent",
+  resumeProviderSessionId: "resumeProviderSessionIdPresent",
+} as const satisfies Record<string, string>;
 const HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS = ["code", "errorCode"] as const;
 const HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS =
   ["status", "statusCode", "responseStatus"] as const;
@@ -627,10 +634,14 @@ export function extractHostedAssistantNotificationRedactedDetails(
     }
   }
 
-  if (mergedDetails && "providerSessionId" in mergedDetails) {
+  const assistantNotificationProviderSessionIdPresent =
+    readHostedExecutionDetailBoolean(mergedDetails, "codexThreadIdPresent")
+    ?? readHostedExecutionDetailBoolean(mergedDetails, "providerSessionIdPresent")
+    ?? readHostedExecutionDetailStringPresent(mergedDetails, "codexThreadId")
+    ?? readHostedExecutionDetailStringPresent(mergedDetails, "providerSessionId");
+  if (assistantNotificationProviderSessionIdPresent !== null) {
     details.assistantNotificationProviderSessionIdPresent =
-      typeof mergedDetails.providerSessionId === "string"
-      && mergedDetails.providerSessionId.length > 0;
+      assistantNotificationProviderSessionIdPresent;
   }
 
   const notificationErrorDiagnostics = buildHostedExecutionPrefixedSafeErrorDiagnostics({
@@ -685,6 +696,26 @@ function shouldEmitHostedExecutionStructuredLogToStdIo(
   }
 
   return true;
+}
+
+function readHostedExecutionDetailBoolean(
+  details: HostedExecutionStructuredLogDetails | null,
+  key: string,
+): boolean | null {
+  const value = details?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function readHostedExecutionDetailStringPresent(
+  details: HostedExecutionStructuredLogDetails | null,
+  key: string,
+): boolean | null {
+  if (!details || !(key in details)) {
+    return null;
+  }
+
+  const value = details[key];
+  return typeof value === "string" ? value.length > 0 : null;
 }
 
 export function emitHostedExecutionStructuredLog(
@@ -1060,6 +1091,11 @@ function sanitizeHostedExecutionDetailNode(
         return [[key, "[redacted]"] as const];
       }
 
+      const sensitiveIdPresentKey = readHostedExecutionSensitiveIdPresentDetailKey(key);
+      if (sensitiveIdPresentKey) {
+        return [[sensitiveIdPresentKey, hostedExecutionDetailValuePresent(entry)] as const];
+      }
+
       const redactedTelegramEntry = sanitizeHostedExecutionTelegramDetailEntry(
         key,
         entry,
@@ -1074,6 +1110,19 @@ function sanitizeHostedExecutionDetailNode(
     });
 
   return sanitizedEntries.length > 0 ? Object.fromEntries(sanitizedEntries) : null;
+}
+
+function readHostedExecutionSensitiveIdPresentDetailKey(
+  key: string,
+): string | null {
+  return Object.prototype.hasOwnProperty.call(
+    HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS,
+    key,
+  )
+    ? HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS[
+        key as keyof typeof HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS
+      ]
+    : null;
 }
 
 interface HostedExecutionDetailSanitizationHints {

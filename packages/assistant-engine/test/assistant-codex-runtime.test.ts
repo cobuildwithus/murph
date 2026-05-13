@@ -1079,7 +1079,7 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
         connectionLost: true,
-        codexThreadId: 'thread-77',
+        codexThreadIdPresent: true,
         recoverableConnectionLoss: true,
         retryable: true,
       },
@@ -1605,7 +1605,7 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
         connectionLost: true,
-        codexThreadId: 'thread-stdin-loss',
+        codexThreadIdPresent: true,
         recoverableConnectionLoss: true,
         retryable: true,
       },
@@ -1761,7 +1761,7 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
         interrupted: true,
-        codexThreadId: 'thread-abort',
+        codexThreadIdPresent: true,
         retryable: false,
       },
     })
