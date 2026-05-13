@@ -25,7 +25,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-    HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+    HOSTED_ASSISTANT_MODEL: "gpt-5.5",
     HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_ASSISTANT_REASONING_EFFORT: "low",
     HOSTED_WEB_BASE_URL: "https://app.example.test",
@@ -317,16 +317,16 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("requires the production hot-reply latency profile", () => {
+  it("requires the production hosted assistant profile", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
         }),
         { deployWorker: true },
       ),
     ).toContain(
-      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.4-mini.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.5.",
     );
 
     expect(
@@ -337,7 +337,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     );
 
     expect(
@@ -348,7 +348,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     );
 
     expect(
@@ -357,8 +357,8 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toEqual(expect.not.arrayContaining([
-      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.4-mini.",
-      "production hosted assistant hot-reply deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.5.",
+      "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     ]));
   });
 
