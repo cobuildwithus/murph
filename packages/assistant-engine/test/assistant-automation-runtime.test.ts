@@ -108,7 +108,6 @@ const evidenceMocks = vi.hoisted(() => ({
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
-  writeAssistantAutoReplyRetryExhaustedEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }))
 
@@ -127,8 +126,6 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
-  writeAssistantAutoReplyRetryExhaustedEvidence:
-    evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence:
     evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
 }))
@@ -451,6 +448,7 @@ function createTurnReceipt(
 function createTerminalEvidence(input: {
   captureId?: string
   groupCaptureIds?: string[]
+  groupInputIds?: string[]
   terminal?: {
     deliveryIntentId: string | null
     kind: 'deferred' | 'replied' | 'reply_intent_committed'
@@ -467,12 +465,16 @@ function createTerminalEvidence(input: {
 } = {}) {
   const captureId = input.captureId ?? 'capture-1'
   const groupCaptureIds = input.groupCaptureIds ?? [captureId]
+  const groupInputIds = input.groupInputIds ?? []
 
   return {
     captureId,
     groupCaptureIds,
     groupId: groupCaptureIds.join('+'),
+    groupInputIds,
+    inputId: captureId,
     primaryCaptureId: groupCaptureIds[0] ?? captureId,
+    primaryInputId: groupInputIds[0] ?? captureId,
     providerCleanup: {
       linqMessageIds: [],
       queuedAt: null,
@@ -1109,9 +1111,6 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
-    .mockReset()
-    .mockResolvedValue(undefined)
-  evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence
     .mockReset()
     .mockResolvedValue(undefined)
   evidenceMocks.writeAssistantAutoReplySuppressionEvidence
@@ -2349,6 +2348,64 @@ describe('assistant auto-reply runtime', () => {
       terminalKind: 'replied',
       vault: '/tmp/assistant-automation-vault',
     })
+  })
+
+  it('backfills legacy retry-exhausted evidence as ordinary suppression', async () => {
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockResolvedValueOnce(createTerminalEvidence({
+        captureId: 'capture-1',
+        groupCaptureIds: ['capture-1', 'capture-2'],
+        groupInputIds: ['ain_legacy_input_1', 'ain_legacy_input_2'],
+        terminal: {
+          failedAttempts: 3,
+          kind: 'retry_exhausted',
+          maxFailedAttempts: 3,
+          reason: 'legacy retry limit reached',
+        },
+      }))
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary({
+        captureId: 'capture-1',
+      })),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith({
+        captureIds: ['capture-1', 'capture-2'],
+        linqMessageIds: [],
+        reason: 'legacy retry limit reached',
+        recordedAt: '2026-04-08T00:10:00.000Z',
+        vault: '/tmp/assistant-automation-vault',
+      })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
+      .not.toHaveBeenCalled()
   })
 
   it('does not skip rich-content prompts when the selected provider only accepts text', async () => {
@@ -4797,8 +4854,6 @@ describe('assistant auto-reply runtime', () => {
         captureIds: ['capture-retry-cap'],
         outcome: 'result',
       }))
-    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
-      .not.toHaveBeenCalled()
   })
 
   it('repairs handled receipts without treating failed receipts as retry state', async () => {
@@ -4857,8 +4912,6 @@ describe('assistant auto-reply runtime', () => {
         inputIds: [context.firstInputId],
         outcome: 'result',
       }))
-    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
-      .not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
@@ -4934,8 +4987,6 @@ describe('assistant auto-reply runtime', () => {
         outcome: 'result',
       }))
     expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence)
-      .not.toHaveBeenCalled()
-    expect(evidenceMocks.writeAssistantAutoReplyRetryExhaustedEvidence)
       .not.toHaveBeenCalled()
   })
 

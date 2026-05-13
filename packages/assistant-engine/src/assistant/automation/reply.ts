@@ -48,7 +48,6 @@ import {
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence,
-  writeAssistantAutoReplyRetryExhaustedEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from './evidence.js'
 import {
@@ -2272,20 +2271,6 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(in
     input.evidence.terminal.kind === 'suppressed' ||
     input.evidence.terminal.kind === 'retry_exhausted'
   ) {
-    if (input.evidence.terminal.kind === 'retry_exhausted') {
-      await writeAssistantAutoReplyRetryExhaustedEvidence({
-        captureIds: input.captureIds,
-        failedAttempts: input.evidence.terminal.failedAttempts,
-        inputIds: input.evidence.groupInputIds,
-        linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
-        maxFailedAttempts: input.evidence.terminal.maxFailedAttempts,
-        reason: input.evidence.terminal.reason,
-        recordedAt: input.evidence.recordedAt,
-        vault: input.vault,
-      })
-      return
-    }
-
     await writeAssistantAutoReplySuppressionEvidence({
       captureIds: input.captureIds,
       linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
