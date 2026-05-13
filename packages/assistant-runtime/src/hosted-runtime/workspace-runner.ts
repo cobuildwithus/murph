@@ -526,10 +526,6 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   result: HostedMailboxImportCheckpointResult;
   signal: AbortSignal;
 }): Promise<void> {
-  if (input.result.importResult.blocked.length > 0) {
-    return;
-  }
-
   const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
   const conversationsByKey = new Map<
     string,
