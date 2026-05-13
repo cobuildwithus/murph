@@ -336,6 +336,10 @@ export function extractCodexAssistantProviderUsage(input: {
       usageRecord ?? completionRecord,
       'input_tokens_details',
       'cached_tokens',
+    ) ?? readAssistantProviderNestedInteger(
+      usageRecord ?? completionRecord,
+      'prompt_tokens_details',
+      'cached_tokens',
     ),
     inputTokens,
     outputTokens,
@@ -745,7 +749,10 @@ function subtractAssistantProviderUsageRecords(
     subtrahend,
     ['cachedInputTokens', 'cached_input_tokens'],
     {
-      nested: ['input_tokens_details', 'cached_tokens'],
+      nested: [
+        ['input_tokens_details', 'cached_tokens'],
+        ['prompt_tokens_details', 'cached_tokens'],
+      ],
     },
   )
   copyAssistantProviderUsageDifference(
@@ -769,7 +776,7 @@ function subtractAssistantProviderUsageRecords(
     subtrahend,
     ['reasoningTokens', 'reasoning_tokens', 'reasoningOutputTokens'],
     {
-      nested: ['output_tokens_details', 'reasoning_tokens'],
+      nested: [['output_tokens_details', 'reasoning_tokens']],
     },
   )
   copyAssistantProviderUsageDifference(
@@ -790,7 +797,7 @@ function copyAssistantProviderUsageDifference(
   subtrahend: Record<string, unknown>,
   sourceKeys: readonly string[],
   options: {
-    nested?: readonly [objectKey: string, valueKey: string]
+    nested?: ReadonlyArray<readonly [objectKey: string, valueKey: string]>
   } = {},
 ): void {
   const minuendValue = readAssistantProviderUsageInteger(
@@ -811,19 +818,26 @@ function readAssistantProviderUsageInteger(
   source: Record<string, unknown>,
   sourceKeys: readonly string[],
   options: {
-    nested?: readonly [objectKey: string, valueKey: string]
+    nested?: ReadonlyArray<readonly [objectKey: string, valueKey: string]>
   } = {},
 ): number | null {
-  return readAssistantProviderInteger(source, ...sourceKeys)
-    ?? (
-      options.nested
-        ? readAssistantProviderNestedInteger(
-            source,
-            options.nested[0],
-            options.nested[1],
-          )
-        : null
+  const directValue = readAssistantProviderInteger(source, ...sourceKeys)
+  if (directValue !== null) {
+    return directValue
+  }
+
+  for (const nested of options.nested ?? []) {
+    const nestedValue = readAssistantProviderNestedInteger(
+      source,
+      nested[0],
+      nested[1],
     )
+    if (nestedValue !== null) {
+      return nestedValue
+    }
+  }
+
+  return null
 }
 
 function findAssistantCodexCompletionEvent(
@@ -937,6 +951,12 @@ function sanitizeAssistantProviderRawUsageJson(
     sanitized,
     record,
     'input_tokens_details',
+    ['cached_tokens'],
+  )
+  copyAssistantProviderTokenDetails(
+    sanitized,
+    record,
+    'prompt_tokens_details',
     ['cached_tokens'],
   )
   copyAssistantProviderTokenDetails(

@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
@@ -54,6 +55,7 @@ import {
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
+  summarizeMurphAgeArchitecture,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
   toPublicMurphAgeCalculatorReport,
@@ -342,6 +344,15 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(midus?.featureFamilies.includes("labs"), true);
   assert.equal(resolveMurphAgeSourceRoute("unknown-route"), null);
 
+  const mhas = resolveMurphAgeSourceRoute("mhas-harmonized-aging");
+  assert.equal(mhas?.modelUseStatus, "diagnostic-sidecar-candidate");
+  assert.equal(mhas?.featureFamilies.includes("function"), true);
+  assert.equal(mhas?.productAuthorized, false);
+  assert.equal(
+    mhas?.blockedCurrentUses.some((blockedUse) => blockedUse.includes("score-bearing product use")),
+    true,
+  );
+
   const wearableRoutes = listMurphAgeSourceRoutesByLayer("wearable-shadow-increment");
   assert.equal(wearableRoutes.some((route) => route.routeId === "nhanes-activity-shadow-lmf"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "all-of-us-fitbit-labs-ehr"), true);
@@ -358,6 +369,11 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(priorityRoutes.some((route) => route.activationStatus === "historical-reference"), false);
   assert.equal(priorityRoutes[0]?.routeId, "nhis-r399-outcome-anchor");
   assert.equal(priorityRoutes[1]?.routeId, "nhanes-activity-shadow-lmf");
+  assert.ok(priorityRoutes.findIndex((route) => route.routeId === "mhas-harmonized-aging") > 0);
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "mhas-harmonized-aging")
+      < priorityRoutes.findIndex((route) => route.routeId === "midus-biomarker-mortality"),
+  );
   assert.equal(priorityRoutes.some((route) => route.routeId === "partner-aggregate-evaluator"), true);
 
   if (midus) {
@@ -406,6 +422,95 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_SCHEMA"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "PROHIBITED_TEXT"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "PRODUCT_AUTHORIZED"), true);
+});
+
+test("summarizes Murph Age architecture layers without product display authorization", () => {
+  const summary = summarizeMurphAgeArchitecture();
+  assert.equal(summary.schemaVersion, MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION);
+  assert.deepEqual(summary.layerOrder, [
+    "outcome-anchor",
+    "clinical-lab-body",
+    "function-cognition-context",
+    "wearable-shadow",
+    "source-validation",
+    "product-display",
+  ]);
+  assert.equal(summary.productDisplayAuthorized, false);
+  assert.equal(summary.productPromotionAuthorized, false);
+  assert.equal(summary.riskToAgeDisplayAuthorized, false);
+  assert.equal(summary.sourceRouteIdsByPriority[0], "nhis-r399-outcome-anchor");
+
+  const layersById = new Map(summary.layers.map((layer) => [layer.layerId, layer]));
+  const outcomeAnchor = layersById.get("outcome-anchor");
+  assert.equal(outcomeAnchor?.mode, "score-bearing-research");
+  assert.equal(outcomeAnchor?.scoreBearing, true);
+  assert.equal(outcomeAnchor?.scoreContributionAuthorized, true);
+  assert.equal(outcomeAnchor?.productAuthorized, false);
+  assert.equal(outcomeAnchor?.riskToAgeDisplayAuthorized, false);
+  assert.equal(outcomeAnchor?.modelCardIds.includes("r399_nhis_proxy_10y_acm_research"), true);
+  assert.equal(outcomeAnchor?.sourceRouteIds.includes("nhis-r399-outcome-anchor"), true);
+  assert.equal(outcomeAnchor?.scoreBearingMetricKeys.includes("self-rated-health"), true);
+
+  const clinical = layersById.get("clinical-lab-body");
+  assert.equal(clinical?.mode, "score-bearing-research");
+  assert.equal(clinical?.scoreBearing, true);
+  assert.equal(clinical?.modelCardIds.includes("lab9_bp_body_10y_acm_research"), true);
+  assert.equal(clinical?.modelCardIds.includes("lab5_bp_bmi_transport_research"), true);
+  assert.equal(clinical?.sourceRouteIds.includes("midus-biomarker-mortality"), true);
+  assert.equal(clinical?.sourceRouteIds.includes("creles-transport-stress"), true);
+  assert.equal(clinical?.candidateMetricKeys.includes("hba1c"), true);
+  assert.equal(clinical?.candidateMetricKeys.includes("egfr"), true);
+  assert.equal(clinical?.candidateMetricKeys.includes("triglycerides"), true);
+
+  const functionContext = layersById.get("function-cognition-context");
+  assert.equal(functionContext?.mode, "context-only");
+  assert.equal(functionContext?.scoreBearing, false);
+  assert.equal(functionContext?.scoreContributionAuthorized, false);
+  assert.equal(functionContext?.sourceRouteIds.includes("mhas-harmonized-aging"), true);
+  assert.equal(functionContext?.sourceRouteIds.includes("nshap-integrated-aging"), true);
+  assert.equal(functionContext?.contextMetricKeys.includes("adl-limitation-count"), true);
+
+  const wearable = layersById.get("wearable-shadow");
+  assert.equal(wearable?.mode, "shadow-only");
+  assert.equal(wearable?.scoreBearing, false);
+  assert.equal(wearable?.scoreContributionAuthorized, false);
+  assert.equal(wearable?.sourceRouteIds.includes("nhanes-activity-shadow-lmf"), true);
+  assert.equal(wearable?.sourceRouteIds.includes("all-of-us-fitbit-labs-ehr"), true);
+  assert.equal(wearable?.shadowMetricKeys.includes("steps"), true);
+  assert.equal(wearable?.shadowMetricKeys.includes("resting-heart-rate"), true);
+  assert.equal(wearable?.shadowMetricKeys.includes("total-sleep-minutes"), true);
+
+  const validation = layersById.get("source-validation");
+  assert.equal(validation?.mode, "validation-only");
+  assert.equal(validation?.scoreBearing, false);
+  assert.equal(validation?.sourceRouteIds.includes("partner-aggregate-evaluator"), true);
+  assert.equal(validation?.sourceRouteIds.includes("haalsi-transport-stress"), true);
+  assert.equal(validation?.sourceRouteIds.includes("who-sage-south-africa-transport"), true);
+
+  const product = layersById.get("product-display");
+  assert.equal(product?.mode, "blocked");
+  assert.equal(product?.scoreBearing, false);
+  assert.equal(product?.blockerCodes.includes("PRODUCT_POLICY_NOT_AUTHORIZED"), true);
+  assert.equal(product?.blockerCodes.includes("RISK_TO_AGE_DISPLAY_NOT_AUTHORIZED"), true);
+
+  for (const layer of summary.layers) {
+    assert.equal(layer.productAuthorized, false);
+    assert.equal(layer.riskToAgeDisplayAuthorized, false);
+  }
+
+  const serialized = JSON.stringify(summary);
+  for (const forbidden of [
+    "selectedPointIds",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "prediction",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
 });
 
 test("selects metric points by policy and exposes provenance warnings", () => {

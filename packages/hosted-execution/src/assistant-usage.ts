@@ -26,6 +26,7 @@ const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
 const ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS = new Map<string, ReadonlySet<string>>([
   ["input_tokens_details", new Set(["cached_tokens"])],
   ["output_tokens_details", new Set(["reasoning_tokens"])],
+  ["prompt_tokens_details", new Set(["cached_tokens"])],
 ]);
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";

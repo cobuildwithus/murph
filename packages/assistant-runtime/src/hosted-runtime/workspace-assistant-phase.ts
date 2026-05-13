@@ -306,7 +306,6 @@ export async function runHostedWorkspaceAssistantPhase(
       ? foregroundReplayInputIds
       : input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
-      deferReceiptRecovery: shouldDeferReceiptRecoveryForAssistantPhase(input),
       executionContext,
       foregroundReplayInputIds,
       foregroundReplayPromptInputIds,
@@ -1405,15 +1404,6 @@ function shouldSkipDeviceSyncForAssistantPhase(
   return true;
 }
 
-function shouldDeferReceiptRecoveryForAssistantPhase(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): boolean {
-  return (
-    input.request.reason === "nudge"
-    || hasFreshHostedConversationInput(input)
-  );
-}
-
 function resolveSkippedDeviceSyncWakeAt(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -2080,16 +2070,12 @@ function resolveHostedFastDispatchBaseNextWakeAt(input: {
   skippedDeviceSyncWakeAt: string | null;
   systemMailboxWakeAt: string | null;
 }): string | null {
-  const assistantWakeAt =
-    input.assistantMetrics.assistantAutomationDeferredReceiptRecoveryWakeAt
-      ? input.assistantMetrics.assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery ?? null
-      : input.assistantMetrics.nextWakeAt;
   const skippedDeviceSyncWakeAt = shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input)
     ? null
     : input.skippedDeviceSyncWakeAt;
   return resolveEarliestHostedWorkspaceWakeAt(
     resolveEarliestHostedWorkspaceWakeAt(
-      assistantWakeAt,
+      input.assistantMetrics.nextWakeAt,
       skippedDeviceSyncWakeAt,
     ),
     resolveEarliestHostedWorkspaceWakeAt(

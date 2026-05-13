@@ -62,12 +62,10 @@ import {
   createEmptyInboxScanResult,
   earliestAssistantAutomationWakeAt,
   type AssistantAutomationPassResult,
-  type AssistantAutoReplyScanResult,
   type AssistantRunEvent,
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
-import { recoverAssistantAutoReplies } from './startup-recovery.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -99,8 +97,6 @@ export interface RunAssistantAutomationInput {
 
 export interface RunAssistantAutomationPassInput
   extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
-  // Lets fresh hosted input reach the normal scanner before stale receipt retry scans.
-  deferReceiptRecovery?: boolean
   scanNumber?: number
 }
 
@@ -882,31 +878,6 @@ export async function runAssistantAutomationPass(
     : null
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
-  const runReceiptRecovery = () => recoverAssistantAutoReplies({
-    allowSelfAuthored: input.allowSelfAuthored ?? false,
-    deliveryDispatchMode: input.deliveryDispatchMode,
-    autoReply: state.autoReply,
-    executionContext,
-    inboxServices,
-    maxPerScan: input.maxPerScan,
-    onEvent: input.onEvent,
-    onTraceEvent: input.onTraceEvent,
-    requestId: input.requestId,
-    signal: input.signal,
-    sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-    inputSource,
-    vault: input.vault,
-  })
-
-  const deferReceiptRecovery =
-    applyCanonicalWrites && input.deferReceiptRecovery === true
-  let recovery = !applyCanonicalWrites || deferReceiptRecovery
-    ? {
-        ...createEmptyAutoReplyScanResult(),
-        progressed: false,
-      }
-    : await runReceiptRecovery()
-  let deferredReceiptRecoveryWakeAt: string | null = null
 
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
@@ -932,20 +903,6 @@ export async function runAssistantAutomationPass(
       })
     },
   })
-  if (deferReceiptRecovery) {
-    if (scanResult.replies.replied > 0) {
-      deferredReceiptRecoveryWakeAt = new Date().toISOString()
-      recovery = {
-        ...recovery,
-        nextWakeAt: earliestAssistantAutomationWakeAt(
-          recovery.nextWakeAt,
-          deferredReceiptRecoveryWakeAt,
-        ),
-      }
-    } else if (!input.signal?.aborted) {
-      recovery = await runReceiptRecovery()
-    }
-  }
   const shouldDrainOutboxAfterScan =
     applyCanonicalWrites
     && (input.drainOutbox ?? true)
@@ -1003,31 +960,11 @@ export async function runAssistantAutomationPass(
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
-  const replies = mergeAssistantAutoReplyScanResults(
-    recovery,
-    scanResult.replies,
-  )
-  const recoveryWithoutDeferredReceiptRecovery = deferredReceiptRecoveryWakeAt
-    ? {
-        ...recovery,
-        nextWakeAt: null,
-      }
-    : recovery
-  const repliesWithoutDeferredReceiptRecovery = mergeAssistantAutoReplyScanResults(
-    recoveryWithoutDeferredReceiptRecovery,
-    scanResult.replies,
-  )
-  const nextWakeAtWithoutDeferredReceiptRecovery = earliestAssistantAutomationWakeAt(
-    repliesWithoutDeferredReceiptRecovery.nextWakeAt,
-    scanResult.routing.nextWakeAt,
-    cronNextRunAt,
-    outboxNextAttemptAt,
-  )
+  const replies = scanResult.replies
   const progressed =
     stateProgressed ||
     outboxResult.attempted > 0 ||
     cronResult.processed > 0 ||
-    recovery.progressed ||
     replies.checkpointRequired === true
 
   return {
@@ -1040,35 +977,10 @@ export async function runAssistantAutomationPass(
       cronNextRunAt,
       outboxNextAttemptAt,
     ),
-    ...(deferredReceiptRecoveryWakeAt
-      ? {
-          deferredReceiptRecoveryWakeAt,
-          nextWakeAtWithoutDeferredReceiptRecovery,
-        }
-      : {}),
     outboxAttempted: outboxResult.attempted,
     progressed,
     replies,
     routing: scanResult.routing,
-  }
-}
-
-function mergeAssistantAutoReplyScanResults(
-  left: AssistantAutoReplyScanResult,
-  right: AssistantAutoReplyScanResult,
-): AssistantAutoReplyScanResult {
-  return {
-    ...(left.checkpointRequired || right.checkpointRequired
-      ? { checkpointRequired: true }
-      : {}),
-    considered: left.considered + right.considered,
-    failed: left.failed + right.failed,
-    nextWakeAt: earliestAssistantAutomationWakeAt(
-      left.nextWakeAt,
-      right.nextWakeAt,
-    ),
-    replied: left.replied + right.replied,
-    skipped: left.skipped + right.skipped,
   }
 }
 

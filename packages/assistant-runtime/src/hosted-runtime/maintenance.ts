@@ -132,7 +132,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   foregroundReplayInputIds?: readonly string[] | null;
   foregroundReplayPromptInputIds?: readonly string[] | null;
   preferredInputIds?: readonly string[] | null;
-  deferReceiptRecovery?: boolean;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   skipDeviceSync?: boolean;
@@ -180,18 +179,14 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.requestId,
         input.executionContext,
         input.wake,
-        input.runtime,
         input.preferredInputIds ?? [],
-        input.deferReceiptRecovery === true,
         input.signal,
         input.foregroundReplayInputIds ?? [],
         input.foregroundReplayPromptInputIds ?? [],
       )
     : {
         currentTurnDeliveryIntentIds: [],
-        deferredReceiptRecoveryWakeAt: null,
         nextWakeAt: null,
-        nextWakeAtWithoutDeferredReceiptRecovery: null,
         progressed: false,
         redactedLogEntries: [],
         timings: undefined,
@@ -210,11 +205,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
       assistantResult.timings?.beforeStateElapsedMs ?? null,
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
-    assistantAutomationDeferredReceiptRecoveryWakeAt:
-      assistantResult.deferredReceiptRecoveryWakeAt ?? null,
     assistantAutomationElapsedMs,
-    assistantAutomationNextWakeAtWithoutDeferredReceiptRecovery:
-      assistantResult.nextWakeAtWithoutDeferredReceiptRecovery ?? assistantResult.nextWakeAt,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
@@ -241,17 +232,13 @@ export async function runHostedAssistantAutomation(
   requestId: string,
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
   preferredInputIds: readonly string[] = [],
-  deferReceiptRecovery = false,
   signal?: AbortSignal,
   foregroundReplayInputIds: readonly string[] = [],
   foregroundReplayPromptInputIds: readonly string[] = [],
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
-  deferredReceiptRecoveryWakeAt: string | null;
   nextWakeAt: string | null;
-  nextWakeAtWithoutDeferredReceiptRecovery: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   timings?: {
@@ -262,7 +249,6 @@ export async function runHostedAssistantAutomation(
     totalElapsedMs: number;
   };
 }> {
-  void runtime;
   const startedAt = Date.now();
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices();
@@ -306,7 +292,6 @@ export async function runHostedAssistantAutomation(
     const passStartedAt = Date.now();
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
-      ...(deferReceiptRecovery ? { deferReceiptRecovery: true } : {}),
       drainOutbox: false,
       executionContext,
       inboxServices,
@@ -362,9 +347,6 @@ export async function runHostedAssistantAutomation(
         : {}),
       vault: vaultRoot,
     });
-    const deferredReceiptRecoveryWakeAt = result.deferredReceiptRecoveryWakeAt ?? null;
-    const nextWakeAtWithoutDeferredReceiptRecovery =
-      result.nextWakeAtWithoutDeferredReceiptRecovery ?? result.nextWakeAt;
     const passElapsedMs = elapsedSince(passStartedAt);
     const afterStateStartedAt = Date.now();
     const afterState = await readAssistantAutomationState(vaultRoot);
@@ -394,7 +376,6 @@ export async function runHostedAssistantAutomation(
         ).join(","),
         cronProcessed: result.cronProcessed,
         nextWakeAt: result.nextWakeAt,
-        nextWakeAtWithoutDeferredReceiptRecovery,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
         requestId,
@@ -413,10 +394,8 @@ export async function runHostedAssistantAutomation(
       phase: "wake.running",
     }));
     return {
-      deferredReceiptRecoveryWakeAt,
       currentTurnDeliveryIntentIds,
       nextWakeAt: result.nextWakeAt,
-      nextWakeAtWithoutDeferredReceiptRecovery,
       progressed: result.progressed,
       redactedLogEntries,
       timings: {
@@ -447,9 +426,7 @@ export async function runHostedAssistantAutomation(
       }));
       return {
         currentTurnDeliveryIntentIds: [],
-        deferredReceiptRecoveryWakeAt: null,
         nextWakeAt,
-        nextWakeAtWithoutDeferredReceiptRecovery: nextWakeAt,
         progressed: true,
         redactedLogEntries,
       };

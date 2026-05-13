@@ -51,6 +51,7 @@ export type MurphAgeSourceRouteEvidenceRole =
   | "true-external-candidate";
 
 export type MurphAgeSourceRouteModelUseStatus =
+  | "diagnostic-sidecar-candidate"
   | "frozen-research-anchor"
   | "historical-reference"
   | "metadata-only-candidate"
@@ -315,12 +316,13 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     accessMode: "public-use",
     activationStatus: "metadata-candidate",
     allowedResearchUses: [
-      "older-adult survey transport feasibility",
-      "function and chronic-condition residual diagnostics",
-      "source overlap planning",
+      "function and disability aggregate diagnostics",
+      "lead diagnostic sidecar candidate tracking",
+      "long-interval mortality transport stress",
     ],
     blockedCurrentUses: [
-      "treating harmonized survey proxies as biomarker validation",
+      "score-bearing product use",
+      "treating long-interval follow-up as 10-year validation",
       "product evidence",
       "private local path manifests",
     ],
@@ -328,10 +330,10 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     evidenceRole: "transport-stress",
     featureFamilies: ["clinical-history", "function", "survey-proxy"],
     layers: ["source-feasibility", "transport-validation"],
-    modelUseStatus: "metadata-only-candidate",
-    nextAction: "Use as a survey/proxy transport lane only if endpoint and denominator labels are green.",
+    modelUseStatus: "diagnostic-sidecar-candidate",
+    nextAction: "Track function/disability as the lead aggregate-only diagnostic sidecar candidate while keeping product display and score-bearing use blocked.",
     outcomeSignal: "mortality-or-followup-candidate",
-    priorityRank: 50,
+    priorityRank: 28,
     routeId: "mhas-harmonized-aging",
     sourceFamily: "MHAS / Gateway to Global Aging",
   },
