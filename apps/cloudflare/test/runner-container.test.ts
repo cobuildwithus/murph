@@ -183,6 +183,127 @@ describe("RunnerContainer", () => {
     expect(wakeCall?.[1]?.body).toBeUndefined();
   });
 
+  it("drains non-empty runtime wake responses before returning", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const wakeResponse = new Response(JSON.stringify({ accepted: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-runtime-wake-accepted": "1",
+      },
+      status: 202,
+    });
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/runtime-wake")) {
+          return wakeResponse;
+        }
+
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest(),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.wakeRuntime({ userId: "member_123" })).resolves.toEqual({
+      accepted: true,
+    });
+    expect(wakeResponse.bodyUsed).toBe(true);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("rejects runtime wakes when metadata response draining times out", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const runnerRequestStarted = createDeferred<void>();
+      const runnerResponse = createDeferred<Response>();
+      const wakeResponse = new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("pending"));
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "x-runtime-wake-accepted": "1",
+        },
+        status: 202,
+      });
+      const { container } = createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          if (url.endsWith("/internal/runtime-wake")) {
+            return wakeResponse;
+          }
+
+          runnerRequestStarted.resolve();
+          return await runnerResponse.promise;
+        }),
+      });
+
+      const invocation = container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      await runnerRequestStarted.promise;
+
+      const wake = container.wakeRuntime({ userId: "member_123" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(wake).resolves.toEqual({
+        accepted: false,
+      });
+
+      runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+
+      await expect(invocation).resolves.toEqual(createRunnerResult());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -1917,7 +2038,13 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("300s");
   });
 
-  it("consumes readiness health responses so warm containers can become idle", async () => {
+  it.each([
+    ["cold", "stopped"],
+    ["warm", "running"],
+  ] as const)("consumes readiness health responses for %s containers so they can become idle", async (
+    _label,
+    initialStatus,
+  ) => {
     const healthResponse = new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -1937,7 +2064,7 @@ describe("RunnerContainer", () => {
           status: 200,
         });
       }),
-      initialStatus: "running",
+      initialStatus,
     });
 
     await container.invoke({
