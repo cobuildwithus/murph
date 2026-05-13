@@ -101,6 +101,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^log_dir = "\/tmp\/murph-codex-log"$/mu);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
+  assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -109,6 +110,8 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
+  assert.match(config, /\[features\]\nplugins = false/u);
+  assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "none"/u);
@@ -1167,6 +1170,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'log_dir = "/tmp/murph-codex-log"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
+      "check_for_update_on_startup = false",
       "",
       '[model_providers."openai"]',
       'name = "OpenAI"',
@@ -1175,6 +1179,11 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'wire_api = "responses"',
       'env_http_headers = { "x-hosted-runner-bound-user-id" = "MURPH_HOSTED_CODEX_BOUND_USER_ID", "x-hosted-runtime-attempt-id" = "MURPH_HOSTED_CODEX_RUNTIME_ATTEMPT_ID", "x-hosted-runtime-lease-generation" = "MURPH_HOSTED_CODEX_RUNTIME_LEASE_GENERATION", "x-hosted-runtime-workspace-version" = "MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION" }',
       "requires_openai_auth = false",
+      "",
+      "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
+      "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
+      "[features]",
+      "plugins = false",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",
@@ -1210,9 +1219,12 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
 
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
+  assert.match(config, /\[features\]\nplugins = false/u);
+  assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.doesNotMatch(config, /include_instructions = true/u);
   assert.doesNotMatch(config, /\[skills\.bundled\]\nenabled = true/u);
+  assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /break provider prefix caching/u);
 });
 
