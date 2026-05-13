@@ -157,14 +157,15 @@ describe("cloudflare worker queue backpressure routes", () => {
 
     expect(nudge).toMatchObject({
       accepted: true,
-      alreadyRunning: true,
+      alreadyRunning: false,
       immediateDriveStarted: false,
-      inFlight: true,
+      inFlight: false,
     });
     expect(state.writeFence).toMatchObject({
       expiresAt: "2999-01-01T00:00:00.000Z",
       kind: "runtime",
     });
+    expect(state.wakePending).toBe(true);
   });
 });
 

@@ -336,6 +336,37 @@ export class RunnerStateStore {
     };
   }
 
+  async preemptWriteFenceIfCurrent(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+    wakeAt?: string | null;
+  }): Promise<{
+    preempted: boolean;
+    record: RunnerStateRecord;
+  }> {
+    const meta = this.requireMetaRowSync();
+    if (
+      meta.active_attempt_id !== input.attemptId
+      || normalizeNonNegativeInteger(meta.active_generation).toString() !== input.generation
+      || meta.user_id !== input.userId
+    ) {
+      return {
+        preempted: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    this.clearActiveRunMetaSync(meta);
+    meta.wake_at = normalizePreferredWakeAt(input.wakeAt ?? new Date().toISOString())
+      ?? new Date().toISOString();
+    this.writeMetaRowSync(meta);
+    return {
+      preempted: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
   async completeInvocation(input: {
     finishedAt?: string | null;
     lease: RunnerWriteFenceToken;

@@ -92,7 +92,7 @@ describe("HostedUserRunner wake scheduling", () => {
       accepted: true,
       alreadyRunning: false,
       immediateDriveStarted: true,
-      inFlight: false,
+      inFlight: true,
       nextAlarmAt: FIXED_NOW,
     });
     expect(invoke).toHaveBeenCalledOnce();
@@ -189,6 +189,121 @@ describe("HostedUserRunner wake scheduling", () => {
 
     firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  });
+
+  it("preempts an unexpired write fence when no active runtime child is wakeable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "not-wakeable" as const,
+      reason: "no-active-child" as const,
+    }));
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "9" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_stale",
+      2,
+      "runtime",
+      FIXED_NOW,
+      "2026-04-27T00:01:00.000Z",
+      "7",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: true,
+      inFlight: true,
+      nextAlarmAt: FIXED_NOW,
+    });
+    await flushWaitUntil();
+
+    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      leaseGeneration: "3",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "9",
+    });
+    expect(invoke.mock.calls[0]?.[0].job.request.attemptId).not.toBe("attempt_stale");
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 0,
+      last_invocation_at: FIXED_NOW,
+      wake_at: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alreadyRunning: false,
+          immediateDriveStarted: true,
+          runtimeWakeResult: "not-wakeable:no-active-child",
+          staleWriteFencePreempted: true,
+        }),
+        message: "Hosted runner nudge accepted.",
+      }),
+    );
+  });
+
+  it("keeps an unexpired write fence and schedules a short retry when wake result is unknown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "unknown" as const,
+      reason: "container-rpc-error" as const,
+    }));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "9" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_unknown",
+      2,
+      "runtime",
+      FIXED_NOW,
+      "2026-04-27T00:01:00.000Z",
+      "7",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      immediateDriveStarted: false,
+      inFlight: false,
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledWith({ userId: "member_123" });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_unknown",
+      active_expires_at: "2026-04-27T00:01:00.000Z",
+      wake_at: "2026-04-27T00:00:01.000Z",
+    });
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
   });
 
   it("returns a busy idle-checkpoint lease result behind an active write fence", async () => {

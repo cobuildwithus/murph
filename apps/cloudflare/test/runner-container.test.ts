@@ -163,7 +163,9 @@ describe("RunnerContainer", () => {
     await runnerRequestStarted.promise;
 
     await expect(container.wakeRuntime({ userId: "member_123" })).resolves.toEqual({
-      accepted: true,
+      attemptId: "attempt_evt_123",
+      kind: "accepted",
+      leaseGeneration: "11",
     });
 
     runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
@@ -224,7 +226,9 @@ describe("RunnerContainer", () => {
     await runnerRequestStarted.promise;
 
     await expect(container.wakeRuntime({ userId: "member_123" })).resolves.toEqual({
-      accepted: true,
+      attemptId: "attempt_evt_123",
+      kind: "accepted",
+      leaseGeneration: "11",
     });
     expect(wakeResponse.bodyUsed).toBe(true);
 
@@ -288,7 +292,8 @@ describe("RunnerContainer", () => {
       const wake = container.wakeRuntime({ userId: "member_123" });
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(wake).resolves.toEqual({
-        accepted: false,
+        kind: "unknown",
+        reason: "container-rpc-timeout",
       });
 
       runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
