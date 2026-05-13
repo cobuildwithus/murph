@@ -335,26 +335,18 @@ describe("RunnerStateStore schema guard", () => {
     })).resolves.toMatchObject({
       owns: false,
     });
-    await expect(store.recordWriteFenceWorkspaceCheckpoint({
+    await expect(store.validateWriteFenceToken({
       attemptId: boundLease.attemptId,
       generation: boundLease.generation,
       userId: boundLease.userId,
       workspaceVersion: "7",
     })).resolves.toMatchObject({
-      recorded: true,
+      owns: false,
       record: {
         writeFence: {
-          workspaceVersion: "7",
+          workspaceVersion: "6",
         },
       },
-    });
-    await expect(store.recordWriteFenceWorkspaceCheckpoint({
-      attemptId: boundLease.attemptId,
-      generation: "stale",
-      userId: boundLease.userId,
-      workspaceVersion: "8",
-    })).resolves.toMatchObject({
-      recorded: false,
     });
   });
 

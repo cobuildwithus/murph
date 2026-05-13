@@ -380,15 +380,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.finishRuntimeWriteFenceForSmoke(input);
   }
 
-  async recordRuntimeWriteFenceWorkspaceCheckpoint(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }> {
-    return this.runner.recordRuntimeWriteFenceWorkspaceCheckpoint(input);
-  }
-
   async runUntilIdleOrBudget(input: {
     reason: HostedWorkspaceInvocationReason;
   }): Promise<HostedWorkspaceInvocationResult> {

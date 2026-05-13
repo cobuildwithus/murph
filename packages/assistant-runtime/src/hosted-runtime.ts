@@ -270,7 +270,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const runtimeAbortController = new AbortController();
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
   const assertRuntimeNotAborted = () => {
-    return undefined;
+    if (runtimeAbortController.signal.aborted) {
+      throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+    }
   };
   const guardedPlatform = createAbortGuardedHostedRuntimePlatform(
     runtime.platform,
@@ -376,14 +378,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
       },
     });
-    const foregroundWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
-      read: () => guardedWorkspacePort.read!(),
-      async checkpoint(request) {
-        const response = await guardedWorkspacePort.checkpoint(request);
-        await recordHotRestoreCache(response);
-        return response;
-      },
-    };
+    const foregroundWorkspacePort = guardedWorkspacePort;
     const foregroundRunnerWorkspacePort: HostedRuntimePlatform["workspacePort"] = {
       read: () => guardedWorkspacePort.read!(),
       async checkpoint() {
@@ -517,12 +512,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       runtimeStateDirty ||= result.runtimeStateDirty;
+      let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
+        mailboxBudgetExhausted: mailboxBudget.exhausted,
+        result,
+        workspace: workspaceRead.workspace,
+      });
       while (runtimeStateDirty) {
-        const projection = buildHostedWorkspaceInvocationProjection({
-          mailboxBudgetExhausted: mailboxBudget.exhausted,
-          result,
-          workspace: workspaceRead.workspace,
-        });
         const checkpointWaitResult = await waitForHostedRuntimeIdleCheckpointWindow({
           checkpointStartByMs,
           idleCheckpointDelayMs,
@@ -536,6 +531,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
             workspace: result.latestWorkspace ?? workspaceRead.workspace,
           });
+          const nextProjection = buildHostedWorkspaceInvocationProjection({
+            mailboxBudgetExhausted: mailboxBudget.exhausted,
+            result,
+            workspace: accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
+          });
+          accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
+            accumulatedProjection,
+            nextProjection,
+          );
           runtimeStateDirty ||= result.runtimeStateDirty;
           continue;
         }
@@ -544,10 +548,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
           expectedUserId: input.request.userId,
-          nextWakeAt: projection.nextWakeAt,
-          nextWakeReason: projection.nextWakeReason,
+          nextWakeAt: accumulatedProjection.nextWakeAt,
+          nextWakeReason: accumulatedProjection.nextWakeReason,
           onCheckpointValidated: recordHotRestoreCache,
-          redactedStatus: projection.redactedStatus,
+          redactedStatus: accumulatedProjection.redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           workspacePort: foregroundWorkspacePort,
         });
@@ -555,7 +559,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ...(checkpoint.workspace.nextWakeAt === undefined
             ? {}
             : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
-          redactedStatus: checkpoint.workspace.redactedStatus ?? projection.redactedStatus,
+          redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
           status: resolveHostedWorkspaceInvocationStatus({
             mailboxBudgetExhausted: mailboxBudget.exhausted,
             nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
@@ -639,6 +643,58 @@ function buildHostedWorkspaceInvocationProjection(input: {
       nextWakeAt: nextWake.nextWakeAt,
     }),
   };
+}
+
+function mergeHostedWorkspaceInvocationProjection(
+  previous: HostedWorkspaceInvocationProjection,
+  next: HostedWorkspaceInvocationProjection,
+): HostedWorkspaceInvocationProjection {
+  const selectedWake = selectEarliestHostedRuntimeWake([
+    {
+      at: previous.nextWakeAt,
+      reason: previous.nextWakeReason,
+    },
+    {
+      at: next.nextWakeAt,
+      reason: next.nextWakeReason,
+    },
+  ]);
+
+  return {
+    committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
+    nextWakeAt: selectedWake.nextWakeAt,
+    nextWakeReason: selectedWake.nextWakeReason,
+    redactedStatus: {
+      ...previous.redactedStatus,
+      ...next.redactedStatus,
+    },
+    status: mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
+  };
+}
+
+function mergeHostedWorkspaceInvocationStatus(
+  previous: HostedWorkspaceInvocationResult["status"],
+  next: HostedWorkspaceInvocationResult["status"],
+): HostedWorkspaceInvocationResult["status"] {
+  return readHostedWorkspaceInvocationStatusPriority(next)
+      > readHostedWorkspaceInvocationStatusPriority(previous)
+    ? next
+    : previous;
+}
+
+function readHostedWorkspaceInvocationStatusPriority(
+  status: HostedWorkspaceInvocationResult["status"],
+): number {
+  switch (status) {
+    case "budget_exhausted":
+      return 2;
+    case "scheduled":
+      return 1;
+    case "idle":
+      return 0;
+  }
+
+  return 0;
 }
 
 function resolveHostedRuntimeIdleCheckpointDelayMs(value: number | null | undefined): number {
