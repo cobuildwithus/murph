@@ -1,4 +1,4 @@
-import type { AssistantProviderProgressEvent } from '../provider-registry.js'
+import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantRunEvent } from './shared.js'
 

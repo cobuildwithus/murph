@@ -513,8 +513,8 @@ describe('assistant service-result seam', () => {
           sandbox: 'danger-full-access',
         },
         resumeState: {
-          providerSessionId: 'provider-session-1',
-          resumeRouteId: 'route-1',
+          threadId: 'codex-thread-1',
+          routeFingerprint: 'route-1',
         },
         alias: 'service-result',
         binding: {
@@ -552,7 +552,7 @@ describe('assistant service-result seam', () => {
     })
     expect(result.session.resumeState).toEqual({
       routeFingerprint: 'route-1',
-      threadId: 'provider-session-1',
+      threadId: 'codex-thread-1',
     })
   })
 })

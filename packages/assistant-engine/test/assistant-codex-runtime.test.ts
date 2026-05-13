@@ -179,7 +179,7 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadResumeParams({
         input: baseInput,
-        providerSessionId: 'thread-1',
+        codexThreadId: 'thread-1',
       }),
     ).toEqual({
       excludeTurns: true,
@@ -192,7 +192,7 @@ describe('assistant codex runtime', () => {
           ...baseInput,
           refreshThreadInstructions: true,
         },
-        providerSessionId: 'thread-1',
+        codexThreadId: 'thread-1',
       }),
     ).toEqual({
       developerInstructions: 'Stable Murph instructions.',
@@ -203,7 +203,7 @@ describe('assistant codex runtime', () => {
     const turnStart = buildCodexTurnStartParams({
       imagePaths: [],
       input: baseInput,
-      providerSessionId: 'thread-1',
+      codexThreadId: 'thread-1',
     })
     expect(turnStart).toEqual({
       effort: 'high',
@@ -514,7 +514,7 @@ describe('assistant codex runtime', () => {
     )
     expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerSessionId: threadId,
+        codexThreadId: threadId,
         updates: [
           {
             kind: 'assistant',
@@ -1019,7 +1019,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('marks connection-loss failures as retryable and preserves the provider session id', async () => {
+  it('marks connection-loss failures as retryable and preserves the Codex thread id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-connection-loss-')
 
     codexMocks.spawn.mockImplementation(() => {
@@ -1079,12 +1079,12 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
         connectionLost: true,
-        providerSessionId: 'thread-77',
+        codexThreadId: 'thread-77',
         recoverableConnectionLoss: true,
         retryable: true,
       },
       message: expect.stringContaining(
-        'Provider thread id was captured for diagnostics only.',
+        'Codex thread id was captured for diagnostics only.',
       ),
     })
   })
@@ -1605,7 +1605,7 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_CONNECTION_LOST',
       context: {
         connectionLost: true,
-        providerSessionId: 'thread-stdin-loss',
+        codexThreadId: 'thread-stdin-loss',
         recoverableConnectionLoss: true,
         retryable: true,
       },
@@ -1761,7 +1761,7 @@ describe('assistant codex runtime', () => {
       code: 'ASSISTANT_CODEX_INTERRUPTED',
       context: {
         interrupted: true,
-        providerSessionId: 'thread-abort',
+        codexThreadId: 'thread-abort',
         retryable: false,
       },
     })

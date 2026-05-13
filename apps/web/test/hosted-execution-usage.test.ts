@@ -26,7 +26,7 @@ const BASE_USAGE_RECORD = {
   },
   providerName: "openai",
   providerRequestId: "req_123",
-  providerSessionId: "session_123",
+  codexThreadId: "session_123",
   rawUsageJson: {
     input_tokens: 120,
     input_tokens_details: {
@@ -100,7 +100,7 @@ describe("recordHostedAiUsageRecords", () => {
     });
     const upsertCall = hostedAiUsageUpsert.mock.calls[0]?.[0] as { create?: Record<string, unknown> } | undefined;
     expect(upsertCall?.create).toBeDefined();
-    expect(upsertCall?.create).not.toHaveProperty("providerSessionId");
+    expect(upsertCall?.create).not.toHaveProperty("codexThreadId");
     expect(upsertCall?.create).not.toHaveProperty("providerMetadataJson");
     expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("prompt");
     expect(JSON.stringify(upsertCall?.create?.rawUsageJson)).not.toContain("authorization");

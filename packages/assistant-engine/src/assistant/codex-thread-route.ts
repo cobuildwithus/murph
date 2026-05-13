@@ -8,7 +8,7 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
-import { resolveCodexAssistantLabel } from './provider-registry.js'
+import { resolveCodexAssistantLabel } from './codex-runtime.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface CodexThreadIdentity {

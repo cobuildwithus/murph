@@ -120,7 +120,7 @@ export interface CodexAppServerTurnInput {
 export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
   providerActionCount: number
-  providerSessionId: string | null
+  codexThreadId: string | null
   providerTurnId: string | null
 }
 
@@ -151,7 +151,7 @@ export function readCodexAppServerTurnFailureContext(
   return {
     jsonEvents: [...context.jsonEvents],
     providerActionCount: context.providerActionCount,
-    providerSessionId: context.providerSessionId,
+    codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
   }
 }
@@ -303,7 +303,7 @@ async function runCodexAppServerTurn(
   let normalShutdown = false
   let abortRequested = false
   let nextRequestId = 1
-  let providerSessionId = normalizeNullableString(input.resumeSessionId) ?? null
+  let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
   let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
@@ -337,7 +337,7 @@ async function runCodexAppServerTurn(
     const context = {
       jsonEvents: [...jsonEvents],
       providerActionCount,
-      providerSessionId,
+      codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
     codexAppServerTurnFailureContexts.set(error, context)
@@ -360,13 +360,13 @@ async function runCodexAppServerTurn(
     const now = Date.now()
     try {
       input.onTraceEvent({
-        providerSessionId,
+        codexThreadId,
         rawEvent: {
           schema: CODEX_APP_SERVER_TIMING_TRACE_SCHEMA,
           type: CODEX_APP_SERVER_TIMING_TRACE_TYPE,
           codexTimingElapsedMs: Math.max(0, now - lastTimingAt),
           codexTimingProviderActionCount: providerActionCount,
-          codexTimingProviderSessionIdPresent: providerSessionId !== null,
+          codexTimingThreadIdPresent: codexThreadId !== null,
           codexTimingStage: stage,
           codexTimingTotalElapsedMs: Math.max(0, now - appServerStartedAt),
           codexTimingTurnIdPresent: turnId !== null,
@@ -439,7 +439,7 @@ async function runCodexAppServerTurn(
           stderr,
         }),
         providerActionCount,
-        providerSessionId,
+        codexThreadId,
         signal: child.signalCode ?? null,
         stderr,
       })
@@ -484,12 +484,12 @@ async function runCodexAppServerTurn(
     abortSignal: input.abortSignal,
     onAbort: () => {
       abortRequested = true
-      if (providerSessionId && turnId) {
+      if (codexThreadId && turnId) {
         void tryWriteRpcMessage({
           id: nextRequestId,
           method: 'turn/interrupt',
           params: buildCodexTurnInterruptParams({
-            threadId: providerSessionId,
+            threadId: codexThreadId,
             turnId,
           }),
         })
@@ -553,7 +553,7 @@ async function runCodexAppServerTurn(
       return
     }
 
-    providerSessionId = providerSessionId ?? extractCodexSessionId(message)
+    codexThreadId = codexThreadId ?? extractCodexSessionId(message)
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
 
     const normalizedEvent = normalizeCodexEvent(message)
@@ -569,7 +569,7 @@ async function runCodexAppServerTurn(
     }
 
     input.onTraceEvent?.({
-      providerSessionId,
+      codexThreadId,
       rawEvent: message,
       updates,
     })
@@ -598,7 +598,7 @@ async function runCodexAppServerTurn(
         buildCodexTurnFailedError({
           fallback: lastEventError ?? extractCodexTurnErrorMessage(message),
           providerActionCount,
-          providerSessionId,
+          codexThreadId,
           status,
         }),
       )
@@ -641,12 +641,12 @@ async function runCodexAppServerTurn(
     threadId: string
     turnId: string
   } => {
-    if (!liveTurnOpen || !providerSessionId || !turnId) {
+    if (!liveTurnOpen || !codexThreadId || !turnId) {
       throw buildLiveTurnInactiveError()
     }
 
     return {
-      threadId: providerSessionId,
+      threadId: codexThreadId,
       turnId,
     }
   }
@@ -683,7 +683,7 @@ async function runCodexAppServerTurn(
   }
 
   const registerLiveTurn = () => {
-    if (liveTurnOpen || !input.onLiveTurn || !providerSessionId || !turnId) {
+    if (liveTurnOpen || !input.onLiveTurn || !codexThreadId || !turnId) {
       return
     }
 
@@ -691,7 +691,7 @@ async function runCodexAppServerTurn(
     const cleanup = input.onLiveTurn({
       interrupt: interruptLiveTurn,
       steer: steerLiveTurn,
-      threadId: providerSessionId,
+      threadId: codexThreadId,
       turnId,
     })
     releaseLiveTurn = typeof cleanup === 'function' ? cleanup : () => {}
@@ -760,7 +760,7 @@ async function runCodexAppServerTurn(
         code,
         fallback: lastEventError,
         providerActionCount,
-        providerSessionId,
+        codexThreadId,
         signal,
         stderr,
       }),
@@ -787,28 +787,28 @@ async function runCodexAppServerTurn(
     emitAppServerTimingTrace('initialized')
     sendNotification('initialized', {})
 
-    const threadTimingStage = providerSessionId ? 'thread-resumed' : 'thread-started'
+    const threadTimingStage = codexThreadId ? 'thread-resumed' : 'thread-started'
     const threadResult = await withCodexRpcTimeout(
-      providerSessionId
+      codexThreadId
         ? sendRequest(
             'thread/resume',
             buildCodexThreadResumeParams({
               input,
-              providerSessionId,
+              codexThreadId,
             }),
           )
         : sendRequest('thread/start', buildCodexThreadStartParams(input)),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
-      providerSessionId ? 'thread/resume' : 'thread/start',
+      codexThreadId ? 'thread/resume' : 'thread/start',
     )
-    providerSessionId = extractCodexThreadIdFromResult(threadResult) ?? providerSessionId
+    codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     rolloutRelativePath = resolveCodexRolloutRelativePath({
       codexHome: input.env.CODEX_HOME,
-      providerSessionId,
+      codexThreadId,
       threadPath: extractCodexThreadPathFromResult(threadResult),
     })
     emitAppServerTimingTrace(threadTimingStage)
-    if (!providerSessionId) {
+    if (!codexThreadId) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_FAILED',
         'Codex app-server did not return a thread id.',
@@ -821,7 +821,7 @@ async function runCodexAppServerTurn(
         buildCodexTurnStartParams({
           input,
           imagePaths: input.imagePaths,
-          providerSessionId,
+          codexThreadId,
         }),
       ),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
@@ -873,23 +873,23 @@ async function runCodexAppServerTurn(
     jsonEvents,
     providerActionCount,
     rolloutRelativePath,
-    sessionId: providerSessionId,
+    sessionId: codexThreadId,
     stderr: stderr.trim(),
     stdout: stdout.trim(),
-    threadId: providerSessionId,
+    threadId: codexThreadId,
     turnId,
   }
 }
 
 function resolveCodexRolloutRelativePath(input: {
   codexHome: string | null | undefined
-  providerSessionId: string | null
+  codexThreadId: string | null
   threadPath: string | null
 }): string | null {
   const codexHome = normalizeNullableString(input.codexHome)
-  const providerSessionId = normalizeNullableString(input.providerSessionId)
+  const codexThreadId = normalizeNullableString(input.codexThreadId)
   const threadPath = normalizeNullableString(input.threadPath)
-  if (!codexHome || !providerSessionId || !threadPath) {
+  if (!codexHome || !codexThreadId || !threadPath) {
     return null
   }
 
@@ -906,7 +906,7 @@ function resolveCodexRolloutRelativePath(input: {
 
   return normalizeCodexRolloutRelativePath(
     relativePath.split(path.sep).join('/'),
-    providerSessionId,
+    codexThreadId,
   )
 }
 
@@ -915,7 +915,7 @@ const codexRolloutRelativePathPattern =
 
 function normalizeCodexRolloutRelativePath(
   value: string,
-  providerSessionId: string,
+  codexThreadId: string,
 ): string | null {
   if (
     value.length === 0 ||
@@ -938,7 +938,7 @@ function normalizeCodexRolloutRelativePath(
     match[1] !== match[4] ||
     match[2] !== match[5] ||
     match[3] !== match[6] ||
-    match[7] !== providerSessionId
+    match[7] !== codexThreadId
   ) {
     return null
   }

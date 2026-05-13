@@ -11,14 +11,14 @@ import {
 import {
   mergeAssistantProviderActivityLabels,
   type AssistantProviderProgressEvent,
-} from '../provider-progress.js'
+} from './provider-progress.js'
 import {
   CODEX_ASSISTANT_CAPABILITIES,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
   resolveCodexStaticModels as resolveCodexStaticModelCatalog,
-} from './codex-cli.js'
-import { createCatalogModel } from './catalog.js'
+} from './providers/codex-cli.js'
+import { createCatalogModel } from './providers/catalog.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
@@ -28,7 +28,7 @@ import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
-} from './types.js'
+} from './providers/types.js'
 
 export function resolveCodexAssistantCapabilities(): AssistantProviderCapabilities {
   return cloneAssistantProviderCapabilities(CODEX_ASSISTANT_CAPABILITIES)
@@ -129,7 +129,7 @@ export async function executeCodexAssistantTurnFromInput(
     providerConfig,
     freshThreadFallback: input.freshThreadFallback,
     refreshThreadInstructions: input.refreshThreadInstructions,
-    resumeProviderSessionId: input.resumeProviderSessionId,
+    resumeCodexThreadId: input.resumeCodexThreadId,
     sessionContext: input.sessionContext,
     showThinkingTraces: input.showThinkingTraces,
     systemPrompt: input.systemPrompt,
@@ -160,7 +160,7 @@ export async function executeCodexAssistantTurnAttemptFromInput(
     providerConfig,
     freshThreadFallback: input.freshThreadFallback,
     refreshThreadInstructions: input.refreshThreadInstructions,
-    resumeProviderSessionId: input.resumeProviderSessionId,
+    resumeCodexThreadId: input.resumeCodexThreadId,
     sessionContext: input.sessionContext,
     showThinkingTraces: input.showThinkingTraces,
     systemPrompt: input.systemPrompt,
@@ -182,7 +182,7 @@ export type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
-} from './types.js'
+} from './providers/types.js'
 
 function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttemptMetadata {
   return {

@@ -519,7 +519,7 @@ describe('assistant auto-reply failure observability', () => {
           codexStderrPresent: false,
           ignored: 'drop me',
           providerActionCount: 2,
-          providerSessionId: 'provider-session-1',
+          codexThreadId: 'provider-session-1',
           retryable: false,
           status: '429',
           upstreamErrorMessage:
@@ -547,7 +547,7 @@ describe('assistant auto-reply failure observability', () => {
       codexStderrPresent: false,
       outboxIntentId: 'outbox-1',
       providerActionCount: 2,
-      providerSessionId: 'provider-session-1',
+      codexThreadId: 'provider-session-1',
       retryable: false,
       status: '429',
       upstreamErrorMessage:
@@ -673,7 +673,7 @@ describe('assistant auto-reply failure observability', () => {
         new Error('Assistant provider timed out while syncing state.'),
         {
           context: {
-            providerSessionId: [` ${syntheticHomePath}/tmp `, 123, ''],
+            codexThreadId: [` ${syntheticHomePath}/tmp `, 123, ''],
             retryable: 'yes',
           },
         },
@@ -687,7 +687,7 @@ describe('assistant auto-reply failure observability', () => {
       safeSummary: 'assistant provider failed',
     })
     expect(snapshot.context).toEqual({
-      providerSessionId: ['<HOME_DIR>/tmp', 'Assistant reply failed.'],
+      codexThreadId: ['<HOME_DIR>/tmp', 'Assistant reply failed.'],
       retryable: 'yes',
     })
   })

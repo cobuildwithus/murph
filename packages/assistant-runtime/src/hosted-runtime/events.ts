@@ -60,7 +60,7 @@ const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
-const HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES = new Set([
+const HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
   "thread-start",
@@ -645,17 +645,23 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     return null;
   }
 
-  const providerContinuation = readHostedAssistantProviderPlanAllowedString(
-    record,
-    "providerContinuation",
-    HOSTED_ASSISTANT_PROVIDER_CONTINUATION_VALUES,
-  );
+  const codexContinuation =
+    readHostedAssistantProviderPlanAllowedString(
+      record,
+      "codexContinuation",
+      HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES,
+    )
+    ?? readHostedAssistantProviderPlanAllowedString(
+      record,
+      "providerContinuation",
+      HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES,
+    );
   const workingDirectoryKind = readHostedAssistantProviderPlanAllowedString(
     record,
     "workingDirectoryKind",
     HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES,
   );
-  if (!providerContinuation || !workingDirectoryKind) {
+  if (!codexContinuation || !workingDirectoryKind) {
     return null;
   }
 
@@ -664,14 +670,15 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       readHostedAssistantProviderPlanNullableNumber(record, "activeTurnHistoryCount"),
     activeTurnHistoryPresent:
       readHostedAssistantProviderPlanBoolean(record, "activeTurnHistoryPresent"),
-    providerContinuation,
+    codexContinuation,
     providerPlanKind: "provider.plan",
     providerRequestOrdinal:
       readHostedAssistantProviderPlanNullableNumber(record, "providerRequestOrdinal"),
     refreshThreadInstructions:
       readHostedAssistantProviderPlanBoolean(record, "refreshThreadInstructions"),
-    resumeProviderSessionIdPresent:
-      readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
+    resumeCodexThreadIdPresent:
+      readHostedAssistantProviderPlanBoolean(record, "resumeCodexThreadIdPresent")
+        ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
     workingDirectoryKind,
   };
 }
@@ -1006,8 +1013,10 @@ function readHostedAssistantCodexAppServerTimingTrace(
   );
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
-    "codexTimingProviderSessionIdPresent",
-    readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingProviderSessionIdPresent"),
+    "codexTimingThreadIdPresent",
+    readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingThreadIdPresent")
+      ?? readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingCodexThreadIdPresent")
+      ?? readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingProviderSessionIdPresent"),
   );
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,

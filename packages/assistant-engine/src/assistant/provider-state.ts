@@ -20,7 +20,7 @@ export function readAssistantProviderResumeRouteId(input: {
   return normalizeNullableString(resumeState?.routeFingerprint) ?? null
 }
 
-export function readAssistantProviderSessionId(input: {
+export function readAssistantCodexThreadId(input: {
   codexResume?: AssistantSessionResumeState | null
   resumeState?: AssistantSessionResumeState | null
 } | AssistantSession): string | null {
@@ -77,15 +77,15 @@ export function writeAssistantProviderResumeRouteId(
   })
 }
 
-export function writeAssistantSessionProviderSessionId(
+export function writeAssistantSessionCodexThreadId(
   resumeState: unknown,
-  providerSessionId: string | null | undefined,
+  codexThreadId: string | null | undefined,
 ): AssistantSessionResumeState | null {
   const current = normalizeAssistantSessionResumeState(resumeState)
   return buildCodexResumeState({
     rolloutRelativePath: current?.rolloutRelativePath,
     routeFingerprint: current?.routeFingerprint,
-    threadId: providerSessionId,
+    threadId: codexThreadId,
   })
 }
 

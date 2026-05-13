@@ -28,8 +28,8 @@ import {
   saveAssistantSession,
 } from '../src/assistant/store.js'
 import {
-  resolveAssistantProviderThreadPlan,
-} from '../src/assistant/provider-turn-runner.js'
+  resolveAssistantCodexThreadPlan,
+} from '../src/assistant/codex-turn-runner.js'
 import {
   resolveAssistantTurnSharedPlan,
 } from '../src/assistant/turn-plan.js'
@@ -157,25 +157,25 @@ describe('assistant onboarding prompt injection', () => {
 
   it('preserves native resume while keeping onboarding guidance open on conversation turns', () => {
     expect(
-      resolveAssistantProviderThreadPlan({
-        candidateResumeProviderSessionId: 'provider-session-1',
+      resolveAssistantCodexThreadPlan({
+        candidateResumeCodexThreadId: 'provider-session-1',
         onboardingGuidanceOpen: true,
         promptProfile: 'conversation',
       }),
     ).toEqual({
       onboardingGuidanceInjected: true,
-      resumeProviderSessionId: 'provider-session-1',
+      resumeCodexThreadId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
     expect(
-      resolveAssistantProviderThreadPlan({
-        candidateResumeProviderSessionId: 'provider-session-1',
+      resolveAssistantCodexThreadPlan({
+        candidateResumeCodexThreadId: 'provider-session-1',
         onboardingGuidanceOpen: true,
         promptProfile: 'notification-decision',
       }),
     ).toEqual({
       onboardingGuidanceInjected: false,
-      resumeProviderSessionId: 'provider-session-1',
+      resumeCodexThreadId: 'provider-session-1',
       shouldInjectBootstrapContext: false,
     })
   })

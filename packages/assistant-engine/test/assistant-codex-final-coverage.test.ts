@@ -31,16 +31,16 @@ const providerMocks = vi.hoisted(() => ({
 }))
 
 const providerTurnRunnerMocks = vi.hoisted(() => ({
-  buildAssistantProviderTurnExecutionPlan: vi.fn(),
-  buildCodexProviderAttemptPlan: vi.fn(),
+  buildCodexTurnExecutionPlan: vi.fn(),
+  buildCodexTurnAttemptPlan: vi.fn(),
   recordAssistantToolFailureRuntimeIssues: vi.fn(),
-  recordProviderAttemptFailed: vi.fn(),
-  recordProviderAttemptStarted: vi.fn(),
-  recordProviderAttemptSucceeded: vi.fn(),
-  recordProviderPlan: vi.fn(),
+  recordCodexAttemptFailed: vi.fn(),
+  recordCodexAttemptStarted: vi.fn(),
+  recordCodexAttemptSucceeded: vi.fn(),
+  recordCodexPlan: vi.fn(),
 }))
 
-vi.mock('../src/assistant/provider-registry.js', () => ({
+vi.mock('../src/assistant/codex-runtime.js', () => ({
   executeCodexAssistantTurnAttemptFromInput:
     providerMocks.executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities:
@@ -51,19 +51,19 @@ vi.mock('../src/assistant/provider-registry.js', () => ({
   resolveCodexStaticModels: providerMocks.resolveCodexStaticModels,
 }))
 
-vi.mock('../src/assistant/provider-turn/planning.js', () => ({
-  buildAssistantProviderTurnExecutionPlan:
-    providerTurnRunnerMocks.buildAssistantProviderTurnExecutionPlan,
-  buildCodexProviderAttemptPlan:
-    providerTurnRunnerMocks.buildCodexProviderAttemptPlan,
+vi.mock('../src/assistant/codex-turn/planning.js', () => ({
+  buildCodexTurnExecutionPlan:
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan,
+  buildCodexTurnAttemptPlan:
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan,
 }))
 
-vi.mock('../src/assistant/provider-turn/attempt-observability.js', () => ({
-  recordProviderAttemptFailed: providerTurnRunnerMocks.recordProviderAttemptFailed,
-  recordProviderAttemptStarted: providerTurnRunnerMocks.recordProviderAttemptStarted,
-  recordProviderAttemptSucceeded:
-    providerTurnRunnerMocks.recordProviderAttemptSucceeded,
-  recordProviderPlan: providerTurnRunnerMocks.recordProviderPlan,
+vi.mock('../src/assistant/codex-turn/attempt-observability.js', () => ({
+  recordCodexAttemptFailed: providerTurnRunnerMocks.recordCodexAttemptFailed,
+  recordCodexAttemptStarted: providerTurnRunnerMocks.recordCodexAttemptStarted,
+  recordCodexAttemptSucceeded:
+    providerTurnRunnerMocks.recordCodexAttemptSucceeded,
+  recordCodexPlan: providerTurnRunnerMocks.recordCodexPlan,
 }))
 
 vi.mock('../src/assistant/issue-reporting.js', () => ({
@@ -80,7 +80,7 @@ import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
-import type { AssistantProviderContinuation } from '../src/assistant/active-turn-input-journal.ts'
+import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
 import {
   DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
   DEFAULT_CODEX_REASONING_OPTIONS,
@@ -92,12 +92,12 @@ import {
   resolveCodexModelCatalog,
   resolveCodexTargetCapabilities,
 } from '../src/assistant/provider-catalog.ts'
-import { executeProviderTurnWithRecovery } from '../src/assistant/provider-turn-runner.ts'
+import { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
 import type {
-  AssistantProviderAttemptPlan,
-  AssistantProviderTurnExecutionPlan,
+  AssistantCodexAttemptPlan,
+  AssistantCodexTurnExecutionPlan,
   AssistantRouteTurnPlan,
-} from '../src/assistant/provider-turn/planning.ts'
+} from '../src/assistant/codex-turn/planning.ts'
 import type {
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionResult,
@@ -110,13 +110,13 @@ afterEach(() => {
   providerMocks.resolveCodexAssistantTargetCapabilities.mockReset()
   providerMocks.resolveCodexAssistantLabel.mockReset()
   providerMocks.resolveCodexStaticModels.mockReset()
-  providerTurnRunnerMocks.buildAssistantProviderTurnExecutionPlan.mockReset()
-  providerTurnRunnerMocks.buildCodexProviderAttemptPlan.mockReset()
+  providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockReset()
+  providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockReset()
   providerTurnRunnerMocks.recordAssistantToolFailureRuntimeIssues.mockReset()
-  providerTurnRunnerMocks.recordProviderAttemptFailed.mockReset()
-  providerTurnRunnerMocks.recordProviderAttemptStarted.mockReset()
-  providerTurnRunnerMocks.recordProviderAttemptSucceeded.mockReset()
-  providerTurnRunnerMocks.recordProviderPlan.mockReset()
+  providerTurnRunnerMocks.recordCodexAttemptFailed.mockReset()
+  providerTurnRunnerMocks.recordCodexAttemptStarted.mockReset()
+  providerTurnRunnerMocks.recordCodexAttemptSucceeded.mockReset()
+  providerTurnRunnerMocks.recordCodexPlan.mockReset()
   vi.restoreAllMocks()
 })
 
@@ -236,7 +236,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
   const result: AssistantProviderTurnExecutionResult = {
     provider: 'codex-cli',
-    providerSessionId: 'provider-session-1',
+    codexThreadId: 'provider-session-1',
     rawEvents: [],
     response: 'provider response',
     stderr: '',
@@ -464,7 +464,7 @@ describe('Codex model catalog', () => {
         },
       ],
       vault: '/vaults/test',
-    } satisfies Parameters<typeof executeProviderTurnWithRecovery>[0]['input']
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
@@ -473,7 +473,7 @@ describe('Codex model catalog', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildAssistantProviderTurnExecutionPlan.mockResolvedValue({
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnHistory: null,
       activeTurnSteering: null,
       executionContext: {
@@ -493,8 +493,8 @@ describe('Codex model catalog', () => {
       route,
       sharedPlan: createSharedPlan(),
       turnId: 'turn-1',
-    } satisfies AssistantProviderTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexProviderAttemptPlan.mockResolvedValue({
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
       attemptCount: 1,
       route,
       routePlan: {
@@ -508,21 +508,21 @@ describe('Codex model catalog', () => {
           surface: null,
         },
         onboardingGuidanceInjected: false,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
-        } satisfies AssistantProviderContinuation,
+        } satisfies AssistantCodexContinuation,
         promptCacheMetadata: null,
         refreshThreadInstructions: false,
-        resumeProviderSessionId: null,
+        resumeCodexThreadId: null,
         sessionContext: undefined,
         systemPrompt: null,
         turnContextPrompt: null,
         workingDirectory: '/work',
       } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantProviderAttemptPlan)
+    } satisfies AssistantCodexAttemptPlan)
 
-    await executeProviderTurnWithRecovery({
+    await executeCodexTurnWithRecovery({
       input,
       plan: createSharedPlan(),
       providerRequestOrdinal: 1,
@@ -545,13 +545,13 @@ describe('Codex model catalog', () => {
         type: 'image',
       },
     ])
-    expect(providerTurnRunnerMocks.recordProviderPlan).toHaveBeenCalledWith(
+    expect(providerTurnRunnerMocks.recordCodexPlan).toHaveBeenCalledWith(
       expect.objectContaining({
         activeTurnHistoryPresent: false,
-        providerContinuation: 'explicit-structured-history',
+        codexContinuation: 'explicit-structured-history',
         providerRequestOrdinal: 1,
         refreshThreadInstructions: false,
-        resumeProviderSessionIdPresent: false,
+        resumeCodexThreadIdPresent: false,
         route,
         sessionId: session.sessionId,
         turnId: 'turn-1',
@@ -588,9 +588,9 @@ describe('Codex model catalog', () => {
       },
       prompt: 'Please connect my WHOOP',
       vault: '/vaults/test',
-    } satisfies Parameters<typeof executeProviderTurnWithRecovery>[0]['input']
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
-    providerTurnRunnerMocks.buildAssistantProviderTurnExecutionPlan.mockResolvedValue({
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnHistory: null,
       activeTurnSteering: null,
       executionContext: input.executionContext,
@@ -608,8 +608,8 @@ describe('Codex model catalog', () => {
       route,
       sharedPlan: createSharedPlan(),
       turnId: 'turn-hosted-device-connect',
-    } satisfies AssistantProviderTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexProviderAttemptPlan.mockResolvedValue({
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
       attemptCount: 1,
       route,
       routePlan: {
@@ -623,19 +623,19 @@ describe('Codex model catalog', () => {
           surface: 'linq',
         },
         onboardingGuidanceInjected: false,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
-        } satisfies AssistantProviderContinuation,
+        } satisfies AssistantCodexContinuation,
         promptCacheMetadata: null,
         refreshThreadInstructions: false,
-        resumeProviderSessionId: null,
+        resumeCodexThreadId: null,
         sessionContext: undefined,
         systemPrompt: null,
         turnContextPrompt: null,
         workingDirectory: '/work',
       } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantProviderAttemptPlan)
+    } satisfies AssistantCodexAttemptPlan)
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -643,7 +643,7 @@ describe('Codex model catalog', () => {
       undefined,
     )
 
-    const outcome = await executeProviderTurnWithRecovery({
+    const outcome = await executeCodexTurnWithRecovery({
       input,
       plan: createSharedPlan(),
       resolvedSession: session,
@@ -665,7 +665,7 @@ describe('Codex model catalog', () => {
       }),
     )
     expect(
-      providerTurnRunnerMocks.recordProviderAttemptSucceeded,
+      providerTurnRunnerMocks.recordCodexAttemptSucceeded,
     ).toHaveBeenCalledWith(expect.objectContaining({
       activityLabels: [],
     }))

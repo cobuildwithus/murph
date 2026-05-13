@@ -17,7 +17,7 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
-import type { AssistantProviderContinuation } from '../active-turn-input-journal.js'
+import type { AssistantCodexContinuation } from '../active-turn-input-journal.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
@@ -76,7 +76,7 @@ export interface AssistantProviderTurnInput {
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
   refreshThreadInstructions?: boolean
-  resumeProviderSessionId?: string | null
+  resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
@@ -115,7 +115,7 @@ export interface AssistantProviderTurnExecutionInput {
   prompt?: string | null
   providerConfig: AssistantProviderConfig
   refreshThreadInstructions?: boolean
-  resumeProviderSessionId?: string | null
+  resumeCodexThreadId?: string | null
   freshThreadFallback?: AssistantProviderFreshThreadFallbackInput | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
@@ -158,8 +158,8 @@ export type AssistantProviderRequestOutcome =
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
   provider: AssistantChatProvider
-  providerContinuation?: AssistantProviderContinuation
-  providerSessionId: string | null
+  codexContinuation?: AssistantCodexContinuation
+  codexThreadId: string | null
   rawEvents: unknown[]
   response: string
   stderr: string
@@ -185,8 +185,8 @@ export type AssistantProviderTurnAttemptResult =
       metadata: AssistantProviderAttemptMetadata
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
-      providerContinuation?: AssistantProviderContinuation
-      providerSessionId?: string | null
+      codexContinuation?: AssistantCodexContinuation
+      codexThreadId?: string | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null

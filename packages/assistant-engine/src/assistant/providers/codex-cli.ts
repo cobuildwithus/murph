@@ -154,7 +154,7 @@ export async function executeCodexAssistantTurnAttempt(
       'Codex app-server execution requires a Codex provider config.',
     )
   }
-  if (input.resumeProviderSessionId && !input.freshThreadFallback) {
+  if (input.resumeCodexThreadId && !input.freshThreadFallback) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_FRESH_FALLBACK_PLAN_MISSING',
       'Codex stale-resume fallback requires a prepared fresh-thread fallback plan.',
@@ -201,7 +201,7 @@ export async function executeCodexAssistantTurnAttempt(
 
             return input.activeTurnSteering?.registerLiveProviderTurn({
               interrupt: turn.interrupt,
-              providerSessionId: turn.threadId,
+              codexThreadId: turn.threadId,
               providerTurnId: turn.turnId,
               sessionId,
               steer: async (steerInput) => {
@@ -229,12 +229,12 @@ export async function executeCodexAssistantTurnAttempt(
   } as const
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
-  let providerContinuation
+  let codexContinuation
   const runFreshThreadFallback = async () => {
     const fallbackInput = {
       ...input,
       ...(input.freshThreadFallback ?? {}),
-      resumeProviderSessionId: null,
+      resumeCodexThreadId: null,
     }
     const prompt = resolveAssistantProviderPrompt(fallbackInput)
     const appServerResult = await executeCodexAppServerTurn({
@@ -251,7 +251,7 @@ export async function executeCodexAssistantTurnAttempt(
 
   try {
     const prompt = resolveAssistantProviderPrompt(
-      input.resumeProviderSessionId
+      input.resumeCodexThreadId
         ? {
             ...input,
             activeTurnMessages: undefined,
@@ -261,14 +261,14 @@ export async function executeCodexAssistantTurnAttempt(
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
       prompt,
-      resumeSessionId: input.resumeProviderSessionId,
+      resumeSessionId: input.resumeCodexThreadId,
     })
   } catch (error) {
     const failureContext = readCodexAppServerTurnFailureContext(error)
     const invalidOutputResumeFailure =
       error instanceof VaultCliError && isCodexInvalidOutputResumeFailure(error)
     if (
-      input.resumeProviderSessionId &&
+      input.resumeCodexThreadId &&
       isCodexDiagnosticTraceError(error) &&
       !invalidOutputResumeFailure
     ) {
@@ -277,22 +277,22 @@ export async function executeCodexAssistantTurnAttempt(
         rawEvent: buildCodexResumeFailureTraceEvent({
           error,
           failureContext,
-          resumeProviderSessionId: input.resumeProviderSessionId,
+          resumeCodexThreadId: input.resumeCodexThreadId,
         }),
       })
     }
 
     if (
-      input.resumeProviderSessionId &&
+      input.resumeCodexThreadId &&
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
     ) {
       result = await runFreshThreadFallback()
-      providerContinuation = {
+      codexContinuation = {
         kind: 'thread-start' as const,
       }
     } else if (
-      input.resumeProviderSessionId &&
+      input.resumeCodexThreadId &&
       error instanceof VaultCliError &&
       invalidOutputResumeFailure
     ) {
@@ -301,7 +301,7 @@ export async function executeCodexAssistantTurnAttempt(
         rawEvent: buildCodexInvalidOutputResumeFailureTraceEvent({
           error,
           failureContext,
-          resumeProviderSessionId: input.resumeProviderSessionId,
+          resumeCodexThreadId: input.resumeCodexThreadId,
         }),
       })
 
@@ -315,7 +315,7 @@ export async function executeCodexAssistantTurnAttempt(
             failureContext,
             fallbackError,
             fallbackResult: 'failed',
-            resumeProviderSessionId: input.resumeProviderSessionId,
+            resumeCodexThreadId: input.resumeCodexThreadId,
           }),
         })
         throw addCodexModelProviderFailureHint({
@@ -332,10 +332,10 @@ export async function executeCodexAssistantTurnAttempt(
           failureContext,
           fallbackResult: 'succeeded',
           result,
-          resumeProviderSessionId: input.resumeProviderSessionId,
+          resumeCodexThreadId: input.resumeCodexThreadId,
         }),
       })
-      providerContinuation = {
+      codexContinuation = {
         kind: 'thread-start' as const,
       }
     } else {
@@ -362,7 +362,7 @@ export async function executeCodexAssistantTurnAttempt(
         ok: false,
         ...(failureContext
           ? {
-              providerSessionId: failureContext.providerSessionId,
+              codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,
             }
@@ -386,12 +386,12 @@ export async function executeCodexAssistantTurnAttempt(
     ok: true,
     result: {
       provider: resolveAssistantChatProviderFromConfig(providerConfig),
-      ...(providerContinuation
+      ...(codexContinuation
         ? {
-            providerContinuation,
+            codexContinuation,
           }
         : {}),
-      providerSessionId: result.sessionId,
+      codexThreadId: result.sessionId,
       response: result.finalMessage,
       stderr: result.stderr,
       stdout: result.stdout,
@@ -535,15 +535,15 @@ interface CodexInvalidOutputEventShapeSummary {
 function buildCodexResumeFailureTraceEvent(input: {
   error: unknown
   failureContext: CodexAppServerTurnFailureContext | null
-  resumeProviderSessionId: string
+  resumeCodexThreadId: string
 }): CodexInvalidOutputTraceRawEvent {
   const failureContext = input.failureContext
   const errorContext = readCodexDiagnosticErrorContext(input.error)
   const summary = summarizeCodexInvalidOutputEventShapes(
     failureContext?.jsonEvents ?? [],
   )
-  const resumeSessionId = normalizeNullableString(input.resumeProviderSessionId)
-  const failureSessionId = normalizeNullableString(failureContext?.providerSessionId)
+  const resumeSessionId = normalizeNullableString(input.resumeCodexThreadId)
+  const failureSessionId = normalizeNullableString(failureContext?.codexThreadId)
   const errorMessage = readCodexDiagnosticErrorMessage(input.error)
   const errorMessageLength = readCodexDiagnosticErrorMessageLength(input.error)
 
@@ -612,7 +612,7 @@ function sanitizeCodexDiagnosticErrorMessage(value: string | null): string | nul
 function buildCodexInvalidOutputResumeFailureTraceEvent(input: {
   error: VaultCliError
   failureContext: CodexAppServerTurnFailureContext | null
-  resumeProviderSessionId: string
+  resumeCodexThreadId: string
 }): CodexInvalidOutputTraceRawEvent {
   return {
     ...buildCodexInvalidOutputBaseTraceEvent(input),
@@ -630,7 +630,7 @@ function buildCodexInvalidOutputFallbackTraceEvent(input: {
   failureContext: CodexAppServerTurnFailureContext | null
   fallbackError?: unknown
   fallbackResult: 'failed' | 'succeeded'
-  resumeProviderSessionId: string
+  resumeCodexThreadId: string
   result?: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
 }): CodexInvalidOutputTraceRawEvent {
   const base = buildCodexInvalidOutputBaseTraceEvent(input)
@@ -653,8 +653,8 @@ function buildCodexInvalidOutputFallbackTraceEvent(input: {
       input.result?.providerActionCount ?? null,
     codexInvalidOutputFallbackResult: input.fallbackResult,
     codexInvalidOutputFallbackSessionChanged:
-      freshSessionId && input.resumeProviderSessionId
-        ? freshSessionId !== input.resumeProviderSessionId
+      freshSessionId && input.resumeCodexThreadId
+        ? freshSessionId !== input.resumeCodexThreadId
         : null,
     codexInvalidOutputFallbackSessionPresent: freshSessionId !== null,
     codexInvalidOutputFallbackTurnPresent:
@@ -671,15 +671,15 @@ function buildCodexInvalidOutputFallbackTraceEvent(input: {
 function buildCodexInvalidOutputBaseTraceEvent(input: {
   error: VaultCliError
   failureContext: CodexAppServerTurnFailureContext | null
-  resumeProviderSessionId: string
+  resumeCodexThreadId: string
 }): CodexInvalidOutputTraceRawEvent {
   const failureContext = input.failureContext
   const errorInputIndex = readCodexInvalidOutputInputIndex(input.error.message)
   const summary = summarizeCodexInvalidOutputEventShapes(
     failureContext?.jsonEvents ?? [],
   )
-  const resumeSessionId = normalizeNullableString(input.resumeProviderSessionId)
-  const failureSessionId = normalizeNullableString(failureContext?.providerSessionId)
+  const resumeSessionId = normalizeNullableString(input.resumeCodexThreadId)
+  const failureSessionId = normalizeNullableString(failureContext?.codexThreadId)
 
   return {
     codexInvalidOutputErrorCode: readCodexDiagnosticErrorCode(input.error),
@@ -721,7 +721,7 @@ function emitCodexInvalidOutputTraceEvent(input: {
 
   try {
     input.onTraceEvent({
-      providerSessionId: null,
+      codexThreadId: null,
       rawEvent: input.rawEvent,
       updates: [],
     })

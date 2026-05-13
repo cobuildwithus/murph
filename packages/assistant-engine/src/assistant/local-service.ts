@@ -41,7 +41,7 @@ import {
   resolveAssistantResumeStateFromProviderTurn,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
-import { readCodexThreadRouteFingerprint } from './provider-route.js'
+import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
   readAssistantSessionResumeState,
 } from './provider-state.js'
@@ -59,10 +59,10 @@ import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
-  executeProviderTurnWithRecovery,
-  resolveAssistantProviderThreadScope,
-  type AssistantProviderThreadScope,
-} from './provider-turn-runner.js'
+  executeCodexTurnWithRecovery,
+  resolveAssistantCodexThreadScope,
+  type AssistantCodexThreadScope,
+} from './codex-turn-runner.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -328,7 +328,7 @@ export async function sendAssistantMessageLocal(
           journal: initialAcceptedInputJournal,
           vault: input.vault,
         })
-        const threadScope = resolveAssistantProviderThreadScope({
+        const threadScope = resolveAssistantCodexThreadScope({
           turnTrigger: input.turnTrigger ?? null,
         })
         let currentInput = input
@@ -476,14 +476,14 @@ export async function sendAssistantMessageLocal(
           > = null
           let providerRequestAcceptedInputIds: readonly string[] =
             acceptedInputIdsForNextProviderRequest
-          const providerOutcome = await executeProviderTurnWithRecovery({
+          const providerOutcome = await executeCodexTurnWithRecovery({
             activeTurnHistory,
             activeTurnSteering: activeTurnInputController,
             input: currentInput,
             onProviderRequestPlanned: async (event) => {
               providerRequestJournal =
                 await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                  continuation: event.providerContinuation,
+                  continuation: event.codexContinuation,
                   ordinal: providerRequestOrdinal,
                   providerAttemptId: event.providerAttemptId,
                   turnId: currentUserTurn.turnId,
@@ -505,14 +505,14 @@ export async function sendAssistantMessageLocal(
           if (providerOutcome.kind === 'failed_terminal') {
             if (!providerRequestJournal) {
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: providerOutcome.providerContinuation,
+                continuation: providerOutcome.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               })
             } else {
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: providerOutcome.providerContinuation,
+                continuation: providerOutcome.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
@@ -540,7 +540,7 @@ export async function sendAssistantMessageLocal(
           if (!providerRequestJournal) {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: providerResult.providerContinuation,
+                continuation: providerResult.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
@@ -551,7 +551,7 @@ export async function sendAssistantMessageLocal(
           } else {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: providerResult.providerContinuation,
+                continuation: providerResult.codexContinuation,
                 ordinal: providerRequestOrdinal,
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
@@ -603,7 +603,7 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal =
                 await runtimeState.turns.acceptedInputs.updateProviderRequest({
                   acceptedInputIds: accepted.acceptedInputJournal.inputIds,
-                  continuation: providerResult.providerContinuation,
+                  continuation: providerResult.codexContinuation,
                   ordinal: providerRequestOrdinal,
                   providerAttemptId: null,
                   turnId: currentUserTurn.turnId,
@@ -641,7 +641,7 @@ export async function sendAssistantMessageLocal(
           plan: sharedPlan,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
-            providerSessionId: providerResult.providerSessionId ?? null,
+            codexThreadId: providerResult.codexThreadId ?? null,
             threadScope,
           }),
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
@@ -815,33 +815,33 @@ async function runAssistantTurnBestEffort(
 }
 
 function resolveProviderResumeStateAction(input: {
-  providerSessionId: string | null
-  threadScope: AssistantProviderThreadScope
+  codexThreadId: string | null
+  threadScope: AssistantCodexThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
   }
 
-  return normalizeNullableString(input.providerSessionId)
+  return normalizeNullableString(input.codexThreadId)
     ? 'persist-from-provider-turn'
     : 'clear'
 }
 
 function resolveActiveTurnProviderLoopSession(input: {
   providerResult: ExecutedAssistantProviderTurnResult
-  threadScope: AssistantProviderThreadScope
+  threadScope: AssistantCodexThreadScope
 }): AssistantSession {
   if (input.threadScope !== 'session-thread') {
     return input.providerResult.session
   }
 
-  const providerSessionId = normalizeNullableString(
-    input.providerResult.providerSessionId,
+  const codexThreadId = normalizeNullableString(
+    input.providerResult.codexThreadId,
   )
   const routeFingerprint = normalizeNullableString(
     readCodexThreadRouteFingerprint(input.providerResult.route),
   )
-  if (!providerSessionId || !routeFingerprint) {
+  if (!codexThreadId || !routeFingerprint) {
     return {
       ...input.providerResult.session,
       codexResume: null,
@@ -849,7 +849,7 @@ function resolveActiveTurnProviderLoopSession(input: {
     }
   }
   const nextResumeState = resolveAssistantResumeStateFromProviderTurn({
-    providerSessionId,
+    codexThreadId,
     routeFingerprint,
   })
 

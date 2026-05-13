@@ -7,7 +7,7 @@ import {
 import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
-} from './provider-registry.js'
+} from './codex-runtime.js'
 import type {
   AssistantProviderAttemptMetadata,
   AssistantProviderRequestOutcome,
@@ -17,7 +17,7 @@ import { errorMessage } from './shared.js'
 import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
-import type { CodexThreadIdentity } from './provider-route.js'
+import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
   annotateRecoveredCodexThreadIdForDiagnostics,
@@ -44,53 +44,53 @@ import type {
 import type {
   AssistantActiveTurnLiveProviderSteering,
 } from './turn-input.js'
-import type { AssistantProviderContinuation } from './active-turn-input-journal.js'
+import type { AssistantCodexContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
-  recordProviderAttemptFailed,
-  recordProviderAttemptStarted,
-  recordProviderAttemptSucceeded,
-  recordProviderPlan,
-} from './provider-turn/attempt-observability.js'
+  recordCodexAttemptFailed,
+  recordCodexAttemptStarted,
+  recordCodexAttemptSucceeded,
+  recordCodexPlan,
+} from './codex-turn/attempt-observability.js'
 import {
-  buildAssistantProviderTurnExecutionPlan,
-  buildCodexProviderAttemptPlan,
-} from './provider-turn/planning.js'
+  buildCodexTurnExecutionPlan,
+  buildCodexTurnAttemptPlan,
+} from './codex-turn/planning.js'
 import type {
-  AssistantProviderAttemptPlan,
-  AssistantProviderTurnExecutionPlan,
-  AssistantProviderTurnExecutionProfile,
-  AssistantProviderTurnThreadScopeProfile,
-} from './provider-turn/planning.js'
+  AssistantCodexAttemptPlan,
+  AssistantCodexTurnExecutionPlan,
+  AssistantCodexTurnExecutionProfile,
+  AssistantCodexTurnThreadScopeProfile,
+} from './codex-turn/planning.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 
 export {
-  resolveAssistantProviderThreadPlan,
-  resolveAssistantProviderThreadScope,
-} from './provider-turn/planning.js'
+  resolveAssistantCodexThreadPlan,
+  resolveAssistantCodexThreadScope,
+} from './codex-turn/planning.js'
 export type {
-  AssistantProviderThreadPlan,
-  AssistantProviderTurnExecutionProfile,
-  AssistantProviderTurnNativeResumePolicy,
-  AssistantProviderTurnPromptProfile,
-  AssistantProviderThreadScope,
-  AssistantProviderTurnThreadScopeProfile,
-  AssistantProviderTurnToolProfile,
-} from './provider-turn/planning.js'
+  AssistantCodexThreadPlan,
+  AssistantCodexTurnExecutionProfile,
+  AssistantCodexTurnNativeResumePolicy,
+  AssistantCodexTurnPromptProfile,
+  AssistantCodexThreadScope,
+  AssistantCodexTurnThreadScopeProfile,
+  AssistantCodexTurnToolProfile,
+} from './codex-turn/planning.js'
 
-type AssistantProviderAttemptOutcome =
+type AssistantCodexAttemptOutcome =
   | {
       kind: 'failed_terminal'
       attemptCount: number
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
-      providerContinuation: AssistantProviderContinuation
-      providerSessionId: string | null
+      codexContinuation: AssistantCodexContinuation
+      codexThreadId: string | null
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
@@ -102,14 +102,14 @@ type AssistantProviderAttemptOutcome =
       result: ExecutedAssistantProviderTurnResult
     }
 
-export type AssistantProviderTurnRecoveryOutcome =
+export type AssistantCodexTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
       attemptCount: number
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
-      providerContinuation: AssistantProviderContinuation
-      providerSessionId: string | null
+      codexContinuation: AssistantCodexContinuation
+      codexThreadId: string | null
       providerTurnId: string | null
       rawEvents: unknown[]
       route: CodexThreadIdentity
@@ -122,24 +122,24 @@ export type AssistantProviderTurnRecoveryOutcome =
       providerTurn: ExecutedAssistantProviderTurnResult
     }
 
-export async function executeProviderTurnWithRecovery(input: {
+export async function executeCodexTurnWithRecovery(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
-    providerContinuation: AssistantProviderContinuation
+    codexContinuation: AssistantCodexContinuation
   }) => Promise<void>
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnThreadScopeProfile | null
+  profile?: AssistantCodexTurnThreadScopeProfile | null
   providerRequestOrdinal?: number | null
   resolvedSession: AssistantSession
   route: CodexThreadIdentity
   turnCreatedAt: string
   turnId: string
-}): Promise<AssistantProviderTurnRecoveryOutcome> {
-  const executionPlan = await buildAssistantProviderTurnExecutionPlan(input)
-  const attemptPlan = await buildCodexProviderAttemptPlan({
+}): Promise<AssistantCodexTurnRecoveryOutcome> {
+  const executionPlan = await buildCodexTurnExecutionPlan(input)
+  const attemptPlan = await buildCodexTurnAttemptPlan({
     attemptCount: 1,
     executionPlan,
     session: input.resolvedSession,
@@ -147,10 +147,10 @@ export async function executeProviderTurnWithRecovery(input: {
 
   await input.onProviderRequestPlanned?.({
     providerAttemptId: null,
-    providerContinuation: attemptPlan.routePlan.providerContinuation,
+    codexContinuation: attemptPlan.routePlan.codexContinuation,
   })
 
-  const attemptOutcome = await executeAssistantProviderAttempt({
+  const attemptOutcome = await executeAssistantCodexAttempt({
     attemptPlan,
     executionPlan,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -168,8 +168,8 @@ export async function executeProviderTurnWithRecovery(input: {
         attemptCount: attemptOutcome.attemptCount,
         error: attemptOutcome.error,
         providerRequestOutcome: attemptOutcome.providerRequestOutcome,
-        providerContinuation: attemptOutcome.providerContinuation,
-        providerSessionId: attemptOutcome.providerSessionId,
+        codexContinuation: attemptOutcome.codexContinuation,
+        codexThreadId: attemptOutcome.codexThreadId,
         providerTurnId: attemptOutcome.providerTurnId,
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
@@ -181,9 +181,9 @@ export async function executeProviderTurnWithRecovery(input: {
 }
 
 function createAssistantProviderUsageAttribution(input: {
-  attemptPlan: AssistantProviderAttemptPlan
+  attemptPlan: AssistantCodexAttemptPlan
   env: NodeJS.ProcessEnv
-  executionPlan: AssistantProviderTurnExecutionPlan
+  executionPlan: AssistantCodexTurnExecutionPlan
   hostedMemberId: string | null
 }): AssistantUsageAttribution | null {
   if (!input.hostedMemberId) {
@@ -218,14 +218,14 @@ function createAssistantProviderUsageAttribution(input: {
   })
 }
 
-function emitProviderPlanTraceEvent(input: {
+function emitCodexPlanTraceEvent(input: {
   activeTurnHistoryMessageCount: number
   activeTurnHistoryPresent: boolean
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
-  providerContinuation: string
+  codexContinuation: string
   providerRequestOrdinal: number | null
   refreshThreadInstructions: boolean
-  resumeProviderSessionIdPresent: boolean
+  resumeCodexThreadIdPresent: boolean
   workingDirectory: string
 }): void {
   if (!input.onTraceEvent) {
@@ -234,16 +234,16 @@ function emitProviderPlanTraceEvent(input: {
 
   try {
     input.onTraceEvent({
-      providerSessionId: null,
+      codexThreadId: null,
       rawEvent: {
         schema: ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA,
         type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
         activeTurnHistoryCount: input.activeTurnHistoryMessageCount,
         activeTurnHistoryPresent: input.activeTurnHistoryPresent,
-        providerContinuation: input.providerContinuation,
+        codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
         refreshThreadInstructions: input.refreshThreadInstructions,
-        resumeProviderSessionIdPresent: input.resumeProviderSessionIdPresent,
+        resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
             ? 'hosted-stable-proc-cwd'
@@ -256,11 +256,11 @@ function emitProviderPlanTraceEvent(input: {
   }
 }
 
-async function executeAssistantProviderAttempt(input: {
-  attemptPlan: AssistantProviderAttemptPlan
-  executionPlan: AssistantProviderTurnExecutionPlan
+async function executeAssistantCodexAttempt(input: {
+  attemptPlan: AssistantCodexAttemptPlan
+  executionPlan: AssistantCodexTurnExecutionPlan
   providerRequestOrdinal: number | null
-}): Promise<AssistantProviderAttemptOutcome> {
+}): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
     activityLabels: [] as readonly string[],
@@ -270,17 +270,17 @@ async function executeAssistantProviderAttempt(input: {
   }
 
   const attemptAt = new Date().toISOString()
-  await recordProviderPlan({
+  await recordCodexPlan({
     activeTurnHistoryMessageCount:
       executionPlan.activeTurnHistory?.messages.length ?? 0,
     activeTurnHistoryPresent:
       (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
     at: attemptAt,
-    providerContinuation: attemptPlan.routePlan.providerContinuation.kind,
+    codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
-    resumeProviderSessionIdPresent:
-      attemptPlan.routePlan.resumeProviderSessionId !== null,
+    resumeCodexThreadIdPresent:
+      attemptPlan.routePlan.resumeCodexThreadId !== null,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,
@@ -288,36 +288,36 @@ async function executeAssistantProviderAttempt(input: {
     vaultRoot: executionPlan.input.vault,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  emitProviderPlanTraceEvent({
+  emitCodexPlanTraceEvent({
     activeTurnHistoryMessageCount:
       executionPlan.activeTurnHistory?.messages.length ?? 0,
     activeTurnHistoryPresent:
       (executionPlan.activeTurnHistory?.messages.length ?? 0) > 0,
     onTraceEvent: executionPlan.input.onTraceEvent,
-    providerContinuation: attemptPlan.routePlan.providerContinuation.kind,
+    codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
-    resumeProviderSessionIdPresent:
-      attemptPlan.routePlan.resumeProviderSessionId !== null,
+    resumeCodexThreadIdPresent:
+      attemptPlan.routePlan.resumeCodexThreadId !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  await recordProviderAttemptStarted({
+  await recordCodexAttemptStarted({
     activeTurnMessagesPresent:
       (attemptPlan.routePlan.activeTurnMessages?.length ?? 0) > 0,
     attemptCount: attemptPlan.attemptCount,
     at: attemptAt,
-    hasResumeProviderSessionId:
-      attemptPlan.routePlan.resumeProviderSessionId !== null,
-    providerContinuationKind: attemptPlan.routePlan.providerContinuation.kind,
+    hasResumeCodexThreadId:
+      attemptPlan.routePlan.resumeCodexThreadId !== null,
+    codexContinuationKind: attemptPlan.routePlan.codexContinuation.kind,
     refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
     route: attemptPlan.route,
     sessionId: attemptPlan.session.sessionId,
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
   })
-  let effectiveProviderContinuation = attemptPlan.routePlan.providerContinuation
+  let effectiveCodexContinuation = attemptPlan.routePlan.codexContinuation
   let usageAttribution: AssistantUsageAttribution | null = null
-  let failedAttemptProviderSessionId: string | null = null
+  let failedAttemptCodexThreadId: string | null = null
   let failedAttemptProviderTurnId: string | null = null
   let failedAttemptRawEvents: unknown[] = []
   let failedAttemptUsage: AssistantProviderUsage | null = null
@@ -363,7 +363,7 @@ async function executeAssistantProviderAttempt(input: {
           }
         : undefined,
       freshThreadFallback: attemptPlan.routePlan.freshThreadFallback,
-      resumeProviderSessionId: attemptPlan.routePlan.resumeProviderSessionId,
+      resumeCodexThreadId: attemptPlan.routePlan.resumeCodexThreadId,
       refreshThreadInstructions: attemptPlan.routePlan.refreshThreadInstructions,
       codexCommand:
         attemptPlan.route.codexCommand ??
@@ -389,7 +389,7 @@ async function executeAssistantProviderAttempt(input: {
       vault: executionPlan.input.vault,
     }).catch(() => undefined)
     if (!attemptResult.ok) {
-      failedAttemptProviderSessionId = attemptResult.providerSessionId ?? null
+      failedAttemptCodexThreadId = attemptResult.codexThreadId ?? null
       failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
       failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
       failedAttemptUsage = attemptResult.usage ?? null
@@ -400,13 +400,13 @@ async function executeAssistantProviderAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         })
-      effectiveProviderContinuation =
-        attemptResult.providerContinuation ?? attemptPlan.routePlan.providerContinuation
+      effectiveCodexContinuation =
+        attemptResult.codexContinuation ?? attemptPlan.routePlan.codexContinuation
       throw attemptResult.error
     }
     const result = attemptResult.result
 
-    await recordProviderAttemptSucceeded({
+    await recordCodexAttemptSucceeded({
       activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
       route: attemptPlan.route,
@@ -422,8 +422,8 @@ async function executeAssistantProviderAttempt(input: {
           attemptMetadata.executedToolCount > 0 ||
           attemptMetadata.providerActionCount > 0,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
-        providerContinuation:
-          result.providerContinuation ?? effectiveProviderContinuation,
+        codexContinuation:
+          result.codexContinuation ?? effectiveCodexContinuation,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
@@ -447,7 +447,7 @@ async function executeAssistantProviderAttempt(input: {
       }),
     ).catch(() => undefined)
 
-    await recordProviderAttemptFailed({
+    await recordCodexAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
       detail: errorMessage(error),
@@ -469,8 +469,8 @@ async function executeAssistantProviderAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         }),
-      providerContinuation: effectiveProviderContinuation,
-      providerSessionId: failedAttemptProviderSessionId,
+      codexContinuation: effectiveCodexContinuation,
+      codexThreadId: failedAttemptCodexThreadId,
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,

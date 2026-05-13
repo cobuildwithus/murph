@@ -2,7 +2,7 @@ import {
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import type { CodexThreadIdentity } from './provider-route.js'
+import type { CodexThreadIdentity } from './codex-thread-route.js'
 import {
   compactAssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'

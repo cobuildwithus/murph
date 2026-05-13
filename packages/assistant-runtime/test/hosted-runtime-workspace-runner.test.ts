@@ -1476,7 +1476,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           const releaseLiveTurn = controller.registerLiveProviderTurn({
             interrupt: async () => undefined,
-            providerSessionId: "provider-session-runner-active-turn",
+            codexThreadId: "codex-thread-runner-active-turn",
             providerTurnId: "provider-turn-runner-active-turn",
             sessionId: "session-runner-active-turn",
             steer: async (input) => {

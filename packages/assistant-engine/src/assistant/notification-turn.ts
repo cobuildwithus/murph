@@ -10,13 +10,13 @@ import { resolveAssistantExecutionOperatorDefaults } from './execution-context.j
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
-  executeProviderTurnWithRecovery,
-  type AssistantProviderTurnThreadScopeProfile,
-} from './provider-turn-runner.js'
+  executeCodexTurnWithRecovery,
+  type AssistantCodexTurnThreadScopeProfile,
+} from './codex-turn-runner.js'
 import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
@@ -75,7 +75,7 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
 ])
 
 const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
-  Omit<AssistantProviderTurnThreadScopeProfile, 'nativeResumePolicy'>
+  Omit<AssistantCodexTurnThreadScopeProfile, 'nativeResumePolicy'>
 > = {
   promptProfile: 'notification-decision',
   threadScope: 'session-thread',
@@ -193,7 +193,7 @@ export async function sendAssistantNotificationLocal(
       })
 
       try {
-        const providerOutcome = await executeProviderTurnWithRecovery({
+        const providerOutcome = await executeCodexTurnWithRecovery({
           input: messageInput,
           plan: sharedPlan,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
@@ -247,7 +247,7 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction: providerResult.providerSessionId
+            providerResumeStateAction: providerResult.codexThreadId
               ? 'persist-from-provider-turn'
               : 'preserve-existing',
             session: providerResult.session,
@@ -286,7 +286,7 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          providerResumeStateAction: providerResult.providerSessionId
+          providerResumeStateAction: providerResult.codexThreadId
             ? 'persist-from-provider-turn'
             : 'preserve-existing',
           session: providerResult.session,

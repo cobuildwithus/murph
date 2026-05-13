@@ -140,7 +140,7 @@ class AssistantActiveTurnInputController {
       this.closed ||
       input.sessionId !== this.input.sessionId ||
       input.turnId !== this.input.turnId ||
-      !normalizeNullableString(input.providerSessionId) ||
+      !normalizeNullableString(input.codexThreadId) ||
       !normalizeNullableString(input.providerTurnId)
     ) {
       return () => {}

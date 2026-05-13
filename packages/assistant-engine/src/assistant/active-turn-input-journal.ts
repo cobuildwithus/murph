@@ -42,7 +42,7 @@ export const assistantAcceptedTurnInputSourceValues = [
   'system',
 ] as const
 
-export const assistantProviderContinuationKindValues = [
+export const assistantCodexContinuationKindValues = [
   'explicit-structured-history',
   'provider-state-optimization',
   'thread-start',
@@ -98,7 +98,7 @@ export const assistantAcceptedTurnInputItemSchema = z
   })
   .strict()
 
-const assistantProviderContinuationSchema = z.union([
+const assistantCodexContinuationSchema = z.union([
   z
     .object({
       kind: z.literal('explicit-structured-history'),
@@ -130,7 +130,7 @@ export const assistantAcceptedTurnInputProviderRequestSchema = z
     requestedAt: isoTimestampSchema,
     providerAttemptId: z.string().min(1).nullable().default(null),
     acceptedInputIds: z.array(z.string().min(1)),
-    continuation: assistantProviderContinuationSchema,
+    continuation: assistantCodexContinuationSchema,
   })
   .strict()
 
@@ -258,8 +258,8 @@ export type AssistantAcceptedTurnInputItem = z.infer<
 export type AssistantAcceptedTurnInputProviderRequest = z.infer<
   typeof assistantAcceptedTurnInputProviderRequestSchema
 >
-export type AssistantProviderContinuation = z.infer<
-  typeof assistantProviderContinuationSchema
+export type AssistantCodexContinuation = z.infer<
+  typeof assistantCodexContinuationSchema
 >
 export type AssistantAcceptedTurnInputPromptFallback = z.infer<
   typeof assistantAcceptedTurnInputPromptFallbackSchema
@@ -586,7 +586,7 @@ export async function updateAssistantAcceptedTurnInputAdmissionState(input: {
 
 export async function recordAssistantAcceptedTurnInputProviderRequest(input: {
   acceptedInputIds?: readonly string[] | null
-  continuation?: AssistantProviderContinuation
+  continuation?: AssistantCodexContinuation
   now?: Date
   ordinal: number
   providerAttemptId?: string | null
@@ -633,7 +633,7 @@ export async function recordAssistantAcceptedTurnInputProviderRequest(input: {
 
 export async function updateAssistantAcceptedTurnInputProviderRequest(input: {
   acceptedInputIds?: readonly string[] | null
-  continuation: AssistantProviderContinuation
+  continuation: AssistantCodexContinuation
   now?: Date
   ordinal: number
   providerAttemptId?: string | null

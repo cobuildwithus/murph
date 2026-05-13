@@ -12,7 +12,7 @@ import type {
 import {
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 import type { AssistantProviderUsage } from './providers/types.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type { AssistantExecutionContext } from './execution-context.js'

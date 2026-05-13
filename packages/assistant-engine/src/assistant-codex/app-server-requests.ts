@@ -51,7 +51,7 @@ export function buildCodexThreadResumeParams(input: {
   input: CodexAppServerTurnInput & {
     workingDirectory: string
   }
-  providerSessionId: string
+  codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     developerInstructions:
@@ -59,7 +59,7 @@ export function buildCodexThreadResumeParams(input: {
         ? normalizeNullableString(input.input.developerInstructions)
         : undefined,
     excludeTurns: input.input.excludeResumeTurns === false ? undefined : true,
-    threadId: input.providerSessionId,
+    threadId: input.codexThreadId,
   })
 }
 
@@ -91,7 +91,7 @@ export function buildCodexTurnStartParams(input: {
   input: CodexAppServerTurnInput & {
     workingDirectory: string
   }
-  providerSessionId: string
+  codexThreadId: string
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     effort: normalizeNullableString(input.input.reasoningEffort),
@@ -99,7 +99,7 @@ export function buildCodexTurnStartParams(input: {
       imagePaths: input.imagePaths,
       prompt: input.input.prompt,
     }),
-    threadId: input.providerSessionId,
+    threadId: input.codexThreadId,
   })
 }
 

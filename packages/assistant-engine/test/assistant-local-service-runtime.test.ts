@@ -8,7 +8,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
-  type AssistantProviderContinuation,
+  type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
 import {
@@ -61,7 +61,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/execution-context.js')
   vi.doUnmock('../src/assistant/provider-failure-diagnostics.js')
-  vi.doUnmock('../src/assistant/provider-turn-runner.js')
+  vi.doUnmock('../src/assistant/codex-turn-runner.js')
   vi.doUnmock('../src/assistant/service-result.js')
   vi.doUnmock('../src/assistant/prompt-attempts.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
@@ -130,7 +130,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal keeps manual chat on the session provider thread', async () => {
+test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -141,7 +141,7 @@ test('sendAssistantMessageLocal keeps manual chat on the session provider thread
   })
 
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
       threadScope: 'session-thread',
     },
@@ -153,7 +153,7 @@ test('sendAssistantMessageLocal keeps manual chat on the session provider thread
   )
 })
 
-test('sendAssistantMessageLocal keeps auto-reply turns on the session provider thread', async () => {
+test('sendAssistantMessageLocal keeps auto-reply turns on the session Codex thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -164,7 +164,7 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session provider t
   })
 
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
       threadScope: 'session-thread',
     },
@@ -176,7 +176,7 @@ test('sendAssistantMessageLocal keeps auto-reply turns on the session provider t
   )
 })
 
-test('sendAssistantMessageLocal runs automation cron turns on isolated provider threads', async () => {
+test('sendAssistantMessageLocal runs automation cron turns on isolated Codex threads', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -187,7 +187,7 @@ test('sendAssistantMessageLocal runs automation cron turns on isolated provider 
   })
 
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.profile,
     {
       threadScope: 'isolated-thread',
     },
@@ -327,16 +327,16 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
       persistUserPromptOnFailure: false,
     },
   })
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => {
       return {
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'explicit-structured-history',
           },
-          providerSessionId: 'provider-thread-active-turn',
+          codexThreadId: 'provider-thread-active-turn',
           response: 'draft before late input',
           route: {
             routeId: 'route-active-turn',
@@ -350,10 +350,10 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'thread-start',
           },
-          providerSessionId: 'provider-thread-active-turn',
+          codexThreadId: 'provider-thread-active-turn',
           response: 'final after late input',
           route: {
             routeId: 'route-active-turn',
@@ -401,7 +401,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
 
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 0)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(mocks.runtimeState.turns.acceptedInputs.append.mock.calls.length, 2)
   expect(
     mocks.runtimeState.turns.acceptedInputs.append.mock.calls[0]?.[0]?.inputs,
@@ -492,7 +492,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
   )
   assert.ok(
     activeTurnCheckpoint.mock.invocationCallOrder[0]!
-      < mocks.executeProviderTurnWithRecovery.mock.invocationCallOrder[1]!,
+      < mocks.executeCodexTurnWithRecovery.mock.invocationCallOrder[1]!,
   )
   assert.deepEqual(
     mocks.runtimeState.turns.acceptedInputs.recordProviderRequest.mock.calls.map(
@@ -514,11 +514,11 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     ],
   )
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Late follow up',
   )
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState,
     {
       routeFingerprint: 'route-active-turn',
@@ -526,7 +526,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
     },
   )
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
       ?.messages,
     [
       {
@@ -590,7 +590,7 @@ test('sendAssistantMessageLocal preserves resume state when active-turn fallback
   assert.equal(result.response, 'final after late input')
 })
 
-test('sendAssistantMessageLocal clears final resume state without a fresh final provider thread', async () => {
+test('sendAssistantMessageLocal clears final resume state without a fresh final Codex thread', async () => {
   const session = createAssistantSession({
     resumeState: {
       routeFingerprint: 'old-route',
@@ -600,19 +600,19 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => ({
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
-        providerSessionId: 'fresh-provider-thread',
+        codexThreadId: 'fresh-provider-thread',
         route: {
           routeId: 'fresh-route',
         },
-        response: 'draft without fresh provider thread',
+        response: 'draft without fresh Codex thread',
         session,
       },
     }))
@@ -620,7 +620,7 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'thread-start',
         },
         response: 'final after late input',
@@ -661,14 +661,14 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
     vault: '/vaults/test',
   })
 
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
       .resumeState?.threadId,
     'fresh-provider-thread',
   )
   assert.deepEqual(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
       ?.messages,
     [
       {
@@ -676,7 +676,7 @@ test('sendAssistantMessageLocal clears final resume state without a fresh final 
         role: 'user',
       },
       {
-        content: 'draft without fresh provider thread',
+        content: 'draft without fresh Codex thread',
         role: 'assistant',
       },
     ],
@@ -696,11 +696,11 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
-  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     providerStarted.resolve()
     await providerInput.onProviderRequestPlanned?.({
       providerAttemptId: null,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
     })
@@ -710,10 +710,10 @@ test('sendAssistantMessageLocal journals provider request before provider execut
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
-        providerSessionId: 'provider-thread-default',
+        codexThreadId: 'provider-thread-default',
         response: 'assistant response',
         route: {
           routeId: 'route-default',
@@ -744,10 +744,10 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     session,
   })
-  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
       providerAttemptId: null,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'provider-state-optimization',
       },
     })
@@ -755,10 +755,10 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
-        providerSessionId: 'provider-thread-default',
+        codexThreadId: 'provider-thread-default',
         response: 'assistant response',
         route: {
           routeId: 'route-default',
@@ -813,13 +813,13 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
     realAcceptedInputPersistence: true,
     session,
   })
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => {
       return {
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'explicit-structured-history',
           },
           response: 'draft before late input',
@@ -832,7 +832,7 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'thread-start',
           },
           response: 'final after late input',
@@ -1004,7 +1004,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before prov
   ).rejects.toMatchObject({
     code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
   })
-  expect(mocks.executeProviderTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(mocks.createAssistantTurnReceipt).not.toHaveBeenCalled()
   expect(mocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
   expect(mocks.persistFailedAssistantPromptAttempt).not.toHaveBeenCalled()
@@ -1047,10 +1047,10 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
   const providerRelease = createDeferred<void>()
   const steer = vi.fn(async () => undefined)
 
-  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
-      providerSessionId: 'thread-live',
+      codexThreadId: 'thread-live',
       providerTurnId: 'turn-live-provider',
       sessionId: session.sessionId,
       steer,
@@ -1063,7 +1063,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
         response: 'final after attempted steer',
@@ -1127,11 +1127,11 @@ test('sendAssistantMessageLocal rejects late assistant-input refs before transcr
     realAcceptedInputPersistence: true,
     session,
   })
-  mocks.executeProviderTurnWithRecovery.mockResolvedValue({
+  mocks.executeCodexTurnWithRecovery.mockResolvedValue({
     kind: 'succeeded',
     providerTurn: {
       onboardingGuidanceInjected: true,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
       response: 'draft before missing late input',
@@ -1206,15 +1206,15 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
     session,
   })
   const firstProviderTurn = createDeferred<Awaited<
-    ReturnType<typeof mocks.executeProviderTurnWithRecovery>
+    ReturnType<typeof mocks.executeCodexTurnWithRecovery>
   >>()
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => firstProviderTurn.promise)
     .mockResolvedValueOnce({
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'thread-start',
         },
         response: 'final after steered input',
@@ -1227,7 +1227,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
     vault: '/vaults/test',
   })
   await vi.waitFor(() => {
-    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
   })
 
   const steeredResultPromise = sendAssistantMessageLocal({
@@ -1245,7 +1245,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
     kind: 'succeeded',
     providerTurn: {
       onboardingGuidanceInjected: true,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
       response: 'draft before steered input',
@@ -1261,9 +1261,9 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   assert.equal(firstResult.response, 'final after steered input')
   assert.equal(steeredResult.response, 'final after steered input')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Follow-up while running',
   )
   expect(
@@ -1299,10 +1299,10 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
 
-  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
-      providerSessionId: 'thread-live',
+      codexThreadId: 'thread-live',
       providerTurnId: 'turn-live-provider',
       sessionId: session.sessionId,
       steer: async (input) => {
@@ -1317,7 +1317,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
         response: 'final after live-steered input',
@@ -1357,7 +1357,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
   assert.equal(firstResult.prompt, 'Follow-up while running')
   assert.equal(steeredResult.response, 'final after live-steered input')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
       .map((call) => call[0])
@@ -1391,17 +1391,17 @@ test('sendAssistantMessageLocal replays only unsteered input from a mixed live-s
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
 
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async (providerInput) => {
       await providerInput.onProviderRequestPlanned?.({
         providerAttemptId: null,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
       })
       const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
         interrupt: async () => undefined,
-        providerSessionId: 'thread-live',
+        codexThreadId: 'thread-live',
         providerTurnId: 'turn-live-provider',
         sessionId: session.sessionId,
         steer: async (input) => {
@@ -1419,7 +1419,7 @@ test('sendAssistantMessageLocal replays only unsteered input from a mixed live-s
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'explicit-structured-history',
           },
           response: 'draft after mixed live input',
@@ -1430,7 +1430,7 @@ test('sendAssistantMessageLocal replays only unsteered input from a mixed live-s
     .mockImplementationOnce(async (providerInput) => {
       await providerInput.onProviderRequestPlanned?.({
         providerAttemptId: null,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
       })
@@ -1438,7 +1438,7 @@ test('sendAssistantMessageLocal replays only unsteered input from a mixed live-s
         kind: 'succeeded',
         providerTurn: {
           onboardingGuidanceInjected: true,
-          providerContinuation: {
+          codexContinuation: {
             kind: 'explicit-structured-history',
           },
           response: 'final after unsteered replay',
@@ -1491,13 +1491,13 @@ test('sendAssistantMessageLocal replays only unsteered input from a mixed live-s
   assert.equal(firstResult.response, 'final after unsteered replay')
   assert.equal(firstQueuedResult.response, 'final after unsteered replay')
   assert.equal(secondQueuedResult.response, 'final after unsteered replay')
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Second follow-up',
   )
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt.includes('First follow-up'),
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt.includes('First follow-up'),
     false,
   )
   expect(
@@ -1530,7 +1530,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
     session,
   })
   const firstProviderTurn = createDeferred<Awaited<
-    ReturnType<typeof mocks.executeProviderTurnWithRecovery>
+    ReturnType<typeof mocks.executeCodexTurnWithRecovery>
   >>()
   const promptPersistenceStarted = createDeferred<void>()
   const promptPersistenceRelease = createDeferred<{
@@ -1550,7 +1550,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
       return promptPersistenceRelease.promise
     },
   )
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => firstProviderTurn.promise)
 
   const firstResultPromise = sendAssistantMessageLocal({
@@ -1589,17 +1589,17 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
   })
 
   await vi.waitFor(() => {
-    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
   })
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.input.prompt,
     'Follow-up while prompt persistence is blocked',
   )
   firstProviderTurn.resolve({
     kind: 'succeeded',
     providerTurn: {
       onboardingGuidanceInjected: true,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
       response: 'final after steered input',
@@ -1615,7 +1615,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
   assert.equal(firstResult.response, 'final after steered input')
   assert.equal(steeredResult.response, 'final after steered input')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal starts a new turn when same-conversation input lacks expected turn id', async () => {
@@ -1641,7 +1641,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
     session,
   })
   const firstProviderTurn = createDeferred<Awaited<
-    ReturnType<typeof mocks.executeProviderTurnWithRecovery>
+    ReturnType<typeof mocks.executeCodexTurnWithRecovery>
   >>()
   mocks.createAssistantTurnReceipt
     .mockResolvedValueOnce({
@@ -1650,13 +1650,13 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
     .mockResolvedValueOnce({
       turnId: 'turn-new',
     })
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockImplementationOnce(async () => firstProviderTurn.promise)
     .mockResolvedValueOnce({
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
         response: 'new turn response',
@@ -1669,7 +1669,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
     vault: '/vaults/test',
   })
   await vi.waitFor(() => {
-    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
   })
 
   await expect(
@@ -1700,9 +1700,9 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
 
   assert.equal(secondResult.response, 'new turn response')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 2)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Same conversation without expected turn id',
   )
 
@@ -1710,7 +1710,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
     kind: 'succeeded',
     providerTurn: {
       onboardingGuidanceInjected: true,
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
       response: 'first turn response',
@@ -1720,7 +1720,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
 
   const firstResult = await firstResultPromise
   assert.equal(firstResult.response, 'first turn response')
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
 })
 
 test('active-turn controller only steers exact conversations while open', async () => {
@@ -2057,7 +2057,7 @@ test('active-turn controller keeps boundary input behind live-acknowledged input
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer: async (input) => {
@@ -2177,7 +2177,7 @@ test('active-turn controller validates hook input before live steering it to the
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer,
@@ -2254,7 +2254,7 @@ test('active-turn controller can notify every active turn in one vault', async (
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer,
@@ -2330,7 +2330,7 @@ test('active-turn controller keeps boundary input behind in-flight live steer in
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer: async () => {
@@ -2442,7 +2442,7 @@ test('active-turn controller interrupts live provider when input-available check
   try {
     controller.registerLiveProviderTurn({
       interrupt,
-      providerSessionId: 'provider-session',
+      codexThreadId: 'provider-session',
       providerTurnId: 'provider-turn',
       sessionId: 'session-test',
       steer: async () => undefined,
@@ -2598,7 +2598,7 @@ test('active-turn controller only probes input after explicit notification or pr
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer,
@@ -2719,7 +2719,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer,
@@ -2848,7 +2848,7 @@ test('active-turn controller reruns input-available admission after an accepted 
   })
   const releaseLiveTurn = controller.registerLiveProviderTurn({
     interrupt: async () => undefined,
-    providerSessionId: 'provider-session',
+    codexThreadId: 'provider-session',
     providerTurnId: 'provider-turn',
     sessionId: 'session-test',
     steer,
@@ -3196,12 +3196,12 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
     },
     session,
   })
-  mocks.executeProviderTurnWithRecovery
+  mocks.executeCodexTurnWithRecovery
     .mockResolvedValueOnce({
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
         response: 'first response',
@@ -3212,7 +3212,7 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
       kind: 'succeeded',
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
         response: 'second response',
@@ -3266,9 +3266,9 @@ test('sendAssistantMessageLocal closes steering at commit barrier without empty 
 
   assert.equal(secondResult.response, 'second response')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 2)
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 2)
   assert.equal(
-    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
     'Arrived after commit barrier',
   )
 
@@ -3315,7 +3315,7 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
     activeTurnInput.mock.calls.map((call) => call[0]?.phase),
     ['input_available', 'request_boundary', 'commit_barrier'],
   )
-  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
@@ -3334,10 +3334,10 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
       error: terminalError,
       kind: 'failed_terminal',
       providerRequestOutcome: 'failed',
-      providerContinuation: {
+      codexContinuation: {
         kind: 'explicit-structured-history',
       },
-      providerSessionId: 'provider-session-failed',
+      codexThreadId: 'provider-session-failed',
       providerTurnId: 'provider-turn-failed',
       rawEvents: [{ method: 'turn/completed' }],
       route: {
@@ -3976,8 +3976,8 @@ async function loadLocalServiceModule(input?: {
         attemptCount: number
         error: Error
         providerRequestOutcome: 'aborted' | 'failed' | 'partial'
-        providerContinuation: AssistantProviderContinuation
-        providerSessionId: string | null
+        codexContinuation: AssistantCodexContinuation
+        codexThreadId: string | null
         providerTurnId: string | null
         rawEvents: unknown[]
         route: {
@@ -3994,7 +3994,7 @@ async function loadLocalServiceModule(input?: {
         kind: 'succeeded'
         providerTurn: {
           onboardingGuidanceInjected: boolean
-          providerContinuation: AssistantProviderContinuation
+          codexContinuation: AssistantCodexContinuation
           response: string
           session: AssistantSession
         }
@@ -4034,10 +4034,10 @@ async function loadLocalServiceModule(input?: {
       kind: 'succeeded' as const,
       providerTurn: {
         onboardingGuidanceInjected: true,
-        providerContinuation: {
+        codexContinuation: {
           kind: 'explicit-structured-history',
         },
-        providerSessionId: 'provider-thread-default',
+        codexThreadId: 'provider-thread-default',
         response: 'assistant response',
         route: {
           routeId: 'route-default',
@@ -4127,18 +4127,18 @@ async function loadLocalServiceModule(input?: {
       }),
     ),
     dispatchAssistantReply: vi.fn(async () => deliveryOutcome),
-    executeProviderTurnWithRecovery: vi.fn(
+    executeCodexTurnWithRecovery: vi.fn(
       async (
         providerInput: Parameters<
-          typeof import('../src/assistant/provider-turn-runner.js').executeProviderTurnWithRecovery
+          typeof import('../src/assistant/codex-turn-runner.js').executeCodexTurnWithRecovery
         >[0],
       ) => {
         await providerInput.onProviderRequestPlanned?.({
           providerAttemptId: null,
-          providerContinuation:
+          codexContinuation:
             providerOutcome.kind === 'succeeded'
-              ? providerOutcome.providerTurn.providerContinuation
-              : providerOutcome.providerContinuation,
+              ? providerOutcome.providerTurn.codexContinuation
+              : providerOutcome.codexContinuation,
         })
         return providerOutcome
       },
@@ -4408,11 +4408,11 @@ async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
     resolveAssistantResumeStateFromProviderTurn: (input: {
-      providerSessionId: string | null
+      codexThreadId: string | null
       routeFingerprint: string
     }) => ({
       routeFingerprint: input.routeFingerprint,
-      threadId: input.providerSessionId,
+      threadId: input.codexThreadId,
     }),
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
@@ -4427,9 +4427,9 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantExecutionOperatorDefaults:
       mocks.resolveAssistantExecutionOperatorDefaults,
   }))
-  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
-    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
-    resolveAssistantProviderThreadScope: vi.fn(
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+    resolveAssistantCodexThreadScope: vi.fn(
       (input: { turnTrigger?: string | null }) =>
         input.turnTrigger === 'automation-cron'
           ? 'isolated-thread'

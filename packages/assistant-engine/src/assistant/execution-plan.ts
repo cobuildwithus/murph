@@ -9,7 +9,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   buildCodexThreadIdentity,
   type CodexThreadIdentity,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigsForProvider,

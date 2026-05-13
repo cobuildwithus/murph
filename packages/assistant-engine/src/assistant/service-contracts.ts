@@ -33,11 +33,11 @@ import type {
 } from './turn-input.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
-  AssistantProviderContinuation,
+  AssistantCodexContinuation,
 } from './active-turn-input-journal.js'
 import type {
   CodexThreadIdentity,
-} from './provider-route.js'
+} from './codex-thread-route.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
 
@@ -132,7 +132,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   attemptCount: number
   nonReplayableProviderWork?: boolean
   onboardingGuidanceInjected?: boolean
-  providerContinuation: AssistantProviderContinuation
+  codexContinuation: AssistantCodexContinuation
   providerOptions: AssistantProviderSessionOptions
   route: CodexThreadIdentity
   session: AssistantSession

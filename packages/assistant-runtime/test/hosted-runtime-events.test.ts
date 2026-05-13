@@ -176,7 +176,7 @@ describe("executeHostedMailboxEvent", () => {
         ]),
       ),
       event: {
-        providerSessionId: "raw-provider-session-id",
+        codexThreadId: "raw-provider-session-id",
         rawEvent: {
           schema: "murph.assistant-codex-invalid-output-diagnostics.v1",
           type: "assistant.codex.invalid_output_resume_failure",
@@ -217,7 +217,7 @@ describe("executeHostedMailboxEvent", () => {
             "[key]",
             "output,HbA1c",
           ],
-          providerSessionId: "raw-provider-session-id",
+          codexThreadId: "raw-provider-session-id",
         },
         updates: [],
       },
@@ -259,7 +259,7 @@ describe("executeHostedMailboxEvent", () => {
         }),
       }),
     );
-    expect(entry?.redacted).not.toHaveProperty("providerSessionId");
+    expect(entry?.redacted).not.toHaveProperty("codexThreadId");
     expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputErrorPreview");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("HbA1c");
@@ -299,7 +299,7 @@ describe("executeHostedMailboxEvent", () => {
     const entry = emitHostedAssistantProviderTraceLog({
       details: {},
       event: {
-        providerSessionId: "raw-provider-session-id",
+        codexThreadId: "raw-provider-session-id",
         rawEvent: {
           schema: "murph.assistant-codex-resume-failure-diagnostics.v1",
           type: "assistant.codex.resume_failure",
@@ -355,7 +355,7 @@ describe("executeHostedMailboxEvent", () => {
           ],
           codexResumeFailureRetryable: false,
           codexResumeFailureErrorPreview: "raw private text should not persist",
-          providerSessionId: "raw-provider-session-id",
+          codexThreadId: "raw-provider-session-id",
         },
         updates: [],
       },
@@ -405,7 +405,7 @@ describe("executeHostedMailboxEvent", () => {
         }),
       }),
     );
-    expect(entry?.redacted).not.toHaveProperty("providerSessionId");
+    expect(entry?.redacted).not.toHaveProperty("codexThreadId");
     expect(entry?.redacted).not.toHaveProperty("codexResumeFailureErrorPreview");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-token-value");
@@ -449,13 +449,13 @@ describe("executeHostedMailboxEvent", () => {
         requestId: "req_123",
       },
       event: {
-        providerSessionId: "raw-provider-session-id",
+        codexThreadId: "raw-provider-session-id",
         rawEvent: {
           schema: "murph.assistant-codex-app-server-timing.v1",
           type: "assistant.codex.app_server_timing",
           codexTimingElapsedMs: 8123,
           codexTimingProviderActionCount: 1,
-          codexTimingProviderSessionIdPresent: true,
+          codexTimingThreadIdPresent: true,
           codexTimingStage: "turn-completed",
           codexTimingTotalElapsedMs: 11042,
           codexTimingTurnIdPresent: true,
@@ -475,7 +475,7 @@ describe("executeHostedMailboxEvent", () => {
       redacted: expect.objectContaining({
         codexTimingElapsedMs: 8123,
         codexTimingProviderActionCount: 1,
-        codexTimingProviderSessionIdPresent: true,
+        codexTimingThreadIdPresent: true,
         codexTimingStage: "turn-completed",
         codexTimingTotalElapsedMs: 11042,
         codexTimingTraceType: "app-server",
@@ -504,7 +504,7 @@ describe("executeHostedMailboxEvent", () => {
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({
-        providerSessionId: null,
+        codexThreadId: null,
         rawEvent: {
           schema: "murph.assistant-context-diagnostics.v1",
           type: "assistant.context.diagnostics",
@@ -533,16 +533,16 @@ describe("executeHostedMailboxEvent", () => {
         updates: [],
       });
       input.onTraceEvent?.({
-        providerSessionId: null,
+        codexThreadId: null,
         rawEvent: {
           schema: "murph.assistant-provider-plan-diagnostics.v1",
           type: "assistant.provider.plan",
           activeTurnHistoryCount: 3,
           activeTurnHistoryPresent: true,
-          providerContinuation: "provider-state-optimization",
+          codexContinuation: "provider-state-optimization",
           providerRequestOrdinal: 1,
           refreshThreadInstructions: false,
-          resumeProviderSessionIdPresent: true,
+          resumeCodexThreadIdPresent: true,
           workingDirectoryKind: "hosted-stable-proc-cwd",
         },
         updates: [],
@@ -672,10 +672,10 @@ describe("executeHostedMailboxEvent", () => {
         component: "runtime.provider",
         details: expect.objectContaining({
           activeTurnHistoryPresent: true,
-          providerContinuation: "provider-state-optimization",
+          codexContinuation: "provider-state-optimization",
           providerPlanKind: "provider.plan",
           refreshThreadInstructions: false,
-          resumeProviderSessionIdPresent: true,
+          resumeCodexThreadIdPresent: true,
           workingDirectoryKind: "hosted-stable-proc-cwd",
         }),
         message: "Hosted assistant provider plan captured.",
@@ -750,10 +750,10 @@ describe("executeHostedMailboxEvent", () => {
           phase: "wake.running",
           redacted: expect.objectContaining({
             activeTurnHistoryPresent: true,
-            providerContinuation: "provider-state-optimization",
+            codexContinuation: "provider-state-optimization",
             providerPlanKind: "provider.plan",
             refreshThreadInstructions: false,
-            resumeProviderSessionIdPresent: true,
+            resumeCodexThreadIdPresent: true,
             workingDirectoryKind: "hosted-stable-proc-cwd",
           }),
         },

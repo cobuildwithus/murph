@@ -46,7 +46,7 @@ describe('Codex-only assistant hard-cut contracts', () => {
 
   it('removes hosted provider request debug traces from active runtime source', async () => {
     const runtimePaths = [
-      path.join('packages', 'assistant-engine', 'src', 'assistant', 'provider-turn-runner.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'codex-turn-runner.ts'),
       path.join('packages', 'assistant-runtime', 'src', 'hosted-runtime', 'events.ts'),
       path.join('packages', 'assistant-runtime', 'src', 'hosted-runtime', 'maintenance.ts'),
     ]

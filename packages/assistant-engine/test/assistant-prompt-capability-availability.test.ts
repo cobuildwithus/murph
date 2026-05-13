@@ -5,7 +5,7 @@ import {
 } from '../src/assistant/execution-context.js'
 import {
   resolveAssistantPromptCapabilityAvailability,
-} from '../src/assistant/provider-turn/planning.js'
+} from '../src/assistant/codex-turn/planning.js'
 
 describe('assistant prompt capability availability', () => {
   it('exposes hosted device-connect providers when the hosted context has configured providers', () => {
