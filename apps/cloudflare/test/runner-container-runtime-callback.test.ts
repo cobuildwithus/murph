@@ -62,32 +62,12 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it("runs a pending idle checkpoint from the activity-expired lifecycle hook", async () => {
-    const beginIdleCheckpointLease = vi.fn(async () => ({
-      attemptId: "checkpoint_attempt_123",
-      generation: "12",
-      userId: "member_123",
-      workspaceVersion: "6",
-    }));
-    const finishIdleCheckpointLease = vi.fn(async () => ({
-      completed: true,
-    }));
+  it("activity expiry destroys the warm shell without dispatching a checkpoint job", async () => {
     const storage = createContainerStorageDouble();
     const destroy = vi.fn(async () => {});
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-
-      const body = JSON.parse(String(init?.body)) as { job?: { request?: { reason?: string } } };
-      if (body.job?.request?.reason === "idle_shutdown_checkpoint") {
-        return new Response(JSON.stringify(createRunnerResult({
-          idleShutdownCheckpointed: true,
-          nextWakeAt: "2026-04-27T00:20:00.000Z",
-        })), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         });
@@ -103,14 +83,7 @@ describe("RunnerContainer internal runtime dispatch", () => {
     let status: "running" | "stopped" = "stopped";
     const container = new RunnerContainer({
       storage,
-    } as never, {
-      USER_RUNNER: {
-        getByName: vi.fn(() => ({
-          beginIdleCheckpointLease,
-          finishIdleCheckpointLease,
-        })),
-      },
-    } as never);
+    } as never, {} as never);
     Object.assign(container, {
       containerFetch,
       destroy: vi.fn(async () => {
@@ -118,8 +91,8 @@ describe("RunnerContainer internal runtime dispatch", () => {
         await destroy();
       }),
       getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
+          lastChange: Date.now(),
+          status,
       })),
       startAndWaitForPorts: vi.fn(async () => {
         status = "running";
@@ -131,187 +104,11 @@ describe("RunnerContainer internal runtime dispatch", () => {
       timeoutMs: 5_000,
       userId: "member_123",
     });
-    await container.onActivityExpired();
-
-    const checkpointBody = readPostedRunnerBody(containerFetch, 1) as {
-      job: {
-        request: Record<string, unknown>;
-      };
-    } & Record<string, unknown>;
-    expect(checkpointBody).toMatchObject({
-    });
-    expect(checkpointBody.job.request).toMatchObject({
-      attemptId: "checkpoint_attempt_123",
-      checkpointNextWakeAt: "2026-04-27T00:10:00.000Z",
-      leaseGeneration: "12",
-      reason: "idle_shutdown_checkpoint",
-      userId: "member_123",
-      workspaceVersion: "6",
-    });
-    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
-      userId: "member_123",
-      workspaceVersion: "6",
-    });
-    expect(finishIdleCheckpointLease).toHaveBeenCalledWith({
-      attemptId: "checkpoint_attempt_123",
-      generation: "12",
-      nextWakeAt: "2026-04-27T00:20:00.000Z",
-      userId: "member_123",
-    });
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("clears pending checkpoint work when beginning the idle checkpoint lease fails", async () => {
-    const beginIdleCheckpointLease = vi.fn(async () => {
-      throw new Error("write fence already active");
-    });
-    const finishIdleCheckpointLease = vi.fn();
-    finishIdleCheckpointLease.mockResolvedValue({ completed: true });
-    const storage = createContainerStorageDouble();
-    const destroy = vi.fn(async () => {});
-    const renewActivityTimeout = vi.fn();
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-
-      const body = JSON.parse(String(init?.body)) as { job?: { request?: { reason?: string } } };
-      expect(body.job?.request?.reason).not.toBe("idle_shutdown_checkpoint");
-
-      return new Response(JSON.stringify(createRunnerResult({
-        nextWakeAt: "2026-04-27T00:10:00.000Z",
-      })), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
-    });
-    let status: "running" | "stopped" = "stopped";
-    const container = new RunnerContainer({
-      storage,
-    } as never, {
-      USER_RUNNER: {
-        getByName: vi.fn(() => ({
-          beginIdleCheckpointLease,
-          finishIdleCheckpointLease,
-        })),
-      },
-    } as never);
-    Object.assign(container, {
-      containerFetch,
-      destroy: vi.fn(async () => {
-        status = "stopped";
-        await destroy();
-      }),
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
-      })),
-      renewActivityTimeout,
-      startAndWaitForPorts: vi.fn(async () => {
-        status = "running";
-      }),
-    });
-
-    await container.invoke({
-      job: createWorkspaceRunnerJob("member_123"),
-      timeoutMs: 5_000,
-      userId: "member_123",
-    });
-    renewActivityTimeout.mockClear();
+    containerFetch.mockClear();
 
     await expect(container.onActivityExpired()).resolves.toBeUndefined();
 
-    expect(beginIdleCheckpointLease).toHaveBeenCalledWith({
-      userId: "member_123",
-      workspaceVersion: "6",
-    });
-    expect(finishIdleCheckpointLease).not.toHaveBeenCalled();
-    expect(countPostedRunnerRequests(containerFetch)).toBe(1);
-    expect(renewActivityTimeout).not.toHaveBeenCalled();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("still shuts down when finishing the idle checkpoint lease fails", async () => {
-    const beginIdleCheckpointLease = vi.fn(async () => ({
-      attemptId: "checkpoint_attempt_123",
-      generation: "12",
-      userId: "member_123",
-      workspaceVersion: "6",
-    }));
-    const finishIdleCheckpointLease = vi.fn(async () => {
-      throw new Error("finish failed");
-    });
-    const storage = createContainerStorageDouble();
-    const destroy = vi.fn(async () => {});
-    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-
-      const body = JSON.parse(String(init?.body)) as { job?: { request?: { reason?: string } } };
-      if (body.job?.request?.reason === "idle_shutdown_checkpoint") {
-        return new Response(JSON.stringify(createRunnerResult({
-          idleShutdownCheckpointed: true,
-          nextWakeAt: "2026-04-27T00:20:00.000Z",
-        })), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
-
-      return new Response(JSON.stringify(createRunnerResult({
-        nextWakeAt: "2026-04-27T00:10:00.000Z",
-      })), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
-    });
-    let status: "running" | "stopped" = "stopped";
-    const container = new RunnerContainer({
-      storage,
-    } as never, {
-      USER_RUNNER: {
-        getByName: vi.fn(() => ({
-          beginIdleCheckpointLease,
-          finishIdleCheckpointLease,
-        })),
-      },
-    } as never);
-    Object.assign(container, {
-      containerFetch,
-      destroy: vi.fn(async () => {
-        status = "stopped";
-        await destroy();
-      }),
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status,
-      })),
-      startAndWaitForPorts: vi.fn(async () => {
-        status = "running";
-      }),
-    });
-
-    await container.invoke({
-      job: createWorkspaceRunnerJob("member_123"),
-      timeoutMs: 5_000,
-      userId: "member_123",
-    });
-    await expect(container.onActivityExpired()).resolves.toBeUndefined();
-
-    expect(countPostedRunnerRequests(containerFetch)).toBe(2);
-    expect(finishIdleCheckpointLease).toHaveBeenCalledWith({
-      attemptId: "checkpoint_attempt_123",
-      generation: "12",
-      nextWakeAt: "2026-04-27T00:20:00.000Z",
-      userId: "member_123",
-    });
+    expect(countPostedRunnerRequests(containerFetch)).toBe(0);
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 });

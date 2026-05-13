@@ -315,10 +315,6 @@ export function useAssistantChatController(
       }
 
       if (outcome.kind === 'failed') {
-        if (outcome.recoveredSession) {
-          commitSession(outcome.recoveredSession)
-        }
-
         const queuedPrompts = promptQueueStateRef.current.prompts
         const queuedPromptDisposition = resolveAssistantQueuedPromptDisposition({
           pauseRequested: false,
@@ -345,10 +341,6 @@ export function useAssistantChatController(
             vault: input.input.vault,
           }).catch(() => {})
         }
-      }
-
-      if (outcome.kind === 'interrupted' && outcome.recoveredSession) {
-        commitSession(outcome.recoveredSession)
       }
 
       activeTurnAbortControllerRef.current = null

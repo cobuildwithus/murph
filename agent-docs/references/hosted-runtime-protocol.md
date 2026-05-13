@@ -32,24 +32,15 @@ The live ownership split is:
 - `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
-  After a successful foreground runner invocation leaves a warm container
-  quiet, the RunnerContainer keeps only in-memory knowledge that the warm
-  workspace should be checkpointed before shutdown. UserRunner does not schedule
-  a separate idle checkpoint alarm, and foreground completion does not consume a
-  runtime-reported deferred-checkpoint scheduler hint.
-  When Cloudflare reports container activity expiry, the shell yields to any
-  active foreground operation; otherwise, if a pending warm checkpoint exists, it
-  takes one short Durable Object write-fence lease, posts checkpoint reason
-  `idle_shutdown_checkpoint` into the already-warm runner, validates the same
-  workspace CAS/user fences, releases the fence with the returned next wake, and
-  then tears down best-effort. Explicit cleanup or user-data deletion aborts an
-  in-progress idle-shutdown checkpoint rather than waiting for the runner
-  timeout. Lease acquisition or checkpoint failure is logged and the shell still
-  proceeds to cleanup; there is no retry loop and no durable idle-checkpoint
-  scheduler. This intentionally favors lifecycle simplicity over maximum replay
-  resistance: if the warm shell is lost before this best-effort checkpoint
-  completes, the next wake may restore the prior checkpoint and rely on
-  runtime/provider idempotency for duplicate-effect safety.
+  UserRunner holds one foreground runtime write fence for the whole hosted
+  invocation, passes the fence expiry as `deadlineAt`, and passes the single
+  `idleCheckpointDelayMs` runtime policy knob. The runtime, not the host,
+  waits for the idle window or deadline and checkpoints dirty local runtime
+  state before returning success. When Cloudflare reports container activity
+  expiry, the shell yields to any active foreground operation; otherwise it runs
+  cleanup only. There is no pending idle-checkpoint Durable Object state, idle
+  checkpoint lease, idle checkpoint alarm, or host-owned shutdown checkpoint
+  invocation.
   When hosted runtime crypto is configured, Cloudflare fetches signed
   ingress/runtime root envelopes from web through the signed
   `/api/internal/hosted-runtime/crypto-context` callback, verifies the authority
@@ -76,10 +67,10 @@ nudge runner
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 pull pending device-sync dirty rows
-checkpoint after import
 run best-effort local inbox projection/parser enrichment without checkpointing it
 run local runtime work until idle or budget
-checkpoint final runtime state
+wait for the runtime idle window, a coalesced wake, or the host deadline
+checkpoint final dirty runtime state with checkpoint reason idle_shutdown
 project redacted status/logs
 ```
 

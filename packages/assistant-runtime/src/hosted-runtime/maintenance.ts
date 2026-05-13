@@ -6,6 +6,7 @@ import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
   type AssistantInputSource,
   type AssistantRunEvent,
@@ -192,8 +193,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         timings: undefined,
       };
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
-  const nextWakeAt = assistantResult.nextWakeAt
-    ?? (assistantResult.progressed ? new Date().toISOString() : null);
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
@@ -213,7 +212,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: earliestHostedMaintenanceWakeAt(
-      nextWakeAt,
+      assistantResult.nextWakeAt,
       earliestHostedMaintenanceWakeAt(
         deviceSyncResult.nextWakeAt,
         deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
@@ -290,6 +289,9 @@ export async function runHostedAssistantAutomation(
   }));
   try {
     const passStartedAt = Date.now();
+    const foregroundReplayScanLimit = foregroundReplayInputIds.length > 0
+      ? normalizeHostedForegroundReplayScanLimit(foregroundReplayInputIds.length)
+      : null;
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -338,11 +340,9 @@ export async function runHostedAssistantAutomation(
       requestId,
       signal,
       inputSource,
-      ...(foregroundReplayInputIds.length > 0
+      ...(foregroundReplayScanLimit !== null
         ? {
-            maxPerScan: normalizeHostedForegroundReplayScanLimit(
-              foregroundReplayInputIds.length,
-            ),
+            maxPerScan: foregroundReplayScanLimit,
           }
         : {}),
       vault: vaultRoot,
@@ -366,6 +366,15 @@ export async function runHostedAssistantAutomation(
     };
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
+    const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+      foregroundReplayScanLimit,
+      resultNextWakeAt: result.nextWakeAt,
+      scanLimit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      scanResult: {
+        replies,
+        routing,
+      },
+    });
     redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
       details: {
@@ -375,7 +384,7 @@ export async function runHostedAssistantAutomation(
           `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
         ).join(","),
         cronProcessed: result.cronProcessed,
-        nextWakeAt: result.nextWakeAt,
+        nextWakeAt,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
         requestId,
@@ -395,7 +404,7 @@ export async function runHostedAssistantAutomation(
     }));
     return {
       currentTurnDeliveryIntentIds,
-      nextWakeAt: result.nextWakeAt,
+      nextWakeAt,
       progressed: result.progressed,
       redactedLogEntries,
       timings: {
@@ -449,6 +458,51 @@ export async function runHostedAssistantAutomation(
 
 function normalizeHostedForegroundReplayScanLimit(count: number): number {
   return Math.max(1, count);
+}
+
+function resolveHostedAssistantAutomationNextWakeAt(input: {
+  foregroundReplayScanLimit: number | null;
+  resultNextWakeAt: string | null;
+  scanLimit: number;
+  scanResult: {
+    replies: {
+      considered: number;
+    };
+    routing: {
+      considered: number;
+    };
+  };
+}): string | null {
+  return earliestHostedMaintenanceWakeAt(
+    input.resultNextWakeAt,
+    resolveHostedAssistantBacklogWakeAt(input),
+  );
+}
+
+function resolveHostedAssistantBacklogWakeAt(input: {
+  foregroundReplayScanLimit: number | null;
+  scanLimit: number;
+  scanResult: {
+    replies: {
+      considered: number;
+    };
+    routing: {
+      considered: number;
+    };
+  };
+}): string | null {
+  if (input.foregroundReplayScanLimit !== null) {
+    return null;
+  }
+
+  if (
+    input.scanResult.replies.considered < input.scanLimit
+    && input.scanResult.routing.considered < input.scanLimit
+  ) {
+    return null;
+  }
+
+  return new Date(Date.now()).toISOString();
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(

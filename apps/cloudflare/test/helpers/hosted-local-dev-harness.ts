@@ -25,9 +25,9 @@ const hostedLocalStatusTimeoutMs = 180_000;
 const hostedLocalStatusRequestTimeoutMs = 10_000;
 const hostedLocalStatusPollIntervalMs = 250;
 const hostedLocalNudgeTimeoutMs = 2_000;
-const hostedLocalIdleCheckpointTimeoutMs = 15_000;
-const hostedLocalIdleCheckpointRetryMs = 1_000;
-const hostedLocalRunUntilIdleCheckpointTimeoutMs = 30_000;
+const hostedLocalActivityExpiryTimeoutMs = 15_000;
+const hostedLocalCompletionRetryMs = 1_000;
+const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
 
 export interface HostedLocalDevHarness {
@@ -39,7 +39,7 @@ export interface HostedLocalDevHarness {
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserBestEffort(userId: string): Promise<void>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
-  runHostedIdleCheckpointForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
+  runHostedManualInvocationForTest(userId: string): Promise<HostedWorkspaceInvocationResult>;
   runHostedAlarmForTest(userId: string): Promise<{ ok: true }>;
   startStuckInvocationForTest(userId: string, input?: {
     reason?: HostedWorkspaceInvocationReason;
@@ -171,7 +171,7 @@ export async function startHostedLocalDevHarness(input: {
       },
       nudgeUserBestEffort: nudgeHostedUserBestEffort,
       expireRunnerActivityForTest,
-      runHostedIdleCheckpointForTest,
+      runHostedManualInvocationForTest,
       request: requestForRuntime,
       requestJson: requestJsonForRuntime,
       runHostedAlarmForTest: async (userId: string): Promise<{ ok: true }> => {
@@ -224,7 +224,7 @@ export async function startHostedLocalDevHarness(input: {
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
         let nextRecoveryNudgeAt = startedAt;
-        let nextIdleCheckpointAttemptAt = startedAt;
+        let nextCompletionRetryAt = startedAt;
         let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
 
@@ -258,11 +258,11 @@ export async function startHostedLocalDevHarness(input: {
             hasMailboxLag
             && !status.inFlight
             && !status.lastErrorCode
-            && now >= nextIdleCheckpointAttemptAt
+            && now >= nextCompletionRetryAt
             && resolveLocallyDrainedMailboxLag(status) !== null
           ) {
-            nextIdleCheckpointAttemptAt = now + hostedLocalIdleCheckpointRetryMs;
-            await runHostedIdleCheckpointForTest(userId)
+            nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
+            await runHostedManualInvocationForTest(userId)
               .catch(() => expireRunnerActivityForTest(userId).catch(() => {}));
             await sleep(pollIntervalMs);
             continue;
@@ -431,23 +431,23 @@ export async function startHostedLocalDevHarness(input: {
           ...statusHeaders(userId),
         },
         method: "POST",
-        signal: AbortSignal.timeout(hostedLocalIdleCheckpointTimeoutMs),
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
       },
     );
   }
 
-  async function runHostedIdleCheckpointForTest(
+  async function runHostedManualInvocationForTest(
     userId: string,
   ): Promise<HostedWorkspaceInvocationResult> {
     return await requestJsonForRuntime<HostedWorkspaceInvocationResult>(
-      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=idle_shutdown_checkpoint`,
+      `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=manual`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
           ...statusHeaders(userId),
         },
         method: "POST",
-        signal: AbortSignal.timeout(hostedLocalRunUntilIdleCheckpointTimeoutMs),
+        signal: AbortSignal.timeout(hostedLocalRunUntilIdleTimeoutMs),
       },
     );
   }

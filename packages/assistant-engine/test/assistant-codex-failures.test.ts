@@ -18,6 +18,12 @@ import {
 } from '../src/assistant-codex/failures.ts'
 
 describe('assistant Codex failure helpers', () => {
+  function expectNoRecoveredThreadResumeClaim(message: string): void {
+    expect(message).not.toMatch(/preserved.*provider thread/iu)
+    expect(message).not.toMatch(/recovered.*provider thread/iu)
+    expect(message).not.toMatch(/resume it/iu)
+  }
+
   it('extracts turn identifiers, statuses, and error messages from fallback shapes', () => {
     expect(
       extractCodexThreadIdFromResult({
@@ -244,24 +250,41 @@ describe('assistant Codex failure helpers', () => {
     expect(
       buildCodexInterruptedError({
         providerActionCount: 0,
-        providerSessionId: null,
+        providerSessionId: 'thread-interrupted-diagnostics',
         signal: 'SIGTERM',
       }),
     ).toMatchObject({
       code: 'ASSISTANT_CODEX_INTERRUPTED',
-      message: 'Codex app-server was interrupted. signal SIGTERM.',
+      message:
+        'Codex app-server was interrupted. signal SIGTERM. Provider thread id was captured for diagnostics only. Retry the request when ready.',
     })
+    expectNoRecoveredThreadResumeClaim(
+      buildCodexInterruptedError({
+        providerActionCount: 0,
+        providerSessionId: 'thread-interrupted-diagnostics',
+        signal: 'SIGTERM',
+      }).message,
+    )
 
     expect(
       buildCodexConnectionFailureMessage({
         code: null,
         fallback: null,
-        providerSessionId: null,
+        providerSessionId: 'thread-connection-diagnostics',
         signal: 'SIGTERM',
         stderr: '',
       }),
     ).toBe(
-      'Codex app-server lost its connection while waiting for the model. signal SIGTERM. Restore connectivity, then retry the request.',
+      'Codex app-server lost its connection while waiting for the model. signal SIGTERM. Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
+    )
+    expectNoRecoveredThreadResumeClaim(
+      buildCodexConnectionFailureMessage({
+        code: null,
+        fallback: null,
+        providerSessionId: 'thread-connection-diagnostics',
+        signal: 'SIGTERM',
+        stderr: '',
+      }),
     )
 
     expect(
@@ -287,6 +310,26 @@ describe('assistant Codex failure helpers', () => {
       },
       message: 'Codex app-server failed. signal SIGTERM.',
     })
+
+    const connectionLoss = buildCodexFailure({
+      code: 1,
+      fallback: 'connection closed before response.completed',
+      providerActionCount: 1,
+      providerSessionId: 'thread-stream-diagnostics',
+      signal: null,
+      stderr: '',
+    })
+    expect(connectionLoss).toMatchObject({
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+      context: {
+        providerSessionId: 'thread-stream-diagnostics',
+        recoverableConnectionLoss: true,
+        retryable: true,
+      },
+      message:
+        'Codex app-server lost its connection while waiting for the model. exit code 1. connection closed before response.completed Provider thread id was captured for diagnostics only. Restore connectivity, then retry the request.',
+    })
+    expectNoRecoveredThreadResumeClaim(connectionLoss.message)
 
     expect(readNodeErrorCode(null)).toBeNull()
     expect(readNodeErrorCode({ code: ' ERR_STREAM_DESTROYED ' })).toBe(

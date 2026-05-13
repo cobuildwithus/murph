@@ -60,7 +60,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/turn-finalizer.js')
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/execution-context.js')
-  vi.doUnmock('../src/assistant/provider-turn-recovery.js')
+  vi.doUnmock('../src/assistant/provider-failure-diagnostics.js')
   vi.doUnmock('../src/assistant/provider-turn-runner.js')
   vi.doUnmock('../src/assistant/service-result.js')
   vi.doUnmock('../src/assistant/prompt-attempts.js')
@@ -3321,10 +3321,10 @@ test('sendAssistantMessageLocal preserves boundary admission for hosted queue-on
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
   const terminalError = new Error('provider failed hard')
-  const recoveredSession = createAssistantSession({
-    sessionId: 'session-recovered',
+  const failedProviderSession = createAssistantSession({
+    sessionId: 'session-provider-failed',
   })
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     plan: {
       ...createSharedPlan(),
       persistUserPromptOnFailure: false,
@@ -3346,7 +3346,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
           model: 'gpt-5.4',
         },
       },
-      session: recoveredSession,
+      session: failedProviderSession,
       usage: createProviderUsage({
         inputTokens: 9,
         outputTokens: 0,
@@ -3354,7 +3354,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
       }),
       usageAttribution: null,
     },
-    recoveredSession,
   })
 
   mocks.persistFailedAssistantPromptAttempt.mockRejectedValueOnce(
@@ -3395,7 +3394,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   )
   assert.equal(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session,
-    recoveredSession,
+    session,
   )
   assert.equal(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.turnTrigger,
@@ -3425,7 +3424,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
             model: 'gpt-5.4',
           },
         },
-        session: recoveredSession,
+        session: failedProviderSession,
         usage: createProviderUsage({
           inputTokens: 9,
           outputTokens: 0,
@@ -3789,8 +3788,6 @@ test('sendAssistantMessageLocal records fallback failure metadata when persisten
   mocks.appendAssistantTranscriptEntries.mockRejectedValueOnce(
     new Error('transcript persistence failed'),
   )
-  mocks.extractRecoveredAssistantSession.mockReturnValueOnce(null)
-
   await assert.rejects(
     () =>
       sendAssistantMessageLocal({
@@ -4002,7 +3999,6 @@ async function loadLocalServiceModule(input?: {
           session: AssistantSession
         }
       }
-  recoveredSession?: AssistantSession | null
   deliveryOutcome?: {
     delivery?: {
       channel: string
@@ -4147,7 +4143,6 @@ async function loadLocalServiceModule(input?: {
         return providerOutcome
       },
     ),
-    extractRecoveredAssistantSession: vi.fn(() => input?.recoveredSession ?? null),
     finalizeAssistantTurnArtifacts: vi.fn(
       async (
         _input: Parameters<
@@ -4431,9 +4426,6 @@ async function loadLocalServiceModule(input?: {
       mocks.resolveAssistantExecutionDefaultTarget,
     resolveAssistantExecutionOperatorDefaults:
       mocks.resolveAssistantExecutionOperatorDefaults,
-  }))
-  vi.doMock('../src/assistant/provider-turn-recovery.js', () => ({
-    extractRecoveredAssistantSession: mocks.extractRecoveredAssistantSession,
   }))
   vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,

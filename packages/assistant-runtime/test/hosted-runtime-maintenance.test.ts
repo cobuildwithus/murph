@@ -38,6 +38,7 @@ vi.mock("../src/device-sync-service.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
@@ -101,7 +102,6 @@ type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
-type HostedAutomationRuntime = Parameters<typeof runHostedAssistantAutomation>[4];
 type HostedTimerRuntime = Parameters<typeof runHostedAssistantRuntimeTimerLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
@@ -117,8 +117,8 @@ const DEVICE_SYNC_CONFIG = {
 
 function createHostedAutomationRuntime(input: {
   deviceSync?: HostedTimerRuntime["resolvedConfig"]["deviceSync"];
-  platform?: Partial<HostedAutomationRuntime["platform"]>;
-} = {}): HostedAutomationRuntime & HostedTimerRuntime {
+  platform?: Partial<HostedTimerRuntime["platform"]>;
+} = {}): HostedTimerRuntime {
   return {
     commitTimeoutMs: 45_000,
     forwardedEnv: {},
@@ -1396,7 +1396,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     );
   });
 
-  it("returns an immediate follow-up wake when assistant work is still runnable now", async () => {
+  it("does not synthesize a wake when assistant work progressed without a due time", async () => {
     vi.useFakeTimers();
 
     try {
@@ -1429,7 +1429,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       expect(result).toMatchObject({
         deviceSyncProcessed: 0,
         deviceSyncSkipped: true,
-        nextWakeAt: "2026-04-08T00:00:00.000Z",
+        nextWakeAt: null,
         parserProcessed: 0,
         redactedLogEntries: [
           expect.objectContaining({
@@ -1441,6 +1441,57 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
         ],
       });
       expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("schedules an immediate wake when the normal assistant scan saturates its limit", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 50,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 50,
+          skipped: 0,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      });
+
+      const result = await runHostedAssistantRuntimeTimerLane({
+        wake: {
+          eventId: "evt_assistant_backlog",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_assistant_backlog",
+        runtime: createHostedAutomationRuntime(),
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
     } finally {
       vi.useRealTimers();
     }

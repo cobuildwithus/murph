@@ -105,23 +105,23 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
-  it("exposes idle-checkpoint lease methods on the user runner durable object", async () => {
+  it("exposes runtime write-fence methods for deploy smoke on the user runner durable object", async () => {
     const harness = createUserRunnerDurableObject();
     await harness.durableObject.bindUser("member_123");
 
-    const lease = await harness.durableObject.beginIdleCheckpointLease({
+    const lease = await harness.durableObject.beginRuntimeWriteFenceForSmoke({
       userId: "member_123",
       workspaceVersion: "7",
     });
 
     expect(lease).toMatchObject({
-      reason: "idle_shutdown_checkpoint",
+      reason: "manual",
       userId: "member_123",
       workspaceVersion: "7",
     });
     expect(lease).not.toBeNull();
     if (!lease) {
-      throw new Error("Expected idle checkpoint lease.");
+      throw new Error("Expected runtime write fence.");
     }
 
     await expect(harness.durableObject.validateRuntimeWriteFence({
@@ -131,10 +131,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       workspaceVersion: "7",
     })).resolves.toBe(true);
 
-    await expect(harness.durableObject.finishIdleCheckpointLease({
+    await expect(harness.durableObject.finishRuntimeWriteFenceForSmoke({
       attemptId: lease.attemptId,
       generation: lease.generation,
-      nextWakeAt: null,
       userId: "member_123",
     })).resolves.toEqual({ completed: true });
   });

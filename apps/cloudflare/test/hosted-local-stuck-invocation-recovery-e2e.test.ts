@@ -108,7 +108,7 @@ describe("hosted local stuck invocation recovery e2e", () => {
     requireScenario().queueAssistantResponses([replyText]);
 
     const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId, {
-      reason: "idle_shutdown_checkpoint",
+      reason: "manual",
     });
     expect(stuckInvocation.ok).toBe(true);
     expect(stuckInvocation.attemptId).toMatch(/^workspace-invocation-/u);

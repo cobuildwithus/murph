@@ -41,9 +41,7 @@ import {
   resolveAssistantResumeStateFromProviderTurn,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
-import {
-  readCodexThreadRouteFingerprint,
-} from './provider-route.js'
+import { readCodexThreadRouteFingerprint } from './provider-route.js'
 import {
   readAssistantSessionResumeState,
 } from './provider-state.js'
@@ -53,10 +51,6 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
-  AUTO_REPLY_RECEIPT_RETRY_AT_KEY,
-  computeAssistantAutoReplyRetryAt,
-} from './automation/auto-reply-retry.js'
-import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -65,13 +59,14 @@ import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
-  extractRecoveredAssistantSession,
-} from './provider-turn-recovery.js'
-import {
   executeProviderTurnWithRecovery,
   resolveAssistantProviderThreadScope,
   type AssistantProviderThreadScope,
 } from './provider-turn-runner.js'
+import {
+  AUTO_REPLY_RECEIPT_RETRY_AT_KEY,
+  computeAssistantAutoReplyRetryAt,
+} from './automation/auto-reply-retry.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -701,15 +696,7 @@ export async function sendAssistantMessageLocal(
         activeTurnInputController?.fail(error)
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
-        const retryAt =
-          input.turnTrigger === 'automation-auto-reply'
-            ? computeAssistantAutoReplyRetryAt(
-                error,
-                Date.parse(failedAt),
-              )
-            : null
-        const failedSession =
-          extractRecoveredAssistantSession(error) ?? resolved.session
+        const failedSession = resolved.session
 
         await runAssistantTurnBestEffort(() =>
           persistFailedAssistantPromptAttempt({
@@ -722,6 +709,9 @@ export async function sendAssistantMessageLocal(
           }),
         )
 
+        const autoReplyRetryAt = input.turnTrigger === 'automation-auto-reply'
+          ? computeAssistantAutoReplyRetryAt(error, Date.parse(failedAt))
+          : null
         await runAssistantTurnBestEffort(() =>
           finalizeAssistantTurnReceipt({
             vault: input.vault,
@@ -732,12 +722,9 @@ export async function sendAssistantMessageLocal(
             error: normalizedError,
             response: responseText,
             completedAt: failedAt,
-            metadata:
-              retryAt === null
-                ? null
-                : {
-                    [AUTO_REPLY_RECEIPT_RETRY_AT_KEY]: retryAt,
-                  },
+            metadata: autoReplyRetryAt
+              ? { [AUTO_REPLY_RECEIPT_RETRY_AT_KEY]: autoReplyRetryAt }
+              : null,
           }),
         )
 

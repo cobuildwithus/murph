@@ -569,7 +569,7 @@ it("waits for an assistant pass before treating foreground conversation imports 
   } satisfies HostedRunnerStatusResponse;
   let statusRequests = 0;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=idle_shutdown_checkpoint")) {
+    if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")) {
       return Response.json({ status: "idle" });
     }
 
@@ -603,7 +603,7 @@ it("waits for an assistant pass before treating foreground conversation imports 
 
     expect(statusRequests).toBe(2);
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=idle_shutdown_checkpoint")
+      String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")
     )).toBe(false);
   } finally {
     await harness.stop();
@@ -731,7 +731,7 @@ it("treats foreground system mailbox imports as local hosted completion without 
     },
   } satisfies HostedRunnerStatusResponse;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
-    if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=idle_shutdown_checkpoint")) {
+    if (String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=manual")) {
       return Response.json({ status: "idle" });
     }
 
@@ -767,7 +767,7 @@ it("treats foreground system mailbox imports as local hosted completion without 
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.some(([request]) =>
-      String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=idle_shutdown_checkpoint")
+      String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=manual")
     )).toBe(false);
   } finally {
     await harness.stop();
@@ -858,17 +858,17 @@ it("calls the hosted-local run-until-idle route with idle checkpoint reason", as
   });
 
   try {
-    await expect(harness.runHostedIdleCheckpointForTest("member_idle_checkpoint"))
+    await expect(harness.runHostedManualInvocationForTest("member_manual_invocation"))
       .resolves.toEqual({ status: "idle" });
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [request, init] = fetch.mock.calls[0]!;
     expect(String(request)).toBe(
-      "http://127.0.0.1:8787/__test/users/member_idle_checkpoint/run-until-idle?reason=idle_shutdown_checkpoint",
+      "http://127.0.0.1:8787/__test/users/member_manual_invocation/run-until-idle?reason=manual",
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer oidc-token");
-    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_idle_checkpoint");
+    expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_manual_invocation");
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(init).toMatchObject({
       method: "POST",

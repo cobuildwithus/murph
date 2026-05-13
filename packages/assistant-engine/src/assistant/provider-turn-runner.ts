@@ -17,15 +17,11 @@ import { errorMessage } from './shared.js'
 import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
-import {
-  readCodexThreadRouteFingerprint,
-  type CodexThreadIdentity,
-} from './provider-route.js'
+import type { CodexThreadIdentity } from './provider-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
-  attachRecoveredAssistantSession,
-  recoverAssistantSessionAfterProviderFailure,
-} from './provider-turn-recovery.js'
+  annotateRecoveredCodexThreadIdForDiagnostics,
+} from './provider-failure-diagnostics.js'
 import { appendAssistantTranscriptEntries } from './store.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
@@ -437,19 +433,10 @@ async function executeAssistantProviderAttempt(input: {
     }
   } catch (error) {
     const errorCode = readAssistantErrorCode(error)
-    const recoveredSession =
-      executionPlan.profile.threadScope === 'session-thread'
-        ? await recoverAssistantSessionAfterProviderFailure({
-            error,
-            routeId: readCodexThreadRouteFingerprint(attemptPlan.route),
-            session: attemptPlan.session,
-            vault: executionPlan.input.vault,
-          })
-        : null
-    const session = recoveredSession ?? attemptPlan.session
-    if (recoveredSession) {
-      attachRecoveredAssistantSession(error, recoveredSession)
+    if (executionPlan.profile.threadScope === 'session-thread') {
+      annotateRecoveredCodexThreadIdForDiagnostics(error)
     }
+    const session = attemptPlan.session
     void appendAssistantTranscriptEntries(
       executionPlan.input.vault,
       session.sessionId,

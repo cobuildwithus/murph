@@ -7,7 +7,7 @@ description: One-pass seam audit prompt for assistant-engine provider turn runti
 ## Scope
 
 - `packages/assistant-engine/src/{model-harness.ts,assistant-provider.ts,assistant-runtime.ts,assistant-service.ts}`
-- `packages/assistant-engine/src/assistant/{provider-turn-runner.ts,execution-plan.ts,provider-binding.ts,provider-turn-recovery.ts,provider-catalog.ts,cli-surface-bootstrap.ts,operator-authority.ts,system-prompt.ts,turns.ts}`
+- `packages/assistant-engine/src/assistant/{provider-turn-runner.ts,execution-plan.ts,provider-binding.ts,provider-failure-diagnostics.ts,provider-catalog.ts,cli-surface-bootstrap.ts,operator-authority.ts,system-prompt.ts,turns.ts}`
 - `packages/assistant-engine/src/assistant/providers/{registry.ts,openai-compatible.ts,codex-cli.ts,helpers.ts,types.ts,catalog.ts}`
 - `packages/assistant-engine/src/assistant-cli-tools/{catalog-profiles.ts,capability-definitions.ts,policy-wrappers.ts}`
 - directly coupled `packages/assistant-engine/test/**`

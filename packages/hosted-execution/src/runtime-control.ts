@@ -797,7 +797,6 @@ export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
   "alarm",
   "retry",
   "manual",
-  "idle_shutdown_checkpoint",
 ] as const;
 
 export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];
@@ -819,7 +818,8 @@ export interface HostedWorkspaceInvocationBudget {
 export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
   budget?: HostedWorkspaceInvocationBudget | null;
-  checkpointNextWakeAt?: string | null;
+  deadlineAt?: string | null;
+  idleCheckpointDelayMs?: number | null;
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
   userId: string;
@@ -827,8 +827,6 @@ export interface HostedWorkspaceInvocationRequest {
 }
 
 export interface HostedWorkspaceInvocationResult {
-  idleShutdownCheckpointed?: boolean;
-  idleShutdownCheckpointSkipped?: "container_not_warm" | "warm_workspace_unavailable";
   nextWakeAt?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   status: HostedWorkspaceInvocationStatus;

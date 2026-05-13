@@ -60,7 +60,7 @@ describe("hosted runtime checkpoint baseline", () => {
       }),
       readCurrentLease: () => createLease({ workspaceVersion: "7" }),
       request: createInvocationRequest({
-        reason: "idle_shutdown_checkpoint",
+        reason: "nudge",
         workspaceVersion: "7",
       }),
       runtime: {},
@@ -105,7 +105,7 @@ function createWorkspaceReadResponse(input: {
 }
 
 function createInvocationRequest(input: {
-  reason?: "idle_shutdown_checkpoint" | "nudge";
+  reason?: "nudge";
   workspaceVersion: string;
 }) {
   return {

@@ -36,7 +36,7 @@ export interface DurableObjectStateLike {
   waitUntil?(promise: Promise<unknown>): void;
 }
 
-export type RunnerWriteFenceKind = "runtime" | "idle_checkpoint";
+export type RunnerWriteFenceKind = "runtime";
 
 export interface RunnerWriteFenceRecord {
   attemptId: string;

@@ -6,7 +6,6 @@ import type {
   AssistantProviderTraceUpdate,
 } from '@murphai/assistant-engine/assistant-provider'
 import {
-  extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
 } from '@murphai/assistant-engine/assistant-provider'
@@ -53,11 +52,9 @@ export type AssistantPromptTurnOutcome =
   | {
       error: unknown
       kind: 'failed'
-      recoveredSession: AssistantSession | null
     }
   | {
       kind: 'interrupted'
-      recoveredSession: AssistantSession | null
     }
 
 interface RunAssistantPromptTurnInput {
@@ -203,19 +200,15 @@ export async function runAssistantPromptTurn(
       streamedAssistantEntryKey,
     }
   } catch (error) {
-    const recoveredSession = extractRecoveredAssistantSession(error)
-
     if (isAssistantProviderInterruptedError(error)) {
       return {
         kind: 'interrupted',
-        recoveredSession,
       }
     }
 
     return {
       error,
       kind: 'failed',
-      recoveredSession,
     }
   }
 }

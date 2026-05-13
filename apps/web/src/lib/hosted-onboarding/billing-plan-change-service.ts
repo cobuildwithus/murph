@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { resolveHostedAiUsageGate } from "../hosted-execution/usage-allowance";
-import { nudgeHostedRunnerUserBestEffortResult } from "../hosted-runner/control";
+import { nudgeHostedSystemRunnerUserBestEffortResult } from "../hosted-runner/system-nudge";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { coerceStripeObjectId } from "./billing";
@@ -154,7 +154,7 @@ export async function upgradeHostedBillingPlan(input: {
       subscription: appliedSubscription,
       targetPlanCode,
     });
-    await nudgeHostedRunnerUserBestEffortResult({
+    await nudgeHostedSystemRunnerUserBestEffortResult({
       context: "billing.plan-upgrade",
       userId: input.memberId,
     });
@@ -220,7 +220,7 @@ export async function upgradeHostedBillingPlan(input: {
     subscription: appliedSubscription,
     targetPlanCode,
   });
-  await nudgeHostedRunnerUserBestEffortResult({
+  await nudgeHostedSystemRunnerUserBestEffortResult({
     context: "billing.plan-upgrade",
     userId: input.memberId,
   });

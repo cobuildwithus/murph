@@ -410,12 +410,7 @@ test('chat controller restores queued prompts and persists error presentation af
   const firstTurn = createDeferred<{
     error: Error
     kind: 'failed'
-    recoveredSession: AssistantSession
   }>()
-  const recoveredSession = {
-    ...TEST_SESSION,
-    sessionId: 'session-controller-recovered',
-  }
 
   controllerMocks.runAssistantPromptTurn.mockImplementationOnce(
     () => firstTurn.promise,
@@ -444,7 +439,6 @@ test('chat controller restores queued prompts and persists error presentation af
   firstTurn.resolve({
     error: new Error('provider failed'),
     kind: 'failed',
-    recoveredSession,
   })
 
   await flushAsyncWork(12)
@@ -460,7 +454,7 @@ test('chat controller restores queued prompts and persists error presentation af
       restoredQueuedPromptCount: 1,
     },
   )
-  assert.equal(controller().session.sessionId, recoveredSession.sessionId)
+  assert.equal(controller().session.sessionId, TEST_SESSION.sessionId)
   assert.equal(controller().queuedPromptCount, 0)
   assert.equal(controller().composerValue, 'queued prompt')
   assert.deepEqual(controller().status, {
@@ -479,7 +473,7 @@ test('chat controller restores queued prompts and persists error presentation af
   ])
   assert.deepEqual(controllerMocks.persistAssistantTurnError.mock.calls[0]?.[0], {
     errorText: 'provider connection dropped',
-    sessionId: recoveredSession.sessionId,
+    sessionId: TEST_SESSION.sessionId,
     vault: '/tmp/vault',
   })
 
@@ -632,11 +626,10 @@ test('chat controller handles streamed completions, queued edit recovery, exit c
 test('chat controller restores queued prompts after interruption and surfaces delivery-error completions', async () => {
   const interruptedTurn = createDeferred<{
     kind: 'interrupted'
-    recoveredSession: AssistantSession
   }>()
-  const recoveredSession = {
+  const secondTurnSession = {
     ...TEST_SESSION,
-    sessionId: 'session-controller-interrupted',
+    sessionId: 'session-controller-second-turn',
   }
 
   let latestPauseArgs:
@@ -653,7 +646,7 @@ test('chat controller restores queued prompts after interruption and surfaces de
     },
     kind: 'completed',
     response: 'second reply',
-    session: recoveredSession,
+    session: secondTurnSession,
     streamedAssistantEntryKey: null,
   })
 
@@ -670,11 +663,10 @@ test('chat controller restores queued prompts after interruption and surfaces de
   })
   interruptedTurn.resolve({
     kind: 'interrupted',
-    recoveredSession,
   })
   await flushAsyncWork(12)
 
-  assert.equal(controller().session.sessionId, recoveredSession.sessionId)
+  assert.equal(controller().session.sessionId, TEST_SESSION.sessionId)
   assert.deepEqual(controller().status, {
     kind: 'info',
     text: 'Paused current turn. Queued follow-ups are back in the composer.',

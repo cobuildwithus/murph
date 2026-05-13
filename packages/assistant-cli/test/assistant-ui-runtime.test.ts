@@ -13,9 +13,6 @@ import type { InkChatEntry } from '../src/assistant/ui/view-model.js'
 const runtimeMocks = vi.hoisted(() => ({
   appendAssistantTranscriptEntries: vi.fn(),
   buildAssistantProviderDefaultsPatch: vi.fn((input) => input),
-  extractRecoveredAssistantSession: vi.fn<(error: unknown) => AssistantSession | null>(
-    () => null,
-  ),
   isAssistantProviderConnectionLostError: vi.fn(() => false),
   isAssistantProviderInterruptedError: vi.fn(() => false),
   isAssistantSessionNotFoundError: vi.fn(() => false),
@@ -39,7 +36,6 @@ vi.mock('../src/assistant/store.js', () => ({
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-provider', () => ({
-  extractRecoveredAssistantSession: runtimeMocks.extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError:
     runtimeMocks.isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError:
@@ -276,13 +272,6 @@ test('runtime helpers surface provider progress, interrupted turns, and transcri
     ],
   )
 
-  const recoveredSession = {
-    ...TEST_SESSION,
-    sessionId: 'recovered-session',
-  }
-  runtimeMocks.extractRecoveredAssistantSession.mockImplementationOnce(
-    () => recoveredSession,
-  )
   runtimeMocks.isAssistantProviderInterruptedError.mockReturnValueOnce(true)
   runtimeMocks.sendAssistantMessage.mockRejectedValueOnce(new Error('paused'))
 
@@ -302,7 +291,6 @@ test('runtime helpers surface provider progress, interrupted turns, and transcri
     }),
     {
       kind: 'interrupted',
-      recoveredSession,
     },
   )
 
@@ -323,13 +311,9 @@ test('runtime helpers surface provider progress, interrupted turns, and transcri
   ])
 })
 
-test('runtime helpers ignore empty trace batches, surface the latest error status, and preserve recovered sessions on non-interrupt failures', async () => {
+test('runtime helpers ignore empty trace batches and surface the latest error status on non-interrupt failures', async () => {
   const setEntriesCalls: InkChatEntry[][] = []
   const setStatusCalls: unknown[] = []
-  const recoveredSession = {
-    ...TEST_SESSION,
-    sessionId: 'recovered-after-error',
-  }
 
   runtimeMocks.sendAssistantMessage.mockImplementationOnce(async (input) => {
     input.onTraceEvent({
@@ -352,7 +336,6 @@ test('runtime helpers ignore empty trace batches, surface the latest error statu
 
     throw new Error('provider failed')
   })
-  runtimeMocks.extractRecoveredAssistantSession.mockReturnValueOnce(recoveredSession)
 
   const failed = await runAssistantPromptTurn({
     activeModel: null,
@@ -375,7 +358,6 @@ test('runtime helpers ignore empty trace batches, surface the latest error statu
   assert.deepEqual(failed, {
     error: new Error('provider failed'),
     kind: 'failed',
-    recoveredSession,
   })
   assert.equal(setEntriesCalls.length, 1)
   assert.deepEqual(setEntriesCalls[0], [

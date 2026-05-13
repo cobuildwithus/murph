@@ -6,7 +6,7 @@ export interface WorkerSendEmailBindingLike {
 }
 
 export interface WorkerUserRunnerStubLike {
-  beginIdleCheckpointLease?(input: {
+  beginRuntimeWriteFenceForSmoke?(input: {
     userId: string;
     workspaceVersion: string;
   }): Promise<{
@@ -18,10 +18,9 @@ export interface WorkerUserRunnerStubLike {
   } | null>;
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
-  finishIdleCheckpointLease?(input: {
+  finishRuntimeWriteFenceForSmoke?(input: {
     attemptId: string;
     generation: string;
-    nextWakeAt?: string | null;
     userId: string;
   }): Promise<{ completed: boolean }>;
   validateRuntimeWriteFence?(input: {

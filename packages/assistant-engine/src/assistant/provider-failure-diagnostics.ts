@@ -1,65 +1,16 @@
-import {
-  type AssistantSession,
-} from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  normalizeAssistantSessionSnapshot,
-} from './provider-state.js'
-
-export async function recoverAssistantSessionAfterProviderFailure(input: {
-  error: unknown
-  routeId: string
-  session: AssistantSession
-  vault: string
-}): Promise<AssistantSession | null> {
-  if (!shouldRecoverAssistantSessionAfterProviderFailure(input.error)) {
-    return null
-  }
-
-  const providerSessionId = extractRecoveredProviderSessionId(input.error)
-  if (!providerSessionId) {
-    return null
-  }
-
-  attachRecoveredProviderSessionId(input.error, providerSessionId)
-  void input.routeId
-  void input.session
-  void input.vault
-  return null
-}
-
-export function attachRecoveredAssistantSession(
+export function annotateRecoveredCodexThreadIdForDiagnostics(
   error: unknown,
-  session: AssistantSession | null,
 ): void {
-  if (!session || !error || typeof error !== 'object') {
+  if (!shouldAnnotateRecoveredCodexThreadIdForDiagnostics(error)) {
     return
   }
 
-  const currentContext = readAssistantProviderErrorContext(error) ?? {}
-  ;(error as { context?: Record<string, unknown> }).context = {
-    ...currentContext,
-    assistantSession: session,
-  }
-}
-
-export function extractRecoveredAssistantSession(
-  error: unknown,
-): AssistantSession | null {
-  const context = readAssistantProviderErrorContext(error)
-  if (!context) {
-    return null
+  const providerSessionId = extractRecoveredProviderSessionId(error)
+  if (!providerSessionId) {
+    return
   }
 
-  const recovered = context.assistantSession
-  if (!recovered || typeof recovered !== 'object') {
-    return null
-  }
-
-  try {
-    return normalizeAssistantSessionSnapshot(recovered as AssistantSession)
-  } catch {
-    return null
-  }
+  attachRecoveredProviderSessionId(error, providerSessionId)
 }
 
 export function extractRecoveredProviderSessionId(error: unknown): string | null {
@@ -93,7 +44,7 @@ export function isAssistantProviderInterruptedError(error: unknown): boolean {
   return Boolean(context && context.interrupted === true)
 }
 
-function shouldRecoverAssistantSessionAfterProviderFailure(
+function shouldAnnotateRecoveredCodexThreadIdForDiagnostics(
   error: unknown,
 ): boolean {
   return (

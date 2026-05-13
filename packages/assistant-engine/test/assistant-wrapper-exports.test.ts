@@ -86,7 +86,7 @@ const wrapperCases = [
     'assistant-provider',
     assistantProvider,
     [
-      'recoverAssistantSessionAfterProviderFailure',
+      'annotateRecoveredCodexThreadIdForDiagnostics',
       'isAssistantProviderConnectionLostError',
     ],
   ],

@@ -1083,7 +1083,9 @@ describe('assistant codex runtime', () => {
         recoverableConnectionLoss: true,
         retryable: true,
       },
-      message: expect.stringContaining('Murph preserved the provider thread'),
+      message: expect.stringContaining(
+        'Provider thread id was captured for diagnostics only.',
+      ),
     })
   })
 

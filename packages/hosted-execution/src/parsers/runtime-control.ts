@@ -160,6 +160,7 @@ const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
   "workspaceVersion",
 ]);
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
+  "checkpointNextWakeAt",
   "committedSeq",
   "events",
   "finalizeRequired",
@@ -882,17 +883,13 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
   const record = requireObject(value, "Hosted workspace invocation request");
 
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
-    rejectHostedWorkspaceInvocationRemovedField(record, field);
-  }
-  const reason = parseHostedWorkspaceInvocationReason(record.reason);
-  if (
-    record.checkpointNextWakeAt !== undefined
-    && reason !== "idle_shutdown_checkpoint"
-  ) {
-    throw new TypeError(
-      "Hosted workspace invocation request checkpointNextWakeAt is only supported for idle_shutdown_checkpoint.",
+    rejectHostedWorkspaceInvocationRemovedField(
+      record,
+      field,
+      "Hosted workspace invocation request",
     );
   }
+  const reason = parseHostedWorkspaceInvocationReason(record.reason);
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
@@ -904,13 +901,23 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             "Hosted workspace invocation request budget",
           ),
         }),
-    ...(record.checkpointNextWakeAt === undefined
+    ...(record.deadlineAt === undefined
       ? {}
       : {
-          checkpointNextWakeAt: readNullableString(
-            record.checkpointNextWakeAt,
-            "Hosted workspace invocation request checkpointNextWakeAt",
+          deadlineAt: readNullableString(
+            record.deadlineAt,
+            "Hosted workspace invocation request deadlineAt",
           ),
+        }),
+    ...(record.idleCheckpointDelayMs === undefined
+      ? {}
+      : {
+          idleCheckpointDelayMs: record.idleCheckpointDelayMs === null
+            ? null
+            : requirePositiveInteger(
+                record.idleCheckpointDelayMs,
+                "Hosted workspace invocation request idleCheckpointDelayMs",
+              ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
@@ -927,18 +934,21 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
 
 export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWorkspaceInvocationResult {
   const record = requireObject(value, "Hosted workspace invocation result");
-  const idleShutdownCheckpointed = record.idleShutdownCheckpointed === undefined
-    ? undefined
-    : requireBoolean(
-        record.idleShutdownCheckpointed,
-        "Hosted workspace invocation result idleShutdownCheckpointed",
-      );
-  const idleShutdownCheckpointSkipped = record.idleShutdownCheckpointSkipped === undefined
-    ? undefined
-    : parseHostedIdleShutdownCheckpointSkipped(
-        record.idleShutdownCheckpointSkipped,
-        "Hosted workspace invocation result idleShutdownCheckpointSkipped",
-      );
+  rejectHostedWorkspaceInvocationRemovedField(
+    record,
+    "idleShutdownCheckpointed",
+    "Hosted workspace invocation result",
+  );
+  rejectHostedWorkspaceInvocationRemovedField(
+    record,
+    "idleShutdownCheckpointSkipped",
+    "Hosted workspace invocation result",
+  );
+  rejectHostedWorkspaceInvocationRemovedField(
+    record,
+    "workspaceCheckpointed",
+    "Hosted workspace invocation result",
+  );
   const nextWakeAt = record.nextWakeAt === undefined
     ? undefined
     : readNullableString(
@@ -947,24 +957,7 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
       );
   const status = parseHostedWorkspaceInvocationStatus(record.status);
 
-  if (idleShutdownCheckpointed === true && status !== "idle") {
-    throw new TypeError(
-      "Hosted workspace invocation result idleShutdownCheckpointed requires status idle.",
-    );
-  }
-  if (idleShutdownCheckpointSkipped !== undefined && status !== "idle") {
-    throw new TypeError(
-      "Hosted workspace invocation result idleShutdownCheckpointSkipped requires status idle.",
-    );
-  }
-  if (idleShutdownCheckpointed === true && idleShutdownCheckpointSkipped !== undefined) {
-    throw new TypeError(
-      "Hosted workspace invocation result cannot both checkpoint and skip idle shutdown checkpoint.",
-    );
-  }
   return {
-    ...(idleShutdownCheckpointed === undefined ? {} : { idleShutdownCheckpointed }),
-    ...(idleShutdownCheckpointSkipped === undefined ? {} : { idleShutdownCheckpointSkipped }),
     ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
     ...(record.redactedStatus === undefined
       ? {}
@@ -976,17 +969,6 @@ export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWork
         }),
     status,
   };
-}
-
-function parseHostedIdleShutdownCheckpointSkipped(
-  value: unknown,
-  field: string,
-): "container_not_warm" | "warm_workspace_unavailable" {
-  if (value === "container_not_warm" || value === "warm_workspace_unavailable") {
-    return value;
-  }
-
-  throw new TypeError(`${field} must be container_not_warm or warm_workspace_unavailable.`);
 }
 
 export function parseHostedMailboxLane(value: unknown): HostedMailboxLane {
@@ -1050,9 +1032,10 @@ function parseHostedWorkspaceInvocationStatus(value: unknown): HostedWorkspaceIn
 function rejectHostedWorkspaceInvocationRemovedField(
   record: Record<string, unknown>,
   field: string,
+  label: string,
 ): void {
   if (record[field] !== undefined) {
-    throw new TypeError(`Hosted workspace invocation request.${field} is no longer supported.`);
+    throw new TypeError(`${label}.${field} is no longer supported.`);
   }
 }
 

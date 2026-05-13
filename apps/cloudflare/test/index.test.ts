@@ -285,7 +285,7 @@ describe("cloudflare worker routes", () => {
     const response = await worker.fetch(request, env);
 
     expect(response.status).toBe(200);
-    expect(userRunner.beginIdleCheckpointLease).toHaveBeenCalledWith({
+    expect(userRunner.beginRuntimeWriteFenceForSmoke).toHaveBeenCalledWith({
       userId: "member_123",
       workspaceVersion: "0",
     });
@@ -298,10 +298,9 @@ describe("cloudflare worker routes", () => {
         workspaceVersion: "0",
       },
     });
-    expect(userRunner.finishIdleCheckpointLease).toHaveBeenCalledWith({
+    expect(userRunner.finishRuntimeWriteFenceForSmoke).toHaveBeenCalledWith({
       attemptId: "smoke_attempt_1",
       generation: "1",
-      nextWakeAt: null,
       userId: "member_123",
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -1208,7 +1207,7 @@ describe("cloudflare worker routes", () => {
 
     const response = await worker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=idle_shutdown_checkpoint",
+        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=manual",
         {
           method: "POST",
         },
@@ -1224,7 +1223,7 @@ describe("cloudflare worker routes", () => {
       status: "idle",
     });
     expect(stub.runUntilIdleForTest).toHaveBeenCalledWith({
-      reason: "idle_shutdown_checkpoint",
+      reason: "manual",
       userId: "member_123",
     });
   });
@@ -2150,7 +2149,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     vi.fn(async () => defaultNudgeResult)) as UserRunnerDurableObjectStubLike["nudgeHostedRunnerForUser"];
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
-    beginIdleCheckpointLease: vi.fn(async (input: {
+    beginRuntimeWriteFenceForSmoke: vi.fn(async (input: {
       userId: string;
       workspaceVersion: string;
     }) => ({
@@ -2206,7 +2205,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       scheduled: true as const,
       userId: input.userId,
     })),
-    finishIdleCheckpointLease: vi.fn(async () => ({ completed: true })),
+    finishRuntimeWriteFenceForSmoke: vi.fn(async () => ({ completed: true })),
     validateRuntimeWriteFence: vi.fn(async () => true),
     recordRuntimeWriteFenceWorkspaceCheckpoint: vi.fn(async () => ({ recorded: true })),
     ...overrides,

@@ -17,14 +17,12 @@ import {
   summarizeAssistantProviderActivityLabels,
 } from '../src/assistant/provider-progress.ts'
 import {
-  attachRecoveredAssistantSession,
+  annotateRecoveredCodexThreadIdForDiagnostics,
   extractRecoveredProviderSessionId,
-  extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
   isAssistantProviderStalledError,
-  recoverAssistantSessionAfterProviderFailure,
-} from '../src/assistant/provider-turn-recovery.ts'
+} from '../src/assistant/provider-failure-diagnostics.ts'
 import {
   resolveAssistantResumeStateFromProviderTurn,
 } from '../src/assistant/turn-finalizer.ts'
@@ -167,14 +165,8 @@ describe('assistant provider seam helpers', () => {
       },
     }
 
-    const recovered = await recoverAssistantSessionAfterProviderFailure({
-      error,
-      routeId: 'route-recovered',
-      session,
-      vault: vaultRoot,
-    })
+    annotateRecoveredCodexThreadIdForDiagnostics(error)
 
-    expect(recovered).toBeNull()
     expect(error.context).toMatchObject({
       recoveredCodexThreadId: 'provider_session_new',
     })
@@ -186,29 +178,15 @@ describe('assistant provider seam helpers', () => {
     })
   })
 
-  it('attaches normalized recovered sessions to provider errors and ignores non-recoverable states', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-assistant-provider-recovery-skip-',
-    )
-    cleanupPaths.push(parentRoot)
-
-    const session = createAssistantSession({
-      providerSessionId: 'provider_session_current',
-      resumeRouteId: 'route-primary',
-    })
-    const skipped = await recoverAssistantSessionAfterProviderFailure({
-      error: {
-        context: {
-          providerSessionId: 'provider_session_current',
-          recoverableConnectionLoss: true,
-        },
+  it('keeps provider failure diagnostics metadata-only and ignores non-recoverable states', () => {
+    const skipped = {
+      context: {
+        providerSessionId: 'provider_session_current',
       },
-      routeId: 'route-recovered',
-      session,
-      vault: vaultRoot,
-    })
+    }
+    annotateRecoveredCodexThreadIdForDiagnostics(skipped)
 
-    expect(skipped).toBeNull()
+    expect(skipped.context).not.toHaveProperty('recoveredCodexThreadId')
 
     const error = {
       context: {
@@ -217,17 +195,25 @@ describe('assistant provider seam helpers', () => {
         requestId: 'req_123',
       },
     }
-    const recoveredSession = createAssistantSession({
-      providerSessionId: 'provider_session_recovered',
-      resumeRouteId: 'route-recovered',
-    })
 
-    attachRecoveredAssistantSession(error, recoveredSession)
+    annotateRecoveredCodexThreadIdForDiagnostics(error)
 
     expect(error.context.requestId).toBe('req_123')
-    expect(extractRecoveredAssistantSession(error)).toEqual(
-      parseAssistantSessionRecord(serializeAssistantSessionForPersistence(recoveredSession)),
-    )
+    expect(error.context).toMatchObject({
+      recoveredCodexThreadId: 'provider_session_recovered',
+    })
+
+    const interrupted = {
+      context: {
+        interrupted: true,
+        providerSessionId: ' provider_session_interrupted ',
+      },
+    }
+    annotateRecoveredCodexThreadIdForDiagnostics(interrupted)
+
+    expect(interrupted.context).toMatchObject({
+      recoveredCodexThreadId: 'provider_session_interrupted',
+    })
   })
 
   it('normalizes tool progress labels and merges unique provider activity labels', () => {
@@ -404,17 +390,6 @@ describe('assistant provider seam helpers', () => {
     expect(isAssistantProviderInterruptedError(error)).toBe(true)
     expect(isAssistantProviderStalledError(error)).toBe(true)
     expect(extractRecoveredProviderSessionId({ context: { providerSessionId: '   ' } })).toBeNull()
-    expect(extractRecoveredAssistantSession(null)).toBeNull()
-    expect(extractRecoveredAssistantSession({ context: { assistantSession: 'bad' } })).toBeNull()
-    expect(
-      extractRecoveredAssistantSession({
-        context: {
-          assistantSession: {
-            sessionId: 'missing-required-fields',
-          },
-        },
-      }),
-    ).toBeNull()
   })
 
   it('rejects route drift even when unrelated provider options stay compatible', () => {

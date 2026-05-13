@@ -208,7 +208,7 @@ describe("HostedUserRunner wake scheduling", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     const activeFence = readRunnerMeta(sql);
 
-    await expect(runner.beginIdleCheckpointLease({
+    await expect(runner.beginRuntimeWriteFenceForSmoke({
       userId: "member_123",
       workspaceVersion: "7",
     })).resolves.toBeNull();
