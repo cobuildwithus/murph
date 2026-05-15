@@ -34,6 +34,12 @@ import {
   redactHostedRuntimeDiagnosticDetails,
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
+import {
+  collectHostedRunnerChildOutputMarkers,
+  countHostedRunnerOutputLines,
+  type HostedRunnerChildFirstCompletionKind,
+  type HostedRunnerChildOutputMarker,
+} from "./runner-child-diagnostics.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   job: HostedExecutionWorkspaceInvocationJobInput;
@@ -189,6 +195,8 @@ export async function runHostedWorkspaceInvocationIsolatedDetailed(
         code: null,
         signal: null,
       },
+      firstCompletionKind: firstCompletion.kind,
+      runtimeWakeReady: childResultState.runtimeWakeReady,
       stderrTail: stderrTail.read(),
       stdoutTail: stdoutTail.read(),
     });
@@ -406,6 +414,7 @@ interface HostedRunnerChildResultState {
   errors: Error[];
   firstResultOrError: Promise<void>;
   results: HostedExecutionRunnerChildResult[];
+  runtimeWakeReady: boolean;
 }
 
 interface HostedRunnerChildCloseResult {
@@ -416,11 +425,17 @@ interface HostedRunnerChildCloseResult {
 interface HostedRunnerChildExitDiagnostics {
   abortedByParent: boolean;
   exitCode: number | null;
+  firstCompletionKind: HostedRunnerChildFirstCompletionKind;
+  runtimeWakeReady: boolean;
   signal: NodeJS.Signals | null;
   abortReasonMessage?: string;
   abortReasonName?: string;
   stderrTail?: string;
+  stderrTailLineCount?: number;
+  stderrTailMarkers?: HostedRunnerChildOutputMarker[];
   stdoutTail?: string;
+  stdoutTailLineCount?: number;
+  stdoutTailMarkers?: HostedRunnerChildOutputMarker[];
 }
 
 function createHostedRunnerChildResultState(
@@ -433,8 +448,8 @@ function createHostedRunnerChildResultState(
     errors: [],
     firstResultOrError: Promise.resolve(),
     results: [],
+    runtimeWakeReady: false,
   };
-  let runtimeWakeReady = false;
   let resolveFirstResultOrError: (() => void) | null = null;
   state.firstResultOrError = new Promise((resolve) => {
     resolveFirstResultOrError = resolve;
@@ -447,8 +462,8 @@ function createHostedRunnerChildResultState(
   child.on("message", (message: unknown) => {
     try {
       if (isHostedExecutionRunnerChildRuntimeWakeReadyMessage(message)) {
-        if (!runtimeWakeReady) {
-          runtimeWakeReady = true;
+        if (!state.runtimeWakeReady) {
+          state.runtimeWakeReady = true;
           input.onRuntimeWakeReady?.(() => {
             if (!child.connected || child.killed) {
               return false;
@@ -527,6 +542,8 @@ function createHostedRunnerMissingChildResultError(
 function createHostedRunnerChildExitDiagnostics(input: {
   abortSignal?: AbortSignal;
   closeResult: HostedRunnerChildCloseResult;
+  firstCompletionKind: HostedRunnerChildFirstCompletionKind;
+  runtimeWakeReady: boolean;
   stderrTail: string;
   stdoutTail: string;
 }): HostedRunnerChildExitDiagnostics {
@@ -534,12 +551,18 @@ function createHostedRunnerChildExitDiagnostics(input: {
   const diagnostics: HostedRunnerChildExitDiagnostics = {
     abortedByParent: input.abortSignal?.aborted === true,
     exitCode: input.closeResult.code,
+    firstCompletionKind: input.firstCompletionKind,
+    runtimeWakeReady: input.runtimeWakeReady,
     signal: input.closeResult.signal,
   };
   const abortReasonName = readHostedRunnerAbortReasonName(abortReason);
   const abortReasonMessage = readHostedRunnerAbortReasonMessage(abortReason);
   const stdoutTail = redactHostedRuntimeDiagnosticText(input.stdoutTail.trim());
   const stderrTail = redactHostedRuntimeDiagnosticText(input.stderrTail.trim());
+  const stdoutTailLineCount = countHostedRunnerOutputLines(input.stdoutTail);
+  const stderrTailLineCount = countHostedRunnerOutputLines(input.stderrTail);
+  const stdoutTailMarkers = collectHostedRunnerChildOutputMarkers(input.stdoutTail);
+  const stderrTailMarkers = collectHostedRunnerChildOutputMarkers(input.stderrTail);
 
   if (abortReasonName) {
     diagnostics.abortReasonName = abortReasonName;
@@ -549,9 +572,17 @@ function createHostedRunnerChildExitDiagnostics(input: {
   }
   if (stdoutTail.length > 0) {
     diagnostics.stdoutTail = stdoutTail;
+    diagnostics.stdoutTailLineCount = stdoutTailLineCount;
+  }
+  if (stdoutTailMarkers.length > 0) {
+    diagnostics.stdoutTailMarkers = stdoutTailMarkers;
   }
   if (stderrTail.length > 0) {
     diagnostics.stderrTail = stderrTail;
+    diagnostics.stderrTailLineCount = stderrTailLineCount;
+  }
+  if (stderrTailMarkers.length > 0) {
+    diagnostics.stderrTailMarkers = stderrTailMarkers;
   }
 
   return diagnostics;

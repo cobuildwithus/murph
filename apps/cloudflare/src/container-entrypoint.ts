@@ -20,6 +20,10 @@ import {
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
 import {
+  readHostedRunnerChildFirstCompletionKind,
+  readHostedRunnerChildOutputMarkers,
+} from "./runner-child-diagnostics.ts";
+import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -1120,6 +1124,7 @@ function buildHostedContainerChildProcessMetadata(
   const metadata: HostedExecutionStructuredLogDetails = {
     abortedByParent: childProcess.abortedByParent === true,
     abortReasonMessagePresent: hasNonEmptyHostedContainerString(childProcess.abortReasonMessage),
+    runtimeWakeReady: childProcess.runtimeWakeReady === true,
     stderrTailPresent: hasNonEmptyHostedContainerString(childProcess.stderrTail),
     stdoutTailPresent: hasNonEmptyHostedContainerString(childProcess.stdoutTail),
   };
@@ -1136,6 +1141,37 @@ function buildHostedContainerChildProcessMetadata(
   const abortReasonName = readHostedContainerSafeCode(childProcess.abortReasonName);
   if (abortReasonName) {
     metadata.abortReasonName = abortReasonName;
+  }
+
+  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
+    childProcess.firstCompletionKind,
+  );
+  if (firstCompletionKind) {
+    metadata.firstCompletionKind = firstCompletionKind;
+  }
+
+  const stderrTailLineCount = readHostedContainerSafeInteger(childProcess.stderrTailLineCount);
+  if (stderrTailLineCount !== null) {
+    metadata.stderrTailLineCount = stderrTailLineCount;
+  }
+
+  const stdoutTailLineCount = readHostedContainerSafeInteger(childProcess.stdoutTailLineCount);
+  if (stdoutTailLineCount !== null) {
+    metadata.stdoutTailLineCount = stdoutTailLineCount;
+  }
+
+  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stderrTailMarkers,
+  );
+  if (stderrTailMarkers) {
+    metadata.stderrTailMarkers = stderrTailMarkers;
+  }
+
+  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stdoutTailMarkers,
+  );
+  if (stdoutTailMarkers) {
+    metadata.stdoutTailMarkers = stdoutTailMarkers;
   }
 
   return metadata;
@@ -1174,6 +1210,12 @@ function readHostedContainerSafeCode(value: unknown): string | null {
 
   const normalized = value.trim();
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedContainerSafeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function readHostedContainerSafeSignal(value: unknown): string | null | undefined {

@@ -346,7 +346,9 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
 
       queueMicrotask(() => {
         child.stdout.write("Bearer stdout-token\n");
+        child.stdout.write("Hosted node runner child prepared workspace invocation.\n");
         child.stderr.write("OPENAI_API_KEY=secret-value /tmp/hosted-runner/private-file\n");
+        child.stderr.write("Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@murphai/missing'\n");
         controller.abort(new Error("Hosted runner response closed before completion at /tmp/hosted-runner/private-file."));
         child.stdout.end();
         child.stderr.end();
@@ -382,7 +384,13 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       abortedByParent: true,
       abortReasonName: "Error",
       exitCode: null,
+      firstCompletionKind: "close",
+      runtimeWakeReady: false,
       signal: "SIGKILL",
+      stderrTailLineCount: 2,
+      stderrTailMarkers: ["module_resolution_failed"],
+      stdoutTailLineCount: 2,
+      stdoutTailMarkers: ["hosted_child_prepared"],
     });
     expect(String(childProcess.abortReasonMessage)).toContain("Hosted runner response closed before completion");
     expect(String(childProcess.abortReasonMessage)).toContain("<redacted-path>");

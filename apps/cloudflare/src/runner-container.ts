@@ -31,6 +31,10 @@ import {
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
+import {
+  readHostedRunnerChildFirstCompletionKind,
+  readHostedRunnerChildOutputMarkers,
+} from "./runner-child-diagnostics.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -1325,6 +1329,7 @@ function buildHostedRunnerContainerChildProcessMetadata(
     abortedByParent: childProcess.abortedByParent === true,
     abortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
       || hasNonEmptyHostedRunnerContainerString(childProcess.abortReasonMessage),
+    runtimeWakeReady: childProcess.runtimeWakeReady === true,
     stderrTailPresent: childProcess.stderrTailPresent === true
       || hasNonEmptyHostedRunnerContainerString(childProcess.stderrTail),
     stdoutTailPresent: childProcess.stdoutTailPresent === true
@@ -1343,6 +1348,37 @@ function buildHostedRunnerContainerChildProcessMetadata(
   const abortReasonName = readHostedRunnerContainerSafeCode(childProcess.abortReasonName);
   if (abortReasonName) {
     metadata.abortReasonName = abortReasonName;
+  }
+
+  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
+    childProcess.firstCompletionKind,
+  );
+  if (firstCompletionKind) {
+    metadata.firstCompletionKind = firstCompletionKind;
+  }
+
+  const stderrTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stderrTailLineCount);
+  if (stderrTailLineCount !== null) {
+    metadata.stderrTailLineCount = stderrTailLineCount;
+  }
+
+  const stdoutTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stdoutTailLineCount);
+  if (stdoutTailLineCount !== null) {
+    metadata.stdoutTailLineCount = stdoutTailLineCount;
+  }
+
+  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stderrTailMarkers,
+  );
+  if (stderrTailMarkers) {
+    metadata.stderrTailMarkers = stderrTailMarkers;
+  }
+
+  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stdoutTailMarkers,
+  );
+  if (stdoutTailMarkers) {
+    metadata.stdoutTailMarkers = stdoutTailMarkers;
   }
 
   return metadata;
@@ -1390,6 +1426,12 @@ function readHostedRunnerContainerSafeCode(value: unknown): string | null {
 
   const normalized = value.trim();
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedRunnerContainerSafeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function readHostedRunnerContainerSafeContentType(value: unknown): string | null {
@@ -1959,15 +2001,20 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   const exitCode = childProcess.exitCode;
   const signal = childProcess.signal;
   const abortReasonName = childProcess.abortReasonName;
+  const firstCompletionKind = readHostedRunnerChildFirstCompletionKind(
+    childProcess.firstCompletionKind,
+  );
 
-  return {
+  const metadata: HostedExecutionStructuredLogDetails = {
     ...result,
     runnerChildAbortedByParent: childProcess.abortedByParent === true,
+    runnerChildRuntimeWakeReady: childProcess.runtimeWakeReady === true,
     ...(typeof exitCode === "number" || exitCode === null ? { runnerChildExitCode: exitCode } : {}),
     ...(typeof signal === "string" || signal === null ? { runnerChildSignal: signal } : {}),
     ...(typeof abortReasonName === "string" && abortReasonName.trim().length > 0
       ? { runnerChildAbortReasonName: abortReasonName }
       : {}),
+    ...(firstCompletionKind ? { runnerChildFirstCompletionKind: firstCompletionKind } : {}),
     runnerChildAbortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
       || hasNonEmptyStringProperty(childProcess, "abortReasonMessage"),
     runnerChildStderrTailPresent: childProcess.stderrTailPresent === true
@@ -1975,6 +2022,28 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
     runnerChildStdoutTailPresent: childProcess.stdoutTailPresent === true
       || hasNonEmptyStringProperty(childProcess, "stdoutTail"),
   };
+  const stderrTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stderrTailLineCount);
+  if (stderrTailLineCount !== null) {
+    metadata.runnerChildStderrTailLineCount = stderrTailLineCount;
+  }
+  const stdoutTailLineCount = readHostedRunnerContainerSafeInteger(childProcess.stdoutTailLineCount);
+  if (stdoutTailLineCount !== null) {
+    metadata.runnerChildStdoutTailLineCount = stdoutTailLineCount;
+  }
+  const stderrTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stderrTailMarkers,
+  );
+  if (stderrTailMarkers) {
+    metadata.runnerChildStderrTailMarkers = stderrTailMarkers;
+  }
+  const stdoutTailMarkers = readHostedRunnerChildOutputMarkers(
+    childProcess.stdoutTailMarkers,
+  );
+  if (stdoutTailMarkers) {
+    metadata.runnerChildStdoutTailMarkers = stdoutTailMarkers;
+  }
+
+  return metadata;
 }
 
 function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructuredLogDetails | null {
