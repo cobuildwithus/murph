@@ -104,8 +104,9 @@ describe("cleanupHostedRunnerContainers", () => {
     expect(spawn).toHaveBeenCalledTimes(3);
   });
 
-  it("scopes cleanup to the local runner build id label when one is configured", async () => {
+  it("scopes current-build cleanup to the worker container namespace without requiring labels", async () => {
     const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "proxy123\n" },
       { exitCode: 0, stdout: "" },
     ]);
 
@@ -123,11 +124,8 @@ describe("cleanupHostedRunnerContainers", () => {
       "-aq",
       "--filter",
       "name=workerd-murph-hosted-",
-      "--filter",
-      expect.stringMatching(
-        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
-      ),
     ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual(["rm", "-f", "proxy123"]);
   });
 
   it("can sweep stale local runner containers from previous build ids", async () => {
@@ -205,10 +203,6 @@ describe("cleanupHostedRunnerContainers", () => {
       "-aq",
       "--filter",
       expect.stringMatching(/^name=workerd-murph-hosted-e2e-[a-f0-9]{24}-$/u),
-      "--filter",
-      expect.stringMatching(
-        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
-      ),
     ]);
   });
 
