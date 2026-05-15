@@ -1820,9 +1820,18 @@ describe("RunnerContainer", () => {
               abortReasonMessage: hiddenAbortReason,
               abortReasonName: "AbortError",
               exitCode: 1,
+              firstCompletionKind: "close",
+              runtimeWakeReady: true,
               signal: "SIGTERM",
               stderrTail: hiddenStderrTail,
+              stderrTailLineCount: 2,
+              stderrTailMarkers: [
+                "module_resolution_failed",
+                "hidden_code_marker",
+              ],
               stdoutTail: hiddenStdoutTail,
+              stdoutTailLineCount: 1,
+              stdoutTailMarkers: ["hosted_child_prepared"],
             },
             errorDetail:
               "Hosted assistant runtime child exited without emitting a result payload.",
@@ -1855,8 +1864,14 @@ describe("RunnerContainer", () => {
           abortReasonName: "AbortError",
           abortReasonMessagePresent: true,
           exitCode: 1,
+          firstCompletionKind: "close",
+          runtimeWakeReady: true,
           signal: "SIGTERM",
+          stderrTailLineCount: 2,
+          stderrTailMarkers: ["module_resolution_failed"],
           stderrTailPresent: true,
+          stdoutTailLineCount: 1,
+          stdoutTailMarkers: ["hosted_child_prepared"],
           stdoutTailPresent: true,
         },
         errorDetailPresent: true,
@@ -1869,6 +1884,7 @@ describe("RunnerContainer", () => {
     expect(serializedThrown).not.toContain(hiddenAbortReason);
     expect(serializedThrown).not.toContain(hiddenStderrTail);
     expect(serializedThrown).not.toContain(hiddenStdoutTail);
+    expect(serializedThrown).not.toContain("hidden_code_marker");
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) => input?.message === "Hosted execution container failed.");
@@ -1888,8 +1904,14 @@ describe("RunnerContainer", () => {
           runnerChildAbortReasonMessagePresent: true,
           runnerChildAbortReasonName: "AbortError",
           runnerChildExitCode: 1,
+          runnerChildFirstCompletionKind: "close",
+          runnerChildRuntimeWakeReady: true,
           runnerChildSignal: "SIGTERM",
+          runnerChildStderrTailLineCount: 2,
+          runnerChildStderrTailMarkers: ["module_resolution_failed"],
           runnerChildStderrTailPresent: true,
+          runnerChildStdoutTailLineCount: 1,
+          runnerChildStdoutTailMarkers: ["hosted_child_prepared"],
           runnerChildStdoutTailPresent: true,
           runnerResponseDetailsKeys: [
             "childProcess",
@@ -1908,6 +1930,7 @@ describe("RunnerContainer", () => {
     expect(serializedFailureLog).not.toContain(hiddenAbortReason);
     expect(serializedFailureLog).not.toContain(hiddenStderrTail);
     expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
+    expect(serializedFailureLog).not.toContain("hidden_code_marker");
   });
 
   it("prefers sanitized inner runtime status over the container response status", async () => {

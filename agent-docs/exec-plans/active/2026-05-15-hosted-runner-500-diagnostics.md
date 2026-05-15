@@ -25,7 +25,9 @@ runtime phase boundaries.
    import, inbox sidecar, CLI bridge, foreground pass, checkpoint, and return.
 5. Add focused tests proving useful metadata is logged without tail text or
    sensitive free-form detail.
-6. Run targeted verification, security/privacy audit, final review, deploy, and
+6. Add child-bootstrap diagnostics for pre-runtime exits: wake-ready state,
+   first completion kind, tail line counts, and fixed-vocabulary tail markers.
+7. Run targeted verification, security/privacy audit, final review, deploy, and
    inspect new production evidence.
 
 ## Verification
@@ -42,6 +44,8 @@ runtime phase boundaries.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts` passed after non-JSON runner response hardening.
 - `pnpm --dir apps/cloudflare test:node -- runner-container.test.ts container-entrypoint.test.ts` passed after JSON runner detail metadata hardening and configuration-error summary cleanup.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts` passed after JSON runner detail metadata hardening and configuration-error summary cleanup.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-isolated.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after child-bootstrap marker diagnostics.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-isolated.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/node-runner-isolated.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/runner-container.test.ts` passed after child-bootstrap marker diagnostics.
 
 ## State
 
@@ -56,4 +60,7 @@ runtime phase boundaries.
   response metadata.
 - JSON runner error details are reduced to presence/shape metadata, safe codes,
   safe statuses, and child-process metadata flags.
-- Awaiting final audits, deploy, and production evidence.
+- Child-process diagnostics now include wake-ready state, first completion kind,
+  stdout/stderr line counts, and fixed-vocabulary marker codes; container and
+  Worker boundaries allowlist marker/completion values before logging them.
+- Awaiting deploy and production evidence for the remaining pre-runtime exit.
