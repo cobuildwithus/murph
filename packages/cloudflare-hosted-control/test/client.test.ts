@@ -525,8 +525,8 @@ describe("createCloudflareHostedControlClient", () => {
     let observedRequest: ObservedRequest | null = null;
     const result = createRunnerNudgeResult({
       accepted: true,
-      alreadyRunning: true,
       inFlight: true,
+      kind: "processing-ensured",
     });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -821,16 +821,16 @@ function createRunnerNudgeResult(
   input: Partial<{
     accepted: boolean;
     alarmScheduled: boolean;
-    alreadyRunning: boolean;
     inFlight: boolean;
+    kind: "caught-up" | "processing-ensured" | "retry-scheduled";
     nextAlarmAt: string | null;
   }> = {},
 ) {
   return {
     accepted: input.accepted ?? true,
     alarmScheduled: input.alarmScheduled ?? false,
-    alreadyRunning: input.alreadyRunning ?? false,
     inFlight: input.inFlight ?? false,
+    kind: input.kind ?? "caught-up",
     nextAlarmAt: input.nextAlarmAt ?? null,
   };
 }

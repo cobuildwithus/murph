@@ -33,7 +33,7 @@ Working set (files/ids/commands):
 - `packages/assistant-engine/src/assistant/channels/runtime.ts`
 - `packages/assistant-engine/src/assistant-cli-tools/capability-definitions.ts`
 - `packages/assistant-engine/test/assistant-bindings.test.ts`
-- `packages/assistant-engine/test/provider-registry-helpers.test.ts`
+- `packages/assistant-engine/test/codex-runtime-helpers.test.ts`
 - `packages/operator-config/src/operator-config/self-delivery-targets.ts`
 - `packages/operator-config/test/operator-config-seam.test.ts`
 - `packages/assistant-cli/src/commands/assistant.ts`

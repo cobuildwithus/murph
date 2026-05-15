@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -168,7 +167,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -178,7 +176,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,

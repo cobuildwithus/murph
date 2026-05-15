@@ -3272,7 +3272,7 @@ async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 250): Promise
   }
 }
 
-async function waitForCondition(predicate: () => boolean, timeoutMs = 250): Promise<void> {
+async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) {

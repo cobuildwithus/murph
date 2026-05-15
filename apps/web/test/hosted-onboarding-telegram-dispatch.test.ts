@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => {
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -26,7 +25,6 @@ const mocks = vi.hoisted(() => {
       return {
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
         configured: true,
         errorCode: null,
         immediateDriveStarted: false,
@@ -41,7 +39,6 @@ const mocks = vi.hoisted(() => {
       return {
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
         configured: true,
         errorCode: null,
         immediateDriveStarted: false,
@@ -199,7 +196,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -209,7 +205,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -756,7 +751,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: false,
       errorCode: null,
       immediateDriveStarted: false,

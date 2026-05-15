@@ -94,13 +94,20 @@ export async function createPackageManagerProcessEnv(
     path.join(tmpdir(), "murph-package-manager-env-"),
   );
   const isolatedEnv = await createIsolatedPackageManagerHomeEnv(homeDir);
+  const reusableCorepackHome = resolveReusableCorepackHome(source);
+  const packageManagerEnv = reusableCorepackHome
+    ? {
+        ...isolatedEnv,
+        COREPACK_HOME: reusableCorepackHome,
+      }
+    : isolatedEnv;
 
   return {
     cleanup: async () => {
       await rm(homeDir, { force: true, recursive: true });
     },
     env: buildPackageManagerProcessEnv({
-      ...isolatedEnv,
+      ...packageManagerEnv,
       ...explicitEnv,
     }, source),
   };
@@ -148,6 +155,28 @@ async function createIsolatedPackageManagerHomeEnv(
     npm_config_store_dir: pnpmStoreDir,
     npm_config_userconfig: userConfigPath,
   };
+}
+
+function resolveReusableCorepackHome(source: NodeJS.ProcessEnv): string | null {
+  const configuredCorepackHome = source.COREPACK_HOME?.trim();
+
+  if (configuredCorepackHome) {
+    return configuredCorepackHome;
+  }
+
+  const xdgCacheHome = source.XDG_CACHE_HOME?.trim();
+
+  if (xdgCacheHome) {
+    return path.join(xdgCacheHome, "node", "corepack");
+  }
+
+  const homeDir = source.HOME?.trim() || source.USERPROFILE?.trim();
+
+  if (!homeDir) {
+    return null;
+  }
+
+  return path.join(homeDir, ".cache", "node", "corepack");
 }
 
 export function buildPackageManagerProcessEnv(

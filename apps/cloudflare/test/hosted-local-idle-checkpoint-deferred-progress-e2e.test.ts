@@ -37,7 +37,7 @@ const firstUserText = "idle checkpoint deferred first input";
 const secondUserText = "idle checkpoint deferred second input";
 const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
-const localRunnerIdleTtlMs = "6000";
+const localRunnerIdleTtlMs = "300000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;

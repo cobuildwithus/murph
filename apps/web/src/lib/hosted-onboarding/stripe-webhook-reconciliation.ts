@@ -193,10 +193,10 @@ export async function nudgeHostedStripeWebhookActivationRunner(input: {
   finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
     accepted: result.accepted,
     alarmScheduled: result.alarmScheduled,
-    alreadyRunning: result.alreadyRunning,
     configured: result.configured,
     errorCode: result.errorCode,
     inFlight: result.inFlight,
+    kind: result.kind,
     nextAlarmAtPresent: result.nextAlarmAtPresent,
   });
 
