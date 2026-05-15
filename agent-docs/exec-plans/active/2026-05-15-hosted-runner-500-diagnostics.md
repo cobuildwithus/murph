@@ -8,9 +8,9 @@ runtime phase boundaries.
 
 - Do not log raw mailbox payloads, prompts, transcripts, stdout/stderr text,
   local paths, account ids, user ids, secrets, or provider responses.
-- Keep the patch observability-only; do not change runner scheduling,
-  checkpointing, retry, or container teardown behavior in this diagnostic
-  slice.
+- Keep diagnostic logs metadata-only and redacted.
+- Behavior changes after diagnosis must be scoped to runner liveness
+  reconciliation; avoid broad container lifecycle rewrites.
 - Preserve overlapping hosted runner work and unrelated dirty files.
 
 ## Plan
@@ -29,6 +29,9 @@ runtime phase boundaries.
    first completion kind, tail line counts, and fixed-vocabulary tail markers.
 7. Run targeted verification, security/privacy audit, final review, deploy, and
    inspect new production evidence.
+8. Patch the diagnosed stale active-runtime/write-fence path so unconfirmed
+   container liveness can be replaced after the startup grace window, and keep
+   alarm-started local runtime work attached until the local drive settles.
 
 ## Verification
 
@@ -46,6 +49,9 @@ runtime phase boundaries.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts` passed after JSON runner detail metadata hardening and configuration-error summary cleanup.
 - `pnpm --dir apps/cloudflare test:node -- node-runner-isolated.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after child-bootstrap marker diagnostics.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-isolated.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/node-runner-isolated.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/runner-container.test.ts` passed after child-bootstrap marker diagnostics.
+- `pnpm --dir apps/cloudflare test:node -- user-runner-alarm.test.ts` passed
+  after stale active-runtime replacement and alarm lifetime regressions.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts` passed after the diagnosed runner liveness fix.
 
 ## State
 
@@ -63,4 +69,14 @@ runtime phase boundaries.
 - Child-process diagnostics now include wake-ready state, first completion kind,
   stdout/stderr line counts, and fixed-vocabulary marker codes; container and
   Worker boundaries allowlist marker/completion values before logging them.
-- Awaiting deploy and production evidence for the remaining pre-runtime exit.
+- Production evidence showed mailbox ingestion succeeded for the newly messaged
+  user while the hosted workspace imported conversation sequence stayed behind;
+  the remaining blocker is runner progress wedged behind an active
+  runtime/write fence whose container liveness is unconfirmed.
+- Runner liveness reconciliation now preserves the startup grace window for
+  fresh fences, but replaces stale active runtime fences after
+  start-required/active-child-rejected/container RPC error/container RPC timeout.
+- Alarm-started local drives now remain attached until the invocation settles,
+  preventing cold-start work from depending only on detached waitUntil state.
+- Awaiting deploy and production evidence that the workspace imports the latest
+  mailbox sequence.

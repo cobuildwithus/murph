@@ -112,7 +112,9 @@ type EnsureRunnerProgressResult =
       record: RunnerStateRecord;
     }
   | {
-      containerResult: Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>;
+      containerResult:
+        | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
+        | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>;
       demand: RunnerProgressDemand;
       localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
       kind: "processing-started";
@@ -129,7 +131,7 @@ type EnsureRunnerProgressResult =
       record: RunnerStateRecord;
     }
   | {
-      deferredFreshLocalEnsure?: boolean;
+      deferredFreshWriteFenceReplacement?: boolean;
       demand: RunnerProgressDemand;
       kind: "retry-scheduled";
       record: RunnerStateRecord;
@@ -232,9 +234,15 @@ export class HostedUserRunner {
 
   async alarm(): Promise<void> {
     try {
-      await this.ensureRunnerProgress({
+      const progress = await this.ensureRunnerProgress({
         reason: "alarm",
       });
+      if (
+        progress.kind === "processing-started"
+        && progress.localEnsurePromise
+      ) {
+        await progress.localEnsurePromise.catch(() => undefined);
+      }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -504,27 +512,47 @@ export class HostedUserRunner {
         };
       }
 
-      if (containerResult.kind === "retry-scheduled") {
+      if (
+        containerResult.kind === "retry-scheduled"
+        && this.shouldDeferFreshActiveRuntimeReplacement(record)
+      ) {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
         return {
           containerResult,
+          deferredFreshWriteFenceReplacement: true,
           demand,
           kind: "retry-scheduled",
           record: retryRecord,
         };
       }
 
-      if (this.shouldDeferFreshLocalEnsurePreemption(record)) {
+      if (
+        containerResult.kind === "start-required"
+        && this.shouldDeferFreshLocalEnsurePreemption(record)
+      ) {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
         return {
           containerResult,
-          deferredFreshLocalEnsure: true,
+          deferredFreshWriteFenceReplacement: true,
+          demand,
+          kind: "retry-scheduled",
+          record: retryRecord,
+        };
+      }
+
+      if (!shouldReplaceUnconfirmedActiveRuntime(containerResult)) {
+        const retryRecord = await this.stateStore.markWakePending({
+          preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
+        });
+        await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
+        return {
+          containerResult,
           demand,
           kind: "retry-scheduled",
           record: retryRecord,
@@ -702,8 +730,8 @@ export class HostedUserRunner {
     }
   }
 
-  private shouldDeferFreshLocalEnsurePreemption(record: RunnerStateRecord): boolean {
-    if (!this.localEnsureInFlight || !record.writeFence) {
+  private shouldDeferFreshActiveRuntimeReplacement(record: RunnerStateRecord): boolean {
+    if (!record.writeFence) {
       return false;
     }
     const startedAt = Date.parse(record.writeFence.startedAt);
@@ -711,6 +739,13 @@ export class HostedUserRunner {
       return false;
     }
     return Date.now() - startedAt < LOCAL_ENSURE_START_GRACE_MS;
+  }
+
+  private shouldDeferFreshLocalEnsurePreemption(record: RunnerStateRecord): boolean {
+    if (!this.localEnsureInFlight) {
+      return false;
+    }
+    return this.shouldDeferFreshActiveRuntimeReplacement(record);
   }
 
   async runUntilIdleForTest(input: {
@@ -1581,6 +1616,20 @@ function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResu
   return { kind: "unknown", reason: "legacy-wake-result" };
 }
 
+function shouldReplaceUnconfirmedActiveRuntime(
+  result:
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>,
+): boolean {
+  if (result.kind === "start-required") {
+    return true;
+  }
+
+  return result.reason === "active-child-rejected"
+    || result.reason === "container-rpc-error"
+    || result.reason === "container-rpc-timeout";
+}
+
 function isRunnerRuntimeWakeUnknownReason(
   value: string,
 ): value is Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"] {
@@ -1609,13 +1658,18 @@ function buildEnsureRunnerProgressLogDetails(
       : null,
     freshLocalEnsurePreemptionDeferred:
       progress.kind === "retry-scheduled"
-      && progress.deferredFreshLocalEnsure === true,
+      && progress.deferredFreshWriteFenceReplacement === true
+      && progress.containerResult?.kind === "start-required",
+    freshWriteFenceReplacementDeferred:
+      progress.kind === "retry-scheduled"
+      && progress.deferredFreshWriteFenceReplacement === true,
     staleWriteFencePreempted:
       progress.kind === "processing-started"
       && "previousAttemptId" in progress,
     writeFenceHeldAfterStartRequired:
       progress.kind === "retry-scheduled"
-      && progress.deferredFreshLocalEnsure === true,
+      && progress.deferredFreshWriteFenceReplacement === true
+      && progress.containerResult?.kind === "start-required",
     ...(progress.kind === "processing-started" && "previousAttemptId" in progress
       ? {
         previousAttemptId: progress.previousAttemptId,
