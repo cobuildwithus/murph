@@ -52,6 +52,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare test:node -- user-runner-alarm.test.ts` passed
   after stale active-runtime replacement and alarm lifetime regressions.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts` passed after the diagnosed runner liveness fix.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after child runtime failure classification.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts` passed after the first child runtime classifier patch; a later rerun after receiver allowlist tightening/status assertions was interrupted by the user before completion.
+- `pnpm --dir apps/cloudflare typecheck` passed after receiver allowlist tightening/status assertions.
 
 ## State
 
@@ -78,5 +81,15 @@ runtime phase boundaries.
   start-required/active-child-rejected/container RPC error/container RPC timeout.
 - Alarm-started local drives now remain attached until the invocation settles,
   preventing cold-start work from depending only on detached waitUntil state.
-- Awaiting deploy and production evidence that the workspace imports the latest
-  mailbox sequence.
+- Production after the stale-fence deploy now starts replacement runner work and
+  reaches a prepared child, but the child exits with a child-result failure
+  before any visible hosted runtime phase boundary.
+- Recent production DB state still shows the target workspace at version 1949,
+  conversation mailbox sequence 712, and imported conversation sequence 704.
+- Child runtime failures now carry a fixed-vocabulary runtime stage/failure
+  tuple through the child result, container entrypoint response, and
+  RunnerContainer failure log so the next deploy can separate workspace read,
+  mailbox decode, stale authority, config, and runtime-in-process failures
+  without exposing free-form child details.
+- Awaiting deploy of the child runtime classifier and production evidence for
+  the exact child failure kind.

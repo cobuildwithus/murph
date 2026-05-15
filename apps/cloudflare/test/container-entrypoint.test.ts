@@ -1317,6 +1317,11 @@ describe("startHostedContainerEntrypoint", () => {
     const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       Object.assign(new Error("hidden child failure message"), {
         details: {
+          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorName: "Error",
+          childRuntimeErrorStatus: 503,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
           childProcess: {
             abortedByParent: false,
             abortReasonMessage: hiddenAbortReason,
@@ -1384,7 +1389,20 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailMarkers: ["hosted_child_prepared"],
             stdoutTailPresent: true,
           },
-          detailsKeys: ["childProcess", "errorDetail"],
+          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorName: "Error",
+          childRuntimeErrorStatus: 503,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
+          detailsKeys: [
+            "childProcess",
+            "childRuntimeErrorCode",
+            "childRuntimeErrorName",
+            "childRuntimeErrorStatus",
+            "childRuntimeFailureKind",
+            "childRuntimeStage",
+            "errorDetail",
+          ],
           errorDetailPresent: true,
           errorMessagePresent: true,
           errorName: "Error",
@@ -1414,6 +1432,11 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailMarkers: ["hosted_child_prepared"],
             stdoutTailPresent: true,
           }),
+          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorName: "Error",
+          childRuntimeErrorStatus: 503,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
         }),
         userId: null,
       }));
@@ -1426,6 +1449,77 @@ describe("startHostedContainerEntrypoint", () => {
       expect(serializedFailureLog).not.toContain(hiddenStderrTail);
       expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
       expect(serializedFailureLog).not.toContain("hidden_code_marker");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("drops non-allowlisted child runtime error diagnostics at the entrypoint boundary", async () => {
+    const hiddenErrorName = "UntrustedCustomErrorName";
+    const hiddenErrorCode = "untrusted_custom_error_code";
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+      Object.assign(new Error("hidden child failure message"), {
+        details: {
+          childRuntimeErrorCode: hiddenErrorCode,
+          childRuntimeErrorName: hiddenErrorName,
+          childRuntimeErrorStatus: 499,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
+        },
+      }),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+        body: JSON.stringify(buildJobBody({
+          wake: {
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+            eventId: "evt_runtime_child_untrusted_diagnostics",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(500);
+      const payload = await response.json() as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        details: {
+          childRuntimeErrorStatus: 499,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
+        },
+      });
+      const serializedPayload = JSON.stringify(payload);
+      expect(serializedPayload).not.toContain(hiddenErrorName);
+      expect(serializedPayload).not.toContain(hiddenErrorCode);
+
+      const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([input]) => input)
+        .find((input) => input.message === "Hosted container entrypoint failed a runner job.");
+      expect(failureLogInput).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          childRuntimeErrorStatus: 499,
+          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeStage: "runtime.in-process",
+        }),
+      }));
+      const serializedFailureLog = JSON.stringify(failureLogInput);
+      expect(serializedFailureLog).not.toContain(hiddenErrorName);
+      expect(serializedFailureLog).not.toContain(hiddenErrorCode);
     } finally {
       spy.mockRestore();
     }

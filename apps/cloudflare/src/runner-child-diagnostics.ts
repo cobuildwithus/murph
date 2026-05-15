@@ -1,9 +1,93 @@
+import type {
+  HostedExecutionErrorCode,
+  HostedExecutionStructuredLogDetails,
+} from "@murphai/hosted-execution";
+
 export type HostedRunnerChildFirstCompletionKind = "child_result" | "close";
 
 const HOSTED_RUNNER_CHILD_FIRST_COMPLETION_KINDS = new Set<string>([
   "child_result",
   "close",
 ]);
+
+export const HOSTED_EXECUTION_CHILD_RUNTIME_STAGES = [
+  "bridge.mailbox-decoder",
+  "bridge.options",
+  "bridge.platform",
+  "bridge.web-control-fetch",
+  "runtime.in-process",
+  "runtime.not-started",
+] as const;
+
+export type HostedExecutionChildRuntimeStage =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_STAGES[number];
+
+export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
+  "hosted_assistant_configuration",
+  "invalid_workspace_port",
+  "mailbox_payload_decode_http",
+  "mailbox_payload_decode_invalid_json",
+  "mailbox_payload_decode_missing_write_fence",
+  "missing_mailbox_port",
+  "missing_runtime_platform",
+  "missing_vault_root",
+  "missing_workspace_port",
+  "relative_vault_root",
+  "stale_invocation_authority",
+  "unclassified_runtime_error",
+  "workspace_version_mismatch",
+] as const;
+
+export type HostedExecutionChildRuntimeFailureKind =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS[number];
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_STAGE_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_STAGES,
+);
+const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KIND_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS,
+);
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODES = [
+  "authorization_error",
+  "bundle_archive_validation_error",
+  "checkpoint_error",
+  "configuration_error",
+  "invalid_request",
+  "outbox_error",
+  "range_error",
+  "reference_error",
+  "runner_http_error",
+  "runtime_error",
+  "syntax_error",
+  "timeout",
+  "type_error",
+  "uri_error",
+] as const satisfies readonly HostedExecutionErrorCode[];
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODE_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODES,
+);
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAMES = [
+  "AbortError",
+  "Error",
+  "EvalError",
+  "HostedAssistantConfigurationError",
+  "HostedBundleArchiveValidationError",
+  "HostedExecutionConfigurationError",
+  "HostedRuntimeInternalAuthorityRejectedError",
+  "HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+] as const;
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAME_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAMES,
+);
 
 const HOSTED_RUNNER_CHILD_OUTPUT_MARKER_VALUES = [
   "hosted_assistant_config_required",
@@ -125,6 +209,71 @@ export function readHostedRunnerChildOutputMarkers(
   return markers.length > 0 ? markers : null;
 }
 
+export function readHostedExecutionChildRuntimeDiagnosticMetadata(
+  record: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {};
+
+  const childRuntimeStage = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeStage,
+    HOSTED_EXECUTION_CHILD_RUNTIME_STAGE_SET,
+  );
+  if (childRuntimeStage) {
+    metadata.childRuntimeStage = childRuntimeStage;
+  }
+
+  const childRuntimeFailureKind = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeFailureKind,
+    HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KIND_SET,
+  );
+  if (childRuntimeFailureKind) {
+    metadata.childRuntimeFailureKind = childRuntimeFailureKind;
+  }
+
+  const childRuntimeErrorName = readHostedExecutionChildRuntimeErrorName(
+    record.childRuntimeErrorName,
+  );
+  if (childRuntimeErrorName) {
+    metadata.childRuntimeErrorName = childRuntimeErrorName;
+  }
+
+  const childRuntimeErrorCode = readHostedExecutionChildRuntimeErrorCode(
+    record.childRuntimeErrorCode,
+  );
+  if (childRuntimeErrorCode) {
+    metadata.childRuntimeErrorCode = childRuntimeErrorCode;
+  }
+
+  const childRuntimeErrorStatus = record.childRuntimeErrorStatus;
+  if (
+    typeof childRuntimeErrorStatus === "number"
+    && Number.isInteger(childRuntimeErrorStatus)
+    && childRuntimeErrorStatus >= 100
+    && childRuntimeErrorStatus <= 599
+  ) {
+    metadata.childRuntimeErrorStatus = childRuntimeErrorStatus;
+  }
+
+  return metadata;
+}
+
+export function readHostedExecutionChildRuntimeErrorName(value: unknown): string | null {
+  return readAllowedHostedExecutionChildDiagnostic(
+    value,
+    HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAME_SET,
+  );
+}
+
+export function readHostedExecutionChildRuntimeErrorCode(
+  value: unknown,
+): HostedExecutionErrorCode | null {
+  const code = readAllowedHostedExecutionChildDiagnostic(
+    value,
+    HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODE_SET,
+  );
+  return code as HostedExecutionErrorCode | null;
+}
+
 function isHostedRunnerChildFirstCompletionKind(
   value: string,
 ): value is HostedRunnerChildFirstCompletionKind {
@@ -135,4 +284,16 @@ function isHostedRunnerChildOutputMarker(
   value: string,
 ): value is HostedRunnerChildOutputMarker {
   return HOSTED_RUNNER_CHILD_OUTPUT_MARKERS.has(value);
+}
+
+function readAllowedHostedExecutionChildDiagnostic(
+  value: unknown,
+  allowed: Set<string>,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return allowed.has(normalized) ? normalized : null;
 }

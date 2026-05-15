@@ -1815,6 +1815,11 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
+            childRuntimeErrorCode: "runtime_error",
+            childRuntimeErrorName: "Error",
+            childRuntimeErrorStatus: 503,
+            childRuntimeFailureKind: "unclassified_runtime_error",
+            childRuntimeStage: "runtime.in-process",
             childProcess: {
               abortedByParent: false,
               abortReasonMessage: hiddenAbortReason,
@@ -1859,6 +1864,11 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
+        childRuntimeErrorCode: "runtime_error",
+        childRuntimeErrorName: "Error",
+        childRuntimeErrorStatus: 503,
+        childRuntimeFailureKind: "unclassified_runtime_error",
+        childRuntimeStage: "runtime.in-process",
         childProcess: {
           abortedByParent: false,
           abortReasonName: "AbortError",
@@ -1905,6 +1915,11 @@ describe("RunnerContainer", () => {
           runnerChildAbortReasonName: "AbortError",
           runnerChildExitCode: 1,
           runnerChildFirstCompletionKind: "close",
+          runnerChildRuntimeErrorCode: "runtime_error",
+          runnerChildRuntimeErrorName: "Error",
+          runnerChildRuntimeErrorStatus: 503,
+          runnerChildRuntimeFailureKind: "unclassified_runtime_error",
+          runnerChildRuntimeStage: "runtime.in-process",
           runnerChildRuntimeWakeReady: true,
           runnerChildSignal: "SIGTERM",
           runnerChildStderrTailLineCount: 2,
@@ -1915,6 +1930,11 @@ describe("RunnerContainer", () => {
           runnerChildStdoutTailPresent: true,
           runnerResponseDetailsKeys: [
             "childProcess",
+            "childRuntimeErrorCode",
+            "childRuntimeErrorName",
+            "childRuntimeErrorStatus",
+            "childRuntimeFailureKind",
+            "childRuntimeStage",
             "errorDetailPresent",
             "payloadDetailsPresent",
           ],
@@ -1931,6 +1951,77 @@ describe("RunnerContainer", () => {
     expect(serializedFailureLog).not.toContain(hiddenStderrTail);
     expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
     expect(serializedFailureLog).not.toContain("hidden_code_marker");
+  });
+
+  it("drops non-allowlisted child runtime error diagnostics from runner response logs", async () => {
+    const hiddenErrorName = "UntrustedCustomErrorName";
+    const hiddenErrorCode = "untrusted_custom_error_code";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "runtime_error",
+          details: {
+            childRuntimeErrorCode: hiddenErrorCode,
+            childRuntimeErrorName: hiddenErrorName,
+            childRuntimeErrorStatus: 499,
+            childRuntimeFailureKind: "unclassified_runtime_error",
+            childRuntimeStage: "runtime.in-process",
+          },
+          error: "Hosted execution runtime failed.",
+          errorName: "Error",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_child_runtime_untrusted_diagnostics"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      details: {
+        childRuntimeErrorStatus: 499,
+        childRuntimeFailureKind: "unclassified_runtime_error",
+        childRuntimeStage: "runtime.in-process",
+      },
+    });
+    const serializedThrown = JSON.stringify(thrown);
+    expect(serializedThrown).not.toContain(hiddenErrorName);
+    expect(serializedThrown).not.toContain(hiddenErrorCode);
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runnerChildRuntimeErrorStatus: 499,
+          runnerChildRuntimeFailureKind: "unclassified_runtime_error",
+          runnerChildRuntimeStage: "runtime.in-process",
+        }),
+      }),
+    );
+    const serializedFailureLog = JSON.stringify(failureLogInput);
+    expect(serializedFailureLog).not.toContain(hiddenErrorName);
+    expect(serializedFailureLog).not.toContain(hiddenErrorCode);
   });
 
   it("prefers sanitized inner runtime status over the container response status", async () => {
