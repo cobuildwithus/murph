@@ -61,6 +61,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare test:node -- runner-outbound.test.ts runner-egress-intercept.test.ts` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
 - `pnpm --dir apps/cloudflare typecheck` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound/diagnostics.ts apps/cloudflare/src/runner-outbound/shared-web-control-policy.ts apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/src/runner-outbound.ts apps/cloudflare/src/runner-outbound/web-control.ts apps/cloudflare/test/runner-egress-intercept.test.ts apps/cloudflare/test/runner-outbound.test.ts` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
+- `pnpm --dir apps/web test -- hosted-onboarding-linq-dispatch.test.ts` passed after removing the silent repeated usage-limit suppression path; the command ran the full web Vitest workspace.
+- `pnpm --dir apps/web typecheck` passed after removing the silent repeated usage-limit suppression path.
+- `bash scripts/workspace-verify.sh test:diff apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after removing the silent repeated usage-limit suppression path.
 
 ## State
 
@@ -118,3 +121,12 @@ runtime phase boundaries.
 - The web-control allowlist and diagnostic operation classifier now share one
   policy helper so future route additions cannot drift between allowed behavior
   and log classification.
+- A fresh production text reached the Linq webhook and updated active-member
+  inbound tracking, but it did not append a conversation mailbox item or nudge
+  the runner because the matched member is over the hosted AI usage limit and
+  the usage-period notice was already marked sent. This is a distinct silent
+  usage-gate branch, not a container/runtime failure.
+- Repeated Linq usage-limit denials now still send the deterministic non-AI
+  quota reply for each new inbound event; the usage-period notice marker is
+  retained as accounting metadata but no longer controls whether the user gets
+  an answer.

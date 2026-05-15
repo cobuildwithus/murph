@@ -223,15 +223,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
 
       if (usageGate.reason === "ai_usage_limit_exceeded") {
-        const claimedNotice = await claimHostedAiUsageLimitNotice({
+        await claimHostedAiUsageLimitNotice({
           memberId: existingMember.id,
           periodStart: usageGate.periodStart,
           prisma: input.prisma,
         });
-
-        if (!claimedNotice) {
-          return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
-        }
       }
 
       return buildAiUsageQuotaReplyResponse({

@@ -2646,7 +2646,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("suppresses repeated Linq AI usage quota replies after the usage-period notice is already claimed", async () => {
+  it("still sends a deterministic Linq AI usage quota reply after the usage-period notice is already claimed", async () => {
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValueOnce(false);
     mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
@@ -2699,9 +2699,22 @@ https://join.example.test/join/code_first_text`);
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "ai-usage-gate-denied",
+      reason: "sent-ai-usage-quota-reply",
     });
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        idempotencyKey: "linq-message:evt_ai_usage_limit_repeat_suppressed",
+        message:
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        replyToMessageId: "msg_123",
+      }),
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
