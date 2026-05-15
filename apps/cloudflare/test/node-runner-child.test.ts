@@ -545,6 +545,53 @@ describe("runHostedExecutionChild", () => {
       "/tmp/hosted-runner/provider-detail",
     );
   });
+
+  it("classifies runtime control-plane HTTP failures by fixed operation", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = new Error(
+      "Hosted workspace read failed with HTTP 404.",
+    ) as Error & { status?: number; statusCode?: number };
+    runtimeError.status = 404;
+    runtimeError.statusCode = 404;
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_read_404",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "invalid_request",
+      childRuntimeErrorName: "Error",
+      childRuntimeErrorStatus: 404,
+      childRuntimeFailureKind: "control_plane_http",
+      childRuntimeHttpOperation: "workspace_read",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
 });
 
 function readChildResult(chunk: unknown): HostedExecutionRunnerChildResult {

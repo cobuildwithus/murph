@@ -2070,6 +2070,7 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
     childRuntimeErrorName: "runnerChildRuntimeErrorName",
     childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",
     childRuntimeFailureKind: "runnerChildRuntimeFailureKind",
+    childRuntimeHttpOperation: "runnerChildRuntimeHttpOperation",
     childRuntimeStage: "runnerChildRuntimeStage",
   } as const;
 

@@ -1815,10 +1815,11 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            childRuntimeErrorCode: "runtime_error",
+            childRuntimeErrorCode: "invalid_request",
             childRuntimeErrorName: "Error",
-            childRuntimeErrorStatus: 503,
-            childRuntimeFailureKind: "unclassified_runtime_error",
+            childRuntimeErrorStatus: 404,
+            childRuntimeFailureKind: "control_plane_http",
+            childRuntimeHttpOperation: "workspace_read",
             childRuntimeStage: "runtime.in-process",
             childProcess: {
               abortedByParent: false,
@@ -1864,10 +1865,11 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        childRuntimeErrorCode: "runtime_error",
+        childRuntimeErrorCode: "invalid_request",
         childRuntimeErrorName: "Error",
-        childRuntimeErrorStatus: 503,
-        childRuntimeFailureKind: "unclassified_runtime_error",
+        childRuntimeErrorStatus: 404,
+        childRuntimeFailureKind: "control_plane_http",
+        childRuntimeHttpOperation: "workspace_read",
         childRuntimeStage: "runtime.in-process",
         childProcess: {
           abortedByParent: false,
@@ -1915,10 +1917,11 @@ describe("RunnerContainer", () => {
           runnerChildAbortReasonName: "AbortError",
           runnerChildExitCode: 1,
           runnerChildFirstCompletionKind: "close",
-          runnerChildRuntimeErrorCode: "runtime_error",
+          runnerChildRuntimeErrorCode: "invalid_request",
           runnerChildRuntimeErrorName: "Error",
-          runnerChildRuntimeErrorStatus: 503,
-          runnerChildRuntimeFailureKind: "unclassified_runtime_error",
+          runnerChildRuntimeErrorStatus: 404,
+          runnerChildRuntimeFailureKind: "control_plane_http",
+          runnerChildRuntimeHttpOperation: "workspace_read",
           runnerChildRuntimeStage: "runtime.in-process",
           runnerChildRuntimeWakeReady: true,
           runnerChildSignal: "SIGTERM",
@@ -1934,6 +1937,7 @@ describe("RunnerContainer", () => {
             "childRuntimeErrorName",
             "childRuntimeErrorStatus",
             "childRuntimeFailureKind",
+            "childRuntimeHttpOperation",
             "childRuntimeStage",
             "errorDetailPresent",
             "payloadDetailsPresent",
@@ -1974,6 +1978,7 @@ describe("RunnerContainer", () => {
             childRuntimeErrorName: hiddenErrorName,
             childRuntimeErrorStatus: 499,
             childRuntimeFailureKind: "unclassified_runtime_error",
+            childRuntimeHttpOperation: "hidden_http_operation",
             childRuntimeStage: "runtime.in-process",
           },
           error: "Hosted execution runtime failed.",
@@ -2006,6 +2011,7 @@ describe("RunnerContainer", () => {
     const serializedThrown = JSON.stringify(thrown);
     expect(serializedThrown).not.toContain(hiddenErrorName);
     expect(serializedThrown).not.toContain(hiddenErrorCode);
+    expect(serializedThrown).not.toContain("hidden_http_operation");
 
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
@@ -2022,6 +2028,7 @@ describe("RunnerContainer", () => {
     const serializedFailureLog = JSON.stringify(failureLogInput);
     expect(serializedFailureLog).not.toContain(hiddenErrorName);
     expect(serializedFailureLog).not.toContain(hiddenErrorCode);
+    expect(serializedFailureLog).not.toContain("hidden_http_operation");
   });
 
   it("prefers sanitized inner runtime status over the container response status", async () => {

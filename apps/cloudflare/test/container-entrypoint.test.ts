@@ -1317,10 +1317,11 @@ describe("startHostedContainerEntrypoint", () => {
     const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       Object.assign(new Error("hidden child failure message"), {
         details: {
-          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorCode: "invalid_request",
           childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 503,
-          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeErrorStatus: 404,
+          childRuntimeFailureKind: "control_plane_http",
+          childRuntimeHttpOperation: "workspace_read",
           childRuntimeStage: "runtime.in-process",
           childProcess: {
             abortedByParent: false,
@@ -1389,10 +1390,11 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailMarkers: ["hosted_child_prepared"],
             stdoutTailPresent: true,
           },
-          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorCode: "invalid_request",
           childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 503,
-          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeErrorStatus: 404,
+          childRuntimeFailureKind: "control_plane_http",
+          childRuntimeHttpOperation: "workspace_read",
           childRuntimeStage: "runtime.in-process",
           detailsKeys: [
             "childProcess",
@@ -1400,6 +1402,7 @@ describe("startHostedContainerEntrypoint", () => {
             "childRuntimeErrorName",
             "childRuntimeErrorStatus",
             "childRuntimeFailureKind",
+            "childRuntimeHttpOperation",
             "childRuntimeStage",
             "errorDetail",
           ],
@@ -1432,10 +1435,11 @@ describe("startHostedContainerEntrypoint", () => {
             stdoutTailMarkers: ["hosted_child_prepared"],
             stdoutTailPresent: true,
           }),
-          childRuntimeErrorCode: "runtime_error",
+          childRuntimeErrorCode: "invalid_request",
           childRuntimeErrorName: "Error",
-          childRuntimeErrorStatus: 503,
-          childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeErrorStatus: 404,
+          childRuntimeFailureKind: "control_plane_http",
+          childRuntimeHttpOperation: "workspace_read",
           childRuntimeStage: "runtime.in-process",
         }),
         userId: null,
@@ -1464,6 +1468,7 @@ describe("startHostedContainerEntrypoint", () => {
           childRuntimeErrorName: hiddenErrorName,
           childRuntimeErrorStatus: 499,
           childRuntimeFailureKind: "unclassified_runtime_error",
+          childRuntimeHttpOperation: "hidden_http_operation",
           childRuntimeStage: "runtime.in-process",
         },
       }),
@@ -1506,6 +1511,7 @@ describe("startHostedContainerEntrypoint", () => {
       const serializedPayload = JSON.stringify(payload);
       expect(serializedPayload).not.toContain(hiddenErrorName);
       expect(serializedPayload).not.toContain(hiddenErrorCode);
+      expect(serializedPayload).not.toContain("hidden_http_operation");
 
       const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([input]) => input)
@@ -1520,6 +1526,7 @@ describe("startHostedContainerEntrypoint", () => {
       const serializedFailureLog = JSON.stringify(failureLogInput);
       expect(serializedFailureLog).not.toContain(hiddenErrorName);
       expect(serializedFailureLog).not.toContain(hiddenErrorCode);
+      expect(serializedFailureLog).not.toContain("hidden_http_operation");
     } finally {
       spy.mockRestore();
     }
