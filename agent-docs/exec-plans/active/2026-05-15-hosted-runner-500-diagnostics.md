@@ -58,6 +58,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after route-level HTTP operation classification.
 - `pnpm --dir apps/cloudflare typecheck` passed after route-level HTTP operation classification.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/runner-container.test.ts` passed after route-level HTTP operation classification.
+- `pnpm --dir apps/cloudflare test:node -- runner-outbound.test.ts runner-egress-intercept.test.ts` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
+- `pnpm --dir apps/cloudflare typecheck` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound/diagnostics.ts apps/cloudflare/src/runner-outbound/shared-web-control-policy.ts apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/src/runner-outbound.ts apps/cloudflare/src/runner-outbound/web-control.ts apps/cloudflare/test/runner-egress-intercept.test.ts apps/cloudflare/test/runner-outbound.test.ts` passed after Worker-boundary web-control proxy diagnostics and review-driven privacy hardening.
 
 ## State
 
@@ -103,3 +106,15 @@ runtime phase boundaries.
   production attempt can distinguish workspace read, mailbox fetch, checkpoint,
   runtime-log write, and adjacent internal calls without logging request bodies,
   response bodies, paths, user ids, or free-form child output.
+- Worker-boundary web-control proxy diagnostics are being added so production
+  can prove whether `web-control.worker` requests reach Cloudflare outbound
+  interception, pass the Worker allowlist, and receive a non-OK response from
+  hosted web without logging raw user ids, route parameters, request bodies, or
+  response bodies.
+- Security/privacy and final-review passes flagged raw user-id leakage in the
+  adjacent open-internet passthrough log and raw method-token logging risk in
+  the new diagnostics; both were fixed by logging user-id presence only and
+  normalizing logged methods to a fixed vocabulary.
+- The web-control allowlist and diagnostic operation classifier now share one
+  policy helper so future route additions cannot drift between allowed behavior
+  and log classification.

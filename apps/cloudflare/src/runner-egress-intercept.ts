@@ -10,6 +10,11 @@ import {
   handleRunnerOutboundRequest,
 } from "./runner-outbound.ts";
 import {
+  readHostedRunnerDiagnosticMethod,
+  readHostedRunnerInternalHostKind,
+  readHostedRunnerInternalOperation,
+} from "./runner-outbound/diagnostics.ts";
+import {
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./runner-outbound/write-fence.ts";
@@ -149,13 +154,13 @@ export async function handleHostedRunnerOpenInternetOutbound(
     component: "runner",
     details: {
       host: url.hostname,
-      method: request.method,
+      method: readHostedRunnerDiagnosticMethod(request.method),
       policy: "open_internet_passthrough",
+      userIdPresent: userId !== null,
     },
     level: "warn",
     message: "Hosted runner open-internet passthrough forwarded outbound request.",
     phase: "wake.running",
-    userId: userId ?? undefined,
   });
   return await fetch(createHostedRunnerOpenInternetPassthroughRequest(request));
 }
@@ -165,7 +170,7 @@ export const hostedRunnerIntercept = handleHostedRunnerOpenInternetOutbound;
 export async function handleHostedRunnerInternalOutbound(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
-  _ctx: HostedRunnerOutboundContext,
+  ctx: HostedRunnerOutboundContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
@@ -173,6 +178,23 @@ export async function handleHostedRunnerInternalOutbound(
   }
 
   const userId = readHostedRunnerBoundUserId(request);
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      boundUserIdHeaderPresent: userId !== null,
+      containerIdPresent: typeof ctx.containerId === "string" && ctx.containerId.length > 0,
+      hostKind: readHostedRunnerInternalHostKind(url.hostname),
+      method: readHostedRunnerDiagnosticMethod(request.method),
+      operation: readHostedRunnerInternalOperation({
+        hostname: url.hostname,
+        method: request.method,
+        pathname: url.pathname,
+      }),
+      runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(request.headers),
+    },
+    message: "Hosted runner internal outbound request received.",
+    phase: "wake.running",
+  });
   if (!userId) {
     return new Response("Missing hosted runner identity.", { status: 403 });
   }
@@ -476,6 +498,10 @@ function readHostedRunnerBoundUserId(request: Request): string | null {
   const value = request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function hostedRuntimeAuthorityHeadersPresent(headers: Headers): boolean {
+  return HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES.some((name) => headers.has(name));
 }
 
 function isAllowedOpenAiRequest(method: string, pathname: string): boolean {
