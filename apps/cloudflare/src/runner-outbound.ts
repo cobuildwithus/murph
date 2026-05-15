@@ -21,6 +21,11 @@ import {
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
+  readHostedRunnerDiagnosticMethod,
+  readHostedRunnerInternalHostKind,
+  readHostedRunnerInternalOperation,
+} from "./runner-outbound/diagnostics.ts";
+import {
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
@@ -101,10 +106,10 @@ export async function handleRunnerOutboundRequest(
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
-        method: request.method,
-        path: safeUrl?.pathname ?? null,
-        urlHost: safeUrl?.hostname ?? null,
-        userId,
+        hostKind: safeUrl ? readRunnerOutboundHostKind(safeUrl.hostname) : "invalid_url",
+        method: readHostedRunnerDiagnosticMethod(request.method),
+        operation: safeUrl ? readRunnerOutboundOperation(safeUrl, request.method) : "invalid_url",
+        userIdPresent: userId.length > 0,
       },
       error,
       message: "Hosted runner outbound request failed.",
@@ -129,6 +134,20 @@ function safeRunnerOutboundRequestUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+function readRunnerOutboundHostKind(hostname: string): string {
+  const kind = readHostedRunnerInternalHostKind(hostname);
+  return kind === "unknown_internal_host" ? "unknown_host" : kind;
+}
+
+function readRunnerOutboundOperation(url: URL, method: string): string {
+  const operation = readHostedRunnerInternalOperation({
+    hostname: url.hostname,
+    method,
+    pathname: url.pathname,
+  });
+  return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
 }
 
 async function handleRunnerArtifactRequest(input: {

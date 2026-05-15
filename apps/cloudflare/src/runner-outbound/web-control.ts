@@ -12,6 +12,9 @@ import {
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -30,8 +33,11 @@ import {
   handleRunnerMailboxPayloadDecodeRequest,
 } from "./mailbox-payload-decode.ts";
 import {
-  isAllowedHostedRunnerWebControlRequest,
+  readHostedRunnerWebControlPolicy,
 } from "./shared-web-control-policy.ts";
+import {
+  readHostedRunnerDiagnosticMethod,
+} from "./diagnostics.ts";
 import {
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
@@ -45,11 +51,38 @@ export async function handleRunnerWebControlRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
+  const policy = readHostedRunnerWebControlPolicy({
+    method: input.request.method,
+    path: input.url.pathname,
+  });
+  const method = readHostedRunnerDiagnosticMethod(input.request.method);
+
   if (input.request.method !== "GET" && input.request.method !== "POST") {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        method,
+        operation: policy.operation,
+        reason: "method_not_allowed",
+      },
+      level: "warn",
+      message: "Hosted runner web-control request rejected.",
+      phase: "wake.running",
+    });
     return methodNotAllowed();
   }
 
   if (input.url.pathname === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        method,
+        operation: policy.operation,
+        workerOwned: true,
+      },
+      message: "Hosted runner web-control request routed to worker-owned handler.",
+      phase: "wake.running",
+    });
     return await handleRunnerMailboxPayloadDecodeRequest({
       env: input.env,
       environment: input.environment,
@@ -58,10 +91,18 @@ export async function handleRunnerWebControlRequest(input: {
     });
   }
 
-  if (!isAllowedHostedRunnerWebControlRequest({
-    method: input.request.method,
-    path: input.url.pathname,
-  })) {
+  if (!policy.allowed) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        method,
+        operation: policy.operation,
+        reason: "not_allowlisted",
+      },
+      level: "warn",
+      message: "Hosted runner web-control request rejected.",
+      phase: "wake.running",
+    });
     return notFound();
   }
 
@@ -116,6 +157,21 @@ export async function handleRunnerWebControlRequest(input: {
     return unauthorized();
   }
 
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      allowHttpHostCount: input.environment.hostedWebAllowHttpHosts?.length ?? 0,
+      bodyPresent: body !== undefined,
+      callbackSigningConfigured: input.environment.webCallbackSigning !== null,
+      ...readHostedWebBaseUrlLogDetails(input.environment.hostedWebBaseUrl),
+      method,
+      operation: policy.operation,
+      searchPresent: input.url.search.length > 0,
+      workspaceCheckpoint: isCheckpointRequest,
+    },
+    message: "Hosted runner web-control request forwarding.",
+    phase: "wake.running",
+  });
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     ...(input.environment.hostedWebAllowHttpHosts
       ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
@@ -129,6 +185,21 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      contentTypePresent: response.headers.has("content-type"),
+      method,
+      operation: policy.operation,
+      responseOk: response.ok,
+      responseStatus: response.status,
+      responseType: response.type,
+      workspaceCheckpoint: isCheckpointRequest,
+    },
+    level: response.ok ? "info" : "warn",
+    message: "Hosted runner web-control response received.",
+    phase: "wake.running",
+  });
   if (checkpointRequest && response.ok) {
     try {
       parseHostedWorkspaceCheckpointResponse(await response.clone().json());
@@ -138,6 +209,24 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   return response;
+}
+
+function readHostedWebBaseUrlLogDetails(value: string): {
+  hostedWebBaseUrlHost: string | null;
+  hostedWebBaseUrlProtocol: string;
+} {
+  try {
+    const url = new URL(value);
+    return {
+      hostedWebBaseUrlHost: url.hostname,
+      hostedWebBaseUrlProtocol: url.protocol.replace(/:$/u, ""),
+    };
+  } catch {
+    return {
+      hostedWebBaseUrlHost: null,
+      hostedWebBaseUrlProtocol: "invalid",
+    };
+  }
 }
 
 function augmentHostedRunnerWebControlBody(input: {

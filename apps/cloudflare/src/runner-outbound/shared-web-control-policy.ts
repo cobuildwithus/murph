@@ -14,6 +14,9 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
+} from "../runtime-mailbox-payload-decode-contract.ts";
 
 export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -24,6 +27,42 @@ export {
 
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/connect-targets\/[^/]+\/connect-link$/u;
+
+export type HostedRunnerWebControlOperation =
+  | "assistant_runtime_issue_export"
+  | "browser_vault_replica_publish"
+  | "device_sync_connect_link"
+  | "device_sync_dirty_ack"
+  | "device_sync_pending_dirty_state"
+  | "device_sync_runtime_apply"
+  | "device_sync_runtime_snapshot"
+  | "mailbox_fetch"
+  | "mailbox_payload_decode"
+  | "mailbox_payload_fetch"
+  | "runtime_log_write"
+  | "usage_recording"
+  | "workspace_checkpoint"
+  | "workspace_read"
+  | "web_control_blocked";
+
+export interface HostedRunnerWebControlPolicy {
+  allowed: boolean;
+  operation: HostedRunnerWebControlOperation;
+}
+
+const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebControlOperation>([
+  [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
+  [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
+  [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
+  [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
+  [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
+  [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
+  [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
+  [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
+]);
 
 export function isAllowedHostedRunnerWebControlPath(path: string): boolean {
   return isAllowedHostedRunnerWebControlRequest({
@@ -39,27 +78,7 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
   method: string;
   path: string;
 }): boolean {
-  if (input.method === "GET") {
-    return input.path === HOSTED_RUNTIME_WORKSPACE_PATH;
-  }
-
-  if (input.method !== "POST") {
-    return false;
-  }
-
-  const path = input.path;
-  return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
-    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH
-    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH
-    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
-    || path === HOSTED_RUNTIME_LOG_PATH
-    || path === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
-    || path === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
-    || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
-    || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
-    || path === HOSTED_RUNTIME_ISSUE_RECORD_PATH
-    || path === HOSTED_RUNTIME_USAGE_RECORD_PATH
-    || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
+  return readHostedRunnerWebControlPolicy(input).allowed;
 }
 
 export function assertAllowedHostedRunnerWebControlRequest(input: {
@@ -73,6 +92,62 @@ export function assertAllowedHostedRunnerWebControlRequest(input: {
   throw new TypeError(
     `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
   );
+}
+
+export function readHostedRunnerWebControlOperation(input: {
+  method: string;
+  path: string;
+}): HostedRunnerWebControlOperation {
+  return readHostedRunnerWebControlPolicy(input).operation;
+}
+
+export function readHostedRunnerWebControlPolicy(input: {
+  method: string;
+  path: string;
+}): HostedRunnerWebControlPolicy {
+  if (
+    input.method === "GET"
+    && input.path === HOSTED_RUNTIME_WORKSPACE_PATH
+  ) {
+    return {
+      allowed: true,
+      operation: "workspace_read",
+    };
+  }
+
+  if (input.method !== "POST") {
+    return {
+      allowed: false,
+      operation: "web_control_blocked",
+    };
+  }
+
+  const path = input.path;
+  if (path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
+    return {
+      allowed: false,
+      operation: "mailbox_payload_decode",
+    };
+  }
+  const operation = HOSTED_RUNNER_WEB_CONTROL_POST_POLICY.get(path);
+  if (operation) {
+    return {
+      allowed: true,
+      operation,
+    };
+  }
+
+  if (HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path)) {
+    return {
+      allowed: true,
+      operation: "device_sync_connect_link",
+    };
+  }
+
+  return {
+    allowed: false,
+    operation: "web_control_blocked",
+  };
 }
 
 export function readHostedRunnerWebControlRoute(path: string): {

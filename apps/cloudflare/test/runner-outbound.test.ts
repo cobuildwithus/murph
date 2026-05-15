@@ -2,6 +2,21 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const hostedExecutionMocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: hostedExecutionMocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 import {
   attachHostedDomainRootEnvelopeSignature,
   buildHostedSecureBoxAad,
@@ -208,6 +223,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
 describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockReset();
     vi.useRealTimers();
     clearHostedRuntimeCryptoContextEnvelopeCacheForTests();
     resetRunnerOutboundSharedCachesForTest();
@@ -1588,6 +1604,81 @@ describe("handleRunnerOutboundRequest", () => {
     expect(headers.get("content-type")).toBeNull();
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          bodyPresent: false,
+          callbackSigningConfigured: true,
+          hostedWebBaseUrlHost: "web.example.test",
+          hostedWebBaseUrlProtocol: "https",
+          method: "GET",
+          operation: "workspace_read",
+          workspaceCheckpoint: false,
+        }),
+        message: "Hosted runner web-control request forwarding.",
+        phase: "wake.running",
+      }),
+    );
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          method: "GET",
+          operation: "workspace_read",
+          responseOk: true,
+          responseStatus: 200,
+          workspaceCheckpoint: false,
+        }),
+        message: "Hosted runner web-control response received.",
+        phase: "wake.running",
+      }),
+    );
+  });
+
+  it("logs non-OK hosted web-control responses without response bodies", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response("Not found", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 404,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://www.withmurph.ai",
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(404);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          contentTypePresent: true,
+          method: "GET",
+          operation: "workspace_read",
+          responseOk: false,
+          responseStatus: 404,
+        }),
+        level: "warn",
+        message: "Hosted runner web-control response received.",
+        phase: "wake.running",
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("Not found");
+    expect(serializedLogs).not.toContain("member_123");
   });
 
   it("selects ingress or runtime roots from the signed hosted crypto context", async () => {

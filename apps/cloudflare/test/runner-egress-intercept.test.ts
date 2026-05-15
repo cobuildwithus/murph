@@ -173,6 +173,54 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          boundUserIdHeaderPresent: true,
+          containerIdPresent: true,
+          hostKind: "web_control_plane",
+          method: "GET",
+          operation: "workspace_read",
+          runtimeAuthorityHeadersPresent: false,
+        }),
+        message: "Hosted runner internal outbound request received.",
+        phase: "wake.running",
+      }),
+    );
+  });
+
+  it("logs unexpected internal outbound methods with a fixed method vocabulary", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+        },
+        method: "SECRET123",
+      }),
+      createInterceptEnv({}),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(405);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          method: "other",
+          operation: "web_control_blocked",
+        }),
+        message: "Hosted runner internal outbound request received.",
+        phase: "wake.running",
+      }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      "SECRET123",
+    );
   });
 
   it("injects OpenAI authorization with a valid runtime write fence and strips authority headers", async () => {
@@ -584,10 +632,13 @@ describe("hostedRunnerIntercept", () => {
           host: "unexpected.example.test",
           method: "POST",
           policy: "open_internet_passthrough",
+          userIdPresent: true,
         },
         message: "Hosted runner open-internet passthrough forwarded outbound request.",
-        userId: "member_123",
       }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      "member_123",
     );
   });
 
