@@ -111,6 +111,7 @@ import {
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
+  HostedRuntimeDeviceSyncPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
   RuntimeLivenessPort,
@@ -124,6 +125,8 @@ const TEST_HOSTED_CODEX_FORWARDED_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
   OPENAI_API_KEY: "test-vercel-key",
 } as const;
+
+process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS ??= "0";
 
 function continueRuntimeLiveness(): Awaited<ReturnType<RuntimeLivenessPort["touch"]>> {
   return {
@@ -154,7 +157,324 @@ async function describeCheckpointConversationWatermarkTransition(
   return `idle->${await readCheckpointConversationWatermark(input, vaultRoot)}`;
 }
 
+interface CapturedHostedExecutionLog {
+  component?: unknown;
+  details?: Record<string, unknown>;
+  message?: unknown;
+  userId?: unknown;
+}
+
+function readCapturedHostedExecutionLogs(spy: {
+  mock: { calls: unknown[][] };
+}): CapturedHostedExecutionLog[] {
+  return spy.mock.calls.flatMap(([payload]) => {
+    if (typeof payload !== "string") {
+      return [];
+    }
+
+    try {
+      return [JSON.parse(payload) as CapturedHostedExecutionLog];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function readCapturedRuntimePhaseLogs(input: {
+  attemptId: string;
+  spy: { mock: { calls: unknown[][] } };
+}): Array<CapturedHostedExecutionLog & {
+  component: "runtime";
+  details: Record<string, unknown>;
+  message: string;
+  userId: null;
+}> {
+  return readCapturedHostedExecutionLogs(input.spy)
+    .filter((entry): entry is CapturedHostedExecutionLog & {
+      component: "runtime";
+      details: Record<string, unknown>;
+      message: string;
+      userId: null;
+    } =>
+      entry.component === "runtime"
+      && entry.message === "Hosted workspace runtime phase boundary."
+      && entry.userId === null
+      && entry.details?.attemptId === input.attemptId
+    );
+}
+
 describe("hosted workspace runtime entrypoint", () => {
+  test("emits metadata-only phase boundary logs for runtime startup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_phase_boundaries",
+          leaseGeneration: "7",
+          reason: "nudge",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          throw new Error("Phase-boundary test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Phase-boundary test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        vaultRoot,
+      });
+
+      const phaseLogs = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_phase_boundaries",
+        spy: consoleInfo,
+      });
+
+      assert.deepEqual(phaseLogs.map((entry) => [
+        entry.details.runtimePhase,
+        entry.details.runtimePhaseStatus,
+      ]), [
+        ["workspace.read", "start"],
+        ["workspace.read", "done"],
+        ["workspace.restore", "start"],
+        ["workspace.restore", "done"],
+        ["codex.prepare", "start"],
+        ["codex.prepare", "done"],
+        ["mailbox.import.initial", "start"],
+        ["mailbox.import.initial", "done"],
+        ["inbox.sidecar", "start"],
+        ["inbox.sidecar", "done"],
+        ["cli.bridge", "start"],
+        ["cli.bridge", "done"],
+        ["foreground.pass", "start"],
+        ["foreground.pass", "done"],
+        ["runtime.return", "done"],
+      ]);
+      assert.equal(phaseLogs.every((entry) => entry.userId === null), true);
+      assert.equal(
+        phaseLogs.some((entry) => JSON.stringify(entry).includes(TEST_USER_ID)),
+        false,
+      );
+      expect(phaseLogs[1]?.details).toEqual(expect.objectContaining({
+        actualWorkspaceVersion: "0",
+        workspacePresent: true,
+      }));
+      expect(phaseLogs[7]?.details).toEqual(expect.objectContaining({
+        fetchedCount: 0,
+        importedCount: 0,
+      }));
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("emits metadata-only phase boundary logs for checkpoint and bridge shutdown", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      async ackDirtyStateProcessed() {
+        throw new Error("Device sync ack should not run.");
+      },
+      async applyUpdates() {
+        throw new Error("Device sync apply should not run.");
+      },
+      async createConnectLink() {
+        throw new Error("Device sync connect link should not run.");
+      },
+      async fetchDirtyStates() {
+        throw new Error("Device sync dirty state should not run.");
+      },
+      async fetchSnapshot() {
+        throw new Error("Device sync snapshot should not run.");
+      },
+    };
+
+    try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_phase_checkpoint",
+          idleCheckpointDelayMs: 1,
+          leaseGeneration: "7",
+          reason: "nudge",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createBundleRef({
+              hash: "d".repeat(64),
+              key: "users/bundles/member-synthetic/phase-checkpoint.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          deviceSyncPort,
+          mailboxPort: createMailboxPort({
+            events: [],
+            items: [createMailboxItem({ laneSeq: "1" })],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events: [],
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        vaultRoot,
+      });
+
+      const phaseLogs = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_phase_checkpoint",
+        spy: consoleInfo,
+      });
+      expect(phaseLogs.map((entry) => [
+        entry.details.runtimePhase,
+        entry.details.runtimePhaseStatus,
+      ])).toEqual(expect.arrayContaining([
+        ["cli.bridge", "done"],
+        ["workspace.checkpoint.idle_shutdown", "start"],
+        ["workspace.checkpoint.idle_shutdown", "done"],
+        ["cli.bridge.stop", "start"],
+        ["cli.bridge.stop", "done"],
+        ["runtime.return", "done"],
+      ]));
+      expect(
+        phaseLogs.find((entry) =>
+          entry.details.runtimePhase === "cli.bridge"
+          && entry.details.runtimePhaseStatus === "done"
+        )?.details,
+      ).toEqual(expect.objectContaining({
+        bridgeStarted: true,
+      }));
+      assert.equal(phaseLogs.every((entry) => entry.userId === null), true);
+      assert.equal(
+        readCapturedHostedExecutionLogs(consoleInfo)
+          .some((entry) => JSON.stringify(entry).includes(TEST_USER_ID)),
+        false,
+      );
+      assert.equal(checkpointRequests.length, 1);
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("emits metadata-only phase boundary logs for runtime failures", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const hiddenFailureMessage = "hidden prompt transcript failure";
+    const hiddenFailureDetail = "hidden mailbox payload detail";
+
+    try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_phase_failure",
+          leaseGeneration: "7",
+          reason: "nudge",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          throw new Error("Failure phase test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Failure phase test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          throw Object.assign(new Error(hiddenFailureMessage), {
+            details: {
+              payload: hiddenFailureDetail,
+            },
+          });
+        },
+        vaultRoot,
+      })).rejects.toThrow(hiddenFailureMessage);
+
+      const phaseLogs = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_phase_failure",
+        spy: consoleError,
+      });
+      const failureLogs = phaseLogs.filter((entry) =>
+        entry.details.runtimePhaseStatus === "fail"
+      );
+      expect(failureLogs.map((entry) => entry.details.runtimePhase)).toEqual([
+        "foreground.pass",
+        "runtime",
+      ]);
+      for (const entry of failureLogs) {
+        expect(entry.details).toEqual(expect.objectContaining({
+          failureDetailsPresent: true,
+          failureMessagePresent: true,
+          failureName: "Error",
+        }));
+      }
+      const serializedLogs = JSON.stringify([
+        ...readCapturedHostedExecutionLogs(consoleInfo),
+        ...readCapturedHostedExecutionLogs(consoleError),
+      ]);
+      expect(serializedLogs).not.toContain(TEST_USER_ID);
+      expect(serializedLogs).not.toContain(hiddenFailureMessage);
+      expect(serializedLogs).not.toContain(hiddenFailureDetail);
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleError.mockRestore();
+      consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("reads workspace, imports mailbox prefix, snapshots through the semantic checkpoint builder, and checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -4230,6 +4550,7 @@ function createPlatform(input: {
   artifactGetCalls?: string[];
   artifactLabelsByHash?: ReadonlyMap<string, string>;
   artifactPutCalls?: Array<{ byteLength: number; sha256: string }>;
+  deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   events?: string[];
   logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort | null;
@@ -4269,6 +4590,7 @@ function createPlatform(input: {
         return undefined;
       },
     },
+    ...(input.deviceSyncPort ? { deviceSyncPort: input.deviceSyncPort } : {}),
     ...(input.logRequests
       ? {
           logPort: {

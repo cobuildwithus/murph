@@ -4,6 +4,12 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  type HostedExecutionLogPhase,
+  type HostedExecutionStructuredLogDetails,
+} from "@murphai/hosted-execution";
+import {
   normalizeHostedAssistantRuntimeConfig,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
@@ -269,6 +275,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   const runtimeAbortController = new AbortController();
   const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
+  const runtimeLogContext = {
+    attemptId: input.request.attemptId,
+    leaseGeneration: input.request.leaseGeneration,
+    workspaceVersion: input.request.workspaceVersion,
+  };
   const assertRuntimeNotAborted = () => {
     if (runtimeAbortController.signal.aborted) {
       throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
@@ -313,10 +324,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
 
   try {
+    emitHostedRuntimePhaseLog({
+      input,
+      requestId,
+      stage: "workspace.read",
+      status: "start",
+    });
     const workspaceRead = await raceHostedRuntimeCancellation(
       workspacePort.read(),
       runtimeAbortController.signal,
     );
+    emitHostedRuntimePhaseLog({
+      details: {
+        actualWorkspaceVersion: workspaceRead.workspace?.version ?? null,
+        workspacePresent: workspaceRead.workspace !== null,
+      },
+      input,
+      requestId,
+      stage: "workspace.read",
+      status: "done",
+    });
     assertRuntimeNotAborted();
     assertWorkspaceRunVersionMatchesRequest({
       expectedWorkspaceVersion: input.request.workspaceVersion,
@@ -336,11 +363,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
     let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
-    const runtimeLogContext = {
-      attemptId: input.request.attemptId,
-      leaseGeneration: input.request.leaseGeneration,
-      workspaceVersion: input.request.workspaceVersion,
-    };
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
       mailboxBudget.importItem(
         item,
@@ -373,6 +395,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: runtimeAbortController.signal,
         },
       );
+    emitHostedRuntimePhaseLog({
+      input,
+      requestId,
+      stage: "workspace.restore",
+      status: "start",
+    });
     const restored = await raceHostedRuntimeCancellation(
       restoreHostedWorkspaceRuntimeJobWorkspace({
         logContext: runtimeLogContext,
@@ -382,6 +410,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
+    emitHostedRuntimePhaseLog({
+      details: {
+        materializedArtifactPathCount: restored.materializedArtifactPaths.size,
+        restoreMode: restored.mode,
+        restoreWasCold: restored.restoreWasCold,
+      },
+      input,
+      requestId,
+      stage: "workspace.restore",
+      status: "done",
+    });
     hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeNotAborted();
 
@@ -440,6 +479,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration]: input.request.leaseGeneration,
       [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion]: input.request.workspaceVersion,
     };
+    emitHostedRuntimePhaseLog({
+      details: {
+        runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
+      },
+      input,
+      requestId,
+      stage: "codex.prepare",
+      status: "start",
+    });
     const hostedCodexRuntime = await raceHostedRuntimeCancellation(
       prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot: restored.operatorHomeRoot,
@@ -447,7 +495,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
+    emitHostedRuntimePhaseLog({
+      details: {
+        runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
+      },
+      input,
+      requestId,
+      stage: "codex.prepare",
+      status: "done",
+    });
     assertRuntimeNotAborted();
+    emitHostedRuntimePhaseLog({
+      details: {
+        foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
+        mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
+      },
+      input,
+      requestId,
+      stage: "mailbox.import.initial",
+      status: "start",
+    });
     const initialMailboxImport = await raceHostedRuntimeCancellation(
       withHostedProcessEnvironment(
         {
@@ -466,11 +533,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ),
       runtimeAbortController.signal,
     );
+    emitHostedRuntimePhaseLog({
+      details: {
+        checkpointDeferred: initialMailboxImport.checkpointDeferred,
+        checkpointed: initialMailboxImport.checkpoint?.checkpointed ?? false,
+        fetchedCount: initialMailboxImport.importResult.fetchedCount,
+        importedCount: initialMailboxImport.importResult.importedCount,
+        stateChanged: initialMailboxImport.stateChanged,
+      },
+      input,
+      requestId,
+      stage: "mailbox.import.initial",
+      status: "done",
+    });
     assertRuntimeNotAborted();
     if (restored.restoreWasCold) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
     }
     const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
+    emitHostedRuntimePhaseLog({
+      details: {
+        inboxReady,
+        rebuild: !inboxReady && restored.restoreWasCold,
+        restoreWasCold: restored.restoreWasCold,
+      },
+      input,
+      requestId,
+      stage: "inbox.sidecar",
+      status: "start",
+    });
     await raceHostedRuntimeCancellation(
       ensureHostedInboxSidecarReady({
         bestEffort: true,
@@ -480,10 +571,34 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
+    emitHostedRuntimePhaseLog({
+      details: {
+        rebuild: !inboxReady && restored.restoreWasCold,
+      },
+      input,
+      requestId,
+      stage: "inbox.sidecar",
+      status: "done",
+    });
     assertRuntimeNotAborted();
+    emitHostedRuntimePhaseLog({
+      input,
+      requestId,
+      stage: "cli.bridge",
+      status: "start",
+    });
     const hostedCliBridge = await startHostedCliRuntimeBridge({
       deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
       messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+    });
+    emitHostedRuntimePhaseLog({
+      details: {
+        bridgeStarted: hostedCliBridge !== null,
+      },
+      input,
+      requestId,
+      stage: "cli.bridge",
+      status: "done",
     });
     const runtimeEnv = {
       ...hostedCodexRuntime.runtimeEnv,
@@ -493,32 +608,74 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       requestId: string;
       workspace: HostedWorkspaceState | null;
-    }): Promise<HostedWorkspaceRunnerResult> => await raceHostedRuntimeCancellation(
-      withHostedProcessEnvironment(
-        {
-          envOverrides: runtimeEnv,
-          operatorHomeRoot: restored.operatorHomeRoot,
-          vaultRoot: restored.vaultRoot,
+    }): Promise<HostedWorkspaceRunnerResult> => {
+      emitHostedRuntimePhaseLog({
+        details: {
+          initialMailboxImportProvided: passInput.initialMailboxImport !== undefined,
+          passRequestId: passInput.requestId,
+          passWorkspaceVersion: passInput.workspace?.version ?? null,
+          workspacePresent: passInput.workspace !== null,
         },
-        async () =>
-          runHostedWorkspaceUntilIdleOrBudget({
-            ...baseRunnerInput,
-            initialMailboxImport: passInput.initialMailboxImport,
-            requestId: passInput.requestId,
-            runAssistantPhase: (phaseInput) =>
-              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-                ...phaseInput,
-                request: input.request,
-                restored,
-                runtime: foregroundRuntime,
-                runtimeEnv,
-                signal: runtimeAbortController.signal,
+        input,
+        requestId,
+        stage: "foreground.pass",
+        status: "start",
+      });
+      try {
+        const passResult = await raceHostedRuntimeCancellation(
+          withHostedProcessEnvironment(
+            {
+              envOverrides: runtimeEnv,
+              operatorHomeRoot: restored.operatorHomeRoot,
+              vaultRoot: restored.vaultRoot,
+            },
+            async () =>
+              runHostedWorkspaceUntilIdleOrBudget({
+                ...baseRunnerInput,
+                initialMailboxImport: passInput.initialMailboxImport,
+                requestId: passInput.requestId,
+                runAssistantPhase: (phaseInput) =>
+                  (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                    ...phaseInput,
+                    request: input.request,
+                    restored,
+                    runtime: foregroundRuntime,
+                    runtimeEnv,
+                    signal: runtimeAbortController.signal,
+                  }),
+                workspace: passInput.workspace,
               }),
-            workspace: passInput.workspace,
-          }),
-      ),
-      runtimeAbortController.signal,
-    );
+          ),
+          runtimeAbortController.signal,
+        );
+        emitHostedRuntimePhaseLog({
+          details: {
+            assistantProgressed: passResult.assistantPhaseResult?.progressed === true,
+            latestWorkspacePresent: passResult.latestWorkspace !== null,
+            latestWorkspaceVersion: passResult.latestWorkspace?.version ?? null,
+            passRequestId: passInput.requestId,
+            runtimeStateDirty: passResult.runtimeStateDirty,
+          },
+          input,
+          requestId,
+          stage: "foreground.pass",
+          status: "done",
+        });
+        return passResult;
+      } catch (error) {
+        emitHostedRuntimePhaseLog({
+          details: {
+            passRequestId: passInput.requestId,
+          },
+          error,
+          input,
+          requestId,
+          stage: "foreground.pass",
+          status: "fail",
+        });
+        throw error;
+      }
+    };
     const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
       input.request.idleCheckpointDelayMs,
     );
@@ -542,16 +699,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         result,
         workspace: workspaceRead.workspace,
       });
+      const resolveActiveCheckpointStartByMs = () => {
+        const projectedWakeCheckpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
+          commitTimeoutMs,
+          deadlineAt: accumulatedProjection.nextWakeAt,
+        });
+        return earliestHostedRuntimeFiniteMs(
+          hostDeadlineCheckpointStartByMs,
+          projectedWakeCheckpointStartByMs,
+        );
+      };
       while (runtimeStateDirty) {
         if (accumulatedProjection.status !== "budget_exhausted") {
-          const projectedWakeCheckpointStartByMs = resolveHostedRuntimeCheckpointStartByMs({
-            commitTimeoutMs,
-            deadlineAt: accumulatedProjection.nextWakeAt,
-          });
-          const checkpointStartByMs = earliestHostedRuntimeFiniteMs(
-            hostDeadlineCheckpointStartByMs,
-            projectedWakeCheckpointStartByMs,
-          );
+          const checkpointStartByMs = resolveActiveCheckpointStartByMs();
           const checkpointWaitResult = await waitForHostedRuntimeIdleCheckpointWindow({
             checkpointStartByMs,
             idleCheckpointDelayMs,
@@ -579,6 +739,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
         }
 
+        const checkpointStartByMs = resolveActiveCheckpointStartByMs();
+        emitHostedRuntimePhaseLog({
+          details: {
+            checkpointStartByMs,
+            nextWakeAtPresent: accumulatedProjection.nextWakeAt !== null,
+            nextWakeReasonPresent: accumulatedProjection.nextWakeReason !== null,
+          },
+          input,
+          phase: "checkpoint",
+          requestId,
+          stage: "workspace.checkpoint.idle_shutdown",
+          status: "start",
+        });
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
@@ -589,6 +762,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           redactedStatus: accumulatedProjection.redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           workspacePort: foregroundWorkspacePort,
+        });
+        emitHostedRuntimePhaseLog({
+          details: {
+            checkpointed: checkpoint.checkpointed,
+            checkpointWorkspaceVersion: checkpoint.workspace.version,
+          },
+          input,
+          phase: "checkpoint",
+          requestId,
+          stage: "workspace.checkpoint.idle_shutdown",
+          status: "done",
         });
         checkpointMetadata.expectedWorkspaceVersion = checkpoint.workspace.version;
         checkpointMetadata.nextWakeAt = checkpoint.workspace.nextWakeAt ?? null;
@@ -616,7 +800,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeStateDirty = result.runtimeStateDirty;
           continue;
         }
-        return {
+        const invocationResult = {
           ...(checkpoint.workspace.nextWakeAt === undefined
             ? {}
             : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
@@ -626,9 +810,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
           }),
         };
+        emitHostedRuntimePhaseLog({
+          details: {
+            invocationStatus: invocationResult.status,
+            nextWakeAtPresent: Object.hasOwn(invocationResult, "nextWakeAt")
+              && invocationResult.nextWakeAt !== null,
+          },
+          input,
+          requestId,
+          stage: "runtime.return",
+          status: "done",
+        });
+        return invocationResult;
       }
     } finally {
-      await hostedCliBridge?.stop();
+      if (hostedCliBridge) {
+        emitHostedRuntimePhaseLog({
+          input,
+          requestId,
+          stage: "cli.bridge.stop",
+          status: "start",
+        });
+        await hostedCliBridge.stop();
+        emitHostedRuntimePhaseLog({
+          input,
+          requestId,
+          stage: "cli.bridge.stop",
+          status: "done",
+        });
+      }
     }
     assertRuntimeNotAborted();
     const projection = buildHostedWorkspaceInvocationProjection({
@@ -641,14 +851,85 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         projection.committedWorkspace?.snapshotRef ?? null,
       );
     }
-    return {
+    const invocationResult = {
       ...(projection.nextWakeAt === undefined ? {} : { nextWakeAt: projection.nextWakeAt }),
       redactedStatus: projection.redactedStatus,
       status: projection.status,
     };
+    emitHostedRuntimePhaseLog({
+      details: {
+        invocationStatus: invocationResult.status,
+        nextWakeAtPresent: Object.hasOwn(invocationResult, "nextWakeAt")
+          && invocationResult.nextWakeAt !== null,
+      },
+      input,
+      requestId,
+      stage: "runtime.return",
+      status: "done",
+    });
+    return invocationResult;
   } catch (error) {
+    emitHostedRuntimePhaseLog({
+      error,
+      input,
+      requestId,
+      stage: "runtime",
+      status: "fail",
+    });
     throw error;
   }
+}
+
+type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
+
+function emitHostedRuntimePhaseLog(input: {
+  details?: HostedExecutionStructuredLogDetails;
+  error?: unknown;
+  input: HostedAssistantWorkspaceRuntimeJobInput;
+  phase?: HostedExecutionLogPhase;
+  requestId: string;
+  stage: string;
+  status: HostedRuntimePhaseLogStatus;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      attemptId: input.input.request.attemptId,
+      leaseGeneration: input.input.request.leaseGeneration,
+      requestId: input.requestId,
+      runtimePhase: input.stage,
+      runtimePhaseStatus: input.status,
+      workspaceVersion: input.input.request.workspaceVersion,
+      ...buildHostedRuntimePhaseFailureMetadata(input.error),
+      ...(input.details ?? {}),
+    },
+    level: input.status === "fail" ? "error" : "info",
+    message: "Hosted workspace runtime phase boundary.",
+    phase: input.phase ?? (input.status === "fail" ? "failed" : "wake.running"),
+    userId: null,
+  });
+}
+
+function buildHostedRuntimePhaseFailureMetadata(
+  error: unknown,
+): HostedExecutionStructuredLogDetails {
+  if (error === undefined) {
+    return {};
+  }
+
+  return {
+    failureDetailsPresent: hasHostedRuntimePhaseOwnProperty(error, "details"),
+    failureMessagePresent: error instanceof Error && error.message.trim().length > 0,
+    failureName: readHostedExecutionSafeErrorName(error) ?? null,
+  };
+}
+
+function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && Object.prototype.hasOwnProperty.call(error, key),
+  );
 }
 
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;

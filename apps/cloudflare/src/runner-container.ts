@@ -4,6 +4,7 @@ import {
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
+  summarizeHostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
@@ -43,6 +44,16 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
+const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
+  "Hosted bundle archive validation failed.",
+  "Hosted execution authorization failed.",
+  "Hosted execution configuration is invalid.",
+  "Hosted execution rejected an invalid request.",
+  "Hosted execution runtime failed.",
+  "Hosted execution timed out.",
+  "Invalid request.",
+  "Request body too large.",
+]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
@@ -1168,7 +1179,7 @@ async function classifyHostedRunnerContainerErrorResponse(
     error?: unknown;
     errorName?: unknown;
   } | null = null;
-  let responseBodyPreview: string | null = null;
+  let responseJsonParseFailed = false;
 
   try {
     payload = await response.clone().json() as {
@@ -1177,37 +1188,30 @@ async function classifyHostedRunnerContainerErrorResponse(
     };
   } catch {
     payload = null;
-  }
-
-  if (!payload) {
-    try {
-      const raw = await response.clone().text();
-      const trimmed = raw.trim();
-      responseBodyPreview = trimmed.length > 0 ? trimmed.slice(0, 500) : null;
-    } catch {
-      responseBodyPreview = null;
-    }
+    responseJsonParseFailed = true;
   }
 
   const code = typeof payload?.code === "string" && payload.code.trim().length > 0
     ? payload.code
     : null;
+  const responseMetadata = payload
+    ? {}
+    : buildHostedRunnerContainerNonJsonResponseMetadata(response);
   const details = sanitizeHostedExecutionStructuredLogDetails({
-    ...(payload?.details && typeof payload.details === "object" && !Array.isArray(payload.details)
-      ? payload.details as HostedExecutionStructuredLogDetails
-      : {}),
-    ...(responseBodyPreview ? { responseBodyPreview } : {}),
+    ...buildHostedRunnerContainerPayloadDetailsMetadata(payload?.details),
+    ...(responseJsonParseFailed ? { responseJsonParseFailed } : {}),
+    ...responseMetadata,
   });
-  const message = typeof payload?.error === "string" && payload.error.trim().length > 0
+  const safePayloadMessage = readHostedRunnerContainerSafePayloadMessage(payload?.error)
+    ?? summarizeHostedRunnerContainerErrorCode(code);
+  const message = safePayloadMessage
     ? formatHostedRunnerContainerErrorMessage({
         code,
         details,
-        message: payload.error,
+        message: safePayloadMessage,
         status: response.status,
       })
-    : responseBodyPreview
-      ? `Hosted runner container returned HTTP ${response.status}: ${responseBodyPreview.slice(0, 200)}`
-      : `Hosted runner container returned HTTP ${response.status}.`;
+    : `Hosted runner container returned HTTP ${response.status}.`;
   const payloadErrorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
     ? payload.errorName.trim()
     : null;
@@ -1241,6 +1245,209 @@ async function classifyHostedRunnerContainerErrorResponse(
   error.status = response.status;
   error.statusCode = response.status;
   return error;
+}
+
+function buildHostedRunnerContainerPayloadDetailsMetadata(
+  details: unknown,
+): HostedExecutionStructuredLogDetails {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return {};
+  }
+
+  const record = details as Record<string, unknown>;
+  const metadata: HostedExecutionStructuredLogDetails = {
+    payloadDetailsPresent: true,
+  };
+  const errorCodeDetail = readHostedRunnerContainerSafeCode(record.errorCodeDetail);
+  if (errorCodeDetail) {
+    metadata.errorCodeDetail = errorCodeDetail;
+  }
+  if (hasNonEmptyHostedRunnerContainerString(record.errorDetail)) {
+    metadata.errorDetailPresent = true;
+  }
+  if (hasNonEmptyHostedRunnerContainerString(record.errorCause)) {
+    metadata.errorCausePresent = true;
+  }
+  if (Array.isArray(record.stackPreview) && record.stackPreview.length > 0) {
+    metadata.stackPreviewPresent = true;
+  }
+
+  const errorStatus = record.errorStatus;
+  if (
+    typeof errorStatus === "number"
+    && Number.isInteger(errorStatus)
+    && errorStatus >= 100
+    && errorStatus <= 599
+  ) {
+    metadata.errorStatus = errorStatus;
+  }
+
+  const childProcess = readHostedRunnerContainerRecordProperty(record, "childProcess");
+  if (childProcess) {
+    metadata.childProcess = buildHostedRunnerContainerChildProcessMetadata(childProcess);
+  }
+
+  for (const [key, value] of Object.entries(readHostedRunnerContainerResponseMetadata(record))) {
+    metadata[key] = value;
+  }
+
+  return metadata;
+}
+
+function readHostedRunnerContainerResponseMetadata(
+  record: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {};
+  if (typeof record.responseJsonParseFailed === "boolean") {
+    metadata.responseJsonParseFailed = record.responseJsonParseFailed;
+  }
+  if (typeof record.responseBodyPreviewOmitted === "boolean") {
+    metadata.responseBodyPreviewOmitted = record.responseBodyPreviewOmitted;
+  }
+  if (typeof record.responseBodyPresent === "boolean") {
+    metadata.responseBodyPresent = record.responseBodyPresent;
+  }
+  if (typeof record.responseContentLengthBytes === "number" && Number.isSafeInteger(record.responseContentLengthBytes)) {
+    metadata.responseContentLengthBytes = record.responseContentLengthBytes;
+  }
+  const responseContentType = readHostedRunnerContainerSafeContentType(record.responseContentType);
+  if (responseContentType) {
+    metadata.responseContentType = responseContentType;
+  }
+
+  return metadata;
+}
+
+function buildHostedRunnerContainerChildProcessMetadata(
+  childProcess: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {
+    abortedByParent: childProcess.abortedByParent === true,
+    abortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
+      || hasNonEmptyHostedRunnerContainerString(childProcess.abortReasonMessage),
+    stderrTailPresent: childProcess.stderrTailPresent === true
+      || hasNonEmptyHostedRunnerContainerString(childProcess.stderrTail),
+    stdoutTailPresent: childProcess.stdoutTailPresent === true
+      || hasNonEmptyHostedRunnerContainerString(childProcess.stdoutTail),
+  };
+  const exitCode = childProcess.exitCode;
+  if (typeof exitCode === "number" || exitCode === null) {
+    metadata.exitCode = exitCode;
+  }
+
+  const signal = readHostedRunnerContainerSafeNullableCode(childProcess.signal);
+  if (signal !== undefined) {
+    metadata.signal = signal;
+  }
+
+  const abortReasonName = readHostedRunnerContainerSafeCode(childProcess.abortReasonName);
+  if (abortReasonName) {
+    metadata.abortReasonName = abortReasonName;
+  }
+
+  return metadata;
+}
+
+function readHostedRunnerContainerRecordProperty(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record[key];
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readHostedRunnerContainerSafePayloadMessage(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES.has(normalized)
+    ? normalized
+    : null;
+}
+
+function summarizeHostedRunnerContainerErrorCode(code: string | null): string | null {
+  return code === "HOSTED_ASSISTANT_CONFIG_REQUIRED"
+    ? summarizeHostedExecutionErrorCode("configuration_error")
+    : summarizeHostedExecutionErrorCode(code);
+}
+
+function readHostedRunnerContainerSafeNullableCode(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return readHostedRunnerContainerSafeCode(value) ?? undefined;
+}
+
+function readHostedRunnerContainerSafeCode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedRunnerContainerSafeContentType(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/u
+    .test(normalized)
+    ? normalized
+    : null;
+}
+
+function hasNonEmptyHostedRunnerContainerString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function buildHostedRunnerContainerNonJsonResponseMetadata(
+  response: Response,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {
+    responseBodyPreviewOmitted: true,
+  };
+  const contentLengthBytes = readHostedRunnerContainerContentLengthBytes(response);
+  if (contentLengthBytes !== null) {
+    metadata.responseContentLengthBytes = contentLengthBytes;
+    metadata.responseBodyPresent = contentLengthBytes > 0;
+  }
+
+  const contentType = readHostedRunnerContainerContentType(response);
+  if (contentType) {
+    metadata.responseContentType = contentType;
+  }
+
+  return metadata;
+}
+
+function readHostedRunnerContainerContentLengthBytes(response: Response): number | null {
+  const raw = response.headers.get("content-length")?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readHostedRunnerContainerContentType(response: Response): string | null {
+  const raw = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/u
+    .test(raw)
+    ? raw
+    : null;
 }
 
 function formatHostedRunnerContainerErrorMessage(input: {
@@ -1723,6 +1930,7 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
 
   return {
     detailsKeys: Object.keys(diagnostics).sort(),
+    ...buildRunnerContainerResponseMetadataDetails(error),
     ...(typeof diagnostics.errorCode === "string" ? { errorCode: diagnostics.errorCode } : {}),
     ...(typeof diagnostics.errorCodeDetail === "string"
       ? { errorCodeDetail: diagnostics.errorCodeDetail }
@@ -1732,6 +1940,65 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExecutionStructuredLogDetails {
+  const details = readRunnerContainerErrorDetails(error);
+  if (!details) {
+    return {};
+  }
+
+  const result: HostedExecutionStructuredLogDetails = {
+    runnerResponseDetailsKeys: Object.keys(details).sort(),
+  };
+  const childProcess = details.childProcess;
+  if (!isStructuredLogDetailsRecord(childProcess)) {
+    return result;
+  }
+
+  const exitCode = childProcess.exitCode;
+  const signal = childProcess.signal;
+  const abortReasonName = childProcess.abortReasonName;
+
+  return {
+    ...result,
+    runnerChildAbortedByParent: childProcess.abortedByParent === true,
+    ...(typeof exitCode === "number" || exitCode === null ? { runnerChildExitCode: exitCode } : {}),
+    ...(typeof signal === "string" || signal === null ? { runnerChildSignal: signal } : {}),
+    ...(typeof abortReasonName === "string" && abortReasonName.trim().length > 0
+      ? { runnerChildAbortReasonName: abortReasonName }
+      : {}),
+    runnerChildAbortReasonMessagePresent: childProcess.abortReasonMessagePresent === true
+      || hasNonEmptyStringProperty(childProcess, "abortReasonMessage"),
+    runnerChildStderrTailPresent: childProcess.stderrTailPresent === true
+      || hasNonEmptyStringProperty(childProcess, "stderrTail"),
+    runnerChildStdoutTailPresent: childProcess.stdoutTailPresent === true
+      || hasNonEmptyStringProperty(childProcess, "stdoutTail"),
+  };
+}
+
+function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructuredLogDetails | null {
+  if (!(error instanceof Error) || !("details" in error)) {
+    return null;
+  }
+
+  return sanitizeHostedExecutionStructuredLogDetails(
+    (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
+  );
+}
+
+function isStructuredLogDetailsRecord(
+  value: HostedExecutionStructuredLogDetailValue | undefined,
+): value is HostedExecutionStructuredLogDetails {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasNonEmptyStringProperty(
+  record: HostedExecutionStructuredLogDetails,
+  key: string,
+): boolean {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {
