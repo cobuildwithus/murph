@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   createCoalescingRuntimeWakeSignal,
+  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   runHostedWorkspaceRuntimeJobInProcess,
   type RuntimeWakeSignal,
 } from "@murphai/assistant-runtime";
@@ -20,6 +21,7 @@ import {
 import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
+  isHostedRuntimeInternalAuthorityRejectedError,
 } from "./runtime-platform.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
@@ -46,6 +48,11 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.js";
 import {
+  readHostedExecutionChildRuntimeErrorName,
+  type HostedExecutionChildRuntimeFailureKind,
+  type HostedExecutionChildRuntimeStage,
+} from "./runner-child-diagnostics.js";
+import {
   LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS,
 } from "./web-control-plane.js";
 import {
@@ -67,6 +74,29 @@ interface HostedExecutionChildInput {
   job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
+const HOSTED_EXECUTION_CHILD_RUNTIME_TYPE_ERROR_FAILURES = new Map<
+  string,
+  HostedExecutionChildRuntimeFailureKind
+>([
+  ["Hosted assistant runtime platform must be injected.", "missing_runtime_platform"],
+  ["Hosted workspace runtime job workspace port must be injected.", "missing_workspace_port"],
+  ["Hosted workspace runtime job workspace port must support read.", "invalid_workspace_port"],
+  ["Hosted workspace runtime job mailbox port must be injected.", "missing_mailbox_port"],
+  ["Hosted workspace runtime bridge requires an explicit vault root.", "missing_vault_root"],
+  ["Hosted workspace runtime bridge vault root must be absolute.", "relative_vault_root"],
+]);
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_FAILURES = new Map<
+  string,
+  HostedExecutionChildRuntimeFailureKind
+>([
+  ["Hosted mailbox payload decode returned invalid JSON.", "mailbox_payload_decode_invalid_json"],
+  [
+    "Hosted mailbox payload decode requires a runtime write fence.",
+    "mailbox_payload_decode_missing_write_fence",
+  ],
+]);
+
 export async function runHostedExecutionChild(
   dependencies: HostedExecutionChildDependencies = {},
 ): Promise<void> {
@@ -80,6 +110,7 @@ export async function runHostedExecutionChild(
   const setExitCode = dependencies.setExitCode ?? ((value: number) => {
     process.exitCode = value;
   });
+  let runtimeStage: HostedExecutionChildRuntimeStage = "runtime.not-started";
 
   let input: HostedExecutionChildInput;
   try {
@@ -131,6 +162,9 @@ export async function runHostedExecutionChild(
     });
     const result = await runWorkspaceChildJob({
       job: input.job,
+      noteRuntimeStage: (stage) => {
+        runtimeStage = stage;
+      },
       runWorkspaceInProcess,
       runtimeWakeSignal,
     });
@@ -149,7 +183,9 @@ export async function runHostedExecutionChild(
         errorName: error instanceof Error ? error.name : null,
       },
     });
-    const serializedError = createHostedExecutionChildRuntimeError(error);
+    const serializedError = createHostedExecutionChildRuntimeError(error, {
+      runtimeStage,
+    });
     setExitCode(1);
     sendResult({
       ok: false,
@@ -192,11 +228,13 @@ function addHostedExecutionRunnerChildRuntimeWakeListener(
 
 async function runWorkspaceChildJob(input: {
   job: HostedExecutionWorkspaceInvocationJobInput;
+  noteRuntimeStage: (stage: HostedExecutionChildRuntimeStage) => void;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
   runtimeWakeSignal: RuntimeWakeSignal;
 }) {
   let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
   const boundUserId = readHostedExecutionRunnerJobUserId(input.job);
+  input.noteRuntimeStage("bridge.platform");
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId,
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
@@ -211,6 +249,7 @@ async function runWorkspaceChildJob(input: {
       },
     },
   });
+  input.noteRuntimeStage("bridge.web-control-fetch");
   const webControlFetch = createCloudflareHostedProviderFetch(
     boundUserId,
     fetch,
@@ -219,12 +258,14 @@ async function runWorkspaceChildJob(input: {
       readCurrentLease: () => currentLease,
     },
   );
+  input.noteRuntimeStage("bridge.mailbox-decoder");
   const decodeMailboxPayload = createCloudflareHostedMailboxPayloadDecoder({
     fetchImpl: webControlFetch,
     readCurrentLease: () => currentLease,
     timeoutMs: readHostedRunnerCommitTimeoutMs(input.job.runtime?.commitTimeoutMs ?? null),
   });
 
+  input.noteRuntimeStage("bridge.options");
   const jobOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
     decodeMailboxPayload,
     platform,
@@ -240,6 +281,7 @@ async function runWorkspaceChildJob(input: {
     webControlFetch,
   });
 
+  input.noteRuntimeStage("runtime.in-process");
   return await input.runWorkspaceInProcess(input.job, {
     ...jobOptions,
     runtimeWakeSignal: input.runtimeWakeSignal,
@@ -290,13 +332,19 @@ function createHostedExecutionChildBootstrapError(error: unknown): {
   };
 }
 
-function createHostedExecutionChildRuntimeError(error: unknown): {
+function createHostedExecutionChildRuntimeError(
+  error: unknown,
+  input: {
+    runtimeStage: HostedExecutionChildRuntimeStage;
+  },
+): {
   code: string | null;
   details: Record<string, unknown> | null;
   message: string;
   name: string | null;
   stack: string | null;
 } {
+  const childRuntimeDiagnostics = buildHostedExecutionChildRuntimeErrorDiagnostics(error, input);
   return {
     code:
       error
@@ -305,15 +353,87 @@ function createHostedExecutionChildRuntimeError(error: unknown): {
       && typeof error.code === "string"
         ? error.code
         : null,
-    details: redactHostedRuntimeDiagnosticDetails(
-      extractHostedAssistantNotificationRedactedDetails(error),
-    ),
+    details: {
+      ...(redactHostedRuntimeDiagnosticDetails(
+        extractHostedAssistantNotificationRedactedDetails(error),
+      ) ?? {}),
+      ...childRuntimeDiagnostics,
+    },
     message: readHostedRuntimeChildErrorMessage(error),
     name: error instanceof Error ? error.name : null,
     stack: error instanceof Error && error.stack
       ? redactHostedRuntimeDiagnosticText(error.stack)
       : null,
   };
+}
+
+function buildHostedExecutionChildRuntimeErrorDiagnostics(
+  error: unknown,
+  input: {
+    runtimeStage: HostedExecutionChildRuntimeStage;
+  },
+): Record<string, number | string> {
+  const childRuntimeErrorName = error instanceof Error
+    ? readHostedExecutionChildRuntimeErrorName(error.name)
+    : null;
+  return {
+    childRuntimeErrorCode: deriveHostedExecutionErrorCode(error),
+    ...(childRuntimeErrorName ? { childRuntimeErrorName } : {}),
+    childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error),
+    childRuntimeStage: input.runtimeStage,
+    ...readHostedExecutionChildRuntimeStatus(error),
+  };
+}
+
+function classifyHostedExecutionChildRuntimeFailure(
+  error: unknown,
+): HostedExecutionChildRuntimeFailureKind {
+  if (error instanceof HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError) {
+    return "workspace_version_mismatch";
+  }
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+    return "stale_invocation_authority";
+  }
+  if (error instanceof TypeError) {
+    const typeFailure = HOSTED_EXECUTION_CHILD_RUNTIME_TYPE_ERROR_FAILURES.get(
+      error.message,
+    );
+    if (typeFailure) {
+      return typeFailure;
+    }
+  }
+  if (error instanceof Error) {
+    if (error.name === "HostedAssistantConfigurationError") {
+      return "hosted_assistant_configuration";
+    }
+    if (/^Hosted mailbox payload decode failed with HTTP \d{3}\.$/u.test(error.message)) {
+      return "mailbox_payload_decode_http";
+    }
+    const messageFailure = HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_FAILURES.get(
+      error.message,
+    );
+    if (messageFailure) {
+      return messageFailure;
+    }
+  }
+  return "unclassified_runtime_error";
+}
+
+function readHostedExecutionChildRuntimeStatus(
+  error: unknown,
+): Record<string, number> {
+  if (!error || typeof error !== "object") {
+    return {};
+  }
+  const status = "status" in error ? error.status : "statusCode" in error ? error.statusCode : null;
+  return (
+    typeof status === "number"
+    && Number.isInteger(status)
+    && status >= 100
+    && status <= 599
+  )
+    ? { childRuntimeErrorStatus: status }
+    : {};
 }
 
 function readHostedRuntimeChildErrorMessage(error: unknown): string {

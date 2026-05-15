@@ -458,6 +458,12 @@ describe("runHostedExecutionChild", () => {
     );
     expect(payload.error?.message).not.toContain("fixture-local-code");
     expect(payload.error?.message).not.toContain("fixture-openai-code");
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "type_error",
+      childRuntimeErrorName: "TypeError",
+      childRuntimeFailureKind: "unclassified_runtime_error",
+      childRuntimeStage: "runtime.not-started",
+    });
   });
 
   it("redacts runtime failure diagnostics before writing the child result payload", async () => {
@@ -465,7 +471,8 @@ describe("runHostedExecutionChild", () => {
     const setExitCode = vi.fn();
     const runtimeError = new Error(
       'failed for person@example.test +15555550123 with OPENAI_API_KEY=fixture "MURPH_HOSTED_CLI_BRIDGE_TOKEN":"bridge-secret" OPENAI_API_KEY: "colon-secret" base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
-    ) as Error & { details?: Record<string, unknown> };
+    ) as Error & { details?: Record<string, unknown>; status?: number };
+    runtimeError.status = 429;
     runtimeError.details = {
       assistantProviderErrorMessage:
         ["Bearer", "provider-token at /tmp/hosted-runner/provider-detail"].join(" "),
@@ -524,6 +531,13 @@ describe("runHostedExecutionChild", () => {
     expect(payload.error?.details?.assistantProviderErrorMessage).toBe(
       ["Bearer", "[redacted] at <redacted-path>"].join(" "),
     );
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorName: "Error",
+      childRuntimeErrorStatus: 429,
+      childRuntimeFailureKind: "unclassified_runtime_error",
+      childRuntimeStage: "runtime.in-process",
+    });
     expect(JSON.stringify(payload.error?.details)).not.toContain("provider-token");
     expect(JSON.stringify(payload.error?.details)).not.toContain("nested-bridge-secret");
     expect(JSON.stringify(payload.error?.details)).not.toContain("nested-gateway-secret");

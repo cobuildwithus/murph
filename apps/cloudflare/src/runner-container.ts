@@ -32,6 +32,7 @@ import {
   type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
 import {
+  readHostedExecutionChildRuntimeDiagnosticMetadata,
   readHostedRunnerChildFirstCompletionKind,
   readHostedRunnerChildOutputMarkers,
 } from "./runner-child-diagnostics.ts";
@@ -1291,6 +1292,12 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
     metadata.childProcess = buildHostedRunnerContainerChildProcessMetadata(childProcess);
   }
 
+  for (const [key, value] of Object.entries(
+    readHostedExecutionChildRuntimeDiagnosticMetadata(record),
+  )) {
+    metadata[key] = value;
+  }
+
   for (const [key, value] of Object.entries(readHostedRunnerContainerResponseMetadata(record))) {
     metadata[key] = value;
   }
@@ -1993,6 +2000,12 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   const result: HostedExecutionStructuredLogDetails = {
     runnerResponseDetailsKeys: Object.keys(details).sort(),
   };
+  for (const [key, value] of Object.entries(
+    buildRunnerChildRuntimeDiagnosticMetadata(details),
+  )) {
+    result[key] = value;
+  }
+
   const childProcess = details.childProcess;
   if (!isStructuredLogDetailsRecord(childProcess)) {
     return result;
@@ -2044,6 +2057,30 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   }
 
   return metadata;
+}
+
+function buildRunnerChildRuntimeDiagnosticMetadata(
+  details: HostedExecutionStructuredLogDetails,
+): HostedExecutionStructuredLogDetails {
+  const childRuntimeMetadata = readHostedExecutionChildRuntimeDiagnosticMetadata(details);
+  const result: HostedExecutionStructuredLogDetails = {};
+
+  const runtimeFields = {
+    childRuntimeErrorCode: "runnerChildRuntimeErrorCode",
+    childRuntimeErrorName: "runnerChildRuntimeErrorName",
+    childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",
+    childRuntimeFailureKind: "runnerChildRuntimeFailureKind",
+    childRuntimeStage: "runnerChildRuntimeStage",
+  } as const;
+
+  for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {
+    const value = childRuntimeMetadata[sourceKey];
+    if (value !== undefined) {
+      result[targetKey] = value;
+    }
+  }
+
+  return result;
 }
 
 function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructuredLogDetails | null {

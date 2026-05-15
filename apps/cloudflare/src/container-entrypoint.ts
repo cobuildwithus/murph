@@ -20,6 +20,7 @@ import {
   type HostedExecutionRunnerJobInput,
 } from "./runner-job-transport.ts";
 import {
+  readHostedExecutionChildRuntimeDiagnosticMetadata,
   readHostedRunnerChildFirstCompletionKind,
   readHostedRunnerChildOutputMarkers,
 } from "./runner-child-diagnostics.ts";
@@ -1111,6 +1112,11 @@ function buildHostedContainerRunnerJobErrorMetadata(
     const childProcess = readHostedContainerRecordProperty(rawDetails, "childProcess");
     if (childProcess) {
       details.childProcess = buildHostedContainerChildProcessMetadata(childProcess);
+    }
+    for (const [key, value] of Object.entries(
+      readHostedExecutionChildRuntimeDiagnosticMetadata(rawDetails),
+    )) {
+      details[key] = value;
     }
     details.errorDetailPresent = hasNonEmptyHostedContainerString(rawDetails.errorDetail);
   }
