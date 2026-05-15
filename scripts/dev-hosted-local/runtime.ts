@@ -928,9 +928,6 @@ async function listHostedRunnerContainerIds(input: {
   containerIds: string[];
   result: BoundedCommandResult;
 }> {
-  const localBuildId = input.scope === "all-builds"
-    ? null
-    : resolveHostedRunnerCleanupLocalBuildId(input.env);
   const containerNamePrefix = resolveHostedRunnerContainerNamePrefix(input.env);
   const result = await runBoundedCommand({
     args: [
@@ -938,12 +935,9 @@ async function listHostedRunnerContainerIds(input: {
       "-aq",
       "--filter",
       `name=${containerNamePrefix}`,
-      ...(localBuildId
-        ? [
-          "--filter",
-          `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}=${localBuildId}`,
-        ]
-        : ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]),
+      ...(input.scope === "all-builds"
+        ? ["--filter", `label=${HOSTED_RUNNER_CONTAINER_LOCAL_BUILD_ID_LABEL}`]
+        : []),
     ],
     command: "docker",
     cwd: input.cwd,
