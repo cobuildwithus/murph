@@ -11,6 +11,8 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
+  summarizeHostedExecutionErrorCode,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   parseHostedExecutionRunnerJobInput,
@@ -170,6 +172,7 @@ export async function startHostedContainerEntrypoint(input: {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
   let activeHostedRunnerJobCount = 0;
   let activeRuntimeWake: (() => boolean) | null = null;
+  let activeRuntimeWakeAttemptId: string | null = null;
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
@@ -196,7 +199,20 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
-        if (wake?.() === true) {
+        const accepted = wake?.() === true;
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            activeHostedRunnerJobCount,
+            activeRuntimeWakePresent: wake !== null,
+            runtimeWakeAccepted: accepted,
+            workspaceAttemptId: activeRuntimeWakeAttemptId,
+          },
+          message: "Hosted container entrypoint handled runtime wake request.",
+          phase: "wake.running",
+          userId: null,
+        });
+        if (accepted) {
           response.setHeader("x-runtime-wake-accepted", "1");
         } else {
           response.setHeader("x-runtime-wake-accepted", "0");
@@ -301,7 +317,21 @@ export async function startHostedContainerEntrypoint(input: {
       const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
         onChildReadyForRuntimeWake(sendWake) {
           activeRuntimeWake = sendWake;
+          activeRuntimeWakeAttemptId = job
+            ? readHostedContainerWorkspaceAttemptId(job)
+            : null;
           runtimeWakeForRequest = sendWake;
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              activeHostedRunnerJobCount,
+              activeRuntimeWakePresent: true,
+              workspaceAttemptId: activeRuntimeWakeAttemptId,
+            },
+            message: "Hosted container child reported runtime wake readiness.",
+            phase: "wake.running",
+            userId: null,
+          });
         },
         signal: requestAbort.signal,
       });
@@ -329,10 +359,11 @@ export async function startHostedContainerEntrypoint(input: {
 
       emitHostedExecutionStructuredLog({
         component: "container",
-        error,
+        details: buildHostedContainerRunnerJobErrorMetadata(error),
+        level: "error",
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",
-        userId: typeof job === "object" && job ? readHostedExecutionRunnerJobUserId(job) : null,
+        userId: null,
       });
       if (error instanceof HostedRunnerShellIsolationError) {
         runtime.exitScheduler();
@@ -343,6 +374,7 @@ export async function startHostedContainerEntrypoint(input: {
       stopActiveJobDiagnostics?.();
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
+        activeRuntimeWakeAttemptId = null;
       }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
@@ -551,6 +583,12 @@ function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
 
   const phase = (result as { phase?: unknown }).phase;
   return typeof phase === "string" ? phase : null;
+}
+
+function readHostedContainerWorkspaceAttemptId(
+  job: HostedExecutionRunnerJobInput,
+): string | null {
+  return job.kind === "workspace-invocation" ? job.request.attemptId : null;
 }
 
 function resolveHostedContainerRuntimeDependencies(
@@ -1018,13 +1056,15 @@ export function classifyRunnerJobError(error: unknown): {
   payload: Record<string, unknown>;
   statusCode: number;
 } {
-  const details = buildHostedExecutionSafeErrorDetails(error);
+  const details = buildHostedContainerRunnerJobErrorMetadata(error);
+  const safeErrorName = readHostedExecutionSafeErrorName(error);
 
   if (isHostedAssistantConfigurationError(error)) {
     return {
       payload: {
         code: error.code,
-        error: error.message,
+        error: summarizeHostedExecutionErrorCode("configuration_error")
+          ?? summarizeHostedExecutionError(error),
         ...(details ? { details } : {}),
       },
       statusCode: 503,
@@ -1036,12 +1076,124 @@ export function classifyRunnerJobError(error: unknown): {
       code: deriveHostedExecutionErrorCode(error),
       error: summarizeHostedExecutionError(error),
       ...(details ? { details } : {}),
-      ...(readHostedExecutionSafeErrorName(error)
-        ? { errorName: readHostedExecutionSafeErrorName(error) }
-        : {}),
+      ...(safeErrorName ? { errorName: safeErrorName } : {}),
     },
     statusCode: 500,
   };
+}
+
+function buildHostedContainerRunnerJobErrorMetadata(
+  error: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const details: HostedExecutionStructuredLogDetails = {
+    detailsPresent: hasHostedContainerOwnProperty(error, "details"),
+    errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+    stackPresent: error instanceof Error && typeof error.stack === "string" && error.stack.trim().length > 0,
+  };
+  const safeErrorName = readHostedExecutionSafeErrorName(error);
+  if (safeErrorName) {
+    details.errorName = safeErrorName;
+  }
+
+  const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
+    ?? readHostedContainerSafeCodeProperty(error, "errorCode");
+  if (errorCodeDetail) {
+    details.errorCodeDetail = errorCodeDetail;
+  }
+
+  const rawDetails = readHostedContainerErrorDetailsRecord(error);
+  if (rawDetails) {
+    details.detailsKeys = Object.keys(rawDetails).sort();
+    const childProcess = readHostedContainerRecordProperty(rawDetails, "childProcess");
+    if (childProcess) {
+      details.childProcess = buildHostedContainerChildProcessMetadata(childProcess);
+    }
+    details.errorDetailPresent = hasNonEmptyHostedContainerString(rawDetails.errorDetail);
+  }
+
+  return Object.keys(details).length > 0 ? details : null;
+}
+
+function buildHostedContainerChildProcessMetadata(
+  childProcess: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {
+    abortedByParent: childProcess.abortedByParent === true,
+    abortReasonMessagePresent: hasNonEmptyHostedContainerString(childProcess.abortReasonMessage),
+    stderrTailPresent: hasNonEmptyHostedContainerString(childProcess.stderrTail),
+    stdoutTailPresent: hasNonEmptyHostedContainerString(childProcess.stdoutTail),
+  };
+  const exitCode = childProcess.exitCode;
+  if (typeof exitCode === "number" || exitCode === null) {
+    metadata.exitCode = exitCode;
+  }
+
+  const signal = readHostedContainerSafeSignal(childProcess.signal);
+  if (signal !== undefined) {
+    metadata.signal = signal;
+  }
+
+  const abortReasonName = readHostedContainerSafeCode(childProcess.abortReasonName);
+  if (abortReasonName) {
+    metadata.abortReasonName = abortReasonName;
+  }
+
+  return metadata;
+}
+
+function readHostedContainerErrorDetailsRecord(error: unknown): Record<string, unknown> | null {
+  if (!error || typeof error !== "object" || !Object.prototype.hasOwnProperty.call(error, "details")) {
+    return null;
+  }
+
+  return readHostedContainerRecordProperty(error as Record<string, unknown>, "details");
+}
+
+function readHostedContainerRecordProperty(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record[key];
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readHostedContainerSafeCodeProperty(error: unknown, key: string): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  return readHostedContainerSafeCode((error as Record<string, unknown>)[key]);
+}
+
+function readHostedContainerSafeCode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(normalized) ? normalized : null;
+}
+
+function readHostedContainerSafeSignal(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return readHostedContainerSafeCode(value) ?? undefined;
+}
+
+function hasHostedContainerOwnProperty(error: unknown, key: string): boolean {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && Object.prototype.hasOwnProperty.call(error, key),
+  );
+}
+
+function hasNonEmptyHostedContainerString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function classifyRequestDecodeError(error: unknown): {

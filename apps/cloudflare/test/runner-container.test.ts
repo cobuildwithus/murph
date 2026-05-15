@@ -1598,10 +1598,9 @@ describe("RunnerContainer", () => {
     expect(thrown).toBeInstanceOf(HostedExecutionConfigurationError);
     expect(thrown).toMatchObject({
       code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
-      message:
-        "Hosted assistant defaults are missing. Code: HOSTED_ASSISTANT_CONFIG_REQUIRED. Status: 503.",
       name: "HostedExecutionConfigurationError",
     });
+    expect(String(thrown)).toContain("HOSTED_ASSISTANT_CONFIG_REQUIRED");
     expect(String(thrown)).not.toContain("secret stack");
   });
 
@@ -1633,19 +1632,20 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "type_error",
       details: {
-        errorDetail:
-          "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+        errorDetailPresent: true,
+        payloadDetailsPresent: true,
       },
-      message:
-        "Invalid request. Detail: Hosted assistant runtime job input runtime.userEnv.[redacted-env-key] must be a string. Code: type_error. Status: 400.",
+      message: "Invalid request. Code: type_error. Status: 400.",
       name: "TypeError",
       status: 400,
       statusCode: 400,
     });
     expect(requireObject(thrown, "runner error").details).toMatchObject({
-      errorDetail:
-        "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+      errorDetailPresent: true,
+      payloadDetailsPresent: true,
     });
+    expect(JSON.stringify(thrown)).not.toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(thrown)).not.toContain("runtime.userEnv");
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) => input?.message === "Hosted execution container failed.");
@@ -1673,7 +1673,78 @@ describe("RunnerContainer", () => {
     expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails();
   });
 
-  it("bubbles runtime shell detail into the thrown container error message", async () => {
+  it("omits raw body previews from non-json runner failure responses", async () => {
+    const hiddenBody = "hidden non-json runner body with provider text and OPENAI_API_KEY=placeholder";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(hiddenBody, {
+          headers: {
+            "content-length": String(Buffer.byteLength(hiddenBody)),
+            "content-type": "text/plain; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_non_json_failure"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      details: {
+        responseBodyPresent: true,
+        responseBodyPreviewOmitted: true,
+        responseContentLengthBytes: Buffer.byteLength(hiddenBody),
+        responseContentType: "text/plain",
+        responseJsonParseFailed: true,
+      },
+      message: "Hosted runner container returned HTTP 500.",
+      status: 500,
+      statusCode: 500,
+    });
+    expect(JSON.stringify(thrown)).not.toContain(hiddenBody);
+    expect(String(thrown)).not.toContain(hiddenBody);
+    expect(String(thrown)).not.toContain("placeholder");
+
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected container failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runnerResponseDetailsKeys: [
+            "responseBodyPresent",
+            "responseBodyPreviewOmitted",
+            "responseContentLengthBytes",
+            "responseContentType",
+            "responseJsonParseFailed",
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(failureLogInput)).not.toContain(hiddenBody);
+    expect(JSON.stringify(failureLogInput)).not.toContain("placeholder");
+  });
+
+  it("summarizes runtime shell detail in the thrown container error", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -1715,14 +1786,128 @@ describe("RunnerContainer", () => {
       code: "runtime_error",
       details: {
         errorCodeDetail: "VAULT_FILE_MISSING",
-        errorDetail: "Missing required file \"vault.json\".",
+        errorDetailPresent: true,
+        payloadDetailsPresent: true,
       },
-      message:
-        "Hosted execution runtime failed. Detail: Missing required file \"vault.json\". Code: VAULT_FILE_MISSING. Status: 500.",
+      message: "Hosted execution runtime failed. Code: VAULT_FILE_MISSING. Status: 500.",
       name: "Error",
       status: 500,
       statusCode: 500,
     });
+    expect(JSON.stringify(thrown)).not.toContain("vault.json");
+  });
+
+  it("logs child-process runner failure metadata without free-form tails", async () => {
+    const hiddenStderrTail = "hidden stderr tail";
+    const hiddenStdoutTail = "hidden stdout tail";
+    const hiddenAbortReason = "hidden abort reason";
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "runtime_error",
+          details: {
+            childProcess: {
+              abortedByParent: false,
+              abortReasonMessage: hiddenAbortReason,
+              abortReasonName: "AbortError",
+              exitCode: 1,
+              signal: "SIGTERM",
+              stderrTail: hiddenStderrTail,
+              stdoutTail: hiddenStdoutTail,
+            },
+            errorDetail:
+              "Hosted assistant runtime child exited without emitting a result payload.",
+          },
+          error: "Hosted execution runtime failed.",
+          errorName: "Error",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_child_process_diagnostics"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      code: "runtime_error",
+      details: {
+        childProcess: {
+          abortedByParent: false,
+          abortReasonName: "AbortError",
+          abortReasonMessagePresent: true,
+          exitCode: 1,
+          signal: "SIGTERM",
+          stderrTailPresent: true,
+          stdoutTailPresent: true,
+        },
+        errorDetailPresent: true,
+        payloadDetailsPresent: true,
+      },
+      status: 500,
+      statusCode: 500,
+    });
+    const serializedThrown = JSON.stringify(thrown);
+    expect(serializedThrown).not.toContain(hiddenAbortReason);
+    expect(serializedThrown).not.toContain(hiddenStderrTail);
+    expect(serializedThrown).not.toContain(hiddenStdoutTail);
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    if (!failureLogInput) {
+      throw new Error("Expected container failure log input.");
+    }
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          errorCode: "runtime_error",
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution runtime failed.",
+          errorName: "Error",
+          errorStatus: 500,
+          runnerChildAbortedByParent: false,
+          runnerChildAbortReasonMessagePresent: true,
+          runnerChildAbortReasonName: "AbortError",
+          runnerChildExitCode: 1,
+          runnerChildSignal: "SIGTERM",
+          runnerChildStderrTailPresent: true,
+          runnerChildStdoutTailPresent: true,
+          runnerResponseDetailsKeys: [
+            "childProcess",
+            "errorDetailPresent",
+            "payloadDetailsPresent",
+          ],
+        }),
+        level: "warn",
+        message: "Hosted execution container failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
+
+    const serializedFailureLog = JSON.stringify(failureLogInput);
+    expect(serializedFailureLog).not.toContain(hiddenAbortReason);
+    expect(serializedFailureLog).not.toContain(hiddenStderrTail);
+    expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
   });
 
   it("prefers sanitized inner runtime status over the container response status", async () => {
@@ -1764,14 +1949,15 @@ describe("RunnerContainer", () => {
 
     expect(thrown).toMatchObject({
       details: {
-        errorDetail: "Provider request was rate limited.",
+        errorDetailPresent: true,
         errorStatus: 429,
+        payloadDetailsPresent: true,
       },
-      message:
-        "Hosted execution runtime failed. Detail: Provider request was rate limited. Code: runtime_error. Status: 429.",
+      message: "Hosted execution runtime failed. Code: runtime_error. Status: 429.",
       status: 500,
       statusCode: 500,
     });
+    expect(JSON.stringify(thrown)).not.toContain("Provider request was rate limited.");
   });
 
   it("restores safe bundle-validation error names from runner shell error codes", async () => {
@@ -1815,15 +2001,13 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "bundle_archive_validation_error",
       details: {
-        bundleArchiveOperation: "runner-input",
-        bundleRefPresent: true,
+        payloadDetailsPresent: true,
       },
-      message:
-        "Hosted bundle archive validation failed. Code: bundle_archive_validation_error. Status: 500.",
       name: "HostedBundleArchiveValidationError",
       status: 500,
       statusCode: 500,
     });
+    expect(String(thrown)).toContain("bundle_archive_validation_error");
   });
 
   it("keeps the canonical internal HTTP run route disabled", async () => {

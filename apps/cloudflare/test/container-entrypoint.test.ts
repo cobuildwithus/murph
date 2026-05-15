@@ -370,6 +370,41 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runtimeWakeCount).toBe(2);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
+    const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input);
+    expect(logInputs).toContainEqual(expect.objectContaining({
+      details: {
+        activeHostedRunnerJobCount: 1,
+        activeRuntimeWakePresent: true,
+        workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+      },
+      message: "Hosted container child reported runtime wake readiness.",
+      userId: null,
+    }));
+    expect(logInputs
+      .filter((input) =>
+        input.message === "Hosted container entrypoint handled runtime wake request."
+      )
+      .map((input) => input.details)).toEqual([
+        {
+          activeHostedRunnerJobCount: 0,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: false,
+          workspaceAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePresent: true,
+          runtimeWakeAccepted: true,
+          workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePresent: true,
+          runtimeWakeAccepted: true,
+          workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+        },
+      ]);
   });
 
   it("does not mark runtime wakes accepted when the ready child cannot receive IPC", async () => {
@@ -424,6 +459,25 @@ describe("startHostedContainerEntrypoint", () => {
     expect(acceptedWake.status).toBe(204);
     expect(acceptedWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(invocationResponse.status).toBe(200);
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .filter((input) =>
+        input.message === "Hosted container entrypoint handled runtime wake request."
+      )
+      .map((input) => input.details)).toEqual([
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePresent: true,
+          runtimeWakeAccepted: false,
+          workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePresent: true,
+          runtimeWakeAccepted: true,
+          workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
+        },
+      ]);
   });
 
   it("includes runner bundle metadata on the health endpoint when the manifest is present", async () => {
@@ -1241,12 +1295,114 @@ describe("startHostedContainerEntrypoint", () => {
       expect(payload).toMatchObject({
         code: "type_error",
         details: {
-          errorDetail: "missing hosted runtime config",
+          detailsPresent: false,
+          errorMessagePresent: true,
+          errorName: "TypeError",
+          stackPresent: true,
         },
         error: "Hosted execution runtime failed.",
         errorName: "TypeError",
       });
-      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
+      expect(JSON.stringify(payload)).not.toContain("missing hosted runtime config");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns metadata-only downstream child process failure diagnostics", async () => {
+    const hiddenStderrTail = "hidden child stderr tail";
+    const hiddenStdoutTail = "hidden child stdout tail";
+    const hiddenAbortReason = "hidden child abort reason";
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
+      Object.assign(new Error("hidden child failure message"), {
+        details: {
+          childProcess: {
+            abortedByParent: false,
+            abortReasonMessage: hiddenAbortReason,
+            abortReasonName: "AbortError",
+            exitCode: 1,
+            signal: "SIGTERM",
+            stderrTail: hiddenStderrTail,
+            stdoutTail: hiddenStdoutTail,
+          },
+          errorDetail: "hidden child detail",
+        },
+      }),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+        body: JSON.stringify(buildJobBody({
+          wake: {
+            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+            eventId: "evt_runtime_child_process_error",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(500);
+      const payload = await response.json() as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        code: "runtime_error",
+        details: {
+          childProcess: {
+            abortedByParent: false,
+            abortReasonMessagePresent: true,
+            abortReasonName: "AbortError",
+            exitCode: 1,
+            signal: "SIGTERM",
+            stderrTailPresent: true,
+            stdoutTailPresent: true,
+          },
+          detailsKeys: ["childProcess", "errorDetail"],
+          errorDetailPresent: true,
+          errorMessagePresent: true,
+          errorName: "Error",
+          stackPresent: true,
+        },
+        error: "Hosted execution runtime failed.",
+        errorName: "Error",
+      });
+      const serializedPayload = JSON.stringify(payload);
+      expect(serializedPayload).not.toContain("hidden child failure message");
+      expect(serializedPayload).not.toContain("hidden child detail");
+      expect(serializedPayload).not.toContain(hiddenAbortReason);
+      expect(serializedPayload).not.toContain(hiddenStderrTail);
+      expect(serializedPayload).not.toContain(hiddenStdoutTail);
+
+      const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+        .map(([input]) => input)
+        .find((input) => input.message === "Hosted container entrypoint failed a runner job.");
+      expect(failureLogInput).toEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          childProcess: expect.objectContaining({
+            stderrTailPresent: true,
+            stdoutTailPresent: true,
+          }),
+        }),
+        userId: null,
+      }));
+      const serializedFailureLog = JSON.stringify(failureLogInput);
+      expect(serializedFailureLog).not.toContain("hidden child failure message");
+      expect(serializedFailureLog).not.toContain("hidden child detail");
+      expect(serializedFailureLog).not.toContain(hiddenAbortReason);
+      expect(serializedFailureLog).not.toContain(hiddenStderrTail);
+      expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
     } finally {
       spy.mockRestore();
     }
@@ -1287,12 +1443,17 @@ describe("startHostedContainerEntrypoint", () => {
       expect(payload).toMatchObject({
         code: "authorization_error",
         details: {
-          errorDetail: "Authorization=Bearer [redacted] for [redacted-email] OPENAI_API_KEY=[redacted]",
+          detailsPresent: false,
+          errorMessagePresent: true,
+          errorName: "Error",
+          stackPresent: true,
         },
         error: "Hosted execution authorization failed.",
         errorName: "Error",
       });
-      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
+      const serializedPayload = JSON.stringify(payload);
+      expect(serializedPayload).not.toContain("placeholder");
+      expect(serializedPayload).not.toContain("ops@example.com");
     } finally {
       spy.mockRestore();
     }
@@ -1336,11 +1497,13 @@ describe("startHostedContainerEntrypoint", () => {
       expect(payload).toMatchObject({
         code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
         details: {
+          detailsPresent: false,
           errorCodeDetail: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+          errorMessagePresent: true,
+          stackPresent: true,
         },
-        error: "Hosted assistant defaults are missing.",
+        error: "Hosted execution configuration is invalid.",
       });
-      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
     } finally {
       spy.mockRestore();
     }
@@ -1733,9 +1896,14 @@ describe("startHostedContainerEntrypoint", () => {
     const payload = await response.json() as ClassifiedRunnerPayload;
     expect(payload).toMatchObject({
       code: "runtime_error",
+      details: {
+        detailsPresent: false,
+        errorMessagePresent: true,
+        stackPresent: true,
+      },
       error: "Hosted execution runtime failed.",
     });
-    expect(payload.details?.errorDetail).toContain(String(childPid));
+    expect(JSON.stringify(payload)).not.toContain(String(childPid));
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
   });
@@ -1754,13 +1922,15 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
         details: {
+          detailsPresent: false,
           errorCodeDetail: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+          errorMessagePresent: true,
+          stackPresent: true,
         },
-        error: "Hosted assistant defaults are missing.",
+        error: "Hosted execution configuration is invalid.",
       },
       statusCode: 503,
     });
-    expect((classified.payload as ClassifiedRunnerPayload).details?.stackPreview).toEqual(expect.any(Array));
   });
 
   it("surfaces safe generic runner failure metadata", () => {
@@ -1770,14 +1940,17 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorDetail: "boom",
+          detailsPresent: false,
+          errorMessagePresent: true,
+          errorName: "Error",
+          stackPresent: true,
         },
         error: "Hosted execution runtime failed.",
         errorName: "Error",
       },
       statusCode: 500,
     });
-    expect((classified.payload as ClassifiedRunnerPayload).details?.stackPreview).toEqual(expect.any(Array));
+    expect(JSON.stringify(classified.payload)).not.toContain("boom");
   });
 
   it("surfaces bundle-validation failures with their dedicated code and safe properties", () => {
@@ -1797,12 +1970,11 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "bundle_archive_validation_error",
         details: {
-          bundleArchiveOperation: "runner-input",
-          bundleRefPresent: false,
-          errorDetail: "Hosted bundle archive is invalid.",
-          errorProperties: {
-            operation: "runner-input",
-          },
+          detailsKeys: ["bundleArchiveOperation", "bundleRefPresent"],
+          detailsPresent: true,
+          errorCodeDetail: "bundle_archive_validation_error",
+          errorMessagePresent: true,
+          stackPresent: true,
         },
         error: "Hosted bundle archive validation failed.",
         errorName: "HostedBundleArchiveValidationError",
