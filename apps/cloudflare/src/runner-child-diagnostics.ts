@@ -23,6 +23,7 @@ export type HostedExecutionChildRuntimeStage =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_STAGES[number];
 
 export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
+  "control_plane_http",
   "hosted_assistant_configuration",
   "invalid_workspace_port",
   "mailbox_payload_decode_http",
@@ -41,11 +42,44 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
 export type HostedExecutionChildRuntimeFailureKind =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS[number];
 
+export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
+  "artifact_fetch",
+  "artifact_upload",
+  "assistant_runtime_issue_export",
+  "browser_vault_replica_publish",
+  "browser_vault_replica_write",
+  "device_sync_connect_link",
+  "device_sync_dirty_ack",
+  "device_sync_pending_dirty_state",
+  "device_sync_runtime_apply",
+  "device_sync_runtime_snapshot",
+  "email_send",
+  "mailbox_fetch",
+  "mailbox_payload_decode",
+  "mailbox_payload_fetch",
+  "raw_email_read",
+  "runtime_crypto_context_fetch",
+  "runtime_crypto_root_fetch",
+  "runtime_internal_request",
+  "runtime_log_write",
+  "telegram_file_download",
+  "telegram_file_lookup",
+  "usage_recording",
+  "workspace_checkpoint",
+  "workspace_read",
+] as const;
+
+export type HostedExecutionChildRuntimeHttpOperation =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS[number];
+
 const HOSTED_EXECUTION_CHILD_RUNTIME_STAGE_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_STAGES,
 );
 const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KIND_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS,
+);
+const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS,
 );
 
 const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODES = [
@@ -228,6 +262,14 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   );
   if (childRuntimeFailureKind) {
     metadata.childRuntimeFailureKind = childRuntimeFailureKind;
+  }
+
+  const childRuntimeHttpOperation = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeHttpOperation,
+    HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_SET,
+  );
+  if (childRuntimeHttpOperation) {
+    metadata.childRuntimeHttpOperation = childRuntimeHttpOperation;
   }
 
   const childRuntimeErrorName = readHostedExecutionChildRuntimeErrorName(

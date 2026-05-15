@@ -50,6 +50,7 @@ import {
 import {
   readHostedExecutionChildRuntimeErrorName,
   type HostedExecutionChildRuntimeFailureKind,
+  type HostedExecutionChildRuntimeHttpOperation,
   type HostedExecutionChildRuntimeStage,
 } from "./runner-child-diagnostics.js";
 import {
@@ -96,6 +97,75 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_FAILURES = new Map<
     "mailbox_payload_decode_missing_write_fence",
   ],
 ]);
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_PATTERNS: ReadonlyArray<{
+  operation: HostedExecutionChildRuntimeHttpOperation;
+  pattern: RegExp;
+}> = [
+  { operation: "artifact_fetch", pattern: /^Hosted artifact fetch /u },
+  { operation: "artifact_upload", pattern: /^Hosted artifact upload /u },
+  {
+    operation: "assistant_runtime_issue_export",
+    pattern: /^Hosted assistant runtime issue export$/u,
+  },
+  {
+    operation: "browser_vault_replica_publish",
+    pattern: /^Hosted browser-vault replica publish$/u,
+  },
+  {
+    operation: "browser_vault_replica_write",
+    pattern: /^Hosted browser-vault replica write$/u,
+  },
+  {
+    operation: "device_sync_connect_link",
+    pattern: /^Hosted device-sync connect link /u,
+  },
+  { operation: "device_sync_dirty_ack", pattern: /^Hosted device-sync dirty ack$/u },
+  {
+    operation: "device_sync_pending_dirty_state",
+    pattern: /^Hosted device-sync pending dirty state$/u,
+  },
+  {
+    operation: "device_sync_runtime_apply",
+    pattern: /^Hosted device-sync runtime apply$/u,
+  },
+  {
+    operation: "device_sync_runtime_snapshot",
+    pattern: /^Hosted device-sync runtime snapshot$/u,
+  },
+  { operation: "email_send", pattern: /^Hosted email send$/u },
+  { operation: "mailbox_fetch", pattern: /^Hosted mailbox fetch$/u },
+  {
+    operation: "mailbox_payload_decode",
+    pattern: /^Hosted mailbox payload decode$/u,
+  },
+  {
+    operation: "mailbox_payload_fetch",
+    pattern: /^Hosted mailbox payload fetch$/u,
+  },
+  { operation: "raw_email_read", pattern: /^Hosted raw email read$/u },
+  {
+    operation: "runtime_crypto_context_fetch",
+    pattern: /^Hosted runtime crypto context fetch$/u,
+  },
+  {
+    operation: "runtime_crypto_root_fetch",
+    pattern: /^Hosted runtime crypto root fetch$/u,
+  },
+  {
+    operation: "runtime_internal_request",
+    pattern: /^Hosted runtime internal request to /u,
+  },
+  { operation: "runtime_log_write", pattern: /^Hosted runtime log write$/u },
+  {
+    operation: "telegram_file_download",
+    pattern: /^Hosted Telegram file download$/u,
+  },
+  { operation: "telegram_file_lookup", pattern: /^Hosted Telegram file lookup$/u },
+  { operation: "usage_recording", pattern: /^Hosted usage recording$/u },
+  { operation: "workspace_checkpoint", pattern: /^Hosted workspace checkpoint$/u },
+  { operation: "workspace_read", pattern: /^Hosted workspace read$/u },
+];
 
 export async function runHostedExecutionChild(
   dependencies: HostedExecutionChildDependencies = {},
@@ -376,10 +446,13 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
   const childRuntimeErrorName = error instanceof Error
     ? readHostedExecutionChildRuntimeErrorName(error.name)
     : null;
+  const childRuntimeHttpOperation =
+    readHostedExecutionChildRuntimeHttpOperation(error);
   return {
     childRuntimeErrorCode: deriveHostedExecutionErrorCode(error),
     ...(childRuntimeErrorName ? { childRuntimeErrorName } : {}),
     childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error),
+    ...(childRuntimeHttpOperation ? { childRuntimeHttpOperation } : {}),
     childRuntimeStage: input.runtimeStage,
     ...readHostedExecutionChildRuntimeStatus(error),
   };
@@ -406,8 +479,12 @@ function classifyHostedExecutionChildRuntimeFailure(
     if (error.name === "HostedAssistantConfigurationError") {
       return "hosted_assistant_configuration";
     }
-    if (/^Hosted mailbox payload decode failed with HTTP \d{3}\.$/u.test(error.message)) {
+    const httpOperation = readHostedExecutionChildRuntimeHttpOperation(error);
+    if (httpOperation === "mailbox_payload_decode") {
       return "mailbox_payload_decode_http";
+    }
+    if (httpOperation) {
+      return "control_plane_http";
     }
     const messageFailure = HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_FAILURES.get(
       error.message,
@@ -417,6 +494,32 @@ function classifyHostedExecutionChildRuntimeFailure(
     }
   }
   return "unclassified_runtime_error";
+}
+
+function readHostedExecutionChildRuntimeHttpOperation(
+  error: unknown,
+): HostedExecutionChildRuntimeHttpOperation | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const description = readHostedExecutionRuntimeHttpDescription(error.message);
+  if (!description) {
+    return null;
+  }
+
+  for (const { operation, pattern } of HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_PATTERNS) {
+    if (pattern.test(description)) {
+      return operation;
+    }
+  }
+
+  return null;
+}
+
+function readHostedExecutionRuntimeHttpDescription(message: string): string | null {
+  const match = /^(.+?) failed with HTTP \d{3}\./u.exec(message);
+  return match?.[1] ?? null;
 }
 
 function readHostedExecutionChildRuntimeStatus(

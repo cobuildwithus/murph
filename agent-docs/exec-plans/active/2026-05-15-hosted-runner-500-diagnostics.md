@@ -55,6 +55,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after child runtime failure classification.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts` passed after the first child runtime classifier patch; a later rerun after receiver allowlist tightening/status assertions was interrupted by the user before completion.
 - `pnpm --dir apps/cloudflare typecheck` passed after receiver allowlist tightening/status assertions.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after route-level HTTP operation classification.
+- `pnpm --dir apps/cloudflare typecheck` passed after route-level HTTP operation classification.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/runner-container.test.ts` passed after route-level HTTP operation classification.
 
 ## State
 
@@ -91,5 +94,12 @@ runtime phase boundaries.
   RunnerContainer failure log so the next deploy can separate workspace read,
   mailbox decode, stale authority, config, and runtime-in-process failures
   without exposing free-form child details.
-- Awaiting deploy of the child runtime classifier and production evidence for
-  the exact child failure kind.
+- Production after the child runtime classifier deploy showed the child reaches
+  `runtime.in-process` and fails with HTTP 404/`invalid_request`, but the
+  parent-visible classifier was still too coarse to name the exact internal
+  control-plane operation.
+- Child runtime HTTP diagnostics now add a fixed-vocabulary
+  `childRuntimeHttpOperation` beside the coarse failure kind, so the next
+  production attempt can distinguish workspace read, mailbox fetch, checkpoint,
+  runtime-log write, and adjacent internal calls without logging request bodies,
+  response bodies, paths, user ids, or free-form child output.
