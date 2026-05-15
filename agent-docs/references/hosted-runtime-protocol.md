@@ -203,19 +203,23 @@ per-user Durable Object to invoke the container if needed. The Durable Object
 keeps lease, in-flight invocation, alarm, and short-lived coordination metadata
 only. It does not persist queue history, per-message completion, outbox truth,
 assistant channel enablement state, or checkpoint recovery truth.
-When the Durable Object is idle, the persisted nudge starts the runner drive
-directly and keeps the alarm as recovery. When a write-fenced invocation exists,
-the write fence is commit authority only, not proof that useful runtime progress
-is still possible. The Durable Object asks the container to wake the exact
-active child for the current write-fence identity. A successful exact wake may
-coalesce with the active invocation; an explicit `not-wakeable` result clears
-the old fence by identity and starts replacement processing immediately, except
-for the bounded startup window after this Durable Object just began a local
-replacement drive and the container child has not registered yet. That startup
-window schedules a short retry only; it is not an `already running` result.
-Unknown wake results schedule a short retry and keep the fence until the retry
-or hard timeout resolves ambiguity. Local Durable Object promises are allowed to
-coalesce work, but they are not liveness authority. The hosted runtime owns the
+When the Durable Object receives a nudge or alarm, it reconciles durable demand:
+mailbox high-water rows ahead of checkpointed import watermarks, or a
+runtime-scheduled retry/wake. If no durable demand exists, the runner stays
+idle. When demand exists and no write fence is active, the Durable Object starts
+the runner drive and keeps an alarm as recovery. When a write-fenced invocation
+exists, the write fence is commit authority only, not proof that useful runtime
+progress is still possible. The Durable Object asks the container to ensure
+processing for the exact active child and mailbox target. A successful exact
+wake may coalesce with the active invocation; an explicit `not-wakeable` result
+clears the old fence by identity and starts replacement processing immediately,
+except for the bounded startup window after this Durable Object just began a
+local replacement drive and the container child has not registered yet. That
+startup window schedules a short retry only; it is not an `already running`
+result. Unknown wake results schedule a short retry and keep the fence until
+the retry or hard timeout resolves ambiguity. Local Durable Object promises are
+allowed to coalesce work, but they are not liveness authority. The hosted
+runtime owns the
 foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the

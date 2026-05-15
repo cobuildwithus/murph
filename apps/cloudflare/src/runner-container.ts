@@ -7,6 +7,9 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
   handleHostedRunnerOpenInternetOutbound,
@@ -89,6 +92,7 @@ interface HostedExecutionContainerRunnerInput {
 export interface HostedExecutionContainerStubLike {
   abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
   destroyInstance(): Promise<void>;
+  ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   expireActivityForTest?(input: { userId: string }): Promise<{ ok: true }>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   smokeHealth(input?: HostedExecutionContainerSmokeHealthInput): Promise<HostedExecutionContainerSmokeHealthResult>;
@@ -167,6 +171,29 @@ export type RunnerRuntimeWakeResult =
         | "missing-wake-method";
     };
 
+export interface RunnerContainerEnsureProcessingInput {
+  activeRuntime?: RunnerRuntimeWakeInput | null;
+  invoke?: HostedExecutionContainerInvokeRequest | null;
+  reason: HostedWorkspaceInvocationReason;
+  targetSeq?: string | null;
+  userId: string;
+}
+
+export type RunnerContainerEnsureProcessingResult =
+  | {
+      action: "restarted" | "started" | "woken";
+      kind: "accepted";
+      result?: HostedExecutionRunnerJobResult;
+    }
+  | {
+      kind: "start-required";
+      reason: "no-active-child";
+    }
+  | {
+      kind: "retry-scheduled";
+      reason: Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"];
+    };
+
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   enableInternet = true;
@@ -223,6 +250,48 @@ export class RunnerContainer extends Container {
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
     }
+  }
+
+  async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
+    assertRunnerContainerEnsureProcessingUserIds(input);
+    let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
+    if (input.activeRuntime) {
+      const wake = await this.wakeRuntime(input.activeRuntime);
+      if (wake.kind === "accepted") {
+        return {
+          action: "woken",
+          kind: "accepted",
+        };
+      }
+
+      if (wake.kind === "unknown") {
+        return {
+          kind: "retry-scheduled",
+          reason: wake.reason,
+        };
+      }
+
+      if (!input.invoke) {
+        return {
+          kind: "start-required",
+          reason: "no-active-child",
+        };
+      }
+      startAction = "restarted";
+    }
+
+    if (!input.invoke) {
+      return {
+        kind: "start-required",
+        reason: "no-active-child",
+      };
+    }
+
+    return {
+      action: startAction,
+      kind: "accepted",
+      result: await this.invoke(input.invoke),
+    };
   }
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
@@ -926,11 +995,12 @@ export async function invokeHostedExecutionContainerRunner(
   }
 
   const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
-  const invocation = container.invoke({
+  const invokeRequest: HostedExecutionContainerInvokeRequest = {
     job: input.job,
     timeoutMs: input.timeoutMs,
     userId: jobUserId,
-  });
+  };
+  const invocation = invokeRunnerContainerProcessing(container, invokeRequest);
   return input.signal
     ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
         if (isRunnerContainerAbortHardTimeout(input.signal?.reason)) {
@@ -1302,6 +1372,33 @@ function emitRunnerContainerLifecycleFailure(input: {
   });
 }
 
+async function invokeRunnerContainerProcessing(
+  container: HostedExecutionContainerStubLike,
+  invokeRequest: HostedExecutionContainerInvokeRequest,
+): Promise<HostedExecutionRunnerJobResult> {
+  if (!container.ensureProcessing) {
+    return await container.invoke(invokeRequest);
+  }
+
+  const ensured = await container.ensureProcessing({
+    invoke: invokeRequest,
+    reason: readHostedExecutionRunnerJobReason(invokeRequest.job),
+    targetSeq: null,
+    userId: invokeRequest.userId,
+  });
+  if (ensured.kind === "accepted" && ensured.result) {
+    return ensured.result;
+  }
+
+  throw new Error(`Hosted runner container ensureProcessing returned ${ensured.kind} without invoking work.`);
+}
+
+function readHostedExecutionRunnerJobReason(
+  job: HostedExecutionRunnerJobInput,
+): HostedWorkspaceInvocationReason {
+  return job.request.reason;
+}
+
 export async function destroyHostedExecutionContainer(input: {
   runnerContainerName?: string;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
@@ -1355,6 +1452,27 @@ export function resolveHostedExecutionRunnerUserIdFromContainerName(input: {
   return versionSuffix && input.containerName.endsWith(versionSuffix)
     ? input.containerName.slice(0, -versionSuffix.length)
     : input.containerName;
+}
+
+function assertRunnerContainerEnsureProcessingUserIds(
+  input: RunnerContainerEnsureProcessingInput,
+): void {
+  if (input.activeRuntime && input.activeRuntime.userId !== input.userId) {
+    throw new TypeError("Hosted runner container ensureProcessing activeRuntime userId must match input userId.");
+  }
+
+  if (!input.invoke) {
+    return;
+  }
+
+  if (input.invoke.userId !== input.userId) {
+    throw new TypeError("Hosted runner container ensureProcessing invoke userId must match input userId.");
+  }
+
+  const jobUserId = readHostedExecutionRunnerJobUserId(input.invoke.job);
+  if (jobUserId !== input.userId) {
+    throw new TypeError("Hosted runner container ensureProcessing job userId must match input userId.");
+  }
 }
 
 function readRunnerContainerWorkerVersionSegment(source: RunnerContainerNameSource): string | null {

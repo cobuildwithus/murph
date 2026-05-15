@@ -6,6 +6,7 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+import { HOSTED_RUNTIME_STATUS_PATH } from "@murphai/hosted-execution/routes";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
@@ -56,14 +57,14 @@ describe("cloudflare worker queue backpressure routes", () => {
       nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: null,
       })),
       nudgeHostedRunnerForUser: vi.fn(async (_userId: string) => ({
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: null,
       })),
@@ -95,7 +96,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     await expect(runResponse.json()).resolves.toEqual({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
+      kind: "processing-ensured",
       inFlight: false,
       nextAlarmAt: null,
     });
@@ -151,15 +152,34 @@ describe("cloudflare worker queue backpressure routes", () => {
       reason: "manual",
       userId: "member_123",
     });
+    installOidcJwksFetch(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_STATUS_PATH) {
+        return Response.json({
+          mailboxLag: [
+            {
+              importedSeq: "0",
+              lag: "1",
+              lane: "conversation",
+              maxSeq: "1",
+            },
+          ],
+          userId: "member_123",
+          workspace: null,
+        });
+      }
+
+      throw new Error(`Unexpected fetch during Cloudflare backpressure test: ${url.origin}${url.pathname}`);
+    });
 
     const nudge = await harness.durableObject.nudgeHostedRunnerForUser("member_123");
     const state = await stateStore.readState();
 
     expect(nudge).toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "retry-scheduled",
     });
     expect(state.writeFence).toMatchObject({
       expiresAt: "2999-01-01T00:00:00.000Z",
