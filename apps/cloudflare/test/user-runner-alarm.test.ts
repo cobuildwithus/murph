@@ -455,7 +455,7 @@ describe("HostedUserRunner wake scheduling", () => {
     });
   });
 
-  it("keeps an unexpired write fence and schedules a short retry when wake result is unknown", async () => {
+  it("keeps a fresh write fence and schedules a short retry when wake result is unknown", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const wakeRuntime = vi.fn(async () => ({
@@ -503,6 +503,74 @@ describe("HostedUserRunner wake scheduling", () => {
       wake_at: "2026-04-27T00:00:01.000Z",
     });
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+  });
+
+  it("replaces a stale active write fence when runtime liveness is unconfirmed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const replacementInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "unknown" as const,
+      reason: "container-rpc-error" as const,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [replacementInvocation.promise],
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "9" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_unknown",
+      2,
+      "runtime",
+      "2026-04-26T23:59:57.000Z",
+      "2026-04-27T00:01:00.000Z",
+      "7",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+      inFlight: true,
+      nextAlarmAt: FIXED_NOW,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: "attempt_unknown",
+      leaseGeneration: "2",
+      userId: "member_123",
+    });
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      leaseGeneration: "3",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "9",
+    });
+    expect(invoke.mock.calls[0]?.[0].job.request.attemptId).not.toBe("attempt_unknown");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          containerProcessingResult: "retry-scheduled:container-rpc-error",
+          immediateDriveStarted: true,
+          progressKind: "processing-started",
+          staleWriteFencePreempted: true,
+        }),
+        message: "Hosted runner nudge accepted.",
+      }),
+    );
+
+    replacementInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
   });
 
   it("defers preempting a fresh local drain before the container child is registered", async () => {
@@ -668,6 +736,44 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: "attempt_alarm",
       active_generation: 9,
+      wake_at: null,
+    });
+  });
+
+  it("keeps alarm-started runtime work attached until the local drive settles", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocation.promise],
+      mailboxLag: [createMailboxLag({
+        importedSeq: "700",
+        lag: "1",
+        maxSeq: "701",
+      })],
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_at = ?
+       WHERE singleton = 1`,
+      FIXED_NOW,
+    );
+
+    const alarm = runner.alarm();
+    let alarmSettled = false;
+    void alarm.finally(() => {
+      alarmSettled = true;
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(alarmSettled).toBe(false);
+
+    invocation.resolve({ nextWakeAt: null, status: "idle" });
+    await expect(alarm).resolves.toBeUndefined();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
       wake_at: null,
     });
   });
