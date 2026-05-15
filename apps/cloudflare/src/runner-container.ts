@@ -175,7 +175,6 @@ export interface RunnerContainerEnsureProcessingInput {
   activeRuntime?: RunnerRuntimeWakeInput | null;
   invoke?: HostedExecutionContainerInvokeRequest | null;
   reason: HostedWorkspaceInvocationReason;
-  targetSeq?: string | null;
   userId: string;
 }
 
@@ -1383,7 +1382,6 @@ async function invokeRunnerContainerProcessing(
   const ensured = await container.ensureProcessing({
     invoke: invokeRequest,
     reason: readHostedExecutionRunnerJobReason(invokeRequest.job),
-    targetSeq: null,
     userId: invokeRequest.userId,
   });
   if (ensured.kind === "accepted" && ensured.result) {

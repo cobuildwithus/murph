@@ -232,7 +232,6 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     })).resolves.toEqual({
       action: "woken",
@@ -272,7 +271,6 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     })).resolves.toEqual({
       action: "restarted",
@@ -296,7 +294,6 @@ describe("RunnerContainer", () => {
         userId: "member_other",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     })).rejects.toThrow(/activeRuntime userId must match input userId/u);
 
@@ -310,7 +307,6 @@ describe("RunnerContainer", () => {
         userId: "member_other",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     })).rejects.toThrow(/invoke userId must match input userId/u);
 
@@ -327,7 +323,6 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     })).rejects.toThrow(/job userId must match input userId/u);
 
