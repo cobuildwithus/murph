@@ -154,7 +154,7 @@ describe("hosted email worker ingress", () => {
     mocks.nudgeHostedRunner.mockResolvedValue({
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
+      kind: "processing-ensured",
       inFlight: false,
       nextAlarmAt: null,
     });

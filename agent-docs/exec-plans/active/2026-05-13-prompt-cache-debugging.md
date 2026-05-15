@@ -42,7 +42,7 @@ accounting is wrong.
 
 ## Verification
 
-- `pnpm exec vitest run packages/assistant-engine/test/provider-registry-helpers.test.ts packages/hosted-execution/test/assistant-usage.test.ts` passed.
+- `pnpm exec vitest run packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/hosted-execution/test/assistant-usage.test.ts` passed.
 - `pnpm exec tsc --noEmit --pretty false --project packages/assistant-engine/tsconfig.json` passed.
 - `pnpm exec tsc --noEmit --pretty false --project packages/hosted-execution/tsconfig.json` passed.
 - `pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live` passed.

@@ -49,7 +49,7 @@ describe("runner bundle package-manager process env", () => {
     expect(env).not.toHaveProperty("npm_config_cache");
   });
 
-  it("uses an isolated package-manager home and user config", async () => {
+  it("uses an isolated package-manager home while reusing the parent Corepack cache", async () => {
     const processEnv = await createPackageManagerProcessEnv(
       {
         COREPACK_ENABLE_AUTO_PIN: "0",
@@ -76,8 +76,7 @@ describe("runner bundle package-manager process env", () => {
       expect(env.HOME).not.toBe("/tmp/home");
       expect(env.USERPROFILE).toBe(env.HOME);
       expect(env.COREPACK_ENABLE_PROJECT_SPEC).toBeUndefined();
-      expect(env.COREPACK_HOME).toBe(path.join(env.HOME ?? "", "cache", "corepack"));
-      expect(env.COREPACK_HOME).not.toBe("/tmp/corepack");
+      expect(env.COREPACK_HOME).toBe("/tmp/corepack");
       expect(env.NPM_CONFIG_CACHE).toBe(path.join(env.HOME ?? "", "cache", "npm"));
       expect(env.NPM_CONFIG_CACHE).not.toBe("/tmp/npm-cache");
       expect(env.PNPM_STORE_DIR).toBe(path.join(env.HOME ?? "", "data", "pnpm-store"));
@@ -87,6 +86,25 @@ describe("runner bundle package-manager process env", () => {
       expect(env.npm_config_cache).toBe(env.NPM_CONFIG_CACHE);
       expect(env.npm_config_store_dir).toBe(env.PNPM_STORE_DIR);
       expect(env.npm_config_userconfig).toBe(env.NPM_CONFIG_USERCONFIG);
+    } finally {
+      await processEnv.cleanup();
+    }
+  });
+
+  it("derives a reusable Corepack cache from the parent home when COREPACK_HOME is unset", async () => {
+    const processEnv = await createPackageManagerProcessEnv(
+      undefined,
+      {
+        HOME: "/tmp/home",
+        PATH: "/usr/bin",
+      },
+    );
+
+    try {
+      expect(processEnv.env.COREPACK_HOME).toBe(
+        path.join("/tmp/home", ".cache", "node", "corepack"),
+      );
+      expect(processEnv.env.HOME).not.toBe("/tmp/home");
     } finally {
       await processEnv.cleanup();
     }

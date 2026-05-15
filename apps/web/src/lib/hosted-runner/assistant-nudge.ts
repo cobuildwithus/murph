@@ -33,11 +33,11 @@ export async function nudgeHostedAssistantRunnerUserBestEffortResult(input: {
     return {
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
       configured: true,
       errorCode: "AI_USAGE_GATE_DENIED",
       immediateDriveStarted: null,
       inFlight: null,
+      kind: null,
       nextAlarmAtPresent: null,
       usageGateDenied: true,
     };
@@ -47,11 +47,11 @@ export async function nudgeHostedAssistantRunnerUserBestEffortResult(input: {
     return {
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
       configured: true,
       errorCode: "AI_USAGE_GATE_UNAVAILABLE",
       immediateDriveStarted: null,
       inFlight: null,
+      kind: null,
       nextAlarmAtPresent: null,
       usageGateDenied: false,
     };

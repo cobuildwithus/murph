@@ -173,7 +173,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
       "Hosted local test",
     );
 
-    expect(env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("120000");
+    expect(env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS).toBe("600000");
   });
 
   it("clears device-sync provider env that would otherwise leak into scenarios", () => {

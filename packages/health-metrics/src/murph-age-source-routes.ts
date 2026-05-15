@@ -14,7 +14,11 @@ export type MurphAgeSourceRouteId =
   | "nhanes-iii-lmf-sanity"
   | "nhis-r399-outcome-anchor"
   | "nshap-integrated-aging"
+  | "nsrr-hchs-sol-sleep-actigraphy"
   | "nsrr-mesa-sleep-autonomic"
+  | "nsrr-mros-sleep-aging"
+  | "nsrr-shhs-sleep-heart-health"
+  | "nsrr-sof-sleep-aging"
   | "partner-aggregate-evaluator"
   | "uk-biobank-integrated"
   | "who-sage-south-africa-transport";
@@ -384,6 +388,102 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 60,
     routeId: "nsrr-mesa-sleep-autonomic",
     sourceFamily: "NSRR / MESA Sleep",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "sleep and cardiometabolic outcome feasibility",
+      "sleep-autonomic aggregate receipt design",
+      "wearable-shadow benchmark stress outside MESA",
+    ],
+    blockedCurrentUses: [
+      "treating sleep cohort data as consumer wearable validation",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR SHHS sleep-heart-health route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["autonomic", "clinical-history", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, sleep, and outcome tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 61,
+    routeId: "nsrr-shhs-sleep-heart-health",
+    sourceFamily: "NSRR SHHS",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "objective activity and sleep transport feasibility",
+      "sleep and autonomic aggregate receipt design",
+      "wearable-shadow benchmark stress outside MESA",
+    ],
+    blockedCurrentUses: [
+      "assuming actigraphy alone proves wearable validity",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR HCHS/SOL sleep-actigraphy route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "autonomic", "clinical-history", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, actigraphy, sleep, and follow-up tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 62,
+    routeId: "nsrr-hchs-sol-sleep-actigraphy",
+    sourceFamily: "NSRR HCHS/SOL",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "older-adult male sleep transport feasibility",
+      "sleep-autonomic aggregate receipt stress",
+      "fallback sleep-cohort validation if preferred routes are incomplete",
+    ],
+    blockedCurrentUses: [
+      "assuming polysomnography alone proves consumer wearable validity",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR MrOS sleep-aging route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["autonomic", "clinical-history", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, sleep, and follow-up tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "mortality-or-followup-candidate",
+    priorityRank: 63,
+    routeId: "nsrr-mros-sleep-aging",
+    sourceFamily: "NSRR MrOS",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "older-adult female sleep transport feasibility",
+      "sleep-autonomic aggregate receipt stress",
+      "fallback sleep-cohort validation if preferred routes are incomplete",
+    ],
+    blockedCurrentUses: [
+      "assuming polysomnography alone proves consumer wearable validity",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR SOF sleep-aging route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["autonomic", "clinical-history", "function", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, sleep, and follow-up tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "mortality-or-followup-candidate",
+    priorityRank: 64,
+    routeId: "nsrr-sof-sleep-aging",
+    sourceFamily: "NSRR SOF",
   },
   {
     accessMode: "human-admin-workbench",

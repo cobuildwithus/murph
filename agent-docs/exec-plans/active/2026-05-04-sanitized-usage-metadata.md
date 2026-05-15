@@ -37,7 +37,7 @@ Persist token-only provider usage metadata for hosted AI usage rows so token ext
 - `packages/assistant-engine/src/assistant/providers/helpers.ts`
 - `packages/assistant-engine/src/assistant/providers/types.ts`
 - `packages/assistant-engine/src/assistant/service-usage.ts`
-- `packages/assistant-engine/test/provider-registry-helpers.test.ts`
+- `packages/assistant-engine/test/codex-runtime-helpers.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-platform.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-usage.test.ts`
 - `packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts`

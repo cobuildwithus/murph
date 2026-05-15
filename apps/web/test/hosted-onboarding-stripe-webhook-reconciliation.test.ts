@@ -47,7 +47,6 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,

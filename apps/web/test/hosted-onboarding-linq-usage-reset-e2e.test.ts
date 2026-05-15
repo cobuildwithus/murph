@@ -82,7 +82,6 @@ const mocks = vi.hoisted(() => {
       return {
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
         configured: true,
         errorCode: null,
         immediateDriveStarted: false,
@@ -322,7 +321,6 @@ describe("hosted Linq usage reset e2e", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,

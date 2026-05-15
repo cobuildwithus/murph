@@ -24,7 +24,7 @@ it("nudges the workspace runner without polling old hosted-run status", async ()
   nudgeUserRunner.mockResolvedValue({
     accepted: true,
     alarmScheduled: true,
-    alreadyRunning: false,
+    kind: "processing-ensured",
     inFlight: false,
     leaseGeneration: "1",
     nextAlarmAt: "2026-04-27T00:00:00.000Z",
@@ -40,7 +40,7 @@ it("nudges the workspace runner without polling old hosted-run status", async ()
   })).resolves.toEqual({
     accepted: true,
     alarmScheduled: true,
-    alreadyRunning: false,
+    kind: "processing-ensured",
     inFlight: false,
     leaseGeneration: "1",
     nextAlarmAt: "2026-04-27T00:00:00.000Z",

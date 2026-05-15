@@ -54,7 +54,6 @@ const mocks = vi.hoisted(() => {
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -68,7 +67,6 @@ const mocks = vi.hoisted(() => {
       return {
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
         configured: true,
         errorCode: null,
         immediateDriveStarted: false,
@@ -84,7 +82,6 @@ const mocks = vi.hoisted(() => {
       return {
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
         configured: true,
         errorCode: null,
         immediateDriveStarted: false,
@@ -399,7 +396,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -409,7 +405,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -1374,7 +1369,6 @@ https://join.example.test/join/code_first_text`);
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: false,
       errorCode: null,
       immediateDriveStarted: false,

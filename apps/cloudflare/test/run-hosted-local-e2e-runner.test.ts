@@ -252,7 +252,7 @@ function expectVitestSpawnCall(): void {
 }
 
 function expectedRunnerTimeoutMs(): string {
-  return process.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "120000";
+  return process.env.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || "600000";
 }
 
 function restoreControlledEnv(): void {

@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -42,7 +41,6 @@ const mocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
@@ -370,7 +368,6 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,

@@ -1166,7 +1166,7 @@ describe("cloudflare worker routes", () => {
       nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
@@ -1188,7 +1188,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
+      kind: "processing-ensured",
       inFlight: false,
       nextAlarmAt: "2026-04-26T00:00:00.000Z",
     });
@@ -1259,7 +1259,7 @@ describe("cloudflare worker routes", () => {
       nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: false,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: null,
       })),
@@ -1301,7 +1301,7 @@ describe("cloudflare worker routes", () => {
       nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: null,
       })),
@@ -1529,7 +1529,7 @@ describe("cloudflare worker routes", () => {
       nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
-        alreadyRunning: true,
+        kind: "processing-ensured",
         inFlight: true,
         nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
@@ -1549,7 +1549,6 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
-      alreadyRunning: true,
       inFlight: true,
     });
     expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
@@ -1562,7 +1561,7 @@ describe("cloudflare worker routes", () => {
       nudgeHostedRunnerForUser: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
-        alreadyRunning: false,
+        kind: "processing-ensured",
         inFlight: false,
         nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
@@ -2139,7 +2138,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   const defaultNudgeResult = {
     accepted: true,
     alarmScheduled: true,
-    alreadyRunning: false,
+    kind: "processing-ensured",
     inFlight: false,
     nextAlarmAt: null,
   };

@@ -193,9 +193,9 @@ export async function runHostedMailboxLagSweeper(input: {
         nudgeAccepted += 1;
         logger.info("Hosted mailbox lag sweeper runner nudge accepted.", {
           alarmScheduled: nudge.alarmScheduled,
-          alreadyRunning: nudge.alreadyRunning,
           immediateDriveStarted: nudge.immediateDriveStarted,
           inFlight: nudge.inFlight,
+          kind: nudge.kind,
           nextAlarmAtPresent: nudge.nextAlarmAtPresent,
           userFingerprint,
         });

@@ -10,11 +10,11 @@ import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 export interface HostedRunnerUserNudgeBestEffortResult {
   accepted: boolean;
   alarmScheduled: boolean | null;
-  alreadyRunning: boolean | null;
   configured: boolean;
   errorCode: string | null;
   immediateDriveStarted: boolean | null;
   inFlight: boolean | null;
+  kind: HostedRunnerNudgeResult["kind"] | null;
   nextAlarmAtPresent: boolean | null;
 }
 
@@ -127,21 +127,21 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
       ? {
         accepted: result.accepted,
         alarmScheduled: result.alarmScheduled,
-        alreadyRunning: result.alreadyRunning,
         configured: true,
         errorCode: null,
         immediateDriveStarted: result.immediateDriveStarted ?? null,
         inFlight: result.inFlight,
+        kind: result.kind,
         nextAlarmAtPresent: (result.nextAlarmAt ?? null) !== null,
       }
       : {
         accepted: false,
         alarmScheduled: null,
-        alreadyRunning: null,
         configured: false,
         errorCode: null,
         immediateDriveStarted: null,
         inFlight: null,
+        kind: null,
         nextAlarmAtPresent: null,
       };
   } catch (error) {
@@ -154,11 +154,11 @@ export async function nudgeHostedRunnerUserBestEffortResult(input: {
     return {
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
       configured: true,
       errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
       immediateDriveStarted: null,
       inFlight: null,
+      kind: null,
       nextAlarmAtPresent: null,
     };
   }
