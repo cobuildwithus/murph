@@ -82,11 +82,13 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
 const LOCAL_ENSURE_START_GRACE_MS = 2_000;
 
-type DurableRunnerDemand =
+type RunnerProgressDemand =
+  | {
+      kind: "active-runtime";
+      record: RunnerStateRecord;
+    }
   | {
       kind: "mailbox-backlog";
-      mailboxMaxSeq: string;
-      mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"];
       record: RunnerStateRecord;
     }
   | {
@@ -105,13 +107,13 @@ type EnsureRunnerProgressResult =
       containerResult:
         | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
         | null;
-      demand: DurableRunnerDemand;
+      demand: RunnerProgressDemand;
       kind: "processing-ensured";
       record: RunnerStateRecord;
     }
   | {
       containerResult: Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>;
-      demand: DurableRunnerDemand;
+      demand: RunnerProgressDemand;
       localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
       kind: "processing-started";
       nextAlarmAt?: string | null;
@@ -120,7 +122,7 @@ type EnsureRunnerProgressResult =
     }
   | {
       containerResult: null;
-      demand: DurableRunnerDemand;
+      demand: RunnerProgressDemand;
       localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
       kind: "processing-started";
       nextAlarmAt?: string | null;
@@ -128,7 +130,7 @@ type EnsureRunnerProgressResult =
     }
   | {
       deferredFreshLocalEnsure?: boolean;
-      demand: DurableRunnerDemand;
+      demand: RunnerProgressDemand;
       kind: "retry-scheduled";
       record: RunnerStateRecord;
       containerResult:
@@ -474,7 +476,7 @@ export class HostedUserRunner {
   }
 
   private async ensureRunnerProgress(input: RunnerProgressInput): Promise<EnsureRunnerProgressResult> {
-    const demand = await this.readDurableDemand();
+    const demand = await this.readRunnerProgressDemand();
     if (!demand) {
       const record = await this.stateStore.readState();
       await this.syncAlarm(record);
@@ -490,7 +492,6 @@ export class HostedUserRunner {
           leaseGeneration: String(record.writeFence.generation),
           userId: record.userId,
         },
-        demand,
         reason: input.reason,
       });
       if (containerResult.kind === "accepted") {
@@ -578,9 +579,7 @@ export class HostedUserRunner {
     await this.syncAlarmAt(initialAlarmAt);
     const localEnsureInFlight = this.kickLocalEnsure({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      reason: demand.kind === "scheduled-runtime" && demand.reason === "retry"
-        ? "retry"
-        : input.reason,
+      reason: resolveRunnerProgressReason(demand, input.reason),
     });
     return {
       containerResult: null,
@@ -592,15 +591,17 @@ export class HostedUserRunner {
     };
   }
 
-  private async readDurableDemand(): Promise<DurableRunnerDemand | null> {
+  private async readRunnerProgressDemand(): Promise<RunnerProgressDemand | null> {
     const due = await this.stateStore.readDueWork(Date.now());
 
-    if (due.kind === "runtime") {
-      const mailboxDemand = await this.tryReadMailboxBacklogDemand(due.record);
-      if (mailboxDemand) {
-        return mailboxDemand;
-      }
+    if (due.record.writeFence) {
+      return {
+        kind: "active-runtime",
+        record: due.record,
+      };
+    }
 
+    if (due.kind === "runtime") {
       return {
         kind: "scheduled-runtime",
         reason: due.reason,
@@ -613,15 +614,12 @@ export class HostedUserRunner {
 
   private async readMailboxBacklogDemand(
     record: RunnerStateRecord,
-  ): Promise<Extract<DurableRunnerDemand, { kind: "mailbox-backlog" }> | null> {
+  ): Promise<Extract<RunnerProgressDemand, { kind: "mailbox-backlog" }> | null> {
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
-    const mailboxMaxSeq = readMailboxBacklogMaxSeq(webStatus.mailboxLag);
 
-    if (mailboxMaxSeq) {
+    if (hasMailboxBacklog(webStatus.mailboxLag)) {
       return {
         kind: "mailbox-backlog",
-        mailboxLag: webStatus.mailboxLag,
-        mailboxMaxSeq,
         record,
       };
     }
@@ -629,20 +627,9 @@ export class HostedUserRunner {
     return null;
   }
 
-  private async tryReadMailboxBacklogDemand(
-    record: RunnerStateRecord,
-  ): Promise<Extract<DurableRunnerDemand, { kind: "mailbox-backlog" }> | null> {
-    try {
-      return await this.readMailboxBacklogDemand(record);
-    } catch {
-      return null;
-    }
-  }
-
   private async ensureActiveRuntimeProcessing(
     input: {
       activeRuntime: RunnerRuntimeWakeInput;
-      demand: DurableRunnerDemand;
       reason: HostedWorkspaceInvocationReason;
     },
   ): Promise<
@@ -666,7 +653,6 @@ export class HostedUserRunner {
         const result = await container.ensureProcessing({
           activeRuntime: input.activeRuntime,
           reason: input.reason,
-          targetSeq: readDurableDemandTargetSeq(input.demand),
           userId: input.activeRuntime.userId,
         });
         if (
@@ -818,7 +804,7 @@ export class HostedUserRunner {
     };
 
     while (true) {
-      const demand = await this.readDurableDemand();
+      const demand = await this.readRunnerProgressDemand();
       if (!demand) {
         await this.syncAlarm(await this.stateStore.readState());
         return lastResult;
@@ -842,9 +828,7 @@ export class HostedUserRunner {
 
       lastResult = await this.runRuntimeWake({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-        reason: demand.kind === "scheduled-runtime" && demand.reason === "retry"
-          ? "retry"
-          : input.reason,
+        reason: resolveRunnerProgressReason(demand, input.reason),
       });
       if (lastResult.status === "scheduled") {
         return lastResult;
@@ -1465,23 +1449,27 @@ function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
   return readRunnerRuntimeDueAt(record);
 }
 
-function readMailboxBacklogMaxSeq(
+function hasMailboxBacklog(
   mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
-): string | null {
-  let maxSeq: string | null = null;
+): boolean {
   for (const lane of mailboxLag) {
     if (compareHostedMailboxSeq(lane.maxSeq, lane.importedSeq) <= 0) {
       continue;
     }
-    if (!maxSeq || compareHostedMailboxSeq(lane.maxSeq, maxSeq) > 0) {
-      maxSeq = lane.maxSeq;
-    }
+    return true;
   }
-  return maxSeq;
+  return false;
 }
 
-function readDurableDemandTargetSeq(demand: DurableRunnerDemand): string | null {
-  return demand.kind === "mailbox-backlog" ? demand.mailboxMaxSeq : null;
+function resolveRunnerProgressReason(
+  demand: RunnerProgressDemand,
+  requestedReason: HostedWorkspaceInvocationReason,
+): HostedWorkspaceInvocationReason {
+  return demand.kind === "scheduled-runtime"
+    && demand.reason === "retry"
+    && requestedReason === "alarm"
+    ? "retry"
+    : requestedReason;
 }
 
 function compareHostedMailboxSeq(left: string, right: string): number {

@@ -142,6 +142,68 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(alarms).toEqual(["deleted"]);
   });
 
+  it("does not report caught-up when mailbox checkpoints are caught up behind an active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      mailboxLag: [createMailboxLag({
+        importedSeq: "701",
+        lag: "0",
+        maxSeq: "701",
+      })],
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_active",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "2026-04-27T00:01:00.000Z",
+      "21",
+    );
+
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      inFlight: true,
+    });
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      kind: "processing-ensured",
+      nextAlarmAt: "2026-04-27T00:01:00.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: {
+        attemptId: "attempt_active",
+        leaseGeneration: "9",
+        userId: "member_123",
+      },
+      reason: "nudge",
+      userId: "member_123",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      inFlight: true,
+    });
+  });
+
   it("starts scheduled runtime work without depending on a mailbox status read", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -547,7 +609,6 @@ describe("HostedUserRunner wake scheduling", () => {
         userId: "member_123",
       },
       reason: "nudge",
-      targetSeq: "701",
       userId: "member_123",
     });
     expect(invoke).toHaveBeenCalledOnce();
@@ -601,7 +662,6 @@ describe("HostedUserRunner wake scheduling", () => {
         userId: "member_123",
       },
       reason: "alarm",
-      targetSeq: "701",
       userId: "member_123",
     });
     expect(invoke).not.toHaveBeenCalled();
