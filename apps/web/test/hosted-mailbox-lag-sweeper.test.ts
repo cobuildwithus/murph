@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 interface MockAssistantNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean | null;
-  alreadyRunning: boolean | null;
+  kind: "caught-up" | "processing-ensured" | "retry-scheduled" | null;
   configured: boolean;
   errorCode: string | null;
   immediateDriveStarted: boolean | null;
@@ -24,11 +24,11 @@ const mocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "caught-up",
       nextAlarmAtPresent: false,
       usageGateDenied: false,
     };
@@ -74,7 +74,6 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: true,
@@ -450,7 +449,7 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
+      kind: null,
       configured: true,
       errorCode: "AI_USAGE_GATE_DENIED",
       immediateDriveStarted: null,
@@ -501,7 +500,7 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
+      kind: null,
       configured: true,
       errorCode: "AI_USAGE_GATE_DENIED",
       immediateDriveStarted: null,
@@ -546,7 +545,7 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
+      kind: null,
       configured: true,
       errorCode: "TimeoutError",
       immediateDriveStarted: null,

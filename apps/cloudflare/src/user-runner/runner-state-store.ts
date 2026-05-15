@@ -475,10 +475,7 @@ export class RunnerStateStore {
     nextWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.wake_at = earliestIsoDate(
-      meta.wake_at,
-      normalizePreferredWakeAt(input.nextWakeAt ?? null),
-    );
+    meta.wake_at = normalizePreferredWakeAt(input.nextWakeAt ?? null);
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
@@ -749,25 +746,6 @@ function readRuntimeDueReason(record: RunnerStateRecord): "retry" | "wake" | nul
     return "wake";
   }
   return backoffMs >= wakeMs ? "retry" : "wake";
-}
-
-function earliestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs < leftMs ? right : left;
 }
 
 function latestIsoDate(left: string | null, right: string | null): string | null {

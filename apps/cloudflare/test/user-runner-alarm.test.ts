@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  HostedRuntimeWebStatusResponse,
   HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -90,10 +91,10 @@ describe("HostedUserRunner wake scheduling", () => {
 
     expect(nudge).toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
       inFlight: true,
-      nextAlarmAt: FIXED_NOW,
+      kind: "processing-ensured",
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
@@ -108,11 +109,78 @@ describe("HostedUserRunner wake scheduling", () => {
       last_invocation_at: FIXED_NOW,
       wake_at: null,
     });
-    expect(alarms[0]).toBe(FIXED_NOW);
-    expect(alarms.slice(1)).toEqual(["deleted", "deleted"]);
+    expect(alarms[0]).toBe("2026-04-27T00:00:01.000Z");
+    expect(alarms.at(-1)).toBe("deleted");
   });
 
-  it("queues a foreground nudge behind an active write fence and follows up after release", async () => {
+  it("does not start runtime work when mailbox checkpoints are caught up", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "caught-up",
+      nextAlarmAt: null,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
+    expect(alarms).toEqual(["deleted"]);
+  });
+
+  it("starts scheduled runtime work without depending on a mailbox status read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [{ nextWakeAt: WORKSPACE_NEXT_WAKE_AT, status: "scheduled" }],
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      onStatusRead: () => {
+        throw new Error("Status read should not block scheduled runtime due work.");
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_at = ?
+       WHERE singleton = 1`,
+      FIXED_NOW,
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+      kind: "processing-ensured",
+    });
+    await flushWaitUntil();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: WORKSPACE_NEXT_WAKE_AT,
+    });
+  });
+
+  it("wakes a foreground runtime behind an active write fence without forcing a second local run", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
@@ -138,18 +206,17 @@ describe("HostedUserRunner wake scheduling", () => {
 
     expect(nudge).toMatchObject({
       accepted: true,
-      alreadyRunning: true,
       immediateDriveStarted: false,
       inFlight: true,
+      kind: "processing-ensured",
       nextAlarmAt: activeFenceExpiresAt,
     });
 
     firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
 
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke.mock.calls[0]?.[0].job.request.reason).toBe("nudge");
-    expect(invoke.mock.calls[1]?.[0].job.request.reason).toBe("nudge");
   });
 
   it("wakes the active runtime best-effort when a nudge arrives during an invocation", async () => {
@@ -172,7 +239,6 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: true,
       immediateDriveStarted: false,
       inFlight: true,
     });
@@ -187,15 +253,17 @@ describe("HostedUserRunner wake scheduling", () => {
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          alreadyRunning: true,
-          runtimeWakeAccepted: true,
+          containerProcessingAction: "woken",
+          containerProcessingResult: "accepted:woken",
+          progressKind: "processing-ensured",
         }),
         message: "Hosted runner nudge accepted.",
       }),
     );
 
     firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it("replaces an unexpired write fence when no active runtime child is wakeable", async () => {
@@ -229,7 +297,6 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
       inFlight: true,
       nextAlarmAt: FIXED_NOW,
@@ -260,11 +327,11 @@ describe("HostedUserRunner wake scheduling", () => {
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          alreadyRunning: false,
+          containerProcessingResult: "start-required:no-active-child",
           immediateDriveStarted: true,
-          runtimeWakeResult: "not-wakeable:no-active-child",
+          progressKind: "processing-started",
           staleWriteFencePreempted: true,
-          writeFenceHeldAfterNotWakeable: false,
+          writeFenceHeldAfterStartRequired: false,
         }),
         message: "Hosted runner nudge accepted.",
       }),
@@ -302,18 +369,13 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
       inFlight: true,
-      nextAlarmAt: FIXED_NOW,
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
     await flushWaitUntil();
 
-    expect(wakeRuntime).toHaveBeenCalledWith({
-      attemptId: "attempt_expired",
-      leaseGeneration: "2",
-      userId: "member_123",
-    });
+    expect(wakeRuntime).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
       leaseGeneration: "3",
@@ -362,7 +424,6 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAt: "2026-04-27T00:00:01.000Z",
@@ -407,7 +468,6 @@ describe("HostedUserRunner wake scheduling", () => {
     const secondNudge = await runner.nudgeHostedRunner();
     expect(secondNudge).toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: false,
       inFlight: false,
       nextAlarmAt: expect.any(String),
@@ -428,13 +488,12 @@ describe("HostedUserRunner wake scheduling", () => {
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          alreadyRunning: false,
-          freshLocalDrainPreemptionDeferred: true,
+          containerProcessingResult: "start-required:no-active-child",
+          freshLocalEnsurePreemptionDeferred: true,
           immediateDriveStarted: false,
-          progressKind: "scheduled-short-retry",
-          runtimeWakeResult: "not-wakeable:no-active-child",
+          progressKind: "retry-scheduled",
           staleWriteFencePreempted: false,
-          writeFenceHeldAfterNotWakeable: false,
+          writeFenceHeldAfterStartRequired: true,
         }),
         message: "Hosted runner nudge accepted.",
       }),
@@ -442,6 +501,115 @@ describe("HostedUserRunner wake scheduling", () => {
 
     firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+  });
+
+  it("checks container processing when local ensure is in flight but no child is wakeable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const firstInvocation = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [firstInvocation.promise],
+      mailboxLag: [createMailboxLag({
+        importedSeq: "700",
+        lag: "1",
+        maxSeq: "701",
+      })],
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+      kind: "processing-ensured",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const activeFence = readRunnerMeta(sql);
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "retry-scheduled",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: {
+        attemptId: activeFence.active_attempt_id,
+        leaseGeneration: String(activeFence.active_generation),
+        userId: "member_123",
+      },
+      reason: "nudge",
+      targetSeq: "701",
+      userId: "member_123",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+
+    firstInvocation.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
+  });
+
+  it("uses the same container processing reconciliation from alarms", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      mailboxLag: [createMailboxLag({
+        importedSeq: "700",
+        lag: "1",
+        maxSeq: "701",
+      })],
+      workspace: createWorkspaceState({ version: "21" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_alarm",
+      9,
+      "runtime",
+      FIXED_NOW,
+      "2026-04-27T00:01:00.000Z",
+      "21",
+    );
+
+    await runner.alarm();
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: {
+        attemptId: "attempt_alarm",
+        leaseGeneration: "9",
+        userId: "member_123",
+      },
+      reason: "alarm",
+      targetSeq: "701",
+      userId: "member_123",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_alarm",
+      active_generation: 9,
+      wake_at: null,
+    });
   });
 
   it("replaces a stale local drain when the exact active child is not wakeable", async () => {
@@ -472,7 +640,6 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
       inFlight: true,
       nextAlarmAt: expect.any(String),
@@ -497,12 +664,11 @@ describe("HostedUserRunner wake scheduling", () => {
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
-          alreadyRunning: false,
+          containerProcessingResult: "start-required:no-active-child",
           immediateDriveStarted: true,
-          progressKind: "preempted-stale-fence",
-          runtimeWakeResult: "not-wakeable:no-active-child",
+          progressKind: "processing-started",
           staleWriteFencePreempted: true,
-          writeFenceHeldAfterNotWakeable: false,
+          writeFenceHeldAfterStartRequired: false,
         }),
         message: "Hosted runner nudge accepted.",
       }),
@@ -626,7 +792,6 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
@@ -636,7 +801,6 @@ describe("HostedUserRunner wake scheduling", () => {
     delayedWake.resolve({ kind: "not-wakeable", reason: "no-active-child" });
     await expect(stalePreemption).resolves.toMatchObject({
       accepted: true,
-      alreadyRunning: false,
       immediateDriveStarted: false,
     });
 
@@ -796,7 +960,8 @@ describe("HostedUserRunner wake scheduling", () => {
       last_error_at: FIXED_NOW,
       wake_at: FIXED_NOW,
     });
-    expect(alarms).toEqual([FIXED_NOW, RETRY_AT]);
+    expect(alarms.at(-1)).toBe(RETRY_AT);
+    expect(alarms).toContain("2026-04-27T00:00:01.000Z");
   });
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
@@ -945,8 +1110,7 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(destroyInstance).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(alarms).toHaveLength(2);
-    expect(alarms[1]).toBe("deleted");
+    expect(alarms.at(-1)).toBe("deleted");
     expect(alarms).not.toContain(RETRY_AT);
   });
 
@@ -997,8 +1161,7 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(destroyInstance).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-    expect(alarms).toHaveLength(2);
-    expect(alarms[1]).toBe("deleted");
+    expect(alarms.at(-1)).toBe("deleted");
     expect(alarms).not.toContain(RETRY_AT);
   });
 
@@ -1050,25 +1213,55 @@ describe("HostedUserRunner wake scheduling", () => {
 function createRunnerHarness(input: {
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
+  ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
+  mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
+  onStatusRead?: () => Promise<void> | void;
   onWorkspaceRead?: () => Promise<void> | void;
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState();
   const invocationResults = [...(input.invocationResults ?? [])];
+  let mailboxLag = input.mailboxLag ?? [createMailboxLag()];
+  const markMailboxCaughtUp = () => {
+    mailboxLag = mailboxLag.map((lane) => ({
+      ...lane,
+      importedSeq: lane.maxSeq,
+      lag: "0",
+    }));
+  };
   const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
     async () => {
       const next = invocationResults.shift() ?? { nextWakeAt: null, status: "idle" };
       if (next instanceof Error) {
         throw next;
       }
-      return await next;
+      const result = await next;
+      markMailboxCaughtUp();
+      return result;
     },
   );
   const runnerContainerNames: string[] = [];
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: input.destroyInstance ?? (async () => {}),
+    ...(input.ensureProcessing
+      ? {
+          ensureProcessing: async (ensureInput) => {
+            if (ensureInput.invoke) {
+              return {
+                action: ensureInput.activeRuntime ? "restarted" : "started",
+                kind: "accepted",
+                result: await invoke(ensureInput.invoke),
+              };
+            }
+            return await input.ensureProcessing?.(ensureInput) ?? {
+              kind: "start-required",
+              reason: "no-active-child",
+            };
+          },
+        }
+      : {}),
     invoke,
     smokeHealth: async () => ({
       ok: true,
@@ -1086,6 +1279,8 @@ function createRunnerHarness(input: {
   };
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    readMailboxLag: () => mailboxLag,
+    onStatusRead: input.onStatusRead,
     onWorkspaceRead: input.onWorkspaceRead,
   });
 
@@ -1187,6 +1382,8 @@ function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
     onWorkspaceRead?: () => Promise<void> | void;
+    onStatusRead?: () => Promise<void> | void;
+    readMailboxLag?: () => HostedRuntimeWebStatusResponse["mailboxLag"];
   } = {},
 ): void {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
@@ -1203,8 +1400,9 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_STATUS_PATH) {
+        await hooks.onStatusRead?.();
         return jsonResponse({
-          mailboxLag: [],
+          mailboxLag: hooks.readMailboxLag?.() ?? [],
           userId: input.boundUserId,
           workspace,
         });
@@ -1243,6 +1441,18 @@ function createWorkspaceState(
     updatedAt: FIXED_NOW,
     userId: "member_123",
     version: "0",
+    ...overrides,
+  };
+}
+
+function createMailboxLag(
+  overrides: Partial<HostedRuntimeWebStatusResponse["mailboxLag"][number]> = {},
+): HostedRuntimeWebStatusResponse["mailboxLag"][number] {
+  return {
+    importedSeq: "0",
+    lag: "1",
+    lane: "conversation",
+    maxSeq: "1",
     ...overrides,
   };
 }

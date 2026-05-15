@@ -17,7 +17,7 @@ interface MockAssistantNudgeInput {
 interface MockAssistantNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean | null;
-  alreadyRunning: boolean | null;
+  kind: "caught-up" | "processing-ensured" | "retry-scheduled" | null;
   configured: boolean;
   errorCode: string | null;
   immediateDriveStarted: boolean | null;
@@ -52,11 +52,11 @@ const assistantNudgeMocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "caught-up",
       nextAlarmAtPresent: false,
       usageGateDenied: false,
     };
@@ -102,7 +102,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
         return {
           accepted: false,
           alarmScheduled: null,
-          alreadyRunning: null,
+          kind: null,
           configured: false,
           errorCode: null,
           immediateDriveStarted: null,
@@ -119,7 +119,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
       return {
         accepted: result.accepted,
         alarmScheduled: result.alarmScheduled,
-        alreadyRunning: result.alreadyRunning,
+        kind: result.kind,
         configured: true,
         errorCode: null,
         immediateDriveStarted: result.immediateDriveStarted ?? null,
@@ -161,7 +161,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       inFlight: false,
       leaseGeneration: "1",
     });
@@ -186,7 +185,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       inFlight: false,
       leaseGeneration: "1",
     });
@@ -236,7 +234,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       inFlight: false,
       leaseGeneration: "1",
     });
@@ -282,14 +279,14 @@ describe("nudgeHostedRunnerBestEffort", () => {
     let resolveDirectNudge!: (value: {
       accepted: boolean;
       alarmScheduled: boolean;
-      alreadyRunning: boolean;
+      kind: "caught-up" | "processing-ensured" | "retry-scheduled";
       inFlight: boolean;
       leaseGeneration: string;
     }) => void;
     const directNudge = new Promise<{
       accepted: boolean;
       alarmScheduled: boolean;
-      alreadyRunning: boolean;
+      kind: "caught-up" | "processing-ensured" | "retry-scheduled";
       inFlight: boolean;
       leaseGeneration: string;
     }>((resolve) => {
@@ -330,8 +327,8 @@ describe("nudgeHostedRunnerBestEffort", () => {
     resolveDirectNudge({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       inFlight: false,
+      kind: "processing-ensured",
       leaseGeneration: "1",
     });
     await expect(handoff).resolves.toMatchObject({
@@ -372,7 +369,6 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       inFlight: false,
       leaseGeneration: "1",
     });
@@ -448,7 +444,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
+      kind: "processing-ensured",
       immediateDriveStarted: true,
       inFlight: false,
       leaseGeneration: "1",
@@ -497,7 +493,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
+      kind: "processing-ensured",
       immediateDriveStarted: true,
       inFlight: false,
       leaseGeneration: "1",

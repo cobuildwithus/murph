@@ -766,9 +766,9 @@ export interface HostedMailboxLaneLag {
 export interface HostedRunnerNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean;
-  alreadyRunning: boolean;
   immediateDriveStarted?: boolean;
   inFlight: boolean;
+  kind: "caught-up" | "processing-ensured" | "retry-scheduled";
   nextAlarmAt?: string | null;
 }
 

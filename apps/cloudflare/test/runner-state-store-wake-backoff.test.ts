@@ -55,7 +55,7 @@ describe("RunnerStateStore wake/backoff authority", () => {
     });
   });
 
-  it("preserves a nudge recorded while a runtime write fence is active", async () => {
+  it("replaces a nudge recorded while a runtime write fence is active with the next runtime wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
@@ -80,9 +80,12 @@ describe("RunnerStateStore wake/backoff authority", () => {
     expect(scheduled).toMatchObject({
       backoffUntil: null,
       failureCount: 0,
-      wakeAt: RETRY_AT,
+      wakeAt: LATER_WAKE,
     });
     await expect(store.readDueWork(Date.parse(RETRY_AT))).resolves.toMatchObject({
+      kind: "idle",
+    });
+    await expect(store.readDueWork(Date.parse(LATER_WAKE))).resolves.toMatchObject({
       kind: "runtime",
       reason: "wake",
     });

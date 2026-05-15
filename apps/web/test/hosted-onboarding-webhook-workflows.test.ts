@@ -13,7 +13,7 @@ import {
 interface MockAssistantNudgeResult {
   accepted: boolean;
   alarmScheduled: boolean | null;
-  alreadyRunning: boolean | null;
+  kind: "caught-up" | "processing-ensured" | "retry-scheduled" | null;
   configured: boolean;
   errorCode: string | null;
   immediateDriveStarted: boolean | null;
@@ -30,11 +30,11 @@ const mocks = vi.hoisted(() => ({
     return {
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "caught-up",
       nextAlarmAtPresent: false,
       usageGateDenied: false,
     };
@@ -107,21 +107,21 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "caught-up",
       nextAlarmAtPresent: false,
     });
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: false,
       configured: true,
       errorCode: null,
       immediateDriveStarted: false,
       inFlight: false,
+      kind: "caught-up",
       nextAlarmAtPresent: false,
       usageGateDenied: false,
     });
@@ -252,7 +252,7 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
+      kind: null,
       configured: false,
       errorCode: null,
       immediateDriveStarted: null,
@@ -272,7 +272,7 @@ describe("hosted onboarding webhook workflows", () => {
     mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
       accepted: false,
       alarmScheduled: null,
-      alreadyRunning: null,
+      kind: null,
       configured: true,
       errorCode: "AI_USAGE_GATE_DENIED",
       immediateDriveStarted: null,

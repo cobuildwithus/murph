@@ -752,10 +752,6 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
       record.alarmScheduled,
       "Hosted runner nudge result alarmScheduled",
     ),
-    alreadyRunning: requireBoolean(
-      record.alreadyRunning,
-      "Hosted runner nudge result alreadyRunning",
-    ),
     ...(record.immediateDriveStarted === undefined
       ? {}
       : {
@@ -765,6 +761,7 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
           ),
         }),
     inFlight: requireBoolean(record.inFlight, "Hosted runner nudge result inFlight"),
+    kind: parseHostedRunnerNudgeResultKind(record),
     ...(record.nextAlarmAt === undefined
       ? {}
       : {
@@ -774,6 +771,37 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
           ),
         }),
   };
+}
+
+function parseHostedRunnerNudgeResultKind(
+  record: Record<string, unknown>,
+): HostedRunnerNudgeResult["kind"] {
+  const value = record.kind;
+  if (value === undefined) {
+    if (
+      record.alreadyRunning === true
+      || record.immediateDriveStarted === true
+      || record.inFlight === true
+    ) {
+      return "processing-ensured";
+    }
+    return record.alarmScheduled === true ? "retry-scheduled" : "caught-up";
+  }
+
+  return parseHostedRunnerNudgeResultKindValue(value);
+}
+
+function parseHostedRunnerNudgeResultKindValue(
+  value: unknown,
+): HostedRunnerNudgeResult["kind"] {
+  if (
+    value === "caught-up"
+    || value === "processing-ensured"
+    || value === "retry-scheduled"
+  ) {
+    return value;
+  }
+  throw new TypeError("Hosted runner nudge result kind is invalid.");
 }
 
 export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerStatusResponse {

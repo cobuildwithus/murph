@@ -927,9 +927,9 @@ describe("hosted runtime control contracts", () => {
     const nudge = {
       accepted: true,
       alarmScheduled: true,
-      alreadyRunning: false,
       immediateDriveStarted: true,
       inFlight: true,
+      kind: "processing-ensured",
       nextAlarmAt: "2026-04-26T00:00:05.000Z",
     };
     const status = {
@@ -994,13 +994,13 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRunnerNudgeResult({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: true,
       inFlight: true,
+      kind: "processing-ensured",
     })).toEqual({
       accepted: true,
       alarmScheduled: false,
-      alreadyRunning: true,
       inFlight: true,
+      kind: "processing-ensured",
     });
     expect(parseHostedRunnerStatusResponse({
       inFlight: false,

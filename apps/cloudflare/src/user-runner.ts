@@ -52,6 +52,7 @@ import {
   invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerContainerEnsureProcessingResult,
   type RunnerRuntimeWakeInput,
   type RunnerRuntimeWakeResult,
 } from "./runner-container.js";
@@ -79,35 +80,61 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
-const LOCAL_DRAIN_START_GRACE_MS = 2_000;
+const LOCAL_ENSURE_START_GRACE_MS = 2_000;
+
+type DurableRunnerDemand =
+  | {
+      kind: "mailbox-backlog";
+      mailboxMaxSeq: string;
+      mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"];
+      record: RunnerStateRecord;
+    }
+  | {
+      kind: "scheduled-runtime";
+      record: RunnerStateRecord;
+      reason: "retry" | "wake";
+    };
 
 type EnsureRunnerProgressResult =
   | {
-      kind: "idle";
+      demand: null;
+      kind: "caught-up";
       record: RunnerStateRecord;
     }
   | {
-      kind: "runtime-wake-accepted";
+      containerResult:
+        | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
+        | null;
+      demand: DurableRunnerDemand;
+      kind: "processing-ensured";
       record: RunnerStateRecord;
-      runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "accepted" }>;
     }
   | {
-      drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "preempted-stale-fence";
+      containerResult: Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>;
+      demand: DurableRunnerDemand;
+      localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
+      kind: "processing-started";
+      nextAlarmAt?: string | null;
       previousAttemptId: string;
       record: RunnerStateRecord;
-      runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" }>;
     }
   | {
-      drainPromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "started";
+      containerResult: null;
+      demand: DurableRunnerDemand;
+      localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
+      kind: "processing-started";
+      nextAlarmAt?: string | null;
       record: RunnerStateRecord;
     }
   | {
-      deferredFreshLocalDrain?: boolean;
-      kind: "scheduled-short-retry";
+      deferredFreshLocalEnsure?: boolean;
+      demand: DurableRunnerDemand;
+      kind: "retry-scheduled";
       record: RunnerStateRecord;
-      runtimeWake: Extract<RunnerRuntimeWakeResult, { kind: "not-wakeable" | "unknown" }>;
+      containerResult:
+        | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
+        | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>
+        | null;
     };
 
 export interface HostedRunnerUserDataDeletionResult {
@@ -138,7 +165,7 @@ interface RunnerUserStores {
   userId: string;
 }
 
-interface RunnerDrainInput {
+interface RunnerProgressInput {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   reason: HostedWorkspaceInvocationReason;
 }
@@ -172,8 +199,8 @@ export class HostedUserRunner {
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private runnerStores: RunnerUserStores | null = null;
   private runtimeCryptoContextLock: Promise<void> | null = null;
-  private drainPromise: Promise<HostedWorkspaceInvocationResult> | null = null;
-  private readonly retiredDrainPromises = new WeakSet<Promise<HostedWorkspaceInvocationResult>>();
+  private localEnsureInFlight: Promise<HostedWorkspaceInvocationResult> | null = null;
+  private readonly retiredEnsurePromises = new WeakSet<Promise<HostedWorkspaceInvocationResult>>();
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -211,7 +238,7 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner alarm drain failed; scheduling retry.",
+        message: "Hosted runner alarm reconciliation failed; scheduling retry.",
         phase: "failed",
         userId: await this.tryReadBoundUserId(),
       });
@@ -227,7 +254,7 @@ export class HostedUserRunner {
 
     return {
       ...webStatus,
-      inFlight: this.drainPromise !== null || record.writeFence !== null,
+      inFlight: this.localEnsureInFlight !== null || record.writeFence !== null,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
@@ -284,10 +311,6 @@ export class HostedUserRunner {
   }
 
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
-    const record = await this.stateStore.markWakePending({
-      preferredWakeAt: new Date().toISOString(),
-    });
-    await this.syncAlarm(record);
     const progress = await this.ensureRunnerProgress({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       reason: "nudge",
@@ -395,27 +418,24 @@ export class HostedUserRunner {
     return { completed: result.completed };
   }
 
-  async runUntilIdleOrBudget(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
+  async runUntilIdleOrBudget(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
     const progress = await this.ensureRunnerProgress({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       reason: input.reason,
     });
     if (
-      (
-        progress.kind === "started"
-        || progress.kind === "preempted-stale-fence"
-      )
-      && progress.drainPromise
+      progress.kind === "processing-started"
+      && progress.localEnsurePromise
     ) {
-      return await progress.drainPromise;
+      return await progress.localEnsurePromise;
     }
-    if (progress.kind === "idle") {
+    if (progress.kind === "caught-up") {
       return {
-        nextWakeAt: progress.record.nextWakeAt,
+        nextWakeAt: readRunnerStateAlarmAt(progress.record),
         status: "idle",
       };
     }
-    const nextWakeAt = progress.kind === "scheduled-short-retry"
+    const nextWakeAt = progress.kind === "retry-scheduled"
       ? readRunnerRuntimeDueAt(progress.record)
       : readRunnerStateAlarmAt(progress.record);
     return {
@@ -427,68 +447,86 @@ export class HostedUserRunner {
   private toHostedRunnerNudgeResult(
     progress: EnsureRunnerProgressResult,
   ): HostedRunnerNudgeResult {
-    const alreadyRunning =
-      progress.kind === "runtime-wake-accepted";
     const immediateDriveStarted =
-      (
-        progress.kind === "started"
-        || progress.kind === "preempted-stale-fence"
-      )
-      && progress.drainPromise !== null;
-    const nextAlarmAt = progress.kind === "scheduled-short-retry"
+      progress.kind === "processing-started"
+      && progress.localEnsurePromise !== null;
+    const nextAlarmAt = progress.kind === "retry-scheduled"
       ? readRunnerRuntimeDueAt(progress.record)
+      : progress.kind === "processing-started" && progress.nextAlarmAt !== undefined
+      ? progress.nextAlarmAt
       : readRunnerStateAlarmAt(progress.record);
+    const kind = progress.kind === "caught-up"
+      ? "caught-up"
+      : progress.kind === "retry-scheduled"
+      ? "retry-scheduled"
+      : "processing-ensured";
 
     return {
       accepted: true,
       alarmScheduled: nextAlarmAt !== null,
-      alreadyRunning,
+      kind,
       immediateDriveStarted,
-      inFlight: alreadyRunning || immediateDriveStarted,
+      inFlight:
+        progress.kind === "processing-ensured"
+        || progress.kind === "processing-started",
       nextAlarmAt,
     };
   }
 
-  private async ensureRunnerProgress(input: RunnerDrainInput): Promise<EnsureRunnerProgressResult> {
-    const record = await this.stateStore.readState();
+  private async ensureRunnerProgress(input: RunnerProgressInput): Promise<EnsureRunnerProgressResult> {
+    const demand = await this.readDurableDemand();
+    if (!demand) {
+      const record = await this.stateStore.readState();
+      await this.syncAlarm(record);
+      return { demand: null, kind: "caught-up", record };
+    }
+
+    const record = demand.record;
 
     if (record.writeFence) {
-      const runtimeWake = await this.wakeActiveRuntime({
-        attemptId: record.writeFence.attemptId,
-        leaseGeneration: String(record.writeFence.generation),
-        userId: record.userId,
+      const containerResult = await this.ensureActiveRuntimeProcessing({
+        activeRuntime: {
+          attemptId: record.writeFence.attemptId,
+          leaseGeneration: String(record.writeFence.generation),
+          userId: record.userId,
+        },
+        demand,
+        reason: input.reason,
       });
-      if (runtimeWake.kind === "accepted") {
+      if (containerResult.kind === "accepted") {
         await this.syncAlarm(record);
         return {
-          kind: "runtime-wake-accepted",
+          containerResult,
+          demand,
+          kind: "processing-ensured",
           record,
-          runtimeWake,
         };
       }
 
-      if (runtimeWake.kind === "unknown") {
+      if (containerResult.kind === "retry-scheduled") {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
         return {
-          kind: "scheduled-short-retry",
+          containerResult,
+          demand,
+          kind: "retry-scheduled",
           record: retryRecord,
-          runtimeWake,
         };
       }
 
-      if (this.shouldDeferFreshLocalDrainPreemption(record)) {
+      if (this.shouldDeferFreshLocalEnsurePreemption(record)) {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
         return {
-          deferredFreshLocalDrain: true,
-          kind: "scheduled-short-retry",
+          containerResult,
+          deferredFreshLocalEnsure: true,
+          demand,
+          kind: "retry-scheduled",
           record: retryRecord,
-          runtimeWake,
         };
       }
 
@@ -505,49 +543,188 @@ export class HostedUserRunner {
         return await this.ensureRunnerProgress(input);
       }
 
-      this.retireCurrentDrainPromise();
+      this.retireCurrentEnsurePromise();
       await this.syncAlarm(preempted.record);
 
-      const drainPromise = this.kickDrain({
+      const localEnsureInFlight = this.kickLocalEnsure({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: input.reason,
       });
       return {
-        drainPromise,
-        kind: "preempted-stale-fence",
+        containerResult,
+        demand,
+        localEnsurePromise: localEnsureInFlight,
+        kind: "processing-started",
         previousAttemptId: previousFence.attemptId,
         record: preempted.record,
-        runtimeWake,
       };
     }
 
-    const due = await this.stateStore.readDueWork(Date.now());
-    if (due.kind !== "runtime") {
-      await this.syncAlarm(due.record);
-      return { kind: "idle", record: due.record };
+    if (isRunnerBackoffActive(record, Date.now())) {
+      const retryRecord = await this.stateStore.markWakePending({
+        preferredWakeAt: new Date().toISOString(),
+      });
+      await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
+      return {
+        containerResult: null,
+        demand,
+        kind: "retry-scheduled",
+        record: retryRecord,
+      };
     }
 
-    this.retireCurrentDrainPromise();
-    const drainPromise = this.kickDrain({
+    this.retireCurrentEnsurePromise();
+    const initialAlarmAt = new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString();
+    await this.syncAlarmAt(initialAlarmAt);
+    const localEnsureInFlight = this.kickLocalEnsure({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      reason: due.reason === "retry" ? "retry" : input.reason,
+      reason: demand.kind === "scheduled-runtime" && demand.reason === "retry"
+        ? "retry"
+        : input.reason,
     });
     return {
-      drainPromise,
-      kind: "started",
-      record: due.record,
+      containerResult: null,
+      demand,
+      localEnsurePromise: localEnsureInFlight,
+      kind: "processing-started",
+      nextAlarmAt: initialAlarmAt,
+      record,
     };
   }
 
-  private shouldDeferFreshLocalDrainPreemption(record: RunnerStateRecord): boolean {
-    if (!this.drainPromise || !record.writeFence) {
+  private async readDurableDemand(): Promise<DurableRunnerDemand | null> {
+    const due = await this.stateStore.readDueWork(Date.now());
+
+    if (due.kind === "runtime") {
+      const mailboxDemand = await this.tryReadMailboxBacklogDemand(due.record);
+      if (mailboxDemand) {
+        return mailboxDemand;
+      }
+
+      return {
+        kind: "scheduled-runtime",
+        reason: due.reason,
+        record: due.record,
+      };
+    }
+
+    return await this.readMailboxBacklogDemand(due.record);
+  }
+
+  private async readMailboxBacklogDemand(
+    record: RunnerStateRecord,
+  ): Promise<Extract<DurableRunnerDemand, { kind: "mailbox-backlog" }> | null> {
+    const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
+    const mailboxMaxSeq = readMailboxBacklogMaxSeq(webStatus.mailboxLag);
+
+    if (mailboxMaxSeq) {
+      return {
+        kind: "mailbox-backlog",
+        mailboxLag: webStatus.mailboxLag,
+        mailboxMaxSeq,
+        record,
+      };
+    }
+
+    return null;
+  }
+
+  private async tryReadMailboxBacklogDemand(
+    record: RunnerStateRecord,
+  ): Promise<Extract<DurableRunnerDemand, { kind: "mailbox-backlog" }> | null> {
+    try {
+      return await this.readMailboxBacklogDemand(record);
+    } catch {
+      return null;
+    }
+  }
+
+  private async ensureActiveRuntimeProcessing(
+    input: {
+      activeRuntime: RunnerRuntimeWakeInput;
+      demand: DurableRunnerDemand;
+      reason: HostedWorkspaceInvocationReason;
+    },
+  ): Promise<
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
+    | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>
+  > {
+    if (!this.runnerContainerNamespace) {
+      return { kind: "retry-scheduled", reason: "missing-container-binding" };
+    }
+
+    const container = this.runnerContainerNamespace.getByName(
+      resolveHostedExecutionRunnerContainerName({
+        source: this.runnerRuntimeEnvSource,
+        userId: input.activeRuntime.userId,
+      }),
+    );
+
+    if (container.ensureProcessing) {
+      try {
+        const result = await container.ensureProcessing({
+          activeRuntime: input.activeRuntime,
+          reason: input.reason,
+          targetSeq: readDurableDemandTargetSeq(input.demand),
+          userId: input.activeRuntime.userId,
+        });
+        if (
+          result.kind === "accepted"
+          || result.kind === "start-required"
+          || result.kind === "retry-scheduled"
+        ) {
+          return result;
+        }
+        return { kind: "retry-scheduled", reason: "legacy-wake-result" };
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+          level: "warn",
+          message: "Hosted runner could not ensure active runtime processing.",
+          phase: "scheduled",
+          userId: input.activeRuntime.userId,
+        });
+        return { kind: "retry-scheduled", reason: "container-rpc-error" };
+      }
+    }
+
+    if (!container.wakeRuntime) {
+      return { kind: "retry-scheduled", reason: "missing-wake-method" };
+    }
+
+    try {
+      const runtimeWake = normalizeRunnerRuntimeWakeResult(await container.wakeRuntime(input.activeRuntime));
+      if (runtimeWake.kind === "accepted") {
+        return { action: "woken", kind: "accepted" };
+      }
+      if (runtimeWake.kind === "not-wakeable") {
+        return { kind: "start-required", reason: "no-active-child" };
+      }
+      return { kind: "retry-scheduled", reason: runtimeWake.reason };
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+          level: "warn",
+          message: "Hosted runner could not ensure active runtime processing.",
+          phase: "scheduled",
+          userId: input.activeRuntime.userId,
+        });
+      return { kind: "retry-scheduled", reason: "container-rpc-error" };
+    }
+  }
+
+  private shouldDeferFreshLocalEnsurePreemption(record: RunnerStateRecord): boolean {
+    if (!this.localEnsureInFlight || !record.writeFence) {
       return false;
     }
     const startedAt = Date.parse(record.writeFence.startedAt);
     if (!Number.isFinite(startedAt)) {
       return false;
     }
-    return Date.now() - startedAt < LOCAL_DRAIN_START_GRACE_MS;
+    return Date.now() - startedAt < LOCAL_ENSURE_START_GRACE_MS;
   }
 
   async runUntilIdleForTest(input: {
@@ -590,75 +767,92 @@ export class HostedUserRunner {
     };
   }
 
-  private kickDrain(
-    input: RunnerDrainInput,
+  private kickLocalEnsure(
+    input: RunnerProgressInput,
   ): Promise<HostedWorkspaceInvocationResult> | null {
-    if (this.drainPromise) {
+    if (this.localEnsureInFlight) {
       return null;
     }
 
-    const drain = this.runDrainLoop(input)
+    const localEnsure = this.runLocalEnsureLoop(input)
       .finally(() => {
-        if (this.drainPromise === drain) {
-          this.drainPromise = null;
+        if (this.localEnsureInFlight === localEnsure) {
+          this.localEnsureInFlight = null;
         }
       });
-    this.drainPromise = drain;
+    this.localEnsureInFlight = localEnsure;
 
     try {
-      this.state.waitUntil?.(drain);
+      this.state.waitUntil?.(localEnsure);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         error,
         level: "warn",
-        message: "Hosted runner could not register detached drain with Durable Object waitUntil.",
+        message: "Hosted runner could not register detached ensure with Durable Object waitUntil.",
         phase: "scheduled",
         userId: null,
       });
     }
-    void drain.catch(async (error) => {
-      if (this.retiredDrainPromises.has(drain)) {
+    void localEnsure.catch(async (error) => {
+      if (this.retiredEnsurePromises.has(localEnsure)) {
         return;
       }
       await this.scheduleRetryAfterFailure(error);
     });
-    return drain;
+    return localEnsure;
   }
 
-  private retireCurrentDrainPromise(): void {
-    if (!this.drainPromise) {
+  private retireCurrentEnsurePromise(): void {
+    if (!this.localEnsureInFlight) {
       return;
     }
-    this.retiredDrainPromises.add(this.drainPromise);
-    this.drainPromise = null;
+    this.retiredEnsurePromises.add(this.localEnsureInFlight);
+    this.localEnsureInFlight = null;
   }
 
-  private async runDrainLoop(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
+  private async runLocalEnsureLoop(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
     let lastResult: HostedWorkspaceInvocationResult = {
       nextWakeAt: null,
       status: "idle",
     };
 
     while (true) {
-      const due = await this.stateStore.readDueWork(Date.now());
-      if (due.kind === "runtime") {
-        lastResult = await this.runRuntimeWake({
-          aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-          reason: due.reason === "retry" ? "retry" : input.reason,
-        });
-        if (lastResult.status === "scheduled") {
-          return lastResult;
-        }
-        continue;
+      const demand = await this.readDurableDemand();
+      if (!demand) {
+        await this.syncAlarm(await this.stateStore.readState());
+        return lastResult;
       }
 
-      await this.syncAlarm(due.record);
-      return lastResult;
+      if (demand.record.writeFence) {
+        await this.syncAlarm(demand.record);
+        return {
+          nextWakeAt: readRunnerStateAlarmAt(demand.record),
+          status: "scheduled",
+        };
+      }
+
+      if (isRunnerBackoffActive(demand.record, Date.now())) {
+        await this.syncAlarmAt(readRunnerRuntimeDueAt(demand.record));
+        return {
+          nextWakeAt: readRunnerRuntimeDueAt(demand.record),
+          status: "scheduled",
+        };
+      }
+
+      lastResult = await this.runRuntimeWake({
+        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+        reason: demand.kind === "scheduled-runtime" && demand.reason === "retry"
+          ? "retry"
+          : input.reason,
+      });
+      if (lastResult.status === "scheduled") {
+        return lastResult;
+      }
     }
   }
 
-  private async runRuntimeWake(input: RunnerDrainInput): Promise<HostedWorkspaceInvocationResult> {
+  private async runRuntimeWake(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
     const initialRecord = await this.stateStore.readState();
     let token: RunnerWriteFenceToken;
     try {
@@ -668,6 +862,7 @@ export class HostedUserRunner {
         reason: input.reason,
         userId: initialRecord.userId,
       });
+      await this.syncAlarm(await this.stateStore.readState());
     } catch (error) {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
@@ -896,36 +1091,6 @@ export class HostedUserRunner {
     }
 
     await this.state.storage.setAlarm(new Date(nextAlarmAt));
-  }
-
-  private async wakeActiveRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
-    if (!this.runnerContainerNamespace) {
-      return { kind: "unknown", reason: "missing-container-binding" };
-    }
-
-    const container = this.runnerContainerNamespace.getByName(
-      resolveHostedExecutionRunnerContainerName({
-        source: this.runnerRuntimeEnvSource,
-        userId: input.userId,
-      }),
-    );
-    if (!container.wakeRuntime) {
-      return { kind: "unknown", reason: "missing-wake-method" };
-    }
-
-    try {
-      return normalizeRunnerRuntimeWakeResult(await container.wakeRuntime(input));
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner could not wake an active runtime best-effort.",
-        phase: "scheduled",
-        userId: input.userId,
-      });
-      return { kind: "unknown", reason: "container-rpc-error" };
-    }
   }
 
   private async scheduleRetryAfterFailure(error: unknown): Promise<void> {
@@ -1300,11 +1465,47 @@ function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
   return readRunnerRuntimeDueAt(record);
 }
 
+function readMailboxBacklogMaxSeq(
+  mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
+): string | null {
+  let maxSeq: string | null = null;
+  for (const lane of mailboxLag) {
+    if (compareHostedMailboxSeq(lane.maxSeq, lane.importedSeq) <= 0) {
+      continue;
+    }
+    if (!maxSeq || compareHostedMailboxSeq(lane.maxSeq, maxSeq) > 0) {
+      maxSeq = lane.maxSeq;
+    }
+  }
+  return maxSeq;
+}
+
+function readDurableDemandTargetSeq(demand: DurableRunnerDemand): string | null {
+  return demand.kind === "mailbox-backlog" ? demand.mailboxMaxSeq : null;
+}
+
+function compareHostedMailboxSeq(left: string, right: string): number {
+  const leftValue = BigInt(left);
+  const rightValue = BigInt(right);
+  if (leftValue === rightValue) {
+    return 0;
+  }
+  return leftValue > rightValue ? 1 : -1;
+}
+
 function readRunnerRuntimeDueAt(record: RunnerStateRecord): string | null {
   if (!record.wakeAt) {
     return null;
   }
   return latestIsoDate(record.wakeAt, record.backoffUntil);
+}
+
+function isRunnerBackoffActive(record: RunnerStateRecord, nowMs: number): boolean {
+  if (!record.backoffUntil) {
+    return false;
+  }
+  const backoffUntilMs = Date.parse(record.backoffUntil);
+  return Number.isFinite(backoffUntilMs) && backoffUntilMs > nowMs;
 }
 
 function earliestIsoDate(left: string | null, right: string | null): string | null {
@@ -1406,54 +1607,65 @@ function isRunnerRuntimeWakeUnknownReason(
 function buildEnsureRunnerProgressLogDetails(
   progress: EnsureRunnerProgressResult,
 ): HostedExecutionStructuredLogDetails {
-  const runtimeWake = readEnsureRunnerProgressRuntimeWake(progress);
+  const containerResult = readEnsureRunnerProgressContainerResult(progress);
   return {
-    alreadyRunning: progress.kind === "runtime-wake-accepted",
     immediateDriveStarted:
-      (
-        progress.kind === "started"
-        || progress.kind === "preempted-stale-fence"
-      )
-      && progress.drainPromise !== null,
+      progress.kind === "processing-started"
+      && progress.localEnsurePromise !== null,
+    demandKind: progress.demand?.kind ?? null,
+    mailboxBacklogPresent: progress.demand?.kind === "mailbox-backlog",
     progressKind: progress.kind,
-    runtimeWakeAccepted: runtimeWake?.kind === "accepted",
-    runtimeWakeResult: runtimeWake ? formatRunnerRuntimeWakeResult(runtimeWake) : null,
-    freshLocalDrainPreemptionDeferred:
-      progress.kind === "scheduled-short-retry"
-      && progress.deferredFreshLocalDrain === true,
-    staleWriteFencePreempted: progress.kind === "preempted-stale-fence",
-    writeFenceHeldAfterNotWakeable:
-      progress.kind === "scheduled-short-retry"
-      && runtimeWake?.kind === "not-wakeable"
-      && progress.deferredFreshLocalDrain !== true,
-    ...(progress.kind === "preempted-stale-fence"
+    containerProcessingAction: readContainerProcessingAction(containerResult),
+    containerProcessingResult: containerResult
+      ? formatContainerEnsureProcessingResult(containerResult)
+      : null,
+    freshLocalEnsurePreemptionDeferred:
+      progress.kind === "retry-scheduled"
+      && progress.deferredFreshLocalEnsure === true,
+    staleWriteFencePreempted:
+      progress.kind === "processing-started"
+      && "previousAttemptId" in progress,
+    writeFenceHeldAfterStartRequired:
+      progress.kind === "retry-scheduled"
+      && progress.deferredFreshLocalEnsure === true,
+    ...(progress.kind === "processing-started" && "previousAttemptId" in progress
       ? {
         previousAttemptId: progress.previousAttemptId,
-        progressStarted: progress.drainPromise !== null,
+        progressStarted: progress.localEnsurePromise !== null,
       }
       : {}),
     wakePending: progress.record.wakePending,
   };
 }
 
-function readEnsureRunnerProgressRuntimeWake(
+function readEnsureRunnerProgressContainerResult(
   progress: EnsureRunnerProgressResult,
-): RunnerRuntimeWakeResult | null {
+): RunnerContainerEnsureProcessingResult | null {
   if (
-    progress.kind === "runtime-wake-accepted"
-    || progress.kind === "preempted-stale-fence"
-    || progress.kind === "scheduled-short-retry"
+    progress.kind === "processing-ensured"
+    || progress.kind === "processing-started"
+    || progress.kind === "retry-scheduled"
   ) {
-    return progress.runtimeWake;
+    return progress.containerResult;
   }
   return null;
 }
 
-function formatRunnerRuntimeWakeResult(result: RunnerRuntimeWakeResult): string {
-  if (result.kind === "accepted") {
-    return "accepted";
+function readContainerProcessingAction(result: RunnerContainerEnsureProcessingResult | null): string | null {
+  if (!result || !("action" in result)) {
+    return null;
   }
-  return `${result.kind}:${result.reason}`;
+  return result.action;
+}
+
+function formatContainerEnsureProcessingResult(result: RunnerContainerEnsureProcessingResult): string {
+  if (result.kind === "accepted") {
+    return `accepted:${result.action}`;
+  }
+  if (result.kind === "start-required") {
+    return `start-required:${result.reason}`;
+  }
+  return `retry-scheduled:${result.reason}`;
 }
 
 function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
