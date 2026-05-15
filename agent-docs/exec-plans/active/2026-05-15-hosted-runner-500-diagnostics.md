@@ -64,6 +64,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/web test -- hosted-onboarding-linq-dispatch.test.ts` passed after removing the silent repeated usage-limit suppression path; the command ran the full web Vitest workspace.
 - `pnpm --dir apps/web typecheck` passed after removing the silent repeated usage-limit suppression path.
 - `bash scripts/workspace-verify.sh test:diff apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after removing the silent repeated usage-limit suppression path.
+- `pnpm --dir apps/web test -- hosted-onboarding-linq-usage-reset-e2e.test.ts` passed after adding the service-boundary repeated usage-limit regression; the command ran the full web Vitest workspace.
+- `pnpm --dir apps/web typecheck` passed after adding the service-boundary repeated usage-limit regression.
+- `bash scripts/workspace-verify.sh test:diff apps/web/test/hosted-onboarding-linq-usage-reset-e2e.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after adding the service-boundary repeated usage-limit regression; `apps/web verify` completed with the pre-existing lint warnings in `device-sync/agent-session-service.ts` and the pre-existing Turbopack trace warning.
 
 ## State
 
@@ -130,3 +133,7 @@ runtime phase boundaries.
   quota reply for each new inbound event; the usage-period notice marker is
   retained as accounting metadata but no longer controls whether the user gets
   an answer.
+- A hosted Linq service-boundary e2e regression now covers the production
+  failure shape: exhausted usage period, already-claimed notice marker, and a
+  fresh inbound text still produce the deterministic usage-limit reply without
+  appending mailbox work or nudging the runner.

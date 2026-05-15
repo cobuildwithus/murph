@@ -479,6 +479,62 @@ describe("hosted Linq usage reset e2e", () => {
       signal: undefined,
     });
   });
+
+  it("still sends the usage-limit reply when the exhausted period notice was already claimed", async () => {
+    const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
+    const alreadyClaimedAt = new Date("2026-04-29T16:30:00.000Z");
+    const usage = createUsageResetPrismaFixture({
+      initialPeriod: {
+        limitNoticeSentAt: alreadyClaimedAt,
+        limitUsdMicros: monthlyLimit,
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+        spentUsdMicros: monthlyLimit,
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma: usage.prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-04-30T12:00:00.000Z",
+        data: {
+          id: "msg_after_notice_claimed",
+          parts: [
+            {
+              type: "text",
+              value: "Are you there?",
+            },
+          ],
+          sent_at: "2026-04-30T12:00:00.000Z",
+        },
+        eventId: "evt_after_notice_claimed",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-ai-usage-quota-reply",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: CHAT_ID,
+      idempotencyKey: "linq-message:evt_after_notice_claimed",
+      message: USAGE_LIMIT_MESSAGE,
+      replyToMessageId: "msg_after_notice_claimed",
+      signal: undefined,
+    });
+    expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
+    expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
+      limitNoticeSentAt: alreadyClaimedAt,
+      spentUsdMicros: monthlyLimit,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
 });
 
 async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebhookTestInput) {
@@ -487,6 +543,7 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 
 function createUsageResetPrismaFixture(input: {
   initialPeriod: {
+    limitNoticeSentAt?: Date | null;
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
@@ -628,6 +685,7 @@ type UsagePeriodWhere = {
 
 function buildUsagePeriodRecord(input: {
   billingPlanCode?: "launch_monthly" | "launch_edge_monthly";
+  limitNoticeSentAt?: Date | null;
   limitUsdMicros: bigint;
   memberId?: string;
   periodEnd: Date;
@@ -639,7 +697,7 @@ function buildUsagePeriodRecord(input: {
     blockedAt: input.spentUsdMicros >= input.limitUsdMicros
       ? new Date(input.periodEnd.getTime() - 60_000)
       : null,
-    limitNoticeSentAt: null,
+    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros,
     memberId: input.memberId ?? MEMBER_ID,
     periodEnd: input.periodEnd,
