@@ -84,6 +84,11 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare typecheck` passed after adding runtime control-plane request lifecycle logs and runner retry metadata.
 - `security-privacy-review` found no findings; residual diagnostic-integrity risk is limited to child-spoofed fixed-vocabulary phase metadata, not data exposure.
 - `simplify` review found module-global phase timing state; replaced it with per-invocation closure state and centralized child runtime phase metadata projection.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts apps/cloudflare/test/node-runner-isolated.test.ts` passed after artifact/web-control restore diagnostics.
+- `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-artifacts.test.ts test/hosted-runtime-workspace-entrypoint.test.ts` passed in `packages/assistant-runtime` after artifact 404 sanitization and open-phase failure closure.
+- `pnpm --dir apps/cloudflare typecheck` passed after artifact/web-control restore diagnostics.
+- `pnpm --dir packages/assistant-runtime typecheck` passed after artifact 404 sanitization and open-phase failure closure.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound.ts apps/cloudflare/src/runner-outbound/diagnostics.ts apps/cloudflare/src/runner-outbound/web-control.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/node-runner-child.ts packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/src/hosted-runtime/artifacts.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/node-runner-child.test.ts packages/assistant-runtime/test/hosted-runtime-artifacts.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts` passed after artifact/web-control restore diagnostics.
 
 ## State
 
@@ -176,3 +181,20 @@ runtime phase boundaries.
 - Runtime wake failures now log the recorded retry timestamp and delay beside
   the existing write-fence attempt metadata, so production evidence can separate
   first-attempt failure time from deliberate retry backoff.
+- Production evidence from the latest incident points to cold restore/control-plane
+  failure, not signup state, usage gating, or provider latency. The dominant
+  child failure shape is artifact fetch during runtime-in-process restore; a
+  smaller secondary shape is workspace-read HTTP 404.
+- Artifact GET/PUT handling now emits metadata-only Worker-boundary completion
+  logs with fixed operation, status, duration, found/authorized flags, and byte
+  counts only; raw content hashes, object paths, user ids, and bodies stay out
+  of logs.
+- Hosted runtime artifact misses now throw a sanitized HTTP 404 error, allowing
+  the child classifier to report `artifact_fetch`/`control_plane_http` instead
+  of a generic runtime error with a raw artifact hash.
+- Web-control non-OK responses now log only response body size/kind and safe
+  JSON error code/shape, making hosted-web 404s distinguishable from HTML/text
+  routing failures without logging response bodies.
+- Runtime phase logging now closes any still-open phase with a fail boundary
+  before logging the outer runtime failure, so restore failures produce
+  `workspace.restore:fail` instead of only `runtime:fail`.

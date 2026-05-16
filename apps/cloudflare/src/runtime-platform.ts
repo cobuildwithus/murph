@@ -202,23 +202,24 @@ export function buildHostedExecutionRuntimePlatform(input: {
       ? options.requireWriteFence
         ? await requireHostedRuntimeWriteFenceHeaders(
             input.workspaceCheckpointBridge,
-            `Hosted artifact upload ${artifact.sha256}`,
+            "Hosted artifact upload",
           )
         : await createHostedRuntimeWriteFenceHeaders(input.workspaceCheckpointBridge)
       : new Headers();
     const response = await fetchHostedResponse({
-      description: `Hosted artifact upload ${artifact.sha256}`,
+      description: "Hosted artifact upload",
       fetchImpl,
       init: {
         body: copyBytesToArrayBuffer(artifact.bytes),
         headers,
         method: "PUT",
       },
+      logPath: "/objects/REDACTED",
       timeoutMs,
       url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
     });
 
-    assertHostedOk(response, `Hosted artifact upload ${artifact.sha256}`);
+    assertHostedOk(response, "Hosted artifact upload");
   };
   const putArtifactOnce = async (
     artifact: {
@@ -260,8 +261,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
     artifactStore: {
       async get(sha256) {
         const response = await fetchHostedResponse({
-          description: `Hosted artifact fetch ${sha256}`,
+          description: "Hosted artifact fetch",
           fetchImpl,
+          logPath: "/objects/REDACTED",
           timeoutMs,
           url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
         });
@@ -270,7 +272,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           return null;
         }
 
-        assertHostedOk(response, `Hosted artifact fetch ${sha256}`);
+        assertHostedOk(response, "Hosted artifact fetch");
         return new Uint8Array(await response.arrayBuffer());
       },
       async put({ bytes, sha256 }) {

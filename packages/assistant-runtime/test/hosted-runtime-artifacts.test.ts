@@ -55,7 +55,12 @@ test("hosted artifact resolver fails closed when the artifact store misses a req
         sha256: "sha_missing",
       },
     }),
-    /artifact fetch failed for sha_missing/u,
+    (error: unknown) => (
+      error instanceof Error
+      && error.message === "Hosted artifact fetch failed with HTTP 404."
+      && (error as { status?: unknown }).status === 404
+      && (error as { statusCode?: unknown }).statusCode === 404
+    ),
   );
 });
 

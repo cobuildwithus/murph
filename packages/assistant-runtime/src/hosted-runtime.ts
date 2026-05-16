@@ -322,7 +322,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assertRuntimeNotAborted();
       return snapshot;
     };
-  const emitPhaseLog = createHostedRuntimePhaseLogger();
+  const phaseLogger = createHostedRuntimePhaseLogger();
+  const emitPhaseLog = phaseLogger.emit;
 
   try {
     emitPhaseLog({
@@ -870,6 +871,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     return invocationResult;
   } catch (error) {
+    phaseLogger.failOpenPhases({
+      error,
+      input,
+      requestId,
+    });
     emitPhaseLog({
       error,
       input,
@@ -902,7 +908,12 @@ type HostedRuntimePhaseName = typeof HOSTED_RUNTIME_PHASE_NAMES[number];
 interface HostedRuntimePhaseLogState {
   ordinal: number;
   runtimeStartedAtMs: number;
-  startedAtMsByStage: Map<string, number>;
+  startedAtMsByStage: Map<HostedRuntimePhaseName, number>;
+}
+
+interface HostedRuntimePhaseLogger {
+  emit(input: HostedRuntimePhaseLogInput): void;
+  failOpenPhases(input: Omit<HostedRuntimePhaseLogInput, "stage" | "status">): void;
 }
 
 interface HostedRuntimePhaseLogInput {
@@ -915,14 +926,28 @@ interface HostedRuntimePhaseLogInput {
   status: HostedRuntimePhaseLogStatus;
 }
 
-function createHostedRuntimePhaseLogger(): (input: HostedRuntimePhaseLogInput) => void {
+function createHostedRuntimePhaseLogger(): HostedRuntimePhaseLogger {
   const state: HostedRuntimePhaseLogState = {
     ordinal: 0,
     runtimeStartedAtMs: Date.now(),
     startedAtMsByStage: new Map(),
   };
 
-  return (input) => emitHostedRuntimePhaseLog(input, state);
+  return {
+    emit(input) {
+      emitHostedRuntimePhaseLog(input, state);
+    },
+    failOpenPhases(input) {
+      const openStages = Array.from(state.startedAtMsByStage.keys()).reverse();
+      for (const stage of openStages) {
+        emitHostedRuntimePhaseLog({
+          ...input,
+          stage,
+          status: "fail",
+        }, state);
+      }
+    },
+  };
 }
 
 function emitHostedRuntimePhaseLog(

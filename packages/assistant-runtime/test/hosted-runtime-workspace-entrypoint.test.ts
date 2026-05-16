@@ -482,6 +482,82 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("emits a fail boundary for the open runtime phase when restore throws", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const hiddenSnapshotHash = "f".repeat(64);
+
+    try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_restore_phase_failure",
+          leaseGeneration: "7",
+          reason: "nudge",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          throw new Error("Restore phase test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Restore phase test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: createBundleRef({
+                hash: hiddenSnapshotHash,
+                key: "users/bundles/member-synthetic/restore-phase-failure.bundle.json",
+                size: 512,
+              }),
+              version: "0",
+            }),
+          }),
+        }),
+        vaultRoot,
+      })).rejects.toThrow("Hosted workspace runtime job snapshot restore failed.");
+
+      const failureLogs = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_restore_phase_failure",
+        spy: consoleError,
+      }).filter((entry) => entry.details.runtimePhaseStatus === "fail");
+      expect(failureLogs.map((entry) => entry.details.runtimePhase)).toEqual([
+        "workspace.restore",
+        "runtime",
+      ]);
+      expect(failureLogs[0]?.details).toEqual(expect.objectContaining({
+        failureDetailsPresent: false,
+        failureMessagePresent: true,
+        runtimePhaseDurationMs: expect.any(Number),
+      }));
+
+      const serializedLogs = JSON.stringify([
+        ...readCapturedHostedExecutionLogs(consoleInfo),
+        ...readCapturedHostedExecutionLogs(consoleError),
+      ]);
+      expect(serializedLogs).not.toContain(TEST_USER_ID);
+      expect(serializedLogs).not.toContain(hiddenSnapshotHash);
+    } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleError.mockRestore();
+      consoleInfo.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("reads workspace, imports mailbox prefix, snapshots through the semantic checkpoint builder, and checkpoints", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

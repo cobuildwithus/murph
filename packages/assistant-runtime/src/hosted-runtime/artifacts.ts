@@ -131,7 +131,13 @@ async function fetchHostedArtifact(
   const bytes = await input.artifactStore.get(ref.sha256);
 
   if (!bytes) {
-    throw new Error(`Hosted runner artifact fetch failed for ${ref.sha256}.`);
+    const error = new Error("Hosted artifact fetch failed with HTTP 404.") as Error & {
+      status: number;
+      statusCode: number;
+    };
+    error.status = 404;
+    error.statusCode = 404;
+    throw error;
   }
 
   return bytes;
