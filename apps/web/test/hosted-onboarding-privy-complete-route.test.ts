@@ -169,6 +169,24 @@ describe("hosted onboarding Privy completion route", () => {
     }));
   });
 
+  it("passes explicit no-signup completion mode to the service", async () => {
+    await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          allowSignup: false,
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      allowSignup: false,
+    }));
+  });
+
   it("passes a validated browser timezone to the completion service", async () => {
     await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {

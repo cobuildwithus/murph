@@ -1,10 +1,14 @@
-import { createHostedPhoneLookupKey } from "./contact-privacy";
+import {
+  createHostedEmailLookupKey,
+  createHostedPhoneLookupKey,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
+  lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
   lookupHostedMemberRoutingByTelegramUserId,
   type HostedMemberRoutingLookupMatch,
 } from "./hosted-member-routing-store";
@@ -79,6 +83,15 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
         prisma: input.prisma,
       })
     : null;
+  const emailLookupKey = input.identity.email?.verifiedAt
+    ? createHostedEmailLookupKey(input.identity.email.address)
+    : null;
+  const lookupByPendingLinqParticipantEmailContact = emailLookupKey
+    ? () => lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey({
+        lookupKey: emailLookupKey,
+        prisma: input.prisma,
+      })
+    : null;
 
   const [
     memberByPrivyUserId,
@@ -86,6 +99,7 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
     memberByWalletAddress,
     memberByTelegramUserId,
     memberByVerifiedEmail,
+    memberByPendingLinqParticipantEmailContact,
   ] =
     input.parallelizeReads
       ? await Promise.all([
@@ -94,6 +108,7 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
           lookupByWalletAddress?.() ?? Promise.resolve(null),
           lookupByTelegramUserId?.() ?? Promise.resolve(null),
           lookupByVerifiedEmail?.() ?? Promise.resolve(null),
+          lookupByPendingLinqParticipantEmailContact?.() ?? Promise.resolve(null),
         ])
       : [
           lookupByPrivyUserId ? await lookupByPrivyUserId() : null,
@@ -101,6 +116,9 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
           lookupByWalletAddress ? await lookupByWalletAddress() : null,
           lookupByTelegramUserId ? await lookupByTelegramUserId() : null,
           lookupByVerifiedEmail ? await lookupByVerifiedEmail() : null,
+          lookupByPendingLinqParticipantEmailContact
+            ? await lookupByPendingLinqParticipantEmailContact()
+            : null,
         ];
 
   if (memberByPrivyUserId) {
@@ -121,6 +139,13 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
 
   if (memberByVerifiedEmail) {
     addHostedMemberPrivyIdentityMatch(matches, memberByVerifiedEmail);
+  }
+
+  if (memberByPendingLinqParticipantEmailContact) {
+    addHostedMemberPrivyIdentityMatch(
+      matches,
+      memberByPendingLinqParticipantEmailContact,
+    );
   }
 
   if (matches.size > 1) {

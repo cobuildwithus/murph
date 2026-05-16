@@ -173,6 +173,7 @@ export function HostedEmailAuthButton({
       const result = await completeHostedPrivyAuth({
         ...authSession,
         ...(completedUser ? { completedUser } : {}),
+        ...(disableSignup ? { disableSignup: true } : {}),
         inviteCode,
       });
       if (onCompleted) {

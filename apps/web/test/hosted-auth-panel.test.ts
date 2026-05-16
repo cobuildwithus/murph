@@ -256,6 +256,55 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   });
 });
 
+test("HostedAuthPanel propagates no-signup mode to every login method", async () => {
+  mocks.loginWithTelegram.mockRejectedValueOnce(new Error("Telegram popup closed"));
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      disableSignup: true,
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector('[data-hosted-phone-auth-disable-signup="yes"]')).toBeTruthy();
+
+  const [telegramButton, emailButton] = Array.from(
+    container.querySelectorAll("button"),
+  ) as HTMLButtonElement[];
+
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.loginWithTelegram).toHaveBeenCalledWith({
+    disableSignup: true,
+  });
+
+  await act(async () => {
+    emailButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, " login@example.com ");
+    }
+    emailForm?.dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+  });
+
+  expect(mocks.sendCode).toHaveBeenCalledWith({
+    email: "login@example.com",
+    disableSignup: true,
+  });
+});
+
 test("HostedAuthPanel can require launch consent after homepage login completion", async () => {
   const { assign, cleanup, container, window } = await renderClientComponent(
     createElement(HostedAuthPanel, {
