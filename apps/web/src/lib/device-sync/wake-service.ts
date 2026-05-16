@@ -25,6 +25,7 @@ import type {
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
+import type { HostedWebhookNudgeWorkflowInput } from "../hosted-onboarding/webhook-workflow-types";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -419,6 +420,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
   });
 
   await persistHostedDeviceSyncWake({
+    runnerNudgeIntent: "device-sync-dirty-recovery",
     wake,
     store,
     persist: async () => {},
@@ -431,6 +433,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
 
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
+  runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
   complete?(): Promise<void>;
@@ -457,15 +460,25 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
-  await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId);
+  await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId, {
+    runnerNudgeIntent: input.runnerNudgeIntent ?? null,
+  });
 
   await input.complete?.();
 }
 
-async function startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId: string): Promise<void> {
+async function startHostedDeviceSyncWakeWorkflowBestEffort(
+  mailboxItemId: string,
+  options: {
+    runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
+  } = {},
+): Promise<void> {
   try {
     await startHostedWebhookNudgeWorkflow({
       mailboxItemId,
+      ...(options.runnerNudgeIntent
+        ? { runnerNudgeIntent: options.runnerNudgeIntent }
+        : {}),
       source: "device-sync",
     });
   } catch (error) {
@@ -601,15 +614,24 @@ function buildHostedDeviceSyncDirtyWakeEventId(input: {
   traceId?: string | null;
   userId: string;
 }): string {
-  const fingerprint = sha256Hex(JSON.stringify({
-    connectionId: input.connectionId,
-    dedupeKey: normalizeNullableString(input.dedupeKey),
-    occurredAt: input.occurredAt,
-    provider: input.provider,
-    traceId: normalizeNullableString(input.traceId),
-    userId: input.userId,
-    version: 1,
-  })).slice(0, 32);
+  const dedupeKey = normalizeNullableString(input.dedupeKey);
+  const fingerprintSeed = dedupeKey
+    ? {
+        connectionId: input.connectionId,
+        dedupeKey,
+        provider: input.provider,
+        userId: input.userId,
+        version: 2,
+      }
+    : {
+        connectionId: input.connectionId,
+        occurredAt: input.occurredAt,
+        provider: input.provider,
+        traceId: normalizeNullableString(input.traceId),
+        userId: input.userId,
+        version: 1,
+      };
+  const fingerprint = sha256Hex(JSON.stringify(fingerprintSeed)).slice(0, 32);
 
   return [
     "device-sync",

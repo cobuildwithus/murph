@@ -43,7 +43,6 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
     staleBefore: new Date(now.getTime() - staleAfterMs),
   });
   const selectedDirtyConnections = dirtyConnections.slice(0, wakeLimit);
-  const wakeOccurredAt = now.toISOString();
 
   logger.info("Hosted device-sync dirty sweeper scanned dirty connections.", {
     dirtyConnections: dirtyConnections.length,
@@ -75,11 +74,11 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
         wake = await appendDirtyWake({
           connectionId: dirtyConnection.connectionId,
           dedupeKey: buildHostedDeviceSyncDirtySweepDedupeKey({
+            connectionId: dirtyConnection.connectionId,
             dirtyRevision: dirtyConnection.dirtyRevision,
-            occurredAt: wakeOccurredAt,
           }),
           eventType: dirtyConnection.latestEventType,
-          occurredAt: wakeOccurredAt,
+          occurredAt: dirtyConnection.latestDirtyAt,
           provider: dirtyConnection.provider,
           resourceCategory: dirtyConnection.latestResourceCategory,
           traceId: null,
@@ -133,14 +132,15 @@ export async function runHostedDeviceSyncDirtySweeper(input: {
 }
 
 function buildHostedDeviceSyncDirtySweepDedupeKey(input: {
+  connectionId: string;
   dirtyRevision: bigint;
-  occurredAt: string;
 }): string {
   return [
     "dirty-revision",
     input.dirtyRevision.toString(),
+    "connection",
+    fingerprintHostedDeviceSyncDirtyValue(input.connectionId),
     "sweep",
-    input.occurredAt,
   ].join(":");
 }
 
