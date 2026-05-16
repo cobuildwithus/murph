@@ -35,6 +35,7 @@ import {
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
 import {
+  collectHostedRunnerChildRuntimePhaseDiagnostics,
   collectHostedRunnerChildOutputMarkers,
   countHostedRunnerOutputLines,
   type HostedRunnerChildFirstCompletionKind,
@@ -433,6 +434,10 @@ interface HostedRunnerChildExitDiagnostics {
   stderrTail?: string;
   stderrTailLineCount?: number;
   stderrTailMarkers?: HostedRunnerChildOutputMarker[];
+  runtimeLastPhase?: string;
+  runtimeLastPhaseOrdinal?: number;
+  runtimeLastPhaseStatus?: string;
+  runtimePhaseTrace?: string[];
   stdoutTail?: string;
   stdoutTailLineCount?: number;
   stdoutTailMarkers?: HostedRunnerChildOutputMarker[];
@@ -563,6 +568,10 @@ function createHostedRunnerChildExitDiagnostics(input: {
   const stderrTailLineCount = countHostedRunnerOutputLines(input.stderrTail);
   const stdoutTailMarkers = collectHostedRunnerChildOutputMarkers(input.stdoutTail);
   const stderrTailMarkers = collectHostedRunnerChildOutputMarkers(input.stderrTail);
+  const runtimePhaseDiagnostics = collectHostedRunnerChildRuntimePhaseDiagnostics({
+    stderrTail: input.stderrTail,
+    stdoutTail: input.stdoutTail,
+  });
 
   if (abortReasonName) {
     diagnostics.abortReasonName = abortReasonName;
@@ -584,6 +593,7 @@ function createHostedRunnerChildExitDiagnostics(input: {
   if (stderrTailMarkers.length > 0) {
     diagnostics.stderrTailMarkers = stderrTailMarkers;
   }
+  Object.assign(diagnostics, runtimePhaseDiagnostics);
 
   return diagnostics;
 }

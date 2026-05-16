@@ -1835,6 +1835,16 @@ describe("RunnerContainer", () => {
                 "module_resolution_failed",
                 "hidden_code_marker",
               ],
+              runtimeLastPhase: "runtime",
+              runtimeLastPhaseDurationMs: 999_999,
+              runtimeLastPhaseElapsedMs: 999_999,
+              runtimeLastPhaseOrdinal: 999_999,
+              runtimeLastPhaseStatus: "fail",
+              runtimePhaseTrace: [
+                "workspace.read:start",
+                "runtime:fail",
+                "hidden.phase:start",
+              ],
               stdoutTail: hiddenStdoutTail,
               stdoutTailLineCount: 1,
               stdoutTailMarkers: ["hosted_child_prepared"],
@@ -1877,6 +1887,9 @@ describe("RunnerContainer", () => {
           abortReasonMessagePresent: true,
           exitCode: 1,
           firstCompletionKind: "close",
+          runtimeLastPhase: "runtime",
+          runtimeLastPhaseStatus: "fail",
+          runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
           runtimeWakeReady: true,
           signal: "SIGTERM",
           stderrTailLineCount: 2,
@@ -1897,6 +1910,8 @@ describe("RunnerContainer", () => {
     expect(serializedThrown).not.toContain(hiddenStderrTail);
     expect(serializedThrown).not.toContain(hiddenStdoutTail);
     expect(serializedThrown).not.toContain("hidden_code_marker");
+    expect(serializedThrown).not.toContain("hidden.phase");
+    expect(serializedThrown).not.toContain("999999");
     const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) => input?.message === "Hosted execution container failed.");
@@ -1922,6 +1937,9 @@ describe("RunnerContainer", () => {
           runnerChildRuntimeErrorStatus: 404,
           runnerChildRuntimeFailureKind: "control_plane_http",
           runnerChildRuntimeHttpOperation: "workspace_read",
+          runnerChildRuntimeLastPhase: "runtime",
+          runnerChildRuntimeLastPhaseStatus: "fail",
+          runnerChildRuntimePhaseTrace: ["workspace.read:start", "runtime:fail"],
           runnerChildRuntimeStage: "runtime.in-process",
           runnerChildRuntimeWakeReady: true,
           runnerChildSignal: "SIGTERM",
@@ -1955,6 +1973,8 @@ describe("RunnerContainer", () => {
     expect(serializedFailureLog).not.toContain(hiddenStderrTail);
     expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
     expect(serializedFailureLog).not.toContain("hidden_code_marker");
+    expect(serializedFailureLog).not.toContain("hidden.phase");
+    expect(serializedFailureLog).not.toContain("999999");
   });
 
   it("drops non-allowlisted child runtime error diagnostics from runner response logs", async () => {

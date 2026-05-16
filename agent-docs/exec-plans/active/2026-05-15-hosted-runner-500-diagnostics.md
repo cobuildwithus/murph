@@ -67,6 +67,21 @@ runtime phase boundaries.
 - `pnpm --dir apps/web test -- hosted-onboarding-linq-usage-reset-e2e.test.ts` passed after adding the service-boundary repeated usage-limit regression; the command ran the full web Vitest workspace.
 - `pnpm --dir apps/web typecheck` passed after adding the service-boundary repeated usage-limit regression.
 - `bash scripts/workspace-verify.sh test:diff apps/web/test/hosted-onboarding-linq-usage-reset-e2e.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after adding the service-boundary repeated usage-limit regression; `apps/web verify` completed with the pre-existing lint warnings in `device-sync/agent-session-service.ts` and the pre-existing Turbopack trace warning.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts node-runner-isolated.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after adding metadata-only runtime phase trace propagation through child, entrypoint, and RunnerContainer failure payloads.
+- `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-entrypoint.test.ts` passed after adding phase ordinal/elapsed/duration metadata to hosted runtime phase boundary logs.
+- `pnpm --dir apps/cloudflare typecheck` and `pnpm --dir packages/assistant-runtime typecheck` passed after simplifying phase timing state and shared phase metadata projection.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts node-runner-isolated.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after the coverage-write transport-failure test and simplify cleanup.
+- `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-entrypoint.test.ts` passed after simplifying phase timing state.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/node-runner-isolated.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts packages/assistant-runtime/src/hosted-runtime.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/node-runner-isolated.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts agent-docs/references/hosted-runtime-protocol.md agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after the coverage-write test and simplify cleanup.
+- `pnpm typecheck` passed after the coverage-write test and simplify cleanup.
+- `pnpm --dir apps/cloudflare typecheck` passed after final-review phase-boundary hardening.
+- `pnpm --dir packages/assistant-runtime typecheck` passed after final-review phase-boundary hardening.
+- `pnpm --dir apps/cloudflare test:node -- node-runner-child.test.ts node-runner-isolated.test.ts runner-container.test.ts container-entrypoint.test.ts` passed after final-review phase-boundary hardening.
+- `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-entrypoint.test.ts` passed after final-review phase-boundary hardening.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/node-runner-isolated.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts packages/assistant-runtime/src/hosted-runtime.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/node-runner-isolated.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts agent-docs/references/hosted-runtime-protocol.md agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after final-review phase-boundary hardening.
+- `pnpm typecheck` passed after final-review phase-boundary hardening.
+- `security-privacy-review` found no findings; residual diagnostic-integrity risk is limited to child-spoofed fixed-vocabulary phase metadata, not data exposure.
+- `simplify` review found module-global phase timing state; replaced it with per-invocation closure state and centralized child runtime phase metadata projection.
 
 ## State
 
@@ -137,3 +152,18 @@ runtime phase boundaries.
   failure shape: exhausted usage period, already-claimed notice marker, and a
   fresh inbound text still produce the deterministic usage-limit reply without
   appending mailbox work or nudging the runner.
+- Hosted runtime phase boundaries now include ordinal, elapsed, and phase
+  duration metadata. The child supervisor extracts a fixed-vocabulary bounded
+  runtime phase trace from child stdout/stderr and carries only that summary
+  through the entrypoint response and RunnerContainer failure logs, preserving
+  the raw-output redaction boundary while exposing the last runtime phase.
+- Child runtime classification now separates control-plane HTTP failures,
+  invalid-JSON control-plane responses, fetch/transport failures, and
+  Cloudflare RPC destroy failures by fixed failure kind and operation.
+- Runtime phase timing state is invocation-local, not module-global, and phase
+  metadata sanitization is shared through the child diagnostics helper before
+  entrypoint or RunnerContainer logging.
+- Final-review hardening treats child stdout/stderr phase logs as untrusted at
+  the parent boundary: parent failure payloads now use line-order phase trace
+  and a bounded supervisor-derived last-phase ordinal only, without carrying
+  child-provided elapsed/duration numbers.

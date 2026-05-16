@@ -347,8 +347,27 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       queueMicrotask(() => {
         child.stdout.write("Bearer stdout-token\n");
         child.stdout.write("Hosted node runner child prepared workspace invocation.\n");
+        child.stdout.write(`${JSON.stringify(createRuntimePhaseLog({
+          elapsedMs: 3,
+          ordinal: 1,
+          phase: "workspace.read",
+          status: "start",
+        }))}\n`);
+        child.stdout.write(`${JSON.stringify(createRuntimePhaseLog({
+          elapsedMs: 999_999,
+          ordinal: 999_999,
+          phase: "workspace.restore",
+          status: "start",
+        }))}\n`);
         child.stderr.write("OPENAI_API_KEY=secret-value /tmp/hosted-runner/private-file\n");
         child.stderr.write("Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@murphai/missing'\n");
+        child.stderr.write(`${JSON.stringify(createRuntimePhaseLog({
+          durationMs: 7,
+          elapsedMs: 10,
+          ordinal: 2,
+          phase: "runtime",
+          status: "fail",
+        }))}\n`);
         controller.abort(new Error("Hosted runner response closed before completion at /tmp/hosted-runner/private-file."));
         child.stdout.end();
         child.stderr.end();
@@ -385,13 +404,23 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
       abortReasonName: "Error",
       exitCode: null,
       firstCompletionKind: "close",
+      runtimeLastPhase: "runtime",
+      runtimeLastPhaseOrdinal: 3,
+      runtimeLastPhaseStatus: "fail",
+      runtimePhaseTrace: [
+        "workspace.read:start",
+        "workspace.restore:start",
+        "runtime:fail",
+      ],
       runtimeWakeReady: false,
       signal: "SIGKILL",
-      stderrTailLineCount: 2,
+      stderrTailLineCount: 3,
       stderrTailMarkers: ["module_resolution_failed"],
-      stdoutTailLineCount: 2,
+      stdoutTailLineCount: 4,
       stdoutTailMarkers: ["hosted_child_prepared"],
     });
+    expect(childProcess).not.toHaveProperty("runtimeLastPhaseDurationMs");
+    expect(childProcess).not.toHaveProperty("runtimeLastPhaseElapsedMs");
     expect(String(childProcess.abortReasonMessage)).toContain("Hosted runner response closed before completion");
     expect(String(childProcess.abortReasonMessage)).toContain("<redacted-path>");
     expect(String(childProcess.stderrTail)).toContain("OPENAI_API_KEY=<redacted>");
@@ -819,6 +848,31 @@ function createMockChildProcess(pid: number): MockChildProcess {
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   return child;
+}
+
+function createRuntimePhaseLog(input: {
+  durationMs?: number;
+  elapsedMs: number;
+  ordinal: number;
+  phase: string;
+  status: string;
+}) {
+  return {
+    component: "runtime",
+    details: {
+      runtimeElapsedMs: input.elapsedMs,
+      runtimePhase: input.phase,
+      ...(input.durationMs === undefined ? {} : { runtimePhaseDurationMs: input.durationMs }),
+      runtimePhaseOrdinal: input.ordinal,
+      runtimePhaseStatus: input.status,
+    },
+    level: input.status === "fail" ? "error" : "info",
+    message: "Hosted workspace runtime phase boundary.",
+    phase: input.status === "fail" ? "failed" : "wake.running",
+    schema: "murph.hosted-execution.log.v1",
+    time: "2026-05-16T00:00:00.000Z",
+    userId: null,
+  };
 }
 
 function createDeferred<T = void>() {

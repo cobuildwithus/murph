@@ -23,6 +23,7 @@ import {
   readHostedExecutionChildRuntimeDiagnosticMetadata,
   readHostedRunnerChildFirstCompletionKind,
   readHostedRunnerChildOutputMarkers,
+  readHostedRunnerChildRuntimePhaseMetadata,
 } from "./runner-child-diagnostics.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -1179,6 +1180,11 @@ function buildHostedContainerChildProcessMetadata(
   if (stdoutTailMarkers) {
     metadata.stdoutTailMarkers = stdoutTailMarkers;
   }
+
+  Object.assign(
+    metadata,
+    readHostedRunnerChildRuntimePhaseMetadata(childProcess),
+  );
 
   return metadata;
 }

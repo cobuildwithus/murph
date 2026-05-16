@@ -592,6 +592,125 @@ describe("runHostedExecutionChild", () => {
       childRuntimeStage: "runtime.in-process",
     });
   });
+
+  it("classifies runtime control-plane transport failures by fixed operation", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw new Error("Hosted workspace read returned invalid JSON.");
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_read_invalid_json",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "invalid_request",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "control_plane_invalid_json",
+      childRuntimeHttpOperation: "workspace_read",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
+
+  it("classifies runtime control-plane fetch failures by fixed operation", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw new Error("Hosted workspace read request failed. fetch failed");
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_read_fetch_failed",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "control_plane_fetch",
+      childRuntimeHttpOperation: "workspace_read",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
+
+  it("classifies Cloudflare RPC destroy failures without free-form details", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw new Error("The RPC call destroy() was called");
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_rpc_destroyed",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "runtime_rpc_destroyed",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
 });
 
 function readChildResult(chunk: unknown): HostedExecutionRunnerChildResult {
