@@ -8,7 +8,9 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
+  buildHostedRunnerExecutablePath,
   buildHostedPlatformBackedRuntimeEnv,
+  HOSTED_RUNNER_EXECUTABLE_PATH,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeToChildEnv,
   withHostedProcessEnvironment,
@@ -266,7 +268,7 @@ test("hosted runtime child env does not project typed parser toolchain into proc
     NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
     NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     NODE_ENV: "production",
-    PATH: "/usr/bin:/bin",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
     OPENAI_API_KEY: "worker-openai-secret",
     REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
   });
@@ -292,6 +294,7 @@ test("hosted runtime child env omits parser path env when no typed toolchain is 
     }),
     {
       NODE_ENV: "production",
+      PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
     },
   );
 });
@@ -306,7 +309,9 @@ test("hosted runtime child env omits ambient proxy env unless platform transport
       },
       forwardedEnv: {},
     }),
-    {},
+    {
+      PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
+    },
   );
 });
 
@@ -330,9 +335,16 @@ test("hosted runtime child env strips spoofed hosted CLI bridge and local daemon
 
   assert.deepEqual(childEnv, {
     NODE_ENV: "production",
-    PATH: "/usr/bin:/bin",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
     OPENAI_API_KEY: "worker-openai-secret",
   });
+});
+
+test("hosted runner executable PATH prepends the image contract and preserves absolute ambient extras", () => {
+  assert.equal(
+    buildHostedRunnerExecutablePath("/custom/bin:/usr/bin:.:relative/bin:/opt/tools:/bin"),
+    `${HOSTED_RUNNER_EXECUTABLE_PATH}:/custom/bin:/opt/tools`,
+  );
 });
 
 test("hosted runtime launch spec derives platform env from forwarded env only when no explicit platform env is supplied", () => {
@@ -1083,7 +1095,7 @@ test("withHostedProcessEnvironment replaces ambient env with the hosted runtime 
         assert.equal(process.env.CUSTOM_HOSTED_ENV, "runtime-value");
         assert.equal(process.cwd(), roots.vaultRoot);
         assert.equal(process.env.HOME, roots.operatorHomeRoot);
-        assert.equal(process.env.PATH, "/usr/bin");
+        assert.equal(process.env.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
         assert.equal(
           process.env.REQUESTS_CA_BUNDLE,
           "/etc/cloudflare/certs/cloudflare-containers-ca.crt",

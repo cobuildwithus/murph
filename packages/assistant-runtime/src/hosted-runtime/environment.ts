@@ -77,6 +77,17 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "TMPDIR",
   "TZ",
 ] as const;
+export const HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES = [
+  "/app/node_modules/.bin",
+  "/usr/local/sbin",
+  "/usr/local/bin",
+  "/usr/sbin",
+  "/usr/bin",
+  "/sbin",
+  "/bin",
+] as const;
+export const HOSTED_RUNNER_EXECUTABLE_PATH =
+  HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES.join(":");
 const HOSTED_RUNTIME_PLATFORM_TRANSPORT_ENV_NAMES = [
   "ALL_PROXY",
   "HTTP_PROXY",
@@ -244,6 +255,27 @@ export function projectHostedRuntimeToChildEnv(input: {
     ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
   };
+}
+
+export function buildHostedRunnerExecutablePath(
+  sourcePath: string | null | undefined,
+): string {
+  const seen = new Set<string>(HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES);
+  const entries: string[] = [...HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES];
+
+  if (sourcePath) {
+    for (const rawEntry of sourcePath.split(":")) {
+      const entry = rawEntry.trim();
+      if (!entry || entry === "." || !entry.startsWith("/") || seen.has(entry)) {
+        continue;
+      }
+
+      seen.add(entry);
+      entries.push(entry);
+    }
+  }
+
+  return entries.join(":");
 }
 
 export function sanitizeHostedAssistantRuntimeForwardedEnv(
@@ -473,6 +505,7 @@ function buildHostedBaseProcessEnvironment(
       env[key] = value;
     }
   }
+  env.PATH = buildHostedRunnerExecutablePath(source.PATH);
 
   return env;
 }

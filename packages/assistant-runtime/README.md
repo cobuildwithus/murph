@@ -55,3 +55,7 @@ Hosted runtime env/config helpers that Cloudflare needs at the app boundary expo
 to reach into lower owner packages directly. Host apps may still decide which env
 profiles are enabled and how transport-specific URL rewriting works, but the
 profile key sets and runtime manifest shape come from this package.
+
+Hosted runner executable lookup is also package-owned: `PATH` is projected from
+the canonical runner image entries plus absolute ambient extras, while forwarded
+and per-user env are not allowed to override it.

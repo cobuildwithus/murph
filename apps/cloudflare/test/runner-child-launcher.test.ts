@@ -7,6 +7,9 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
+  HOSTED_RUNNER_EXECUTABLE_PATH,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   createHostedRunnerChildLauncherDirectories,
   createHostedRunnerChildProcessEnv,
   resolveHostedRunnerTsconfigPath,
@@ -96,7 +99,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
     NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
     OPENAI_API_KEY: "secret",
-    PATH: "/usr/bin:/bin",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
     REQUESTS_CA_BUNDLE: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
     SSL_CERT_FILE: "/etc/ssl/cert.pem",
     TEMP: launcherDirectories.tempRoot,
@@ -109,7 +112,7 @@ test("hosted runner child process env forwards only launcher-safe ambient and sa
   assert.equal("FFMPEG_COMMAND" in env, false);
   assert.equal("PDFINFO_COMMAND" in env, false);
   assert.equal("PDFTOTEXT_COMMAND" in env, false);
-  assert.equal(env.PATH, "/usr/bin:/bin");
+  assert.equal(env.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
   assert.equal("WHISPER_COMMAND" in env, false);
   assert.equal("WHISPER_MODEL_PATH" in env, false);
 });
@@ -133,7 +136,7 @@ test("hosted runner child process env omits parser paths without a typed parser 
     launcherDirectories: createLauncherDirectories("/tmp/hosted-runner"),
   });
 
-  assert.equal(env.PATH, "/usr/bin:/bin");
+  assert.equal(env.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
   assert.equal("FFMPEG_COMMAND" in env, false);
   assert.equal("PDFINFO_COMMAND" in env, false);
   assert.equal("PDFTOTEXT_COMMAND" in env, false);

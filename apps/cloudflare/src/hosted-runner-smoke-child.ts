@@ -18,6 +18,10 @@ import {
   decodeHostedBundleBase64,
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
+import {
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type {
   createDefaultParserRegistry as createDefaultParserRegistryType,
   parseAttachment as parseAttachmentType,
@@ -610,10 +614,14 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "enabled = false",
     "",
     "[shell_environment_policy]",
-    'inherit = "all"',
-    'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+    `inherit = ${JSON.stringify(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");
+}
+
+function tomlStringArray(values: readonly string[]): string {
+  return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
 }
 
 async function runCodexAppServerShellEnvironmentProbe(input: {
@@ -744,7 +752,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       params: {
         command: [
           "/bin/sh",
-          "-lc",
+          "-c",
           [
             "vault_cli_path=$(command -v vault-cli || true)",
             "murph_path=$(command -v murph || true)",

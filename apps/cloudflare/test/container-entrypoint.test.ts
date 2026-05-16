@@ -7,6 +7,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
+import {
+  HOSTED_RUNNER_EXECUTABLE_PATH,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -614,6 +617,7 @@ describe("startHostedContainerEntrypoint", () => {
           "  NO_PROXY: process.env.NO_PROXY,",
           "  NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,",
           "  OPENAI_API_KEY: process.env.OPENAI_API_KEY,",
+          "  PATH: process.env.PATH,",
           "  REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE,",
           "  SECRET: process.env.HOSTED_CONTAINER_SMOKE_SECRET_SHOULD_NOT_LEAK,",
           "  SSL_CERT_FILE: process.env.SSL_CERT_FILE,",
@@ -693,6 +697,8 @@ describe("startHostedContainerEntrypoint", () => {
       ));
       expect(captured.HOME).toEqual(expect.stringContaining("hosted-openai-intercept-smoke-"));
       expect(captured.NODE_EXTRA_CA_CERTS).toEqual(expect.any(String));
+      expect(captured.PATH).toEqual(expect.stringContaining(HOSTED_RUNNER_EXECUTABLE_PATH));
+      expect(captured.PATH).toEqual(expect.stringContaining(binDir));
       expect(captured.REQUESTS_CA_BUNDLE).toEqual(expect.any(String));
       expect(captured.SECRET).toBeUndefined();
     } finally {

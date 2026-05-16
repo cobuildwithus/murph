@@ -415,10 +415,8 @@ describe("hosted runner container image contract", () => {
     );
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-    expect(baseDockerfile).toContain("/etc/profile.d/murph-runner-path.sh");
-    expect(baseDockerfile).toContain(
-      "'export PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
-    );
+    expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
+    expect(baseDockerfile).not.toContain("export PATH=");
     expect(baseDockerfile).not.toContain("WHISPER_COMMAND=");
     expect(baseDockerfile).not.toContain("WHISPER_MODEL_PATH=");
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
@@ -636,8 +634,9 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
     expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
     expect(hostedRunnerSmokeChild).toContain(
-      '"/bin/sh",\n          "-lc",',
+      '"/bin/sh",\n          "-c",',
     );
+    expect(hostedRunnerSmokeChild).not.toContain('"/bin/sh",\n          "-lc",');
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(
       "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
     );
