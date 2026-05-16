@@ -222,6 +222,96 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("logs direct control-plane fetch failures without raw error detail", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("network failure with hidden request detail");
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.workspacePort!.read!()).rejects.toThrow(
+      "Hosted workspace read request failed.",
+    );
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.control-plane",
+        details: expect.objectContaining({
+          bodyBytes: 0,
+          bodyPresent: false,
+          description: "Hosted workspace read",
+          errorCode: "type_error",
+          errorMessagePresent: true,
+          errorName: "TypeError",
+          method: "GET",
+          path: "/api/internal/hosted-workspace",
+          responseOrigin: "https://web.example.test",
+          timeoutMs: expect.any(Number),
+          transport: "direct",
+        }),
+        level: "warn",
+        message: "Hosted runtime control-plane request failed before response.",
+        phase: "runtime.starting",
+        userId: "member_123",
+      }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("hidden request detail");
+  });
+
+  it("logs invalid control-plane JSON without response body text", async () => {
+    const fetchMock = vi.fn(async () => new Response("hidden response body", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.workspacePort!.read!()).rejects.toThrow(
+      "Hosted workspace read returned invalid JSON.",
+    );
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.control-plane",
+        details: expect.objectContaining({
+          description: "Hosted workspace read",
+          errorCode: "syntax_error",
+          errorMessagePresent: true,
+          errorName: "SyntaxError",
+          method: "GET",
+          path: "/api/internal/hosted-workspace",
+          responseBodyBytes: expect.any(Number),
+          responseOrigin: "https://web.example.test",
+          responseStatus: 200,
+          transport: "direct",
+        }),
+        level: "warn",
+        message: "Hosted runtime control-plane response returned invalid JSON.",
+        phase: "runtime.starting",
+        userId: "member_123",
+      }),
+    );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("hidden response body");
+  });
+
   it("accepts missing workspace browser-vault publish responses as stale work", async () => {
     const sourceBundleHash = "b".repeat(64);
     const replicaRef = createBrowserVaultReplicaRef(sourceBundleHash);

@@ -895,9 +895,34 @@ export class HostedUserRunner {
 
     let workspaceVersion: string | null = null;
     try {
+      const workspaceReadStartedAt = Date.now();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          workspaceAttemptId: token.attemptId,
+          workspaceWriteFenceGeneration: token.generation,
+          workspaceReason: input.reason,
+        },
+        message: "Hosted runner workspace read started.",
+        phase: "runtime.starting",
+        userId: initialRecord.userId,
+      });
       const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
       workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          workspaceAttemptId: token.attemptId,
+          workspaceReadLatencyMs: Date.now() - workspaceReadStartedAt,
+          workspaceWriteFenceGeneration: token.generation,
+          workspacePresent: workspaceRead.workspace !== null,
+          workspaceVersion,
+        },
+        message: "Hosted runner workspace read completed.",
+        phase: "runtime.starting",
+        userId: initialRecord.userId,
+      });
       token = await this.stateStore.bindWriteFenceWorkspaceVersion({
         token,
         workspaceVersion,
@@ -944,11 +969,13 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
+      const retryDelayMs = this.resolveRetryDelayMs();
+      const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
       const failed = await this.stateStore.clearWriteFenceAfterFailure({
         error,
         finishedAt: new Date().toISOString(),
         token,
-        retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
+        retryAt,
       });
       if (!failed.failed) {
         await this.syncAlarm(failed.record);
@@ -960,6 +987,8 @@ export class HostedUserRunner {
             workspaceWriteFenceGeneration: token.generation,
             workspaceReason: input.reason,
             workspaceVersion,
+            runtimeRetryDelayMs: retryDelayMs,
+            runtimeRetryAt: retryAt,
           },
           level: "warn",
           message: "Hosted runner ignored stale runtime wake failure.",
@@ -979,6 +1008,8 @@ export class HostedUserRunner {
           workspaceWriteFenceGeneration: token.generation,
           workspaceReason: input.reason,
           workspaceVersion,
+          runtimeRetryDelayMs: retryDelayMs,
+          runtimeRetryAt: retryAt,
         },
         level: "warn",
         message: "Hosted runner runtime wake failed.",
@@ -1118,9 +1149,23 @@ export class HostedUserRunner {
         await this.syncAlarm(error.record);
         return;
       }
+      const retryDelayMs = this.resolveRetryDelayMs();
+      const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
       const record = await this.stateStore.scheduleRetry({
         error,
-        retryAt: new Date(Date.now() + this.resolveRetryDelayMs()).toISOString(),
+        retryAt,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          runtimeRetryDelayMs: retryDelayMs,
+          runtimeRetryAt: retryAt,
+        },
+        level: "warn",
+        message: "Hosted runner scheduled retry after failure.",
+        phase: "scheduled",
+        userId: await this.tryReadBoundUserId(),
       });
       await this.syncAlarm(record);
     } catch (retryError) {
