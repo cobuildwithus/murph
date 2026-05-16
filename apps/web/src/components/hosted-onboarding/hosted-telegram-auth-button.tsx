@@ -61,7 +61,6 @@ export function HostedTelegramAuthButton({
       const result = await completeHostedPrivyAuth({
         ...authSession,
         ...(completedUser ? { completedUser } : {}),
-        ...(disableSignup ? { disableSignup: true } : {}),
       });
       if (onCompleted) {
         await onCompleted(result);

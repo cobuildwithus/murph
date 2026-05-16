@@ -15,8 +15,6 @@ type HostedAuthPanelIslandComponent = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
 )["HostedAuthPanelIsland"];
 
-type AuthDialogMode = "login" | "signup";
-
 type WindowWithIdleCallback = typeof window & {
   cancelIdleCallback?: (handle: number) => void;
   requestIdleCallback?: (
@@ -96,16 +94,14 @@ export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
 }
 
 export function AuthDialog({
-  mode,
   open,
   onOpenChange,
-  title,
+  title = "Log in or sign up",
   description = "Discover what actually makes you healthier.",
   onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
 }: {
-  mode?: AuthDialogMode;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title?: string;
@@ -154,13 +150,12 @@ export function AuthDialog({
       <DialogContent className="max-w-md gap-6 p-6 md:p-7">
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {title ?? resolveAuthDialogTitle(mode)}
+            {title}
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {AuthPanelIsland ? (
           <AuthPanelIsland
-            disableSignup={mode === "login"}
             methods={["phone", "telegram", "email"]}
             onCompleted={onCompleted}
             requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
@@ -177,12 +172,6 @@ export function AuthDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function resolveAuthDialogTitle(mode: AuthDialogMode | undefined): string {
-  if (mode === "login") return "Log in";
-  if (mode === "signup") return "Sign up";
-  return "Log in or sign up";
 }
 
 function AuthPanelSkeleton() {

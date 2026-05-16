@@ -82,18 +82,6 @@ function HomepageTelegramAuthButtonHarness() {
   );
 }
 
-function HomepageTelegramLoginButtonHarness() {
-  const [active, setActive] = useState(false);
-
-  return (
-    <HostedTelegramAuthButton
-      active={active}
-      disableSignup
-      onActivate={() => setActive(true)}
-    />
-  );
-}
-
 test("HomepageTelegramAuthButton logs in with Telegram and redirects through the shared homepage completion flow", async () => {
   const { assign, button, cleanup } = await renderClientComponent(
     createElement(HomepageTelegramAuthButtonHarness),
@@ -111,24 +99,6 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
     user: null,
   });
   expect(assign).toHaveBeenCalledWith("/home");
-});
-
-test("HomepageTelegramAuthButton uses no-signup mode for login completion", async () => {
-  const { button, cleanup } = await renderClientComponent(
-    createElement(HomepageTelegramLoginButtonHarness),
-  );
-  cleanupRender = cleanup;
-
-  await act(async () => {
-    button.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.login).toHaveBeenCalledWith({
-    disableSignup: true,
-  });
-  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
-    disableSignup: true,
-  }));
 });
 
 test("HomepageTelegramAuthButton passes Privy's completed user into shared completion", async () => {

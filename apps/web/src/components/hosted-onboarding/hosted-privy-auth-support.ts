@@ -48,20 +48,17 @@ export async function runHostedPrivyFinalizationAttempt({
 }
 
 export function buildHostedPrivyCompletionRequestPayload(input: {
-  allowSignup?: boolean;
   inviteCode?: string | null;
-}): Record<string, unknown> {
+}): Record<string, string> {
   const timeZone = resolveHostedBrowserTimeZone();
 
   return {
-    ...(input.allowSignup === false ? { allowSignup: false } : {}),
     ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
     ...(timeZone ? { timeZone } : {}),
   };
 }
 
 export async function requestHostedPrivyCompletionWithRetry(input: {
-  allowSignup?: boolean;
   inviteCode?: string | null;
 }): Promise<HostedPrivyCompletionPayload> {
   let lastError: unknown = null;

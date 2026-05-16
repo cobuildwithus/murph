@@ -130,7 +130,6 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
 }
 
 export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSessionInput & {
-  disableSignup?: boolean;
   inviteCode?: string | null;
   onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
@@ -138,7 +137,6 @@ export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSe
   const result = await completeHostedPrivyAuth({
     completedUser: input.completedUser,
     createWallet: input.createWallet,
-    ...(input.disableSignup ? { disableSignup: true } : {}),
     inviteCode: input.inviteCode,
     refreshUser: input.refreshUser,
     requirePhone: true,

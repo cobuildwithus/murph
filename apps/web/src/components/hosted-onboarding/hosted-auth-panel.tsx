@@ -22,7 +22,6 @@ type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedPrimaryMethod = "phone" | "email";
 
 export function HostedAuthPanel({
-  disableSignup = false,
   methods,
   onCompleted,
   onSignOut,
@@ -30,7 +29,6 @@ export function HostedAuthPanel({
   showPassiveLegalNotice,
   size,
 }: {
-  disableSignup?: boolean;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -107,7 +105,6 @@ export function HostedAuthPanel({
 
       {primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
-          disableSignup={disableSignup}
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
           onCompleted={onCompleted}
@@ -122,7 +119,6 @@ export function HostedAuthPanel({
       {primaryMethod === "email" && includesEmail ? (
         <HostedEmailAuthButton
           active
-          disableSignup={disableSignup}
           onCompleted={handleAuthCompleted}
           onActivate={() => {}}
           inline
@@ -140,7 +136,6 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={telegramActive}
-                disableSignup={disableSignup}
                 onCompleted={handleAuthCompleted}
                 onActivate={() => {
                   setPrimaryMethod("phone");
@@ -152,7 +147,6 @@ export function HostedAuthPanel({
               primaryMethod === "phone" ? (
                 <HostedEmailAuthButton
                   active={false}
-                  disableSignup={disableSignup}
                   onCompleted={handleAuthCompleted}
                   onActivate={() => {
                     setPrimaryMethod("email");

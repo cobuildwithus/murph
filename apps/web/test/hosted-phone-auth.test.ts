@@ -2635,14 +2635,6 @@ describe("HostedPhoneAuth", () => {
         inviteCode: "invite-code",
       },
     );
-    assert.deepEqual(
-      buildHostedPrivyCompletionRequestPayload({
-        allowSignup: false,
-      }),
-      {
-        allowSignup: false,
-      },
-    );
   });
 
   it("includes the browser timezone when hosted Privy completion runs in a browser", async () => {

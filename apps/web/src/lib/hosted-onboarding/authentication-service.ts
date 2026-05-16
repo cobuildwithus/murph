@@ -6,7 +6,6 @@ import {
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -42,13 +41,11 @@ import {
 } from "./invite-service";
 import {
   ensureHostedMemberForPrivyIdentity,
-  lookupHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "./member-identity-service";
 import type { HostedPostVerificationStage } from "./stage";
 
 export async function completeHostedPrivyVerification(input: {
-  allowSignup?: boolean;
   identity: HostedPrivyIdentity;
   inviteCode?: string | null;
   now?: Date;
@@ -104,8 +101,7 @@ export async function completeHostedPrivyVerification(input: {
             now,
           });
         })()
-      : await resolveHostedPrivyCompletionMember({
-          allowSignup: input.allowSignup ?? true,
+      : await ensureHostedMemberForPrivyIdentity({
           identity: input.identity,
           prisma,
           now,
@@ -174,41 +170,6 @@ export async function completeHostedPrivyVerification(input: {
     });
     throw error;
   }
-}
-
-async function resolveHostedPrivyCompletionMember(input: {
-  allowSignup: boolean;
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  if (input.allowSignup) {
-    return ensureHostedMemberForPrivyIdentity({
-      identity: input.identity,
-      prisma: input.prisma,
-      now: input.now,
-    });
-  }
-
-  const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
-    identity: input.identity,
-    prisma: input.prisma,
-  });
-
-  if (!existingMemberLookup) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      message: "Finish signup from your latest Murph link before continuing.",
-      httpStatus: 403,
-    });
-  }
-
-  return reconcileHostedPrivyIdentityOnMember({
-    identity: input.identity,
-    member: existingMemberLookup.core,
-    prisma: input.prisma,
-    now: input.now,
-  });
 }
 
 async function syncHostedMemberPendingActivationTimeZone(input: {
