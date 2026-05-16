@@ -79,6 +79,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       {!model.launchConsent.gateActive && status.stage === "verify" ? (
         <JoinInvitePhoneVerificationPanel
           awaitingInviteSessionResolution={model.awaitingInviteSessionResolution}
+          emailAuthTarget={status.invite?.emailAuthTarget ?? null}
           inviteCode={model.inviteCode}
           phoneAuthTarget={status.invite?.phoneAuthTarget ?? null}
           phoneHint={status.invite?.phoneHint ?? null}
@@ -160,12 +161,14 @@ function JoinInvitePanelCard({ children }: { children: ReactNode }) {
 
 function JoinInvitePhoneVerificationPanel({
   awaitingInviteSessionResolution,
+  emailAuthTarget,
   inviteCode,
   phoneAuthTarget,
   phoneHint,
   verificationMode,
 }: {
   awaitingInviteSessionResolution: boolean;
+  emailAuthTarget: NonNullable<HostedInviteStatusPayload["invite"]>["emailAuthTarget"] | null;
   inviteCode: string;
   phoneAuthTarget: NonNullable<HostedInviteStatusPayload["invite"]>["phoneAuthTarget"] | null;
   phoneHint: string | null;
@@ -186,6 +189,7 @@ function JoinInvitePhoneVerificationPanel({
   return (
     <JoinInvitePanelCard>
       <JoinInvitePhoneVerificationIsland
+        emailAuthTarget={emailAuthTarget}
         inviteCode={inviteCode}
         phoneAuthTarget={phoneAuthTarget}
         phoneHint={phoneHint}

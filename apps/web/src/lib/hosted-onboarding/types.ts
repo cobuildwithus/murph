@@ -18,6 +18,7 @@ export interface HostedInviteStatusPayload {
   };
   invite: {
     code: string;
+    emailAuthTarget?: HostedInviteEmailAuthTarget;
     expiresAt: string;
     phoneAuthTarget?: HostedInvitePhoneAuthTarget;
     phoneHint: string | null;
@@ -37,6 +38,15 @@ export type HostedInvitePhoneAuthTarget =
   | {
       kind: "saved";
       phoneHint: string;
+    }
+  | {
+      kind: "manual";
+    };
+
+export type HostedInviteEmailAuthTarget =
+  | {
+      emailAddress: string;
+      kind: "saved";
     }
   | {
       kind: "manual";

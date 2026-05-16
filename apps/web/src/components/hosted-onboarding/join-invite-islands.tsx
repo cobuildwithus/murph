@@ -19,6 +19,7 @@ import type {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
+  HostedInviteEmailAuthTarget,
   HostedInvitePhoneAuthTarget,
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
@@ -126,11 +127,13 @@ export function JoinInviteStatusRefreshIsland({
 }
 
 export function JoinInvitePhoneVerificationIsland({
+  emailAuthTarget,
   inviteCode,
   phoneAuthTarget,
   phoneHint,
   verificationMode,
 }: {
+  emailAuthTarget?: HostedInviteEmailAuthTarget | null;
   inviteCode: string;
   phoneAuthTarget?: HostedInvitePhoneAuthTarget | null;
   phoneHint?: string | null;
@@ -142,6 +145,9 @@ export function JoinInvitePhoneVerificationIsland({
       <HostedEmailAuthButton
         active
         inline
+        initialEmailAddress={
+          emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
+        }
         inviteCode={inviteCode}
         onCompleted={async () => {
           router.refresh();

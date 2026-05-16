@@ -32,6 +32,7 @@ export function HostedEmailAuthButton({
   active = false,
   disableSignup = false,
   inline = false,
+  initialEmailAddress = null,
   inviteCode,
   onActivate = () => undefined,
   onCompleted,
@@ -39,6 +40,7 @@ export function HostedEmailAuthButton({
   active?: boolean;
   disableSignup?: boolean;
   inline?: boolean;
+  initialEmailAddress?: string | null;
   inviteCode?: string | null;
   onActivate?: () => void;
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
@@ -53,7 +55,9 @@ export function HostedEmailAuthButton({
   const { ready } = usePrivy();
   const { refreshUser, user } = useUser();
   const [code, setCode] = useState("");
-  const [emailAddress, setEmailAddress] = useState("");
+  const [emailAddress, setEmailAddress] = useState(
+    () => normalizeEmailAddress(initialEmailAddress) ?? "",
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(
     null,
