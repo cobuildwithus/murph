@@ -21,7 +21,6 @@ export interface HostedPrivyClientSessionInput {
 }
 
 interface HostedAuthCompletionInput extends HostedPrivyClientSessionInput {
-  disableSignup?: boolean;
   inviteCode?: string | null;
 }
 
@@ -56,8 +55,7 @@ export async function completeHostedPrivyAuth(
   }
 
   const payload = await requestHostedPrivyCompletionWithRetry({
-    ...(input.disableSignup === true ? { allowSignup: false } : {}),
-    ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
+    inviteCode: input.inviteCode,
   });
   await input.refreshUser?.().catch(() => null);
   const redirectUrl = await resolveHostedAuthRedirectUrl({

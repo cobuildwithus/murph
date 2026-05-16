@@ -22,7 +22,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
 
   return {
     HostedAuthPanelIsland(props: {
-      disableSignup?: boolean;
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -33,8 +32,6 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
         {
           "data-hosted-auth-launch-consent":
             props.requireLaunchConsentOnCompletion ? "required" : "not-required",
-          "data-hosted-auth-no-signup":
-            props.disableSignup ? "yes" : "no",
           "data-hosted-auth-passive-legal-notice":
             props.showPassiveLegalNotice ? "shown" : "hidden",
         },
@@ -140,7 +137,7 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   expect(authPanel?.getAttribute("data-hosted-auth-passive-legal-notice")).toBe(
     "hidden",
   );
-  expect(window.document.body.textContent).toContain("Sign up");
+  expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
 test("LandingAuthActions keeps the hero CTA as one auth button", async () => {
@@ -179,7 +176,7 @@ test("LandingAuthActions splits the nav CTA when requested", async () => {
   expect(buttons[1]?.textContent).toBe("Signup");
 });
 
-test("LandingAuthActions split CTAs preserve login and signup modes", async () => {
+test("LandingAuthActions split CTAs open the same unified auth modal", async () => {
   const { cleanup, container, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
@@ -203,10 +200,10 @@ test("LandingAuthActions split CTAs preserve login and signup modes", async () =
   });
   await flushHostedAuthPanelIsland();
 
-  expect(container.textContent).toContain("Log in");
+  expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-no-signup="yes"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 
@@ -215,10 +212,10 @@ test("LandingAuthActions split CTAs preserve login and signup modes", async () =
   });
   await flushHostedAuthPanelIsland();
 
-  expect(container.textContent).toContain("Signup");
+  expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-no-signup="no"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 });

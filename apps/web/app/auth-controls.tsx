@@ -12,14 +12,12 @@ import { cn } from "@/src/lib/utils";
 type LandingAuthContext = "nav" | "hero" | "footer";
 
 function LandingAuthDialogButton({
-  authMode = "signup",
   buttonClassName,
   buttonLabel,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
 }: {
-  authMode?: "login" | "signup";
   buttonClassName: string;
   buttonLabel: string;
   requireLaunchConsentOnCompletion?: boolean;
@@ -49,7 +47,6 @@ function LandingAuthDialogButton({
         ) : null}
       </button>
       <AuthDialog
-        mode={authMode}
         open={open}
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
@@ -129,7 +126,6 @@ export function LandingAuthActions({
     return (
       <div className={styles.container}>
         <LandingAuthDialogButton
-          authMode="signup"
           buttonClassName={cn(
             styles.signup,
             context !== "nav" ? "group gap-2" : null,
@@ -146,7 +142,6 @@ export function LandingAuthActions({
   return (
     <div className={styles.container}>
       <LandingAuthDialogButton
-        authMode="login"
         buttonClassName={cn(
           styles.login,
           "shrink-0"
@@ -155,7 +150,6 @@ export function LandingAuthActions({
         requireLaunchConsentOnCompletion
       />
       <LandingAuthDialogButton
-        authMode="signup"
         buttonClassName={cn(styles.signup, "shrink-0")}
         buttonLabel={signupLabel}
         requireLaunchConsentOnCompletion
