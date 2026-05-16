@@ -22,6 +22,7 @@ import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   isHostedRuntimeInternalAuthorityRejectedError,
+  readHostedRuntimeControlPlaneFetchFailureDiagnostics,
 } from "./runtime-platform.js";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
@@ -442,7 +443,7 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
   input: {
     runtimeStage: HostedExecutionChildRuntimeStage;
   },
-): Record<string, number | string> {
+): Record<string, boolean | number | string> {
   const childRuntimeErrorName = error instanceof Error
     ? readHostedExecutionChildRuntimeErrorName(error.name)
     : null;
@@ -454,7 +455,52 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
     childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error),
     ...(childRuntimeHttpOperation ? { childRuntimeHttpOperation } : {}),
     childRuntimeStage: input.runtimeStage,
+    ...readHostedExecutionChildRuntimeFetchFailureMetadata(error),
     ...readHostedExecutionChildRuntimeStatus(error),
+  };
+}
+
+function readHostedExecutionChildRuntimeFetchFailureMetadata(
+  error: unknown,
+): Record<string, boolean | number | string> {
+  const diagnostics =
+    readHostedRuntimeControlPlaneFetchFailureDiagnostics(error)
+    ?? readHostedExecutionChildRuntimeLegacyFetchFailureMetadata(error);
+  if (!diagnostics) {
+    return {};
+  }
+
+  return {
+    childRuntimeFetchCallerSignalAborted: diagnostics.fetchCallerSignalAborted,
+    childRuntimeFetchCauseKind: diagnostics.fetchCauseKind,
+    ...(diagnostics.fetchCauseName
+      ? { childRuntimeFetchCauseName: diagnostics.fetchCauseName }
+      : {}),
+    childRuntimeFetchRequestSignalAborted: diagnostics.fetchRequestSignalAborted,
+    childRuntimeFetchTimeoutMs: diagnostics.fetchTimeoutMs,
+    childRuntimeFetchTimeoutSignalAborted: diagnostics.fetchTimeoutSignalAborted,
+  };
+}
+
+function readHostedExecutionChildRuntimeLegacyFetchFailureMetadata(
+  error: unknown,
+): ReturnType<typeof readHostedRuntimeControlPlaneFetchFailureDiagnostics> {
+  if (
+    !(error instanceof Error)
+    || !readHostedExecutionRuntimeFetchFailureDescription(error.message)
+    || !error.message.includes("The RPC call destroy() was called")
+  ) {
+    return null;
+  }
+
+  return {
+    fetchCallerSignalAborted: false,
+    fetchCauseCode: "runtime_error",
+    fetchCauseKind: "cloudflare_rpc_destroy",
+    fetchCauseName: "Error",
+    fetchRequestSignalAborted: false,
+    fetchTimeoutMs: readHostedRunnerCommitTimeoutMs(null),
+    fetchTimeoutSignalAborted: false,
   };
 }
 

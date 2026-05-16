@@ -89,6 +89,14 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare typecheck` passed after artifact/web-control restore diagnostics.
 - `pnpm --dir packages/assistant-runtime typecheck` passed after artifact 404 sanitization and open-phase failure closure.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-outbound.ts apps/cloudflare/src/runner-outbound/diagnostics.ts apps/cloudflare/src/runner-outbound/web-control.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/node-runner-child.ts packages/assistant-runtime/src/hosted-runtime.ts packages/assistant-runtime/src/hosted-runtime/artifacts.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/node-runner-child.test.ts packages/assistant-runtime/test/hosted-runtime-artifacts.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts` passed after artifact/web-control restore diagnostics.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts node-runner-child.test.ts runner-container.test.ts` passed after adding control-plane fetch cause metadata and artifact fetch/body boundary logs.
+- `pnpm --dir apps/cloudflare typecheck` passed after adding control-plane fetch cause metadata and artifact fetch/body boundary logs.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts` passed after adding control-plane fetch cause metadata and artifact fetch/body boundary logs.
+- `pnpm typecheck` passed after adding control-plane fetch cause metadata and artifact fetch/body boundary logs.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts node-runner-child.test.ts runner-container.test.ts` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
+- `pnpm --dir apps/cloudflare typecheck` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/web-control-plane.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
+- `pnpm typecheck` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
 
 ## State
 
@@ -198,3 +206,11 @@ runtime phase boundaries.
 - Runtime phase logging now closes any still-open phase with a fail boundary
   before logging the outer runtime failure, so restore failures produce
   `workspace.restore:fail` instead of only `runtime:fail`.
+- Control-plane fetch failures now carry fixed-vocabulary cause metadata through
+  the runtime platform, child result, and RunnerContainer indexed logs:
+  fetch cause kind/code/name, timeout, and caller/request/timeout abort flags.
+- Artifact fetches now emit metadata-only start, response, body-read start,
+  body-read completion, and pre-response/body-read failure boundaries with
+  redacted object paths and per-platform ordinals, so the next production
+  failure can separate pre-response transport failures from response/body stream
+  failures without exposing artifact hashes or bodies.

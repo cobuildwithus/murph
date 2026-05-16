@@ -41,6 +41,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   allowHttpHosts?: readonly string[];
   callbackSigning?: HostedWebCallbackSigningEnvironment | null;
   search?: string | null;
+  signal?: AbortSignal | null;
   timeoutMs: number | null;
 }): Promise<Response> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -87,7 +88,11 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     headers,
     method: input.method,
     redirect: "manual",
-    signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
+    signal: input.signal ?? (
+      typeof input.timeoutMs === "number"
+        ? AbortSignal.timeout(input.timeoutMs)
+        : undefined
+    ),
   });
 }
 

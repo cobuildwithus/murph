@@ -640,6 +640,67 @@ describe("runHostedExecutionChild", () => {
     });
   });
 
+  it("propagates artifact fetch transport cause metadata without free-form cause detail", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = Object.assign(
+      new Error("Hosted artifact fetch request failed."),
+      {
+        hostedRuntimeControlPlaneFetchFailure: true,
+        hostedRuntimeFetchCallerSignalAborted: false,
+        hostedRuntimeFetchCauseCode: "runtime_error",
+        hostedRuntimeFetchCauseKind: "cloudflare_rpc_destroy",
+        hostedRuntimeFetchCauseName: "Error",
+        hostedRuntimeFetchRequestSignalAborted: true,
+        hostedRuntimeFetchTimeoutMs: 30_000,
+        hostedRuntimeFetchTimeoutSignalAborted: false,
+      },
+    );
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_artifact_fetch_rpc_destroyed",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "runtime_error",
+      childRuntimeErrorName: "Error",
+      childRuntimeFailureKind: "control_plane_fetch",
+      childRuntimeFetchCallerSignalAborted: false,
+      childRuntimeFetchCauseKind: "cloudflare_rpc_destroy",
+      childRuntimeFetchCauseName: "Error",
+      childRuntimeFetchRequestSignalAborted: true,
+      childRuntimeFetchTimeoutMs: 30_000,
+      childRuntimeFetchTimeoutSignalAborted: false,
+      childRuntimeHttpOperation: "artifact_fetch",
+      childRuntimeStage: "runtime.in-process",
+    });
+    expect(JSON.stringify(payload.error?.details)).not.toContain("destroy() was called");
+  });
+
   it("classifies runtime control-plane transport failures by fixed operation", async () => {
     const sendResult = vi.fn();
     const setExitCode = vi.fn();
