@@ -593,6 +593,53 @@ describe("runHostedExecutionChild", () => {
     });
   });
 
+  it("classifies missing runtime artifacts without requiring raw artifact hashes", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = new Error(
+      "Hosted artifact fetch failed with HTTP 404.",
+    ) as Error & { status?: number; statusCode?: number };
+    runtimeError.status = 404;
+    runtimeError.statusCode = 404;
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_artifact_fetch_404",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "invalid_request",
+      childRuntimeErrorName: "Error",
+      childRuntimeErrorStatus: 404,
+      childRuntimeFailureKind: "control_plane_http",
+      childRuntimeHttpOperation: "artifact_fetch",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
+
   it("classifies runtime control-plane transport failures by fixed operation", async () => {
     const sendResult = vi.fn();
     const setExitCode = vi.fn();

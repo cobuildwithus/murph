@@ -102,8 +102,8 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_PATTERNS: ReadonlyArray<{
   operation: HostedExecutionChildRuntimeHttpOperation;
   pattern: RegExp;
 }> = [
-  { operation: "artifact_fetch", pattern: /^Hosted artifact fetch /u },
-  { operation: "artifact_upload", pattern: /^Hosted artifact upload /u },
+  { operation: "artifact_fetch", pattern: /^Hosted artifact fetch(?:\b| )/u },
+  { operation: "artifact_upload", pattern: /^Hosted artifact upload(?:\b| )/u },
   {
     operation: "assistant_runtime_issue_export",
     pattern: /^Hosted assistant runtime issue export$/u,

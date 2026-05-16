@@ -76,3 +76,105 @@ export function readHostedRunnerInternalOperation(input: {
 
   return "unknown_internal_operation";
 }
+
+export async function readHostedRunnerSafeResponseBodyMetadata(
+  response: Response,
+): Promise<Record<string, boolean | number | string>> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return {
+      responseBodyKind: "unreadable",
+    };
+  }
+
+  const responseBodyBytes = new TextEncoder().encode(text).byteLength;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return {
+      responseBodyBytes,
+      responseBodyKind: "empty",
+    };
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    const parsed = parseJsonOrNull(trimmed);
+    const errorCode = readSafeResponseErrorCode(parsed);
+    const errorShape = readJsonResponseErrorShape(parsed);
+    return {
+      responseBodyBytes,
+      responseBodyKind: parsed === null ? "invalid_json" : "json",
+      ...(errorCode ? { responseErrorCode: errorCode } : {}),
+      ...(errorShape ? { responseErrorShape: errorShape } : {}),
+    };
+  }
+
+  if (
+    contentType.includes("html")
+    || /^<!doctype\s+html\b/iu.test(trimmed)
+    || /^<html(?:\s|>)/iu.test(trimmed)
+  ) {
+    return {
+      responseBodyBytes,
+      responseBodyKind: "html",
+    };
+  }
+
+  return {
+    responseBodyBytes,
+    responseBodyKind: contentType.startsWith("text/") ? "text" : "unknown",
+  };
+}
+
+function parseJsonOrNull(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function readSafeResponseErrorCode(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const topLevelCode = normalizeSafeResponseCode(value.code);
+  if (topLevelCode) {
+    return topLevelCode;
+  }
+  const error = value.error;
+  if (isRecord(error)) {
+    return normalizeSafeResponseCode(error.code);
+  }
+  return null;
+}
+
+function readJsonResponseErrorShape(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return value === null ? null : "non_object";
+  }
+  const error = value.error;
+  if (typeof error === "string") {
+    return "string_error";
+  }
+  if (isRecord(error)) {
+    return "object_error";
+  }
+  if (typeof value.code === "string") {
+    return "top_level_code";
+  }
+  return null;
+}
+
+function normalizeSafeResponseCode(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 96) {
+    return null;
+  }
+  return /^[a-z0-9][a-z0-9_.:-]*$/u.test(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

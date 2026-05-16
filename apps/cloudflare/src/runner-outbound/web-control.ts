@@ -37,6 +37,7 @@ import {
 } from "./shared-web-control-policy.ts";
 import {
   readHostedRunnerDiagnosticMethod,
+  readHostedRunnerSafeResponseBodyMetadata,
 } from "./diagnostics.ts";
 import {
   type RunnerOutboundEnvironmentSource,
@@ -185,12 +186,16 @@ export async function handleRunnerWebControlRequest(input: {
     search: input.url.search || null,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
+  const responseBodyMetadata = response.ok
+    ? {}
+    : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
       contentTypePresent: response.headers.has("content-type"),
       method,
       operation: policy.operation,
+      ...responseBodyMetadata,
       responseOk: response.ok,
       responseStatus: response.status,
       responseType: response.type,

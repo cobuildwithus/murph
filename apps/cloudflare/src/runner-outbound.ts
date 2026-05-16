@@ -158,6 +158,32 @@ async function handleRunnerArtifactRequest(input: {
   sha256: string;
   userId: string;
 }): Promise<Response> {
+  const startedAt = Date.now();
+  const method = readHostedRunnerDiagnosticMethod(input.request.method);
+  const operation = input.request.method === "PUT" ? "artifact_upload" : "artifact_fetch";
+  const logDetails = {
+    method,
+    operation,
+    userIdPresent: input.userId.length > 0,
+  };
+  const emitCompleted = (
+    details: Record<string, boolean | number | string | null>,
+    responseStatus: number,
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        responseStatus,
+        ...details,
+      },
+      level: responseStatus >= 400 ? "warn" : "info",
+      message: "Hosted runner artifact request completed.",
+      phase: "wake.running",
+    });
+  };
+
   if (input.request.method === "PUT") {
     const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
       env: input.env,
@@ -165,48 +191,81 @@ async function handleRunnerArtifactRequest(input: {
       userId: input.userId,
     });
     if (!ownsWriteFence) {
+      emitCompleted({
+        artifactAuthorized: false,
+      }, 401);
       return unauthorized();
     }
   }
 
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    domain: "runtime",
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const artifactStore = createHostedArtifactStore({
-    bucket: input.bucket,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-    resolveKeyById: crypto.resolveKeyById,
-    userId: input.userId,
-  });
+  try {
+    const crypto = await resolveRunnerOutboundUserCryptoContext({
+      bucket: input.bucket,
+      domain: "runtime",
+      env: input.env,
+      environment: input.environment,
+      userId: input.userId,
+    });
+    const artifactStore = createHostedArtifactStore({
+      bucket: input.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      resolveKeyById: crypto.resolveKeyById,
+      userId: input.userId,
+    });
 
-  if (input.request.method === "GET") {
-    const bytes = await artifactStore.readArtifact(input.sha256);
+    if (input.request.method === "GET") {
+      const bytes = await artifactStore.readArtifact(input.sha256);
 
-    if (!bytes) {
-      return notFound();
+      if (!bytes) {
+        emitCompleted({
+          artifactFound: false,
+        }, 404);
+        return notFound();
+      }
+
+      emitCompleted({
+        artifactByteLength: bytes.byteLength,
+        artifactFound: true,
+      }, 200);
+      return new Response(copyBytesToArrayBuffer(bytes), {
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        status: 200,
+      });
     }
 
-    return new Response(copyBytesToArrayBuffer(bytes), {
-      headers: {
-        "content-type": "application/octet-stream",
-      },
-      status: 200,
+    const bytes = new Uint8Array(await input.request.arrayBuffer());
+    await artifactStore.writeArtifact(input.sha256, bytes);
+    emitCompleted({
+      artifactAuthorized: true,
+      artifactByteLength: bytes.byteLength,
+    }, 200);
+    return json({
+      ok: true,
+      sha256: input.sha256,
+      size: bytes.byteLength,
     });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(readHostedExecutionSafeErrorName(error)
+          ? { errorName: readHostedExecutionSafeErrorName(error) }
+          : {}),
+      },
+      level: "warn",
+      message: "Hosted runner artifact request failed.",
+      phase: "wake.running",
+    });
+    throw error;
   }
-
-  const bytes = new Uint8Array(await input.request.arrayBuffer());
-  await artifactStore.writeArtifact(input.sha256, bytes);
-  return json({
-    ok: true,
-    sha256: input.sha256,
-    size: bytes.byteLength,
-  });
 }
 
 async function handleRunnerBrowserVaultReplicaWriteRequest(input: {

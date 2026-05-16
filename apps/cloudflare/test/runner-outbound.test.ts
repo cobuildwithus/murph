@@ -1655,7 +1655,7 @@ describe("handleRunnerOutboundRequest", () => {
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://www.withmurph.ai",
       }),
-      "member_123" ,
+      "member_123",
     );
 
     expect(response.status).toBe(404);
@@ -1666,6 +1666,8 @@ describe("handleRunnerOutboundRequest", () => {
           contentTypePresent: true,
           method: "GET",
           operation: "workspace_read",
+          responseBodyBytes: 9,
+          responseBodyKind: "text",
           responseOk: false,
           responseStatus: 404,
         }),
@@ -1678,6 +1680,57 @@ describe("handleRunnerOutboundRequest", () => {
       hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
     );
     expect(serializedLogs).not.toContain("Not found");
+    expect(serializedLogs).not.toContain("member_123");
+  });
+
+  it("logs non-OK hosted web-control JSON error shape without response bodies", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      error: {
+        code: "route_not_found",
+        message: "Route was not found",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 404,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://www.withmurph.ai",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(404);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          method: "GET",
+          operation: "workspace_read",
+          responseBodyKind: "json",
+          responseErrorCode: "route_not_found",
+          responseErrorShape: "object_error",
+          responseOk: false,
+          responseStatus: 404,
+        }),
+        level: "warn",
+        message: "Hosted runner web-control response received.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("Route was not found");
     expect(serializedLogs).not.toContain("member_123");
   });
 
@@ -1792,7 +1845,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123" ,
+      "member_123",
     );
     const secondResponse = await handleRunnerOutboundRequest(
       createArtifactPutRequest({
@@ -1801,7 +1854,7 @@ describe("handleRunnerOutboundRequest", () => {
         workspaceVersion: "4",
       }),
       env,
-      "member_123" ,
+      "member_123",
     );
 
     expect(secondResponse.status).toBe(200);
@@ -1816,6 +1869,45 @@ describe("handleRunnerOutboundRequest", () => {
     expect(getByName).toHaveBeenCalledTimes(2);
     expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("logs missing artifact GETs without artifact keys or user ids", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(MISSING_ARTIFACT_URL, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      env,
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(404);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactFound: false,
+          method: "GET",
+          operation: "artifact_fetch",
+          responseStatus: 404,
+          userIdPresent: true,
+        }),
+        level: "warn",
+        message: "Hosted runner artifact request completed.",
+        phase: "wake.running",
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
   it("accepts a later artifact write after rejecting missing lease headers", async () => {
