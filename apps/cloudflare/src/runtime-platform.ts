@@ -10,7 +10,10 @@ import {
   sha256HostedBundleHex,
 } from "@murphai/runtime-state/node";
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   parseHostedMailboxFetchResponse,
@@ -1046,32 +1049,99 @@ async function fetchHostedWebControlPlaneJson(input: {
     path: route.pathname,
   });
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
-  const response = input.transport.mode === "direct"
-    ? await fetchHostedExecutionWebControlPlaneResponse({
-      baseUrl: input.transport.webControlBaseUrl,
-      body,
-      boundUserId: input.boundUserId,
-      callbackSigning: input.transport.callbackSigning,
-      fetchImpl: input.fetchImpl,
-      method,
-      path: route.pathAndSearch,
-      timeoutMs: input.timeoutMs,
-    })
-    : await fetchHostedResponse({
-      description: input.description,
-      fetchImpl: input.fetchImpl,
-      init: {
-        ...(body === undefined ? {} : { body }),
-        headers: createHostedWebControlProxyHeaders({
-          headers: input.headers,
-          hasJsonBody: body !== undefined,
-        }),
+  const requestStartedAt = Date.now();
+  const requestLogDetails = buildHostedWebControlRequestLogDetails({
+    body,
+    description: input.description,
+    method,
+    path: route.pathname,
+    timeoutMs: input.timeoutMs,
+    transport: input.transport,
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "hosted.runtime.control-plane",
+    details: requestLogDetails,
+    message: "Hosted runtime control-plane request started.",
+    phase: "runtime.starting",
+    userId: input.boundUserId,
+  });
+
+  let response: Response;
+  try {
+    response = input.transport.mode === "direct"
+      ? await fetchHostedExecutionWebControlPlaneResponse({
+        baseUrl: input.transport.webControlBaseUrl,
+        body,
+        boundUserId: input.boundUserId,
+        callbackSigning: input.transport.callbackSigning,
+        fetchImpl: input.fetchImpl,
         method,
+        path: route.pathAndSearch,
+        timeoutMs: input.timeoutMs,
+      })
+      : await fetchHostedResponse({
+        description: input.description,
+        fetchImpl: input.fetchImpl,
+        init: {
+          ...(body === undefined ? {} : { body }),
+          headers: createHostedWebControlProxyHeaders({
+            headers: input.headers,
+            hasJsonBody: body !== undefined,
+          }),
+          method,
+        },
+        logFailures: false,
+        logPath: createHostedWebControlLogPath(route.pathname),
+        timeoutMs: input.timeoutMs,
+        url: createHostedWebControlProxyUrl(route.pathAndSearch),
+      });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.control-plane",
+      details: {
+        ...requestLogDetails,
+        durationMs: Date.now() - requestStartedAt,
+        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
       },
-      logPath: createHostedWebControlLogPath(route.pathname),
-      timeoutMs: input.timeoutMs,
-      url: createHostedWebControlProxyUrl(route.pathAndSearch),
+      level: "warn",
+      message: "Hosted runtime control-plane request failed before response.",
+      phase: "runtime.starting",
+      userId: input.boundUserId,
     });
+
+    if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+      throw error;
+    }
+
+    if (
+      error instanceof Error
+      && error.message.startsWith(`${input.description} request failed`)
+    ) {
+      throw error;
+    }
+
+    throw new Error(
+      `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
+      { cause: error },
+    );
+  }
+
+  emitHostedExecutionStructuredLog({
+    component: "hosted.runtime.control-plane",
+    details: {
+      ...requestLogDetails,
+      acceptedStatus: input.acceptedStatuses?.includes(response.status) ?? false,
+      contentLengthPresent: response.headers.has("content-length"),
+      contentTypePresent: response.headers.has("content-type"),
+      durationMs: Date.now() - requestStartedAt,
+      responseOk: response.ok,
+      responseStatus: response.status,
+    },
+    message: "Hosted runtime control-plane response received.",
+    phase: "runtime.starting",
+    userId: input.boundUserId,
+  });
 
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
@@ -1116,8 +1186,60 @@ async function fetchHostedWebControlPlaneJson(input: {
   try {
     return JSON.parse(text);
   } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.control-plane",
+      details: {
+        ...requestLogDetails,
+        durationMs: Date.now() - requestStartedAt,
+        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        responseBodyBytes: new TextEncoder().encode(text).byteLength,
+        responseStatus: response.status,
+      },
+      level: "warn",
+      message: "Hosted runtime control-plane response returned invalid JSON.",
+      phase: "runtime.starting",
+      userId: input.boundUserId,
+    });
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+}
+
+function buildHostedRuntimeControlPlaneSafeErrorMetadata(
+  error: unknown,
+): HostedExecutionStructuredLogDetails {
+  return {
+    errorCode: deriveHostedExecutionErrorCode(error),
+    errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+    ...(readHostedExecutionSafeErrorName(error)
+      ? { errorName: readHostedExecutionSafeErrorName(error) }
+      : {}),
+  };
+}
+
+function buildHostedWebControlRequestLogDetails(input: {
+  body: string | undefined;
+  description: string;
+  method: "GET" | "POST";
+  path: string;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}): HostedExecutionStructuredLogDetails {
+  return {
+    bodyBytes: input.body === undefined ? 0 : new TextEncoder().encode(input.body).byteLength,
+    bodyPresent: input.body !== undefined,
+    description: input.description,
+    method: input.method,
+    path: createHostedWebControlLogPath(input.path),
+    responseOrigin: readHostedWebControlResponseOrigin(input.transport),
+    timeoutMs: input.timeoutMs,
+    transport: input.transport.mode,
+  };
+}
+
+function readHostedWebControlResponseOrigin(transport: HostedWebControlTransport): string {
+  return transport.mode === "direct"
+    ? new URL(transport.webControlBaseUrl).origin
+    : CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane;
 }
 
 function createHostedWebControlProxyUrl(path: string): URL {

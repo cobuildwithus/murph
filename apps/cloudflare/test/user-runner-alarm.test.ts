@@ -1128,6 +1128,22 @@ describe("HostedUserRunner wake scheduling", () => {
     });
     expect(alarms.at(-1)).toBe(RETRY_AT);
     expect(alarms).toContain("2026-04-27T00:00:01.000Z");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          runtimeRetryAt: RETRY_AT,
+          runtimeRetryDelayMs: 5_000,
+          workspaceAttemptId: expect.any(String),
+          workspaceReason: "nudge",
+          workspaceVersion: "0",
+        }),
+        level: "warn",
+        message: "Hosted runner runtime wake failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
   });
 
   it("deletes runner state and clears alarms for hosted user deletion", async () => {

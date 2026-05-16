@@ -80,6 +80,8 @@ runtime phase boundaries.
 - `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-entrypoint.test.ts` passed after final-review phase-boundary hardening.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/node-runner-isolated.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/src/container-entrypoint.ts packages/assistant-runtime/src/hosted-runtime.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/node-runner-isolated.test.ts apps/cloudflare/test/runner-container.test.ts apps/cloudflare/test/container-entrypoint.test.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts agent-docs/references/hosted-runtime-protocol.md agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after final-review phase-boundary hardening.
 - `pnpm typecheck` passed after final-review phase-boundary hardening.
+- `pnpm --dir apps/cloudflare test:node -- runner-platform.test.ts user-runner-alarm.test.ts` passed after adding runtime control-plane request lifecycle logs and runner retry metadata.
+- `pnpm --dir apps/cloudflare typecheck` passed after adding runtime control-plane request lifecycle logs and runner retry metadata.
 - `security-privacy-review` found no findings; residual diagnostic-integrity risk is limited to child-spoofed fixed-vocabulary phase metadata, not data exposure.
 - `simplify` review found module-global phase timing state; replaced it with per-invocation closure state and centralized child runtime phase metadata projection.
 
@@ -167,3 +169,10 @@ runtime phase boundaries.
   the parent boundary: parent failure payloads now use line-order phase trace
   and a bounded supervisor-derived last-phase ordinal only, without carrying
   child-provided elapsed/duration numbers.
+- Runtime control-plane calls now emit metadata-only start, response, pre-response
+  failure, and invalid-JSON logs with method, safe route path, transport, origin,
+  timeout, body size, status, latency, and safe error shape. These logs omit raw
+  request bodies, response bodies, and raw error text.
+- Runtime wake failures now log the recorded retry timestamp and delay beside
+  the existing write-fence attempt metadata, so production evidence can separate
+  first-attempt failure time from deliberate retry backoff.
