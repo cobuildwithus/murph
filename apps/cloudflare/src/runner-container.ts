@@ -2082,6 +2082,12 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
     childRuntimeErrorName: "runnerChildRuntimeErrorName",
     childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",
     childRuntimeFailureKind: "runnerChildRuntimeFailureKind",
+    childRuntimeFetchCallerSignalAborted: "runnerChildRuntimeFetchCallerSignalAborted",
+    childRuntimeFetchCauseKind: "runnerChildRuntimeFetchCauseKind",
+    childRuntimeFetchCauseName: "runnerChildRuntimeFetchCauseName",
+    childRuntimeFetchRequestSignalAborted: "runnerChildRuntimeFetchRequestSignalAborted",
+    childRuntimeFetchTimeoutMs: "runnerChildRuntimeFetchTimeoutMs",
+    childRuntimeFetchTimeoutSignalAborted: "runnerChildRuntimeFetchTimeoutSignalAborted",
     childRuntimeHttpOperation: "runnerChildRuntimeHttpOperation",
     childRuntimeStage: "runnerChildRuntimeStage",
   } as const;

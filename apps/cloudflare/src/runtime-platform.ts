@@ -13,6 +13,7 @@ import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
+  type HostedExecutionErrorCode,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -97,6 +98,77 @@ const HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE =
   "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY";
 const HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON =
   "internal_authority_rejected";
+const HOSTED_RUNTIME_CONTROL_PLANE_FETCH_FAILURE_MARKER =
+  "hostedRuntimeControlPlaneFetchFailure";
+const HOSTED_RUNTIME_FETCH_CAUSE_NAMES = new Set([
+  "AbortError",
+  "Error",
+  "TimeoutError",
+  "TypeError",
+]);
+
+export type HostedRuntimeControlPlaneFetchCauseKind =
+  | "abort"
+  | "cloudflare_rpc_destroy"
+  | "fetch_failed"
+  | "network"
+  | "timeout"
+  | "unknown";
+
+export interface HostedRuntimeControlPlaneFetchFailureDiagnostics {
+  fetchCallerSignalAborted: boolean;
+  fetchCauseCode: HostedExecutionErrorCode;
+  fetchCauseKind: HostedRuntimeControlPlaneFetchCauseKind;
+  fetchCauseName?: string;
+  fetchRequestSignalAborted: boolean;
+  fetchTimeoutMs: number;
+  fetchTimeoutSignalAborted: boolean;
+}
+
+interface HostedRuntimeControlPlaneFetchSignalState {
+  callerSignalAborted: boolean;
+  requestSignalAborted: boolean;
+  timeoutMs: number;
+  timeoutSignalAborted: boolean;
+}
+
+class HostedRuntimeControlPlaneFetchError extends Error {
+  readonly code: HostedExecutionErrorCode;
+  readonly [HOSTED_RUNTIME_CONTROL_PLANE_FETCH_FAILURE_MARKER] = true;
+  readonly hostedRuntimeFetchCallerSignalAborted: boolean;
+  readonly hostedRuntimeFetchCauseCode: HostedExecutionErrorCode;
+  readonly hostedRuntimeFetchCauseKind: HostedRuntimeControlPlaneFetchCauseKind;
+  readonly hostedRuntimeFetchCauseName?: string;
+  readonly hostedRuntimeFetchRequestSignalAborted: boolean;
+  readonly hostedRuntimeFetchTimeoutMs: number;
+  readonly hostedRuntimeFetchTimeoutSignalAborted: boolean;
+
+  constructor(input: {
+    cause: unknown;
+    description: string;
+    signalState: HostedRuntimeControlPlaneFetchSignalState;
+  }) {
+    super(`${input.description} request failed.`, { cause: input.cause });
+    this.name = "Error";
+    this.code = deriveHostedExecutionErrorCode(input.cause);
+    this.hostedRuntimeFetchCauseCode = this.code;
+    this.hostedRuntimeFetchCauseKind = classifyHostedRuntimeFetchCause(
+      input.cause,
+      input.signalState,
+    );
+    const causeName = readHostedRuntimeFetchCauseName(input.cause);
+    if (causeName) {
+      this.hostedRuntimeFetchCauseName = causeName;
+    }
+    this.hostedRuntimeFetchCallerSignalAborted =
+      input.signalState.callerSignalAborted;
+    this.hostedRuntimeFetchRequestSignalAborted =
+      input.signalState.requestSignalAborted;
+    this.hostedRuntimeFetchTimeoutMs = input.signalState.timeoutMs;
+    this.hostedRuntimeFetchTimeoutSignalAborted =
+      input.signalState.timeoutSignalAborted;
+  }
+}
 
 export class HostedRuntimeInternalAuthorityRejectedError extends Error {
   readonly code = HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE;
@@ -257,15 +329,68 @@ export function buildHostedExecutionRuntimePlatform(input: {
         workspaceCheckpointBridge: input.workspaceCheckpointBridge,
       })
     : {};
+  let artifactFetchOrdinal = 0;
   return {
     artifactStore: {
       async get(sha256) {
-        const response = await fetchHostedResponse({
-          description: "Hosted artifact fetch",
-          fetchImpl,
-          logPath: "/objects/REDACTED",
+        const ordinal = ++artifactFetchOrdinal;
+        const startedAt = Date.now();
+        const logDetails = {
+          artifactFetchOrdinal: ordinal,
+          method: "GET",
+          operation: "artifact_fetch",
+          path: "/objects/REDACTED",
+          responseOrigin: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore,
           timeoutMs,
-          url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+        };
+
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: logDetails,
+          message: "Hosted runtime artifact fetch started.",
+          phase: "runtime.starting",
+          userId: null,
+        });
+
+        let response: Response;
+        try {
+          response = await fetchHostedResponse({
+            description: "Hosted artifact fetch",
+            fetchImpl,
+            logPath: "/objects/REDACTED",
+            timeoutMs,
+            url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runtime.artifact-store",
+            details: {
+              ...logDetails,
+              durationMs: Date.now() - startedAt,
+              ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+            },
+            level: "warn",
+            message: "Hosted runtime artifact fetch failed before response.",
+            phase: "runtime.starting",
+            userId: null,
+          });
+          throw error;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            ...logDetails,
+            contentLengthPresent: response.headers.has("content-length"),
+            contentTypePresent: response.headers.has("content-type"),
+            durationMs: Date.now() - startedAt,
+            responseOk: response.ok,
+            responseStatus: response.status,
+          },
+          level: response.ok || response.status === 404 ? "info" : "warn",
+          message: "Hosted runtime artifact fetch response received.",
+          phase: "runtime.starting",
+          userId: null,
         });
 
         if (response.status === 404) {
@@ -273,7 +398,64 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
 
         assertHostedOk(response, "Hosted artifact fetch");
-        return new Uint8Array(await response.arrayBuffer());
+        const bodyStartedAt = Date.now();
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            ...logDetails,
+            durationMs: bodyStartedAt - startedAt,
+            responseStatus: response.status,
+          },
+          message: "Hosted runtime artifact fetch body read started.",
+          phase: "runtime.starting",
+          userId: null,
+        });
+
+        let body: ArrayBuffer;
+        try {
+          body = await response.arrayBuffer();
+        } catch (error) {
+          const wrappedError = new HostedRuntimeControlPlaneFetchError({
+            cause: error,
+            description: "Hosted artifact fetch response body read",
+            signalState: {
+              callerSignalAborted: false,
+              requestSignalAborted: false,
+              timeoutMs,
+              timeoutSignalAborted: false,
+            },
+          });
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runtime.artifact-store",
+            details: {
+              ...logDetails,
+              bodyDurationMs: Date.now() - bodyStartedAt,
+              durationMs: Date.now() - startedAt,
+              responseStatus: response.status,
+              ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
+            },
+            level: "warn",
+            message: "Hosted runtime artifact fetch body read failed.",
+            phase: "runtime.starting",
+            userId: null,
+          });
+          throw wrappedError;
+        }
+
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runtime.artifact-store",
+          details: {
+            ...logDetails,
+            artifactByteLength: body.byteLength,
+            bodyDurationMs: Date.now() - bodyStartedAt,
+            durationMs: Date.now() - startedAt,
+            responseStatus: response.status,
+          },
+          message: "Hosted runtime artifact fetch body read completed.",
+          phase: "runtime.starting",
+          userId: null,
+        });
+        return new Uint8Array(body);
       },
       async put({ bytes, sha256 }) {
         await putArtifactOnce({ bytes, sha256 });
@@ -1070,6 +1252,9 @@ async function fetchHostedWebControlPlaneJson(input: {
   });
 
   let response: Response;
+  const directTimeoutSignal =
+    input.transport.mode === "direct" ? AbortSignal.timeout(input.timeoutMs) : null;
+  const directRequestSignal = directTimeoutSignal;
   try {
     response = input.transport.mode === "direct"
       ? await fetchHostedExecutionWebControlPlaneResponse({
@@ -1080,6 +1265,7 @@ async function fetchHostedWebControlPlaneJson(input: {
         fetchImpl: input.fetchImpl,
         method,
         path: route.pathAndSearch,
+        signal: directRequestSignal,
         timeoutMs: input.timeoutMs,
       })
       : await fetchHostedResponse({
@@ -1099,12 +1285,30 @@ async function fetchHostedWebControlPlaneJson(input: {
         url: createHostedWebControlProxyUrl(route.pathAndSearch),
       });
   } catch (error) {
+    const shouldPreserveError =
+      shouldPreserveHostedRuntimeFetchError(error)
+      || (
+        error instanceof Error
+        && error.message.startsWith(`${input.description} request failed`)
+      );
+    const loggedError = shouldPreserveError
+      ? error
+      : new HostedRuntimeControlPlaneFetchError({
+        cause: error,
+        description: input.description,
+        signalState: {
+          callerSignalAborted: false,
+          requestSignalAborted: directRequestSignal?.aborted ?? false,
+          timeoutMs: input.timeoutMs,
+          timeoutSignalAborted: directTimeoutSignal?.aborted ?? false,
+        },
+      });
     emitHostedExecutionStructuredLog({
       component: "hosted.runtime.control-plane",
       details: {
         ...requestLogDetails,
         durationMs: Date.now() - requestStartedAt,
-        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(loggedError),
       },
       level: "warn",
       message: "Hosted runtime control-plane request failed before response.",
@@ -1116,17 +1320,11 @@ async function fetchHostedWebControlPlaneJson(input: {
       throw error;
     }
 
-    if (
-      error instanceof Error
-      && error.message.startsWith(`${input.description} request failed`)
-    ) {
+    if (shouldPreserveError) {
       throw error;
     }
 
-    throw new Error(
-      `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
-      { cause: error },
-    );
+    throw loggedError;
   }
 
   emitHostedExecutionStructuredLog({
@@ -1209,13 +1407,86 @@ async function fetchHostedWebControlPlaneJson(input: {
 function buildHostedRuntimeControlPlaneSafeErrorMetadata(
   error: unknown,
 ): HostedExecutionStructuredLogDetails {
+  const fetchFailureDiagnostics =
+    readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
   return {
-    errorCode: deriveHostedExecutionErrorCode(error),
+    errorCode: fetchFailureDiagnostics?.fetchCauseCode
+      ?? deriveHostedExecutionErrorCode(error),
     errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
     ...(readHostedExecutionSafeErrorName(error)
       ? { errorName: readHostedExecutionSafeErrorName(error) }
       : {}),
+    ...(fetchFailureDiagnostics
+      ? {
+          fetchCallerSignalAborted:
+            fetchFailureDiagnostics.fetchCallerSignalAborted,
+          fetchCauseCode: fetchFailureDiagnostics.fetchCauseCode,
+          fetchCauseKind: fetchFailureDiagnostics.fetchCauseKind,
+          ...(fetchFailureDiagnostics.fetchCauseName
+            ? { fetchCauseName: fetchFailureDiagnostics.fetchCauseName }
+            : {}),
+          fetchRequestSignalAborted:
+            fetchFailureDiagnostics.fetchRequestSignalAborted,
+          fetchTimeoutMs: fetchFailureDiagnostics.fetchTimeoutMs,
+          fetchTimeoutSignalAborted:
+            fetchFailureDiagnostics.fetchTimeoutSignalAborted,
+        }
+      : {}),
   };
+}
+
+export function readHostedRuntimeControlPlaneFetchFailureDiagnostics(
+  error: unknown,
+): HostedRuntimeControlPlaneFetchFailureDiagnostics | null {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (record[HOSTED_RUNTIME_CONTROL_PLANE_FETCH_FAILURE_MARKER] === true) {
+      const fetchCauseKind = readHostedRuntimeFetchCauseKind(
+        record.hostedRuntimeFetchCauseKind,
+      );
+      const fetchCauseCode = readHostedRuntimeFetchCauseCode(
+        record.hostedRuntimeFetchCauseCode,
+      );
+      const fetchTimeoutMs = readHostedRuntimeFetchTimeoutMs(
+        record.hostedRuntimeFetchTimeoutMs,
+      );
+      const fetchCallerSignalAborted =
+        readHostedRuntimeFetchBoolean(record.hostedRuntimeFetchCallerSignalAborted);
+      const fetchRequestSignalAborted =
+        readHostedRuntimeFetchBoolean(record.hostedRuntimeFetchRequestSignalAborted);
+      const fetchTimeoutSignalAborted =
+        readHostedRuntimeFetchBoolean(record.hostedRuntimeFetchTimeoutSignalAborted);
+      if (
+        fetchCauseKind
+        && fetchCauseCode
+        && fetchTimeoutMs !== null
+        && fetchCallerSignalAborted !== null
+        && fetchRequestSignalAborted !== null
+        && fetchTimeoutSignalAborted !== null
+      ) {
+        const fetchCauseName = readHostedRuntimeFetchCauseNameValue(
+          record.hostedRuntimeFetchCauseName,
+        );
+        return {
+          fetchCallerSignalAborted,
+          fetchCauseCode,
+          fetchCauseKind,
+          ...(fetchCauseName ? { fetchCauseName } : {}),
+          fetchRequestSignalAborted,
+          fetchTimeoutMs,
+          fetchTimeoutSignalAborted,
+        };
+      }
+    }
+
+    current = "cause" in record ? record.cause : null;
+  }
+
+  return null;
 }
 
 function buildHostedWebControlRequestLogDetails(input: {
@@ -1479,16 +1750,29 @@ async function fetchHostedResponse(input: {
   timeoutMs: number;
   url: URL;
 }): Promise<Response> {
+  const callerSignal = input.signal ?? input.init?.signal ?? null;
+  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+  const requestSignal = combineAbortSignals(callerSignal, timeoutSignal);
   try {
-    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
     return await input.fetchImpl(input.url, {
       ...input.init,
-      signal: combineAbortSignals(input.signal ?? input.init?.signal ?? null, timeoutSignal),
+      signal: requestSignal,
     });
   } catch (error) {
-    if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+    if (shouldPreserveHostedRuntimeFetchError(error)) {
       throw error;
     }
+
+    const wrappedError = new HostedRuntimeControlPlaneFetchError({
+      cause: error,
+      description: input.description,
+      signalState: {
+        callerSignalAborted: callerSignal?.aborted ?? false,
+        requestSignalAborted: requestSignal.aborted,
+        timeoutMs: input.timeoutMs,
+        timeoutSignalAborted: timeoutSignal.aborted,
+      },
+    });
 
     if (input.logFailures !== false) {
       emitHostedExecutionStructuredLog({
@@ -1498,18 +1782,15 @@ async function fetchHostedResponse(input: {
           method: input.init?.method ?? "GET",
           path: input.logPath ?? input.url.pathname,
           responseOrigin: input.url.origin,
+          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
         },
-        error,
         level: "warn",
         message: "Hosted runtime upstream request failed.",
         phase: "outbox",
         userId: null,
       });
     }
-    throw new Error(
-      `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
-      { cause: error },
-    );
+    throw wrappedError;
   }
 }
 
@@ -1538,17 +1819,142 @@ function combineAbortSignals(
   return controller.signal;
 }
 
-function formatHostedResponseFetchCause(error: unknown): string {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    return message.length > 0 ? ` ${message}` : "";
+function classifyHostedRuntimeFetchCause(
+  error: unknown,
+  signalState: HostedRuntimeControlPlaneFetchSignalState,
+): HostedRuntimeControlPlaneFetchCauseKind {
+  const message = readHostedRuntimeFetchCauseMessage(error).toLowerCase();
+  const causeName = error instanceof Error ? error.name : "";
+
+  if (message === "the rpc call destroy() was called") {
+    return "cloudflare_rpc_destroy";
   }
 
-  if (typeof error === "string" && error.trim().length > 0) {
-    return ` ${error.trim()}`;
+  if (
+    signalState.timeoutSignalAborted
+    || causeName === "TimeoutError"
+    || message.includes("timed out")
+    || message.includes("timeout")
+  ) {
+    return "timeout";
+  }
+
+  if (
+    signalState.callerSignalAborted
+    || causeName === "AbortError"
+    || message.includes("abort")
+  ) {
+    return "abort";
+  }
+
+  if (
+    message.includes("network")
+    || message.includes("socket")
+    || message.includes("connection reset")
+  ) {
+    return "network";
+  }
+
+  if (error instanceof TypeError || message.includes("fetch failed")) {
+    return "fetch_failed";
+  }
+
+  return "unknown";
+}
+
+function shouldPreserveHostedRuntimeFetchError(error: unknown): boolean {
+  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+    return true;
+  }
+
+  const message = readHostedRuntimeFetchCauseMessage(error).toLowerCase();
+  return message.includes("missing a runtime write-fence authority")
+    || message.includes("hosted web control-plane baseurl")
+    || message.includes("must not include a path");
+}
+
+function readHostedRuntimeFetchCauseMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.trim();
+  }
+
+  if (typeof error === "string") {
+    return error.trim();
   }
 
   return "";
+}
+
+function readHostedRuntimeFetchCauseName(error: unknown): string | null {
+  return error instanceof Error
+    ? readHostedRuntimeFetchCauseNameValue(error.name)
+    : null;
+}
+
+function readHostedRuntimeFetchCauseNameValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return HOSTED_RUNTIME_FETCH_CAUSE_NAMES.has(normalized) ? normalized : null;
+}
+
+function readHostedRuntimeFetchCauseKind(
+  value: unknown,
+): HostedRuntimeControlPlaneFetchCauseKind | null {
+  switch (value) {
+    case "abort":
+    case "cloudflare_rpc_destroy":
+    case "fetch_failed":
+    case "network":
+    case "timeout":
+    case "unknown":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readHostedRuntimeFetchCauseCode(
+  value: unknown,
+): HostedExecutionErrorCode | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  switch (normalized) {
+    case "authorization_error":
+    case "bundle_archive_validation_error":
+    case "checkpoint_error":
+    case "configuration_error":
+    case "invalid_request":
+    case "outbox_error":
+    case "range_error":
+    case "reference_error":
+    case "runner_http_error":
+    case "runtime_error":
+    case "syntax_error":
+    case "timeout":
+    case "type_error":
+    case "uri_error":
+      return normalized;
+    default:
+      return null;
+  }
+}
+
+function readHostedRuntimeFetchBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readHostedRuntimeFetchTimeoutMs(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 0
+    && value <= 3_600_000
+    ? value
+    : null;
 }
 
 function isRetryableHostedWebControlReadError(error: unknown): boolean {

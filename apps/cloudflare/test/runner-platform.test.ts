@@ -24,6 +24,7 @@ import {
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
   isHostedRuntimeInternalAuthorityRejectedError,
+  readHostedRuntimeControlPlaneFetchFailureDiagnostics,
 } from "../src/runtime-platform.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
@@ -155,7 +156,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("network down");
     });
-    const platform = buildHostedExecutionRuntimePlatform({
+    const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
     });
@@ -167,18 +168,94 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
-        details: {
+        details: expect.objectContaining({
           description: "Hosted raw email read",
           method: "GET",
           path: "/messages/raw_123",
           responseOrigin: "http://results.worker",
-        },
+        }),
         level: "warn",
         message: "Hosted runtime upstream request failed.",
         phase: "outbox",
         userId: null,
       }),
     );
+  });
+
+  it("attaches safe artifact fetch cause metadata without logging raw transport detail", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("fetch failed with hidden artifact transport detail");
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    let thrown: unknown;
+    try {
+      await platform.artifactStore.get("a".repeat(64));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(
+      "Hosted artifact fetch request failed.",
+    );
+    expect(String(thrown)).not.toContain("hidden artifact transport detail");
+    expect(readHostedRuntimeControlPlaneFetchFailureDiagnostics(thrown)).toEqual({
+      fetchCallerSignalAborted: false,
+      fetchCauseCode: "type_error",
+      fetchCauseKind: "fetch_failed",
+      fetchCauseName: "TypeError",
+      fetchRequestSignalAborted: false,
+      fetchTimeoutMs: expect.any(Number),
+      fetchTimeoutSignalAborted: false,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchOrdinal: 1,
+          method: "GET",
+          operation: "artifact_fetch",
+          path: "/objects/REDACTED",
+          timeoutMs: expect.any(Number),
+        }),
+        message: "Hosted runtime artifact fetch started.",
+        phase: "runtime.starting",
+        userId: null,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchOrdinal: 1,
+          errorCode: "type_error",
+          errorMessagePresent: true,
+          fetchCauseCode: "type_error",
+          fetchCauseKind: "fetch_failed",
+          fetchCauseName: "TypeError",
+          fetchRequestSignalAborted: false,
+          fetchTimeoutSignalAborted: false,
+          method: "GET",
+          operation: "artifact_fetch",
+          path: "/objects/REDACTED",
+        }),
+        level: "warn",
+        message: "Hosted runtime artifact fetch failed before response.",
+        phase: "runtime.starting",
+        userId: null,
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      mocks.emitHostedExecutionStructuredLog.mock.calls.filter(([input]) =>
+        input?.component === "hosted.runtime.artifact-store"
+      ),
+    );
+    expect(serializedLogs).not.toContain("hidden artifact transport detail");
+    expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
   it("logs non-OK control-plane responses with response metadata", async () => {
@@ -249,7 +326,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           description: "Hosted workspace read",
           errorCode: "type_error",
           errorMessagePresent: true,
-          errorName: "TypeError",
+          errorName: "Error",
+          fetchCauseCode: "type_error",
+          fetchCauseKind: "network",
+          fetchCauseName: "TypeError",
           method: "GET",
           path: "/api/internal/hosted-workspace",
           responseOrigin: "https://web.example.test",
@@ -1063,7 +1143,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(platform.deviceSyncPort!.createConnectLink({
       connectTarget: "whoop",
-    })).rejects.toThrow("Hosted device-sync connect link whoop request failed. fetch failed");
+    })).rejects.toThrow("Hosted device-sync connect link whoop request failed.");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -1375,7 +1455,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ],
       limitPerLane: 10,
       requestId: "request_mailbox_abort",
-    })).rejects.toThrow("Hosted mailbox fetch request failed. The operation was aborted.");
+    })).rejects.toThrow("Hosted mailbox fetch request failed.");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

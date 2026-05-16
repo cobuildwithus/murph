@@ -45,6 +45,18 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
 export type HostedExecutionChildRuntimeFailureKind =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS[number];
 
+export const HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS = [
+  "abort",
+  "cloudflare_rpc_destroy",
+  "fetch_failed",
+  "network",
+  "timeout",
+  "unknown",
+] as const;
+
+export type HostedExecutionChildRuntimeFetchCauseKind =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS[number];
+
 export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
   "artifact_fetch",
   "artifact_upload",
@@ -116,6 +128,9 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KIND_SET = new Set<string>(
 const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS,
 );
+const HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KIND_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KINDS,
+);
 const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES,
 );
@@ -157,6 +172,7 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_NAMES = [
   "RangeError",
   "ReferenceError",
   "SyntaxError",
+  "TimeoutError",
   "TypeError",
   "URIError",
 ] as const;
@@ -419,6 +435,21 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
     metadata.childRuntimeHttpOperation = childRuntimeHttpOperation;
   }
 
+  const childRuntimeFetchCauseKind = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeFetchCauseKind,
+    HOSTED_EXECUTION_CHILD_RUNTIME_FETCH_CAUSE_KIND_SET,
+  );
+  if (childRuntimeFetchCauseKind) {
+    metadata.childRuntimeFetchCauseKind = childRuntimeFetchCauseKind;
+  }
+
+  const childRuntimeFetchCauseName = readHostedExecutionChildRuntimeErrorName(
+    record.childRuntimeFetchCauseName,
+  );
+  if (childRuntimeFetchCauseName) {
+    metadata.childRuntimeFetchCauseName = childRuntimeFetchCauseName;
+  }
+
   const childRuntimeErrorName = readHostedExecutionChildRuntimeErrorName(
     record.childRuntimeErrorName,
   );
@@ -441,6 +472,27 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
     && childRuntimeErrorStatus <= 599
   ) {
     metadata.childRuntimeErrorStatus = childRuntimeErrorStatus;
+  }
+
+  const childRuntimeFetchTimeoutMs = record.childRuntimeFetchTimeoutMs;
+  if (
+    typeof childRuntimeFetchTimeoutMs === "number"
+    && Number.isInteger(childRuntimeFetchTimeoutMs)
+    && childRuntimeFetchTimeoutMs >= 0
+    && childRuntimeFetchTimeoutMs <= 3_600_000
+  ) {
+    metadata.childRuntimeFetchTimeoutMs = childRuntimeFetchTimeoutMs;
+  }
+
+  for (const key of [
+    "childRuntimeFetchCallerSignalAborted",
+    "childRuntimeFetchRequestSignalAborted",
+    "childRuntimeFetchTimeoutSignalAborted",
+  ] as const) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      metadata[key] = value;
+    }
   }
 
   return metadata;
