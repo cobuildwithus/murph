@@ -126,6 +126,10 @@ test("JoinInvitePageView renders invite email verification without phone setup c
         status: createStatus({
           invite: {
             code: "invite-code",
+            emailAuthTarget: {
+              emailAddress: "buddy@example.com",
+              kind: "saved",
+            },
             expiresAt: "2026-03-27T12:00:00.000Z",
             phoneAuthTarget: {
               kind: "manual",
@@ -145,6 +149,10 @@ test("JoinInvitePageView renders invite email verification without phone setup c
   assert.doesNotMatch(markup, /Add your phone/);
   assert.doesNotMatch(markup, /Add your phone or Telegram/);
   expect(mocks.phoneVerificationProps).toMatchObject({
+    emailAuthTarget: {
+      emailAddress: "buddy@example.com",
+      kind: "saved",
+    },
     inviteCode: "invite-code",
     phoneAuthTarget: {
       kind: "manual",

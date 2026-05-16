@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 
 import type {
+  HostedInviteEmailAuthTarget,
   HostedInvitePhoneAuthTarget,
   HostedInviteStatusPayload,
 } from "./types";
@@ -23,7 +24,10 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
-import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
+import {
+  projectHostedMemberRoutingState,
+  type HostedMemberRoutingStateSnapshot,
+} from "./hosted-member-routing-store";
 import { type HostedMemberCoreState } from "./hosted-member-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
@@ -142,6 +146,10 @@ export async function getHostedInviteStatus(input: {
     inviteRouting?.pendingLinqParticipantContact?.kind === "email"
       ? "invite_email"
       : resolveHostedInviteVerificationMode(phoneAuthTarget);
+  const emailAuthTarget = resolveHostedInviteEmailAuthTarget({
+    pendingLinqParticipantContact: inviteRouting?.pendingLinqParticipantContact ?? null,
+    verificationMode,
+  });
   const statusPhoneAuthTarget =
     verificationMode === "invite_email"
       ? ({ kind: "manual" } as const)
@@ -158,6 +166,7 @@ export async function getHostedInviteStatus(input: {
     },
     invite: {
       code: invite.inviteCode,
+      ...(emailAuthTarget ? { emailAuthTarget } : {}),
       expiresAt: invite.expiresAt.toISOString(),
       phoneAuthTarget: statusPhoneAuthTarget,
       phoneHint:
@@ -560,6 +569,23 @@ function toHostedInviteStatusPhoneAuthTarget(
     : {
         kind: "manual",
       };
+}
+
+function resolveHostedInviteEmailAuthTarget(input: {
+  pendingLinqParticipantContact: HostedMemberRoutingStateSnapshot["pendingLinqParticipantContact"];
+  verificationMode: NonNullable<HostedInviteStatusPayload["invite"]>["verificationMode"];
+}): HostedInviteEmailAuthTarget | null {
+  if (
+    input.verificationMode !== "invite_email"
+    || input.pendingLinqParticipantContact?.kind !== "email"
+  ) {
+    return null;
+  }
+
+  return {
+    emailAddress: input.pendingLinqParticipantContact.value,
+    kind: "saved",
+  };
 }
 
 function resolveHostedInviteVerificationMode(

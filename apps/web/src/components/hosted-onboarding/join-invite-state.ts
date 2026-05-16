@@ -83,6 +83,7 @@ function buildJoinInviteStatusRefreshFingerprint(
     capabilities: status.capabilities,
     invite: status.invite
       ? {
+          emailAuthTarget: status.invite.emailAuthTarget,
           phoneAuthTarget: status.invite.phoneAuthTarget,
           phoneHint: status.invite.phoneHint,
           verificationMode: status.invite.verificationMode,

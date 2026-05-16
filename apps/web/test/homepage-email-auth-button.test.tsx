@@ -100,6 +100,24 @@ function HomepageEmailLoginButtonHarness() {
   );
 }
 
+test("HomepageEmailAuthButton prefills an initial email address", async () => {
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedEmailAuthButton, {
+      active: true,
+      initialEmailAddress: " buddy@example.com ",
+      inline: true,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+
+  expect(emailInput?.value).toBe("buddy@example.com");
+});
+
 test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects through the shared homepage completion flow", async () => {
   const { assign, button, cleanup, container, window } = await renderClientComponent(
     createElement(HomepageEmailAuthButtonHarness),

@@ -348,6 +348,10 @@ describe("getHostedInviteStatus", () => {
     });
     expect(status.invite).toEqual({
       code: "invite-code",
+      emailAuthTarget: {
+        emailAddress: "buddy@icloud.com",
+        kind: "saved",
+      },
       expiresAt: "2026-04-07T12:00:00.000Z",
       phoneAuthTarget: {
         kind: "manual",

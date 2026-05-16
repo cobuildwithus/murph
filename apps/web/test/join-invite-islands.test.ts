@@ -392,6 +392,10 @@ test("JoinInviteMessagingSetupIsland keeps phone first without a Telegram seed",
 test("JoinInvitePhoneVerificationIsland uses email auth for invite email verification", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInvitePhoneVerificationIsland, {
+      emailAuthTarget: {
+        emailAddress: "buddy@example.com",
+        kind: "saved",
+      },
       inviteCode: "invite-code",
       phoneAuthTarget: {
         kind: "manual",
@@ -406,6 +410,7 @@ test("JoinInvitePhoneVerificationIsland uses email auth for invite email verific
   expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
   expect(mocks.hostedEmailAuthProps).toMatchObject({
     active: true,
+    initialEmailAddress: "buddy@example.com",
     inline: true,
     inviteCode: "invite-code",
   });
