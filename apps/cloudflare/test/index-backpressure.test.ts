@@ -178,7 +178,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(nudge).toMatchObject({
       accepted: true,
       immediateDriveStarted: false,
-      inFlight: false,
+      inFlight: true,
       kind: "retry-scheduled",
     });
     expect(state.writeFence).toMatchObject({
