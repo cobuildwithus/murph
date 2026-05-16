@@ -114,7 +114,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
-  assert.match(config, /inherit = "none"/u);
+  assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
@@ -1197,7 +1197,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'persistence = "none"',
       "",
       "[shell_environment_policy]",
-      'inherit = "none"',
+      'inherit = "all"',
       'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
     ].join("\n"),

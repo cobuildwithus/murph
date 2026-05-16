@@ -53,8 +53,15 @@ export {
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {
+  buildHostedRunnerExecutablePath,
+  HOSTED_RUNNER_EXECUTABLE_PATH,
+  HOSTED_RUNNER_EXECUTABLE_PATH_ENTRIES,
   projectHostedRuntimeToChildEnv,
 } from "./hosted-runtime/environment.ts";
+export {
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
+} from "./hosted-runtime/codex-shell-env-policy.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";

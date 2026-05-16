@@ -15,6 +15,9 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedRunnerExecutablePath,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
@@ -785,7 +788,7 @@ function buildHostedContainerOpenAiInterceptSmokeProcessEnv(input: {
     NODE_EXTRA_CA_CERTS:
       process.env.NODE_EXTRA_CA_CERTS ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
     OPENAI_API_KEY: HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL,
-    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    PATH: buildHostedRunnerExecutablePath(process.env.PATH),
     REQUESTS_CA_BUNDLE:
       process.env.REQUESTS_CA_BUNDLE ?? HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH,
     SSL_CERT_FILE:

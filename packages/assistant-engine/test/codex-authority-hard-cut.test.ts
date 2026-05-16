@@ -35,16 +35,32 @@ describe('Codex authority hard cut', () => {
   })
 
   it('keeps hosted Codex shell execution on an explicit environment allowlist', async () => {
-    const source = await readWorkspacePackageSource(
+    const codexConfig = await readWorkspacePackageSource(
       'assistant-runtime/src/hosted-runtime/codex-config.ts',
     )
+    const shellEnvPolicy = await readWorkspacePackageSource(
+      'assistant-runtime/src/hosted-runtime/codex-shell-env-policy.ts',
+    )
 
-    expect(source).toContain(
-      'DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "none"',
+    expect(codexConfig).toContain(
+      'from "./codex-shell-env-policy.ts"',
     )
-    expect(source).toContain(
-      'DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY',
+    expect(codexConfig).toContain(
+      'HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE',
     )
+    expect(codexConfig).toContain(
+      'HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY',
+    )
+    expect(shellEnvPolicy).toContain(
+      'HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "all"',
+    )
+    expect(shellEnvPolicy).toContain(
+      'HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY',
+    )
+    expect(shellEnvPolicy).toContain('"PATH"')
+    expect(shellEnvPolicy).toContain('"VAULT"')
+    expect(shellEnvPolicy).not.toContain('OPENAI_API_KEY')
+    expect(shellEnvPolicy).not.toContain('VERCEL_AI_API_KEY')
   })
 
   it('does not hard-code hosted Codex model defaults in Murph config', async () => {

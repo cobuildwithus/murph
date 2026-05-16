@@ -18,11 +18,6 @@ import {
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
 import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
-import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -33,6 +28,10 @@ import {
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./codex-runtime-env.ts";
+import {
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
+  HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
+} from "./codex-shell-env-policy.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
@@ -41,33 +40,6 @@ const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
-const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE = "none";
-const DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
-  "CI",
-  "CODEX_HOME",
-  "CODEX_CA_CERTIFICATE",
-  "COLORTERM",
-  "CURL_CA_BUNDLE",
-  "FORCE_COLOR",
-  "HOME",
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_PROCESS_ENV,
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "NODE_EXTRA_CA_CERTS",
-  "NO_COLOR",
-  "PATH",
-  "REQUESTS_CA_BUNDLE",
-  "SSL_CERT_DIR",
-  "SSL_CERT_FILE",
-  "TEMP",
-  "TERM",
-  "TMP",
-  "TMPDIR",
-  "VAULT",
-] as const;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -377,8 +349,8 @@ export function buildHostedCodexConfigToml(input: {
     'persistence = "none"',
     "",
     "[shell_environment_policy]",
-    `inherit = ${tomlString(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
-    `include_only = ${tomlStringArray(DEFAULT_HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
+    `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");
 }
