@@ -264,6 +264,13 @@ describe("hosted workspace runtime entrypoint", () => {
         ["foreground.pass", "done"],
         ["runtime.return", "done"],
       ]);
+      expect(phaseLogs.map((entry) => entry.details.runtimePhaseOrdinal)).toEqual(
+        Array.from({ length: phaseLogs.length }, (_value, index) => index + 1),
+      );
+      expect(phaseLogs.every((entry) =>
+        typeof entry.details.runtimeElapsedMs === "number"
+      )).toBe(true);
+      expect(phaseLogs[1]?.details.runtimePhaseDurationMs).toEqual(expect.any(Number));
       assert.equal(phaseLogs.every((entry) => entry.userId === null), true);
       assert.equal(
         phaseLogs.some((entry) => JSON.stringify(entry).includes(TEST_USER_ID)),

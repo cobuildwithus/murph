@@ -479,18 +479,27 @@ function classifyHostedExecutionChildRuntimeFailure(
     if (error.name === "HostedAssistantConfigurationError") {
       return "hosted_assistant_configuration";
     }
-    const httpOperation = readHostedExecutionChildRuntimeHttpOperation(error);
-    if (httpOperation === "mailbox_payload_decode") {
-      return "mailbox_payload_decode_http";
-    }
-    if (httpOperation) {
-      return "control_plane_http";
+    if (error.message === "The RPC call destroy() was called") {
+      return "runtime_rpc_destroyed";
     }
     const messageFailure = HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_MESSAGE_FAILURES.get(
       error.message,
     );
     if (messageFailure) {
       return messageFailure;
+    }
+    const httpOperation = readHostedExecutionChildRuntimeHttpOperation(error);
+    if (httpOperation && readHostedExecutionRuntimeInvalidJsonDescription(error.message)) {
+      return "control_plane_invalid_json";
+    }
+    if (httpOperation && readHostedExecutionRuntimeFetchFailureDescription(error.message)) {
+      return "control_plane_fetch";
+    }
+    if (httpOperation === "mailbox_payload_decode") {
+      return "mailbox_payload_decode_http";
+    }
+    if (httpOperation) {
+      return "control_plane_http";
     }
   }
   return "unclassified_runtime_error";
@@ -518,7 +527,23 @@ function readHostedExecutionChildRuntimeHttpOperation(
 }
 
 function readHostedExecutionRuntimeHttpDescription(message: string): string | null {
+  return readHostedExecutionRuntimeHttpStatusDescription(message)
+    ?? readHostedExecutionRuntimeInvalidJsonDescription(message)
+    ?? readHostedExecutionRuntimeFetchFailureDescription(message);
+}
+
+function readHostedExecutionRuntimeHttpStatusDescription(message: string): string | null {
   const match = /^(.+?) failed with HTTP \d{3}\./u.exec(message);
+  return match?.[1] ?? null;
+}
+
+function readHostedExecutionRuntimeInvalidJsonDescription(message: string): string | null {
+  const match = /^(.+?) returned invalid JSON\./u.exec(message);
+  return match?.[1] ?? null;
+}
+
+function readHostedExecutionRuntimeFetchFailureDescription(message: string): string | null {
+  const match = /^(.+?) request failed(?:\.|:)/u.exec(message);
   return match?.[1] ?? null;
 }
 

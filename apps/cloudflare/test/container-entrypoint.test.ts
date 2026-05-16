@@ -1337,6 +1337,16 @@ describe("startHostedContainerEntrypoint", () => {
               "module_resolution_failed",
               "hidden_code_marker",
             ],
+            runtimeLastPhase: "runtime",
+            runtimeLastPhaseDurationMs: 999_999,
+            runtimeLastPhaseElapsedMs: 999_999,
+            runtimeLastPhaseOrdinal: 999_999,
+            runtimeLastPhaseStatus: "fail",
+            runtimePhaseTrace: [
+              "workspace.read:start",
+              "runtime:fail",
+              "hidden.phase:start",
+            ],
             stdoutTail: hiddenStdoutTail,
             stdoutTailLineCount: 1,
             stdoutTailMarkers: ["hosted_child_prepared"],
@@ -1381,6 +1391,9 @@ describe("startHostedContainerEntrypoint", () => {
             abortReasonMessagePresent: true,
             abortReasonName: "AbortError",
             exitCode: 1,
+            runtimeLastPhase: "runtime",
+            runtimeLastPhaseStatus: "fail",
+            runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
             runtimeWakeReady: true,
             signal: "SIGTERM",
             stderrTailLineCount: 2,
@@ -1423,6 +1436,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(serializedPayload).not.toContain(hiddenStderrTail);
       expect(serializedPayload).not.toContain(hiddenStdoutTail);
       expect(serializedPayload).not.toContain("hidden_code_marker");
+      expect(serializedPayload).not.toContain("hidden.phase");
+      expect(serializedPayload).not.toContain("999999");
 
       const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([input]) => input)
@@ -1430,6 +1445,9 @@ describe("startHostedContainerEntrypoint", () => {
       expect(failureLogInput).toEqual(expect.objectContaining({
         details: expect.objectContaining({
           childProcess: expect.objectContaining({
+            runtimeLastPhase: "runtime",
+            runtimeLastPhaseStatus: "fail",
+            runtimePhaseTrace: ["workspace.read:start", "runtime:fail"],
             stderrTailMarkers: ["module_resolution_failed"],
             stderrTailPresent: true,
             stdoutTailMarkers: ["hosted_child_prepared"],
@@ -1453,6 +1471,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(serializedFailureLog).not.toContain(hiddenStderrTail);
       expect(serializedFailureLog).not.toContain(hiddenStdoutTail);
       expect(serializedFailureLog).not.toContain("hidden_code_marker");
+      expect(serializedFailureLog).not.toContain("hidden.phase");
+      expect(serializedFailureLog).not.toContain("999999");
     } finally {
       spy.mockRestore();
     }

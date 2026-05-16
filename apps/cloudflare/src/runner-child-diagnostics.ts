@@ -23,7 +23,9 @@ export type HostedExecutionChildRuntimeStage =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_STAGES[number];
 
 export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
+  "control_plane_fetch",
   "control_plane_http",
+  "control_plane_invalid_json",
   "hosted_assistant_configuration",
   "invalid_workspace_port",
   "mailbox_payload_decode_http",
@@ -34,6 +36,7 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
   "missing_vault_root",
   "missing_workspace_port",
   "relative_vault_root",
+  "runtime_rpc_destroyed",
   "stale_invocation_authority",
   "unclassified_runtime_error",
   "workspace_version_mismatch",
@@ -72,6 +75,38 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS = [
 export type HostedExecutionChildRuntimeHttpOperation =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS[number];
 
+export const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES = [
+  "cli.bridge",
+  "cli.bridge.stop",
+  "codex.prepare",
+  "foreground.pass",
+  "inbox.sidecar",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+export type HostedExecutionChildRuntimeObservedPhase =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES[number];
+
+export const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUSES = [
+  "done",
+  "fail",
+  "start",
+] as const;
+
+export type HostedExecutionChildRuntimeObservedPhaseStatus =
+  typeof HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUSES[number];
+
+type HostedExecutionChildRuntimeObservedPhaseTraceEntry = {
+  phase: HostedExecutionChildRuntimeObservedPhase;
+  position: number;
+  status: HostedExecutionChildRuntimeObservedPhaseStatus;
+};
+
 const HOSTED_EXECUTION_CHILD_RUNTIME_STAGE_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_STAGES,
 );
@@ -81,6 +116,13 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KIND_SET = new Set<string>(
 const HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATION_SET = new Set<string>(
   HOSTED_EXECUTION_CHILD_RUNTIME_HTTP_OPERATIONS,
 );
+const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASES,
+);
+const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUS_SET = new Set<string>(
+  HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUSES,
+);
+const HOSTED_EXECUTION_CHILD_RUNTIME_PHASE_TRACE_LIMIT = 24;
 
 const HOSTED_EXECUTION_CHILD_RUNTIME_ERROR_CODES = [
   "authorization_error",
@@ -243,6 +285,111 @@ export function readHostedRunnerChildOutputMarkers(
   return markers.length > 0 ? markers : null;
 }
 
+export function collectHostedRunnerChildRuntimePhaseDiagnostics(input: {
+  stderrTail: string;
+  stdoutTail: string;
+}): HostedExecutionStructuredLogDetails {
+  const trace = collectHostedRunnerChildRuntimePhaseTrace([
+    input.stdoutTail,
+    input.stderrTail,
+  ]);
+  if (trace.length === 0) {
+    return {};
+  }
+
+  trace.sort((left, right) => left.position - right.position);
+  const boundedTrace = trace.slice(-HOSTED_EXECUTION_CHILD_RUNTIME_PHASE_TRACE_LIMIT);
+  const last = boundedTrace.at(-1)!;
+
+  return {
+    runtimeLastPhase: last.phase,
+    runtimeLastPhaseOrdinal: boundedTrace.length,
+    runtimeLastPhaseStatus: last.status,
+    runtimePhaseTrace: boundedTrace.map((entry) => `${entry.phase}:${entry.status}`),
+  };
+}
+
+export function readHostedRunnerChildRuntimeLastPhase(
+  value: unknown,
+): HostedExecutionChildRuntimeObservedPhase | null {
+  return readAllowedHostedExecutionChildDiagnostic(
+    value,
+    HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_SET,
+  ) as HostedExecutionChildRuntimeObservedPhase | null;
+}
+
+export function readHostedRunnerChildRuntimeLastPhaseStatus(
+  value: unknown,
+): HostedExecutionChildRuntimeObservedPhaseStatus | null {
+  return readAllowedHostedExecutionChildDiagnostic(
+    value,
+    HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUS_SET,
+  ) as HostedExecutionChildRuntimeObservedPhaseStatus | null;
+}
+
+export function readHostedRunnerChildRuntimePhaseTrace(
+  value: unknown,
+): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const trace = value
+    .flatMap((entry): string[] => {
+      if (typeof entry !== "string") {
+        return [];
+      }
+      const [phase, status, extra] = entry.split(":");
+      if (
+        extra !== undefined
+        || !readHostedRunnerChildRuntimeLastPhase(phase)
+        || !readHostedRunnerChildRuntimeLastPhaseStatus(status)
+      ) {
+        return [];
+      }
+      return [`${phase}:${status}`];
+    })
+    .slice(0, HOSTED_EXECUTION_CHILD_RUNTIME_PHASE_TRACE_LIMIT);
+
+  return trace.length > 0 ? trace : null;
+}
+
+export function readHostedRunnerChildRuntimePhaseMetadata(
+  record: Record<string, unknown>,
+): HostedExecutionStructuredLogDetails {
+  const metadata: HostedExecutionStructuredLogDetails = {};
+
+  const runtimeLastPhase = readHostedRunnerChildRuntimeLastPhase(
+    record.runtimeLastPhase,
+  );
+  if (runtimeLastPhase) {
+    metadata.runtimeLastPhase = runtimeLastPhase;
+  }
+
+  const runtimeLastPhaseStatus = readHostedRunnerChildRuntimeLastPhaseStatus(
+    record.runtimeLastPhaseStatus,
+  );
+  if (runtimeLastPhaseStatus) {
+    metadata.runtimeLastPhaseStatus = runtimeLastPhaseStatus;
+  }
+
+  const runtimePhaseTrace = readHostedRunnerChildRuntimePhaseTrace(
+    record.runtimePhaseTrace,
+  );
+  if (runtimePhaseTrace) {
+    metadata.runtimePhaseTrace = runtimePhaseTrace;
+  }
+
+  const runtimeLastPhaseOrdinal = readHostedRunnerChildRuntimePhaseOrdinal(
+    record.runtimeLastPhaseOrdinal,
+  );
+  if (runtimeLastPhaseOrdinal !== null) {
+    metadata.runtimeLastPhaseOrdinal = runtimeLastPhaseOrdinal;
+  }
+
+  return metadata;
+}
+
 export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   record: Record<string, unknown>,
 ): HostedExecutionStructuredLogDetails {
@@ -338,4 +485,78 @@ function readAllowedHostedExecutionChildDiagnostic(
 
   const normalized = value.trim();
   return allowed.has(normalized) ? normalized : null;
+}
+
+function collectHostedRunnerChildRuntimePhaseTrace(
+  values: readonly string[],
+): HostedExecutionChildRuntimeObservedPhaseTraceEntry[] {
+  const trace: HostedExecutionChildRuntimeObservedPhaseTraceEntry[] = [];
+  let position = 0;
+  for (const value of values) {
+    for (const line of value.split(/\r?\n/u)) {
+      const parsed = parseHostedRunnerChildRuntimePhaseLine(line);
+      if (!parsed) {
+        continue;
+      }
+      trace.push({
+        ...parsed,
+        position,
+      });
+      position += 1;
+    }
+  }
+  return trace;
+}
+
+function parseHostedRunnerChildRuntimePhaseLine(
+  line: string,
+): Omit<HostedExecutionChildRuntimeObservedPhaseTraceEntry, "position"> | null {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("{")) {
+    return null;
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.schema !== "murph.hosted-execution.log.v1"
+    || record.component !== "runtime"
+    || record.message !== "Hosted workspace runtime phase boundary."
+  ) {
+    return null;
+  }
+  const details = record.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return null;
+  }
+  const detailRecord = details as Record<string, unknown>;
+  const phase = readHostedRunnerChildRuntimeLastPhase(detailRecord.runtimePhase);
+  const status = readHostedRunnerChildRuntimeLastPhaseStatus(
+    detailRecord.runtimePhaseStatus,
+  );
+  if (!phase || !status) {
+    return null;
+  }
+
+  return {
+    phase,
+    status,
+  };
+}
+
+function readHostedRunnerChildRuntimePhaseOrdinal(value: unknown): number | null {
+  return typeof value === "number"
+      && Number.isSafeInteger(value)
+      && value >= 1
+      && value <= HOSTED_EXECUTION_CHILD_RUNTIME_PHASE_TRACE_LIMIT
+    ? value
+    : null;
 }

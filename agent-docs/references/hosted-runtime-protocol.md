@@ -459,6 +459,15 @@ explicitly appends one.
 `HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers.
+The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
+for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
+and status plus bounded metadata-only correlation, count, and timing fields. The
+Cloudflare child supervisor treats that output as untrusted: it may summarize
+only fixed-vocabulary phase/status pairs plus a supervisor-derived last-phase
+ordinal into container failure payloads. It must not trust child-provided
+numeric timing fields or copy raw child output, mailbox contents, prompts,
+transcripts, provider bodies, local paths, or direct personal identifiers into
+parent logs.
 
 Correctness is recovered from the encrypted workspace checkpoint plus mailbox
 rows that remain fetchable by the runtime until imported and checkpointed.

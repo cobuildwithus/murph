@@ -35,6 +35,7 @@ import {
   readHostedExecutionChildRuntimeDiagnosticMetadata,
   readHostedRunnerChildFirstCompletionKind,
   readHostedRunnerChildOutputMarkers,
+  readHostedRunnerChildRuntimePhaseMetadata,
 } from "./runner-child-diagnostics.ts";
 
 const RUNNER_PORT = 8080;
@@ -1387,6 +1388,10 @@ function buildHostedRunnerContainerChildProcessMetadata(
   if (stdoutTailMarkers) {
     metadata.stdoutTailMarkers = stdoutTailMarkers;
   }
+  Object.assign(
+    metadata,
+    readHostedRunnerChildRuntimePhaseMetadata(childProcess),
+  );
 
   return metadata;
 }
@@ -2055,6 +2060,13 @@ function buildRunnerContainerResponseMetadataDetails(error: unknown): HostedExec
   if (stdoutTailMarkers) {
     metadata.runnerChildStdoutTailMarkers = stdoutTailMarkers;
   }
+  for (const [key, value] of Object.entries(
+    prefixRunnerContainerRuntimePhaseMetadata(
+      readHostedRunnerChildRuntimePhaseMetadata(childProcess),
+    ),
+  )) {
+    metadata[key] = value;
+  }
 
   return metadata;
 }
@@ -2076,6 +2088,27 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
 
   for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {
     const value = childRuntimeMetadata[sourceKey];
+    if (value !== undefined) {
+      result[targetKey] = value;
+    }
+  }
+
+  return result;
+}
+
+function prefixRunnerContainerRuntimePhaseMetadata(
+  metadata: HostedExecutionStructuredLogDetails,
+): HostedExecutionStructuredLogDetails {
+  const result: HostedExecutionStructuredLogDetails = {};
+  const runtimeFields = {
+    runtimeLastPhase: "runnerChildRuntimeLastPhase",
+    runtimeLastPhaseOrdinal: "runnerChildRuntimeLastPhaseOrdinal",
+    runtimeLastPhaseStatus: "runnerChildRuntimeLastPhaseStatus",
+    runtimePhaseTrace: "runnerChildRuntimePhaseTrace",
+  } as const;
+
+  for (const [sourceKey, targetKey] of Object.entries(runtimeFields)) {
+    const value = metadata[sourceKey];
     if (value !== undefined) {
       result[targetKey] = value;
     }

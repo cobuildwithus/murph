@@ -322,9 +322,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assertRuntimeNotAborted();
       return snapshot;
     };
+  const emitPhaseLog = createHostedRuntimePhaseLogger();
 
   try {
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       input,
       requestId,
       stage: "workspace.read",
@@ -334,7 +335,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspacePort.read(),
       runtimeAbortController.signal,
     );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         actualWorkspaceVersion: workspaceRead.workspace?.version ?? null,
         workspacePresent: workspaceRead.workspace !== null,
@@ -395,7 +396,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: runtimeAbortController.signal,
         },
       );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       input,
       requestId,
       stage: "workspace.restore",
@@ -410,7 +411,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         materializedArtifactPathCount: restored.materializedArtifactPaths.size,
         restoreMode: restored.mode,
@@ -479,7 +480,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.leaseGeneration]: input.request.leaseGeneration,
       [HOSTED_CODEX_RUNTIME_AUTHORITY_ENV.workspaceVersion]: input.request.workspaceVersion,
     };
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
       },
@@ -495,7 +496,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
       },
@@ -505,7 +506,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
         mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
@@ -533,7 +534,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ),
       runtimeAbortController.signal,
     );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         checkpointDeferred: initialMailboxImport.checkpointDeferred,
         checkpointed: initialMailboxImport.checkpoint?.checkpointed ?? false,
@@ -551,7 +552,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
     }
     const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         inboxReady,
         rebuild: !inboxReady && restored.restoreWasCold,
@@ -571,7 +572,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }),
       runtimeAbortController.signal,
     );
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         rebuild: !inboxReady && restored.restoreWasCold,
       },
@@ -581,7 +582,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       input,
       requestId,
       stage: "cli.bridge",
@@ -591,7 +592,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       deviceSyncPort: guardedRuntime.platform.deviceSyncPort,
       messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
     });
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         bridgeStarted: hostedCliBridge !== null,
       },
@@ -609,7 +610,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       requestId: string;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
-      emitHostedRuntimePhaseLog({
+      emitPhaseLog({
         details: {
           initialMailboxImportProvided: passInput.initialMailboxImport !== undefined,
           passRequestId: passInput.requestId,
@@ -648,7 +649,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ),
           runtimeAbortController.signal,
         );
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           details: {
             assistantProgressed: passResult.assistantPhaseResult?.progressed === true,
             latestWorkspacePresent: passResult.latestWorkspace !== null,
@@ -663,7 +664,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         return passResult;
       } catch (error) {
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           details: {
             passRequestId: passInput.requestId,
           },
@@ -740,7 +741,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
 
         const checkpointStartByMs = resolveActiveCheckpointStartByMs();
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           details: {
             checkpointStartByMs,
             nextWakeAtPresent: accumulatedProjection.nextWakeAt !== null,
@@ -763,7 +764,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeAbortSignal: runtimeAbortController.signal,
           workspacePort: foregroundWorkspacePort,
         });
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           details: {
             checkpointed: checkpoint.checkpointed,
             checkpointWorkspaceVersion: checkpoint.workspace.version,
@@ -810,7 +811,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
           }),
         };
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           details: {
             invocationStatus: invocationResult.status,
             nextWakeAtPresent: Object.hasOwn(invocationResult, "nextWakeAt")
@@ -825,14 +826,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
     } finally {
       if (hostedCliBridge) {
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           input,
           requestId,
           stage: "cli.bridge.stop",
           status: "start",
         });
         await hostedCliBridge.stop();
-        emitHostedRuntimePhaseLog({
+        emitPhaseLog({
           input,
           requestId,
           stage: "cli.bridge.stop",
@@ -856,7 +857,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       redactedStatus: projection.redactedStatus,
       status: projection.status,
     };
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       details: {
         invocationStatus: invocationResult.status,
         nextWakeAtPresent: Object.hasOwn(invocationResult, "nextWakeAt")
@@ -869,7 +870,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     return invocationResult;
   } catch (error) {
-    emitHostedRuntimePhaseLog({
+    emitPhaseLog({
       error,
       input,
       requestId,
@@ -882,15 +883,53 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
 type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
 
-function emitHostedRuntimePhaseLog(input: {
+const HOSTED_RUNTIME_PHASE_NAMES = [
+  "cli.bridge",
+  "cli.bridge.stop",
+  "codex.prepare",
+  "foreground.pass",
+  "inbox.sidecar",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+type HostedRuntimePhaseName = typeof HOSTED_RUNTIME_PHASE_NAMES[number];
+
+interface HostedRuntimePhaseLogState {
+  ordinal: number;
+  runtimeStartedAtMs: number;
+  startedAtMsByStage: Map<string, number>;
+}
+
+interface HostedRuntimePhaseLogInput {
   details?: HostedExecutionStructuredLogDetails;
   error?: unknown;
   input: HostedAssistantWorkspaceRuntimeJobInput;
   phase?: HostedExecutionLogPhase;
   requestId: string;
-  stage: string;
+  stage: HostedRuntimePhaseName;
   status: HostedRuntimePhaseLogStatus;
-}): void {
+}
+
+function createHostedRuntimePhaseLogger(): (input: HostedRuntimePhaseLogInput) => void {
+  const state: HostedRuntimePhaseLogState = {
+    ordinal: 0,
+    runtimeStartedAtMs: Date.now(),
+    startedAtMsByStage: new Map(),
+  };
+
+  return (input) => emitHostedRuntimePhaseLog(input, state);
+}
+
+function emitHostedRuntimePhaseLog(
+  input: HostedRuntimePhaseLogInput,
+  state: HostedRuntimePhaseLogState,
+): void {
+  const phaseTrace = buildHostedRuntimePhaseTraceMetadata(input, state);
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details: {
@@ -898,6 +937,7 @@ function emitHostedRuntimePhaseLog(input: {
       leaseGeneration: input.input.request.leaseGeneration,
       requestId: input.requestId,
       runtimePhase: input.stage,
+      ...phaseTrace,
       runtimePhaseStatus: input.status,
       workspaceVersion: input.input.request.workspaceVersion,
       ...buildHostedRuntimePhaseFailureMetadata(input.error),
@@ -930,6 +970,30 @@ function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean 
       && typeof error === "object"
       && Object.prototype.hasOwnProperty.call(error, key),
   );
+}
+
+function buildHostedRuntimePhaseTraceMetadata(
+  input: Pick<HostedRuntimePhaseLogInput, "stage" | "status">,
+  state: HostedRuntimePhaseLogState,
+): HostedExecutionStructuredLogDetails {
+  const nowMs = Date.now();
+  state.ordinal += 1;
+  const phaseStartedAtMs = state.startedAtMsByStage.get(input.stage) ?? null;
+  const details: HostedExecutionStructuredLogDetails = {
+    runtimeElapsedMs: Math.max(0, nowMs - state.runtimeStartedAtMs),
+    runtimePhaseOrdinal: state.ordinal,
+    ...(phaseStartedAtMs === null || input.status === "start"
+      ? {}
+      : { runtimePhaseDurationMs: Math.max(0, nowMs - phaseStartedAtMs) }),
+  };
+
+  if (input.status === "start") {
+    state.startedAtMsByStage.set(input.stage, nowMs);
+  } else {
+    state.startedAtMsByStage.delete(input.stage);
+  }
+
+  return details;
 }
 
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
