@@ -328,14 +328,14 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("replaces an unexpired write fence when no active runtime child is wakeable", async () => {
+  it("keeps a fresh active write fence when no active runtime child is wakeable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const wakeRuntime = vi.fn(async () => ({
       kind: "not-wakeable" as const,
       reason: "no-active-child" as const,
     }));
-    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
       wakeRuntime,
       workspace: createWorkspaceState({ version: "9" }),
     });
@@ -359,41 +359,33 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      immediateDriveStarted: true,
+      immediateDriveStarted: false,
       inFlight: true,
-      nextAlarmAt: FIXED_NOW,
+      kind: "retry-scheduled",
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
-    await flushWaitUntil();
 
     expect(wakeRuntime).toHaveBeenCalledWith({
       attemptId: "attempt_stale",
       leaseGeneration: "2",
       userId: "member_123",
     });
-    expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
-      leaseGeneration: "3",
-      reason: "nudge",
-      userId: "member_123",
-      workspaceVersion: "9",
-    });
-    expect(invoke.mock.calls[0]?.[0].job.request.attemptId).not.toBe("attempt_stale");
+    expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      backoff_until: null,
-      failure_count: 0,
-      last_invocation_at: FIXED_NOW,
-      wake_at: null,
+      active_attempt_id: "attempt_stale",
+      active_generation: 2,
+      wake_at: "2026-04-27T00:00:01.000Z",
     });
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
           containerProcessingResult: "start-required:no-active-child",
-          immediateDriveStarted: true,
-          progressKind: "processing-started",
-          staleWriteFencePreempted: true,
-          writeFenceHeldAfterStartRequired: false,
+          immediateDriveStarted: false,
+          progressKind: "retry-scheduled",
+          staleWriteFencePreempted: false,
+          writeFenceHeldAfterStartRequired: true,
         }),
         message: "Hosted runner nudge accepted.",
       }),
@@ -487,7 +479,7 @@ describe("HostedUserRunner wake scheduling", () => {
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
       immediateDriveStarted: false,
-      inFlight: false,
+      inFlight: true,
       nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
 
@@ -531,7 +523,7 @@ describe("HostedUserRunner wake scheduling", () => {
       "attempt_unknown",
       2,
       "runtime",
-      "2026-04-26T23:59:57.000Z",
+      "2026-04-26T23:59:44.000Z",
       "2026-04-27T00:01:00.000Z",
       "7",
     );
@@ -599,7 +591,7 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(secondNudge).toMatchObject({
       accepted: true,
       immediateDriveStarted: false,
-      inFlight: false,
+      inFlight: true,
       nextAlarmAt: expect.any(String),
     });
 
@@ -666,7 +658,7 @@ describe("HostedUserRunner wake scheduling", () => {
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
       immediateDriveStarted: false,
-      inFlight: false,
+      inFlight: true,
       kind: "retry-scheduled",
     });
 
@@ -802,7 +794,7 @@ describe("HostedUserRunner wake scheduling", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     const staleFence = readRunnerMeta(sql);
-    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:00:16.000Z"));
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
@@ -875,7 +867,7 @@ describe("HostedUserRunner wake scheduling", () => {
       immediateDriveStarted: true,
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:00:16.000Z"));
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
@@ -951,7 +943,7 @@ describe("HostedUserRunner wake scheduling", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     const staleFence = readRunnerMeta(sql);
-    vi.setSystemTime(new Date("2026-04-27T00:00:03.000Z"));
+    vi.setSystemTime(new Date("2026-04-27T00:00:16.000Z"));
 
     const stalePreemption = runner.nudgeHostedRunner();
     await vi.waitFor(() => expect(wakeRuntime).toHaveBeenCalledTimes(1));

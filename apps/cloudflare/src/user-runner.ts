@@ -80,7 +80,7 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
-const LOCAL_ENSURE_START_GRACE_MS = 2_000;
+const FRESH_WRITE_FENCE_STARTUP_GRACE_MS = 15_000;
 
 type RunnerProgressDemand =
   | {
@@ -477,7 +477,8 @@ export class HostedUserRunner {
       kind,
       immediateDriveStarted,
       inFlight:
-        progress.kind === "processing-ensured"
+        progress.record.writeFence !== null
+        || progress.kind === "processing-ensured"
         || progress.kind === "processing-started",
       nextAlarmAt,
     };
@@ -531,7 +532,7 @@ export class HostedUserRunner {
 
       if (
         containerResult.kind === "start-required"
-        && this.shouldDeferFreshLocalEnsurePreemption(record)
+        && this.shouldDeferFreshActiveRuntimeReplacement(record)
       ) {
         const retryRecord = await this.stateStore.markWakePending({
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
@@ -738,14 +739,7 @@ export class HostedUserRunner {
     if (!Number.isFinite(startedAt)) {
       return false;
     }
-    return Date.now() - startedAt < LOCAL_ENSURE_START_GRACE_MS;
-  }
-
-  private shouldDeferFreshLocalEnsurePreemption(record: RunnerStateRecord): boolean {
-    if (!this.localEnsureInFlight) {
-      return false;
-    }
-    return this.shouldDeferFreshActiveRuntimeReplacement(record);
+    return Date.now() - startedAt < FRESH_WRITE_FENCE_STARTUP_GRACE_MS;
   }
 
   async runUntilIdleForTest(input: {
