@@ -278,6 +278,24 @@ test("HomepageEmailAuthButton uses no-signup mode for login code sends and resen
     email: "user@example.com",
     disableSignup: true,
   });
+
+  const codeInput = container.querySelector(
+    "input[data-input-otp]",
+  ) as HTMLInputElement | null;
+  const verifyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Verify email"),
+  );
+
+  await act(async () => {
+    if (codeInput) {
+      setInputValue(window, codeInput, "654321");
+    }
+    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+    disableSignup: true,
+  }));
 });
 
 test("HomepageEmailAuthButton does not expose no-account send-code errors in login mode", async () => {

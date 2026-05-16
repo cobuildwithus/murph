@@ -297,3 +297,21 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
   });
   expect(mocks.ensureHostedPrivyWalletReady).not.toHaveBeenCalled();
 });
+
+test("completeHostedPrivyAuth disables server-side signup for login-only completion", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+
+  await completeHostedPrivyAuth({
+    createWallet: vi.fn(),
+    disableSignup: true,
+    user: {
+      linkedAccounts: [{ type: "email" }],
+    },
+  });
+
+  expect(mocks.requestHostedPrivyCompletionWithRetry).toHaveBeenCalledWith({
+    allowSignup: false,
+  });
+});

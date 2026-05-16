@@ -23,6 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
       headers: request.headers,
     });
     const result = await completeHostedPrivyVerification({
+      ...(body.allowSignup === false ? { allowSignup: false } : {}),
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       ...(timeZone ? { timeZone } : {}),

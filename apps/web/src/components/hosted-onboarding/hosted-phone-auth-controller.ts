@@ -511,6 +511,7 @@ export function useHostedPhoneAuthController({
 
         await finalizeHostedPrivyVerification({
           completedUser: completedUserRef.current,
+          disableSignup,
           inviteCode,
           onAuthCompleted,
           onCompleted,
