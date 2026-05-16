@@ -36,16 +36,24 @@ export async function nudgeHostedWebhookMailboxItemStep(
     throw new FatalError("Hosted webhook mailbox item is missing.");
   }
 
-  if (await isHostedWebhookMailboxItemCheckpointed(mailboxItem)) {
-    return;
+  const bypassMailboxProgressChecks = input.runnerNudgeIntent === "device-sync-dirty-recovery";
+
+  if (bypassMailboxProgressChecks && input.source !== "device-sync") {
+    throw new FatalError("Hosted webhook nudge intent is not valid for this source.");
   }
 
-  if (!(await isHostedWebhookMailboxItemLatestInLane(mailboxItem))) {
-    return;
+  if (!bypassMailboxProgressChecks) {
+    if (await isHostedWebhookMailboxItemCheckpointed(mailboxItem)) {
+      return;
+    }
+
+    if (!(await isHostedWebhookMailboxItemLatestInLane(mailboxItem))) {
+      return;
+    }
   }
 
   const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
-    context: resolveHostedNudgeWorkflowContext(input.source),
+    context: resolveHostedNudgeWorkflowContext(input),
     timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
     userId: mailboxItem.userId,
   });
@@ -69,11 +77,15 @@ withHostedWorkflowStepMaxRetries(
 );
 
 function resolveHostedNudgeWorkflowContext(
-  source: HostedWebhookNudgeWorkflowInput["source"],
+  input: HostedWebhookNudgeWorkflowInput,
 ): string {
-  return source === "device-sync"
+  if (input.runnerNudgeIntent === "device-sync-dirty-recovery") {
+    return "device-sync.dirty-recovery:workflow";
+  }
+
+  return input.source === "device-sync"
     ? "device-sync.wake:workflow"
-    : `webhook:${source}:workflow`;
+    : `webhook:${input.source}:workflow`;
 }
 
 async function isHostedWebhookMailboxItemCheckpointed(

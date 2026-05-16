@@ -12,6 +12,7 @@ export type HostedWebhookNudgeWorkflowSource =
 
 export type HostedWebhookNudgeWorkflowInput = {
   mailboxItemId: string;
+  runnerNudgeIntent?: "device-sync-dirty-recovery";
   source: HostedWebhookNudgeWorkflowSource;
 };
 

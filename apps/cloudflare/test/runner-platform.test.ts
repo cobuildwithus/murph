@@ -23,6 +23,7 @@ import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
+  HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
 } from "../src/runtime-platform.ts";
@@ -256,6 +257,160 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(serializedLogs).not.toContain("hidden artifact transport detail");
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it("retries replay-safe artifact fetch transport failures once", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new TypeError("fetch failed");
+      }
+
+      return new Response("artifact-bytes", {
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const result = await platform.artifactStore.get("b".repeat(64));
+
+    expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchAttempt: 1,
+          artifactFetchMaxAttempts: 2,
+          fetchCauseKind: "fetch_failed",
+          retrying: true,
+        }),
+        level: "warn",
+        message: "Hosted runtime artifact fetch failed before response; retrying.",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactByteLength: 14,
+          artifactFetchAttempt: 2,
+          artifactFetchMaxAttempts: 2,
+        }),
+        message: "Hosted runtime artifact fetch body read completed.",
+      }),
+    );
+  });
+
+  it("retries replay-safe artifact response body read failures once", async () => {
+    const failedResponse = new Response("unused", {
+      headers: {
+        "content-type": "application/octet-stream",
+      },
+      status: 200,
+    });
+    vi.spyOn(failedResponse, "arrayBuffer").mockRejectedValueOnce(
+      new TypeError("fetch failed"),
+    );
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return failedResponse;
+      }
+
+      return new Response("artifact-bytes", {
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const result = await platform.artifactStore.get("c".repeat(64));
+
+    expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchAttempt: 1,
+          artifactFetchMaxAttempts: 2,
+          fetchCauseKind: "fetch_failed",
+          retrying: true,
+        }),
+        level: "warn",
+        message: "Hosted runtime artifact fetch body read failed; retrying.",
+      }),
+    );
+  });
+
+  it("does not retry artifact fetch failures that are not replay-safe transport errors", async () => {
+    const cases: Array<{
+      createResult(): Promise<Response>;
+      expectedMessage: string | RegExp;
+      label: string;
+    }> = [
+      {
+        createResult: async () => new Response("unavailable", { status: 503 }),
+        expectedMessage: /Hosted artifact fetch failed with HTTP 503/u,
+        label: "http_status",
+      },
+      {
+        createResult: async () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          throw error;
+        },
+        expectedMessage: "Hosted artifact fetch request failed.",
+        label: "abort",
+      },
+      {
+        createResult: async () => {
+          const error = new Error("timed out");
+          error.name = "TimeoutError";
+          throw error;
+        },
+        expectedMessage: "Hosted artifact fetch request failed.",
+        label: "timeout",
+      },
+      {
+        createResult: async () => {
+          throw new HostedRuntimeInternalAuthorityRejectedError({
+            description: "Hosted artifact fetch",
+            status: 401,
+          });
+        },
+        expectedMessage: "Hosted invocation is stale",
+        label: "stale_authority",
+      },
+    ];
+
+    for (const testCase of cases) {
+      vi.clearAllMocks();
+      const fetchMock = vi.fn(testCase.createResult);
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await expect(platform.artifactStore.get("d".repeat(64)))
+        .rejects.toThrow(testCase.expectedMessage);
+      expect(fetchMock, testCase.label).toHaveBeenCalledTimes(1);
+      const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+      expect(serializedLogs).not.toContain('"retrying":true');
+      if (testCase.label !== "http_status") {
+        expect(serializedLogs).toContain('"retrying":false');
+      }
+    }
   });
 
   it("logs non-OK control-plane responses with response metadata", async () => {
