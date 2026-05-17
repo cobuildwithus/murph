@@ -183,13 +183,40 @@ async function handleRunnerArtifactRequest(input: {
       phase: "wake.running",
     });
   };
+  const emitPhase = (
+    message: string,
+    details: Record<string, boolean | number | string | null> = {},
+    level: "info" | "warn" = "info",
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        ...details,
+      },
+      level,
+      message,
+      phase: "wake.running",
+    });
+  };
 
   if (input.request.method === "PUT") {
+    const validationStartedAt = Date.now();
+    emitPhase("Hosted runner artifact write fence validation started.");
     const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
       env: input.env,
       request: input.request,
       userId: input.userId,
     });
+    emitPhase(
+      "Hosted runner artifact write fence validation completed.",
+      {
+        artifactAuthorized: ownsWriteFence,
+        validationDurationMs: Date.now() - validationStartedAt,
+      },
+      ownsWriteFence ? "info" : "warn",
+    );
     if (!ownsWriteFence) {
       emitCompleted({
         artifactAuthorized: false,
@@ -199,12 +226,17 @@ async function handleRunnerArtifactRequest(input: {
   }
 
   try {
+    const cryptoStartedAt = Date.now();
+    emitPhase("Hosted runner artifact crypto context started.");
     const crypto = await resolveRunnerOutboundUserCryptoContext({
       bucket: input.bucket,
       domain: "runtime",
       env: input.env,
       environment: input.environment,
       userId: input.userId,
+    });
+    emitPhase("Hosted runner artifact crypto context completed.", {
+      cryptoContextDurationMs: Date.now() - cryptoStartedAt,
     });
     const artifactStore = createHostedArtifactStore({
       bucket: input.bucket,
@@ -237,8 +269,27 @@ async function handleRunnerArtifactRequest(input: {
       });
     }
 
+    const bodyReadStartedAt = Date.now();
+    emitPhase("Hosted runner artifact request body read started.", {
+      artifactAuthorized: true,
+    });
     const bytes = new Uint8Array(await input.request.arrayBuffer());
+    emitPhase("Hosted runner artifact request body read completed.", {
+      artifactAuthorized: true,
+      artifactByteLength: bytes.byteLength,
+      bodyReadDurationMs: Date.now() - bodyReadStartedAt,
+    });
+    const writeStartedAt = Date.now();
+    emitPhase("Hosted runner artifact write started.", {
+      artifactAuthorized: true,
+      artifactByteLength: bytes.byteLength,
+    });
     await artifactStore.writeArtifact(input.sha256, bytes);
+    emitPhase("Hosted runner artifact write completed.", {
+      artifactAuthorized: true,
+      artifactByteLength: bytes.byteLength,
+      artifactWriteDurationMs: Date.now() - writeStartedAt,
+    });
     emitCompleted({
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,

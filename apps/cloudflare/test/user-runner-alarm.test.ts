@@ -202,6 +202,21 @@ describe("HostedUserRunner wake scheduling", () => {
     await expect(runner.runnerStatus()).resolves.toMatchObject({
       inFlight: true,
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          activeWriteFencePresent: true,
+          demandKind: "active-runtime",
+          localEnsureInFlightPresent: false,
+          progressKind: "processing-ensured",
+          progressStateNextAlarmAt: "2026-04-27T00:01:00.000Z",
+        }),
+        message: "Hosted runner progress check completed.",
+        phase: "scheduled",
+        userId: null,
+      }),
+    );
   });
 
   it("starts scheduled runtime work without depending on a mailbox status read", async () => {

@@ -97,6 +97,15 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare typecheck` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/web-control-plane.ts apps/cloudflare/src/node-runner-child.ts apps/cloudflare/src/runner-child-diagnostics.ts apps/cloudflare/src/runner-container.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/runner-container.test.ts` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
 - `pnpm typecheck` passed after review hardening removed raw fetch-cause text from wrapper messages and wired direct web-control abort signals into diagnostics.
+- `pnpm --dir apps/cloudflare test:node test/runner-platform.test.ts test/runner-outbound.test.ts test/user-runner-alarm.test.ts` passed after adding runner progress, artifact upload, and artifact PUT phase logs.
+- `pnpm --dir apps/cloudflare typecheck` passed after adding runner progress, artifact upload, and artifact PUT phase logs.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/runner-outbound.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/user-runner-alarm.test.ts` passed after adding runner progress, artifact upload, and artifact PUT phase logs.
+- `security-privacy-review` found no findings in the new runner/artifact latency logs; residual risk remains in shared structured-log sanitization and pre-existing logs outside this diff.
+- `coverage-write` added a failed artifact-upload regression proving warning logs stay metadata-only and exclude raw artifact SHA, member id, lease attempt id, and response body text.
+- `task-finish-review` found no correctness, invariant, privacy, or TypeScript issues. It flagged two low operational-noise notes; the plan wording was updated to clarify that artifact GET/PUT crypto context logs are intentional, and phase-boundary logs are intentionally retained to diagnose hangs before completion.
+- `pnpm --dir apps/cloudflare test:node test/runner-platform.test.ts test/runner-outbound.test.ts test/user-runner-alarm.test.ts` passed after coverage-write and review updates.
+- `pnpm --dir apps/cloudflare typecheck` passed after coverage-write and review updates.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/runner-outbound.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after coverage-write and review updates.
 
 ## State
 
@@ -214,3 +223,14 @@ runtime phase boundaries.
   redacted object paths and per-platform ordinals, so the next production
   failure can separate pre-response transport failures from response/body stream
   failures without exposing artifact hashes or bodies.
+- Runner progress now emits metadata-only start/completion logs with demand
+  read duration, progress kind, write-fence/backoff timing, local ensure state,
+  and next-alarm state. The local ensure loop also logs demand checks and
+  runtime-wake handoff timing.
+- Artifact uploads now emit metadata-only client-side start, write-fence header,
+  response, pre-response failure, and completion boundaries with redacted object
+  paths and per-platform ordinals.
+- Runner-side artifact request handling now logs crypto context resolution for
+  artifact GET/PUT paths. PUT handling also logs write-fence validation, request
+  body read, and artifact write boundaries with duration and byte-count metadata
+  only.
