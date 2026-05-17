@@ -4,7 +4,10 @@
 import { Prisma } from "@prisma/client";
 
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
-import { createHostedTelegramUserLookupKeyReadCandidates } from "./contact-privacy";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedTelegramUserLookupKeyReadCandidates,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
   hostedMemberHomeLinqRouteSelect,
@@ -148,6 +151,31 @@ export async function lookupHostedMemberRoutingByPendingLinqParticipantContactLo
     ? await projectHostedMemberRoutingLookup(
         routingRecord,
         "pendingLinqParticipantContactLookupKey",
+        input.prisma,
+      )
+    : null;
+}
+
+export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
+  linqChatId: string | null | undefined;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberRoutingLookup | null> {
+  const lookupKey = createHostedLinqChatLookupKey(input.linqChatId);
+  if (!lookupKey) {
+    return null;
+  }
+
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      linqChatLookupKey: lookupKey,
+    },
+    select: hostedMemberRoutingLookupSelect,
+  });
+
+  return routingRecord
+    ? await projectHostedMemberRoutingLookup(
+        routingRecord,
+        "linqChatLookupKey",
         input.prisma,
       )
     : null;

@@ -1303,7 +1303,7 @@ function shouldRestoreHostedRuntimeEagerArtifact(input: {
     return false;
   }
 
-  return !isHostedRuntimeLazyContentPath(input.path);
+  return !isHostedRuntimeLazyVaultContentPath(input.path);
 }
 
 function shouldRestoreHostedRuntimeInlineFile(input: {
@@ -1314,15 +1314,13 @@ function shouldRestoreHostedRuntimeInlineFile(input: {
     return true;
   }
 
-  return !isHostedRuntimeLazyContentPath(input.path);
+  return !isHostedRuntimeLazyVaultContentPath(input.path);
 }
 
-function isHostedRuntimeLazyContentPath(relativePath: string): boolean {
+function isHostedRuntimeLazyVaultContentPath(relativePath: string): boolean {
   return (
-    hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw/inbox")
-    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw/assistant-input")
-    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived/inbox")
-    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived/assistant-input")
+    hasHostedRuntimeEagerArtifactPrefix(relativePath, "raw")
+    || hasHostedRuntimeEagerArtifactPrefix(relativePath, "derived")
   );
 }
 

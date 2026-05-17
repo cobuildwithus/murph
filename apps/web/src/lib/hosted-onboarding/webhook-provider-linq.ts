@@ -19,9 +19,16 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
+import {
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+  type HostedOnboardingStructuredLogDetails,
+  type HostedOnboardingStructuredLogValue,
+} from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
   incrementHostedLinqOutboundDailyState,
@@ -75,12 +82,27 @@ const HOSTED_LINQ_ATTACHMENT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_LINQ_ATTACHMENT_MIME_TYPE_MAX_CHARS = 120;
 const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
 
+type HostedLinqExistingMemberMatch =
+  | "home-linq-chat"
+  | "none"
+  | "pending-contact"
+  | "phone-identity"
+  | "verified-email";
+
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   if (input.event.event_type !== "message.received") {
-    return buildIgnoredLinqWebhookPlan(input.event.event_type);
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan(input.event.event_type),
+      {
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(input.event.event_id),
+        existingMemberMatch: "none",
+        reason: input.event.event_type,
+        routeStage: "ignored-event-type",
+      },
+    );
   }
 
   const context = resolveHostedOnboardingLinqMessageContext(input.event);
@@ -93,18 +115,40 @@ export async function planHostedOnboardingLinqWebhook(input: {
   } = context;
 
   if (isHostedLinqGroupChat(messageEvent)) {
-    return buildIgnoredLinqWebhookPlan("group-chat");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("group-chat"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberMatch: "none",
+        reason: "group-chat",
+        routeStage: "ignored-group-chat",
+      }),
+    );
   }
 
   if (!participantContact) {
-    return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-contact");
+    const reason = summary.isFromMe ? "own-message" : "invalid-contact";
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan(reason),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberMatch: "none",
+        reason,
+        routeStage: "ignored-missing-contact",
+      }),
+    );
   }
 
   if (shouldIgnoreHostedLinqForLocalInboundGuard({
     isFromMe: summary.isFromMe,
     participantContact,
   })) {
-    return buildIgnoredLinqWebhookPlan("local-inbound-not-allowlisted");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("local-inbound-not-allowlisted"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberMatch: "none",
+        reason: "local-inbound-not-allowlisted",
+        routeStage: "ignored-local-inbound-guard",
+      }),
+    );
   }
 
   const existingMemberLookup = participantContact.kind === "phone"
@@ -122,7 +166,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
         lookupKey: participantContact.lookupKey,
         prisma: input.prisma,
       });
-  const existingMember = existingMemberLookup?.core ?? existingPendingLinqContactLookup?.core ?? null;
+  const existingHomeLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
+    ? null
+    : await lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+      });
+  const existingMember =
+    existingMemberLookup?.core
+    ?? existingPendingLinqContactLookup?.core
+    ?? existingHomeLinqChatLookup?.core
+    ?? null;
+  const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
+    existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
+    existingMemberLookupPresent: Boolean(existingMemberLookup),
+    existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
+    participantContactKind: participantContact.kind,
+  });
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -133,11 +193,27 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    return buildIgnoredLinqWebhookPlan("own-message");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("own-message"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "own-message",
+        routeStage: "ignored-own-message",
+      }),
+    );
   }
 
   if (existingMember && isHostedMemberSuspended(existingMember.suspendedAt)) {
-    return buildIgnoredLinqWebhookPlan("suspended-member");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("suspended-member"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: false,
+        existingMemberMatch,
+        reason: "suspended-member",
+        routeStage: "ignored-suspended-member",
+      }),
+    );
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
@@ -154,17 +230,37 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
 
     if (routeDecision.kind === "redirect_to_home") {
-      return buildConversationHomeRedirectResponse({
-        chatId: summary.chatId,
-        homeRecipientPhone: routeDecision.homeRecipientPhone,
-        memberId: existingMember.id,
-        messageId: summary.messageId,
-        sourceEventId: input.event.event_id,
-      });
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildConversationHomeRedirectResponse({
+          chatId: summary.chatId,
+          homeRecipientPhone: routeDecision.homeRecipientPhone,
+          memberId: existingMember.id,
+          messageId: summary.messageId,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          homeRoutePresent: Boolean(homeRoute?.linqChatId),
+          reason: "redirect-to-home",
+          routeDecision: routeDecision.kind,
+          routeStage: "active-member-redirect",
+        }),
+      );
     }
 
     if (routeDecision.kind === "ignore_unknown_home") {
-      return buildIgnoredLinqWebhookPlan("unknown-home-line");
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("unknown-home-line"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          homeRoutePresent: Boolean(homeRoute?.linqChatId),
+          reason: "unknown-home-line",
+          routeDecision: routeDecision.kind,
+          routeStage: "active-member-ignored-home-line",
+        }),
+      );
     }
 
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
@@ -174,15 +270,26 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
 
     if (existingMailboxItem) {
-      return buildActiveMemberDirectPlan({
-        desiredSideEffects: [],
-        response: {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildActiveMemberDirectPlan({
+          desiredSideEffects: [],
+          response: {
+            duplicate: true,
+            ignored: true,
+            ok: true,
+            reason: "duplicate-webhook-event",
+          },
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,
-          ignored: true,
-          ok: true,
+          existingMemberActive: true,
+          existingMemberMatch,
+          homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "duplicate-webhook-event",
-        },
-      });
+          routeDecision: routeDecision.kind,
+          routeStage: "active-member-duplicate",
+        }),
+      );
     }
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
@@ -200,16 +307,34 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
       if (dailyState.quotaReplySentAt) {
-        return buildIgnoredLinqWebhookPlan("daily-quota-reached");
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("daily-quota-reached"),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            dailyInboundCount: dailyState.inboundCount,
+            existingMemberActive: true,
+            existingMemberMatch,
+            reason: "daily-quota-reached",
+            routeStage: "active-member-daily-quota-reached",
+          }),
+        );
       }
 
-      return buildQuotaReplyResponse({
-        chatId: summary.chatId,
-        memberId: existingMember.id,
-        messageId: summary.messageId,
-        occurredAt,
-        sourceEventId: input.event.event_id,
-      });
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildQuotaReplyResponse({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          messageId: summary.messageId,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          dailyInboundCount: dailyState.inboundCount,
+          existingMemberActive: true,
+          existingMemberMatch,
+          reason: "sent-daily-quota-reply",
+          routeStage: "active-member-daily-quota-reply",
+        }),
+      );
     }
 
     const usageGate = await resolveHostedAiUsageGate({
@@ -219,7 +344,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     if (!usageGate.allowed) {
       if (!usageGate.userNotice) {
-        return buildIgnoredLinqWebhookPlan("ai-usage-gate-denied");
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            existingMemberActive: true,
+            existingMemberMatch,
+            reason: "ai-usage-gate-denied",
+            routeStage: "active-member-ai-usage-denied",
+          }),
+        );
       }
 
       if (usageGate.reason === "ai_usage_limit_exceeded") {
@@ -230,15 +363,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
         });
       }
 
-      return buildAiUsageQuotaReplyResponse({
-        chatId: summary.chatId,
-        memberId: existingMember.id,
-        message: usageGate.userNotice.message,
-        messageId: summary.messageId,
-        noticeCode: usageGate.userNotice.code,
-        occurredAt,
-        sourceEventId: input.event.event_id,
-      });
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildAiUsageQuotaReplyResponse({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          message: usageGate.userNotice.message,
+          messageId: summary.messageId,
+          noticeCode: usageGate.userNotice.code,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          reason: "sent-ai-usage-quota-reply",
+          routeStage: "active-member-ai-usage-reply",
+        }),
+      );
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
@@ -267,8 +408,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       tx: input.prisma,
     });
 
-    return {
-      ...buildActiveMemberDirectPlan({
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildActiveMemberDirectPlan({
         aiUsageAllowDecision: await createHostedAiUsageAllowDecision({
           memberId: existingMember.id,
         }),
@@ -282,11 +423,29 @@ export async function planHostedOnboardingLinqWebhook(input: {
         wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
       }),
-    };
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: true,
+        existingMemberMatch,
+        homeRoutePresent: Boolean(homeRoute?.linqChatId),
+        mailboxAppendPresent: true,
+        reason: "wake-appended-active-member",
+        routeDecision: routeDecision.kind,
+        routeStage: "active-member-appended",
+      }),
+    );
   }
 
   if (!isHostedLinqIMessageFirstContact(messageEvent)) {
-    return buildIgnoredLinqWebhookPlan("non-imessage-first-contact");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("non-imessage-first-contact"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "non-imessage-first-contact",
+        routeStage: "ignored-non-imessage-first-contact",
+      }),
+    );
   }
 
   const member = existingMember
@@ -307,7 +466,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (existingDailyState?.onboardingLinkSentAt) {
-    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "signup-link-already-sent",
+        routeStage: "first-contact-signup-already-sent",
+      }),
+    );
   }
 
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
@@ -320,7 +487,16 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (dailyState.onboardingLinkSentAt) {
-    return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "signup-link-already-sent",
+        routeStage: "first-contact-signup-already-sent",
+      }),
+    );
   }
 
   const invite = await issueHostedInviteTx({
@@ -329,15 +505,87 @@ export async function planHostedOnboardingLinqWebhook(input: {
     prisma: input.prisma,
   });
 
-  return buildSignupLinkResponse({
-    chatId: summary.chatId,
-    inviteCode: invite.inviteCode,
-    inviteId: invite.id,
-    memberId: member.id,
-    messageId: summary.messageId,
-    occurredAt,
-    sourceEventId: input.event.event_id,
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildSignupLinkResponse({
+      chatId: summary.chatId,
+      inviteCode: invite.inviteCode,
+      inviteId: invite.id,
+      memberId: member.id,
+      messageId: summary.messageId,
+      occurredAt,
+      sourceEventId: input.event.event_id,
+    }),
+    buildHostedLinqWebhookPlannerDetails(input.event, context, {
+      dailyInboundCount: dailyState.inboundCount,
+      existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+      existingMemberMatch,
+      reason: "sent-signup-link",
+      routeStage: "first-contact-signup-link",
+    }),
+  );
+}
+
+function resolveHostedLinqExistingMemberMatch(input: {
+  existingHomeLinqChatLookupPresent: boolean;
+  existingMemberLookupPresent: boolean;
+  existingPendingLinqContactLookupPresent: boolean;
+  participantContactKind: HostedLinqParticipantContact["kind"];
+}): HostedLinqExistingMemberMatch {
+  if (input.existingMemberLookupPresent) {
+    return input.participantContactKind === "phone" ? "phone-identity" : "verified-email";
+  }
+
+  if (input.existingPendingLinqContactLookupPresent) {
+    return "pending-contact";
+  }
+
+  if (input.existingHomeLinqChatLookupPresent) {
+    return "home-linq-chat";
+  }
+
+  return "none";
+}
+
+function buildHostedLinqWebhookPlannerDetails(
+  event: HostedLinqWebhookEvent,
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>,
+  details: HostedOnboardingStructuredLogDetails,
+): HostedOnboardingStructuredLogDetails {
+  return {
+    eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+    existingMemberMatch: "none",
+    linqChatPresent: context.summary.chatId.trim().length > 0,
+    linqContactKind: context.participantContact?.kind ?? "none",
+    linqIsFromMe: context.summary.isFromMe,
+    linqRecipientPhonePresent: Boolean(context.recipientPhoneNumber),
+    linqService: context.messageEvent.data.service ?? null,
+    routeStage: "unknown",
+    ...details,
+  };
+}
+
+function logHostedLinqWebhookPlannerDecisionAndReturn<T extends HostedOnboardingLinqDirectPlan>(
+  plan: T,
+  details: HostedOnboardingStructuredLogDetails,
+): T {
+  console.info("Hosted Linq webhook planner decision.", {
+    ...sanitizeHostedOnboardingStructuredLogDetails(details),
+    desiredSideEffectCount: plan.desiredSideEffects.length,
+    duplicate: Boolean(plan.response.duplicate),
+    ignored: Boolean(plan.response.ignored),
+    ok: plan.response.ok,
+    responseReason: sanitizeHostedOnboardingPlannerLogValue(plan.response.reason),
+    wakeMailboxItemPresent: Boolean(plan.wakeMailboxItemId),
+    wakeUserPresent: Boolean(plan.wakeUserId),
   });
+
+  return plan;
+}
+
+function sanitizeHostedOnboardingPlannerLogValue(
+  value: string | null | undefined,
+): HostedOnboardingStructuredLogValue {
+  return value ?? null;
 }
 
 function buildHostedLinqConversationWakeForMailbox(input: {

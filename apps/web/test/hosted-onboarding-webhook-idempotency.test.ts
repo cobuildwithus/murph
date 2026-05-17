@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
+  lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -85,10 +87,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress: mocks.lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberSnapshot: mocks.readHostedMemberSnapshot,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey:
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey,
   readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
@@ -487,6 +491,52 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("uses the home Linq chat route when the sender contact no longer matches the member identity", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
+    mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey.mockResolvedValue(null);
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody({
+        from: "icloud-handle@example.test",
+        service: "imessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
+      linqChatId: "chat_123",
+      prisma,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      tx: prisma,
+      envelope: expect.objectContaining({
+        eventId: "evt_123",
+        userId: "member_123",
+      }),
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not count or wake duplicate active-member Linq event ids", async () => {
