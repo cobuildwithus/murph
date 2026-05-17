@@ -2554,7 +2554,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       });
 
-      assert.deepEqual(artifactGetCalls, [bundleHash, rawArtifactHash]);
+      assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.deepEqual(imported, ["4"]);
       assert.equal(fetchRequests.length, 1);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
@@ -3776,11 +3776,7 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           async importItem() {
-            assert.equal(
-              await readFile(path.join(vaultRoot, eagerArtifactSpec.path), "utf8"),
-              "capture-artifact\n",
-            );
-            for (const spec of artifactSpecs) {
+            for (const spec of [eagerArtifactSpec, ...artifactSpecs]) {
               const restoredArtifactPath = path.join(vaultRoot, spec.path);
               await assert.rejects(readFile(restoredArtifactPath, "utf8"));
             }
@@ -3817,11 +3813,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
-      assert.ok(events.indexOf("artifact.get:eager-raw-capture") < mailboxFetchIndex);
+      assert.equal(events.includes("artifact.get:eager-raw-capture"), false);
       for (const [index] of artifactHashes.entries()) {
         assert.equal(events.includes(`artifact.get:restored-artifact-${index}`), false);
       }
-      assert.deepEqual(artifactGetCalls, [bundleHash, eagerArtifactHash]);
+      assert.ok(mailboxFetchIndex >= 0);
+      assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);

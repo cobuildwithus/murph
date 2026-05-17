@@ -812,17 +812,29 @@ describe("hosted workspace restore Codex continuity", () => {
       const lazyRelativePath = "raw/inbox/live/lazy.txt";
       const lazyBytes = Buffer.from("lazy inbox artifact\n", "utf8");
       const lazyArtifactHash = sha256HostedBundleHex(lazyBytes);
+      const lazyProviderRelativePath = "raw/integrations/provider/snapshot.json";
+      const lazyProviderBytes = Buffer.from("{\"provider\":\"lazy\"}\n", "utf8");
+      const lazyProviderArtifactHash = sha256HostedBundleHex(lazyProviderBytes);
       await mkdir(path.dirname(path.join(sourceBaseVaultRoot, lazyRelativePath)), { recursive: true });
       await writeFile(path.join(sourceBaseVaultRoot, lazyRelativePath), lazyBytes);
+      await mkdir(path.dirname(path.join(sourceBaseVaultRoot, lazyProviderRelativePath)), { recursive: true });
+      await writeFile(path.join(sourceBaseVaultRoot, lazyProviderRelativePath), lazyProviderBytes);
       const baseBundle = await snapshotHostedBundleRoots({
         externalizeFile: async (file) => {
-          if (file.path !== lazyRelativePath) {
+          if (file.path !== lazyRelativePath && file.path !== lazyProviderRelativePath) {
             return null;
           }
 
+          const byteSize = file.path === lazyProviderRelativePath
+            ? lazyProviderBytes.byteLength
+            : lazyBytes.byteLength;
+          const sha256 = file.path === lazyProviderRelativePath
+            ? lazyProviderArtifactHash
+            : lazyArtifactHash;
+
           return {
-            byteSize: lazyBytes.byteLength,
-            sha256: lazyArtifactHash,
+            byteSize,
+            sha256,
           };
         },
         kind: "vault",
@@ -844,6 +856,7 @@ describe("hosted workspace restore Codex continuity", () => {
       const artifactBytesByHash = new Map<string, Uint8Array>([
         [baseHash, baseBundle],
         [lazyArtifactHash, lazyBytes],
+        [lazyProviderArtifactHash, lazyProviderBytes],
       ]);
       const platform = createRestorePlatform({
         artifactBytesByHash,
@@ -859,6 +872,9 @@ describe("hosted workspace restore Codex continuity", () => {
       });
       assert.deepEqual(artifactGetCalls, [baseHash]);
       await assert.rejects(readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), {
+        code: "ENOENT",
+      });
+      await assert.rejects(readFile(path.join(restoredVaultRoot, lazyProviderRelativePath), "utf8"), {
         code: "ENOENT",
       });
 
@@ -884,10 +900,20 @@ describe("hosted workspace restore Codex continuity", () => {
 
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(await readFile(path.join(restoredVaultRoot, "live-mailbox-state.txt"), "utf8"), "seq=467\n");
-      const lazyMaterialized = await liveRestored.materializeWorkspaceArtifacts([lazyRelativePath]);
-      assert.deepEqual([...lazyMaterialized.materializedArtifactPaths], [`vault:${lazyRelativePath}`]);
+      const lazyMaterialized = await liveRestored.materializeWorkspaceArtifacts([
+        lazyRelativePath,
+        lazyProviderRelativePath,
+      ]);
+      assert.deepEqual([...lazyMaterialized.materializedArtifactPaths].sort(), [
+        `vault:${lazyRelativePath}`,
+        `vault:${lazyProviderRelativePath}`,
+      ]);
       assert.deepEqual([...lazyMaterialized.missingArtifactPaths], []);
       assert.equal(await readFile(path.join(restoredVaultRoot, lazyRelativePath), "utf8"), "lazy inbox artifact\n");
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, lazyProviderRelativePath), "utf8"),
+        "{\"provider\":\"lazy\"}\n",
+      );
 
       const nextSourceVaultRoot = path.join(workspaceRoot, "next-base-vault");
       await mkdir(path.dirname(path.join(nextSourceVaultRoot, lazyRelativePath)), { recursive: true });
