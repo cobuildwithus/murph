@@ -514,7 +514,7 @@ describe("hosted deploy automation helpers", () => {
       "printf -- '- Container rollout: `%s`\\n' \"${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}\"",
       "printf -- '- Runner idle TTL override: `%s`\\n' \"${DEPLOY_SUMMARY_RUNNER_IDLE_TTL_MS}\"",
       "printf -- '- Smoke user id: `%s`\\n' \"${DEPLOY_SUMMARY_SMOKE_USER_ID}\"",
-      "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
+      "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
       'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
       "runs-on: blacksmith-4vcpu-ubuntu-2404",

@@ -1,5 +1,4 @@
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { availableParallelism } from "node:os";
 import path from "node:path";
 
 import {
@@ -689,7 +688,7 @@ function resolveHostedRunnerPackConcurrency(
 }
 
 function resolveDefaultHostedRunnerBuildConcurrency(): string {
-  return String(Math.min(4, Math.max(1, availableParallelism())));
+  return "1";
 }
 
 function resolvePositiveIntegerEnv(
