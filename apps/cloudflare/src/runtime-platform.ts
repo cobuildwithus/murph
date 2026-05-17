@@ -261,6 +261,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     : null;
   const uploadedArtifactShas = new Set<string>();
   const inFlightArtifactUploads = new Map<string, Promise<void>>();
+  let artifactUploadOrdinal = 0;
   const putArtifactUncached = async (
     artifact: {
       bytes: Uint8Array;
@@ -270,28 +271,125 @@ export function buildHostedExecutionRuntimePlatform(input: {
       requireWriteFence?: boolean;
     } = {},
   ): Promise<void> => {
-    const headers = input.workspaceCheckpointBridge
-      ? options.requireWriteFence
-        ? await requireHostedRuntimeWriteFenceHeaders(
-            input.workspaceCheckpointBridge,
-            "Hosted artifact upload",
-          )
-        : await createHostedRuntimeWriteFenceHeaders(input.workspaceCheckpointBridge)
-      : new Headers();
-    const response = await fetchHostedResponse({
-      description: "Hosted artifact upload",
-      fetchImpl,
-      init: {
-        body: copyBytesToArrayBuffer(artifact.bytes),
-        headers,
-        method: "PUT",
-      },
-      logPath: "/objects/REDACTED",
+    const ordinal = ++artifactUploadOrdinal;
+    const startedAt = Date.now();
+    const logDetails = {
+      artifactByteLength: artifact.bytes.byteLength,
+      artifactUploadOrdinal: ordinal,
+      method: "PUT",
+      operation: "artifact_upload",
+      path: "/objects/REDACTED",
+      requireWriteFence: options.requireWriteFence === true,
+      responseOrigin: CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore,
       timeoutMs,
-      url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+    };
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.artifact-store",
+      details: logDetails,
+      message: "Hosted runtime artifact upload started.",
+      phase: "checkpoint",
+      userId: null,
     });
 
+    const headerStartedAt = Date.now();
+    let headers: Headers;
+    try {
+      headers = input.workspaceCheckpointBridge
+        ? options.requireWriteFence
+          ? await requireHostedRuntimeWriteFenceHeaders(
+              input.workspaceCheckpointBridge,
+              "Hosted artifact upload",
+            )
+          : await createHostedRuntimeWriteFenceHeaders(input.workspaceCheckpointBridge)
+        : new Headers();
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.artifact-store",
+        details: {
+          ...logDetails,
+          durationMs: Date.now() - startedAt,
+          headerDurationMs: Date.now() - headerStartedAt,
+          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        },
+        level: "warn",
+        message: "Hosted runtime artifact upload authority headers failed.",
+        phase: "checkpoint",
+        userId: null,
+      });
+      throw error;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.artifact-store",
+      details: {
+        ...logDetails,
+        attemptHeaderPresent: headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER),
+        headerDurationMs: Date.now() - headerStartedAt,
+        leaseGenerationHeaderPresent: headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER),
+        workspaceVersionHeaderPresent: headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER),
+      },
+      message: "Hosted runtime artifact upload authority headers prepared.",
+      phase: "checkpoint",
+      userId: null,
+    });
+
+    let response: Response;
+    try {
+      response = await fetchHostedResponse({
+        description: "Hosted artifact upload",
+        fetchImpl,
+        init: {
+          body: copyBytesToArrayBuffer(artifact.bytes),
+          headers,
+          method: "PUT",
+        },
+        logPath: "/objects/REDACTED",
+        timeoutMs,
+        url: new URL(`/objects/${artifact.sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.artifact-store",
+        details: {
+          ...logDetails,
+          durationMs: Date.now() - startedAt,
+          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(error),
+        },
+        level: "warn",
+        message: "Hosted runtime artifact upload failed before response.",
+        phase: "checkpoint",
+        userId: null,
+      });
+      throw error;
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.artifact-store",
+      details: {
+        ...logDetails,
+        contentLengthPresent: response.headers.has("content-length"),
+        contentTypePresent: response.headers.has("content-type"),
+        durationMs: Date.now() - startedAt,
+        responseOk: response.ok,
+        responseStatus: response.status,
+      },
+      level: response.ok ? "info" : "warn",
+      message: "Hosted runtime artifact upload response received.",
+      phase: "checkpoint",
+      userId: null,
+    });
     assertHostedOk(response, "Hosted artifact upload");
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.artifact-store",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        responseStatus: response.status,
+      },
+      message: "Hosted runtime artifact upload completed.",
+      phase: "checkpoint",
+      userId: null,
+    });
   };
   const putArtifactOnce = async (
     artifact: {

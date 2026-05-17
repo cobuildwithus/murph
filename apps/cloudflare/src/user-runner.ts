@@ -485,11 +485,44 @@ export class HostedUserRunner {
   }
 
   private async ensureRunnerProgress(input: RunnerProgressInput): Promise<EnsureRunnerProgressResult> {
+    const progressStartedAt = Date.now();
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        localEnsureInFlightPresent: this.localEnsureInFlight !== null,
+        progressReason: input.reason,
+      },
+      message: "Hosted runner progress check started.",
+      phase: "scheduled",
+      userId: null,
+    });
+    let demandReadDurationMs = 0;
+    const finish = (progress: EnsureRunnerProgressResult): EnsureRunnerProgressResult => {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildEnsureRunnerProgressLogDetails(progress),
+          ...buildRunnerRecordTimingLogDetails(progress.record),
+          localEnsureInFlightPresent: this.localEnsureInFlight !== null,
+          progressDemandReadDurationMs: demandReadDurationMs,
+          progressDurationMs: Date.now() - progressStartedAt,
+          progressReason: input.reason,
+          progressStateNextAlarmAt: readRunnerStateAlarmAt(progress.record),
+        },
+        message: "Hosted runner progress check completed.",
+        phase: "scheduled",
+        userId: null,
+      });
+      return progress;
+    };
+
+    const demandReadStartedAt = Date.now();
     const demand = await this.readRunnerProgressDemand();
+    demandReadDurationMs = Date.now() - demandReadStartedAt;
     if (!demand) {
       const record = await this.stateStore.readState();
       await this.syncAlarm(record);
-      return { demand: null, kind: "caught-up", record };
+      return finish({ demand: null, kind: "caught-up", record });
     }
 
     const record = demand.record;
@@ -505,12 +538,12 @@ export class HostedUserRunner {
       });
       if (containerResult.kind === "accepted") {
         await this.syncAlarm(record);
-        return {
+        return finish({
           containerResult,
           demand,
           kind: "processing-ensured",
           record,
-        };
+        });
       }
 
       if (
@@ -521,13 +554,13 @@ export class HostedUserRunner {
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return {
+        return finish({
           containerResult,
           deferredFreshWriteFenceReplacement: true,
           demand,
           kind: "retry-scheduled",
           record: retryRecord,
-        };
+        });
       }
 
       if (
@@ -538,13 +571,13 @@ export class HostedUserRunner {
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return {
+        return finish({
           containerResult,
           deferredFreshWriteFenceReplacement: true,
           demand,
           kind: "retry-scheduled",
           record: retryRecord,
-        };
+        });
       }
 
       if (!shouldReplaceUnconfirmedActiveRuntime(containerResult)) {
@@ -552,12 +585,12 @@ export class HostedUserRunner {
           preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
         });
         await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return {
+        return finish({
           containerResult,
           demand,
           kind: "retry-scheduled",
           record: retryRecord,
-        };
+        });
       }
 
       const previousFence = record.writeFence;
@@ -580,14 +613,14 @@ export class HostedUserRunner {
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: input.reason,
       });
-      return {
+      return finish({
         containerResult,
         demand,
         localEnsurePromise: localEnsureInFlight,
         kind: "processing-started",
         previousAttemptId: previousFence.attemptId,
         record: preempted.record,
-      };
+      });
     }
 
     if (isRunnerBackoffActive(record, Date.now())) {
@@ -595,12 +628,12 @@ export class HostedUserRunner {
         preferredWakeAt: new Date().toISOString(),
       });
       await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-      return {
+      return finish({
         containerResult: null,
         demand,
         kind: "retry-scheduled",
         record: retryRecord,
-      };
+      });
     }
 
     this.retireCurrentEnsurePromise();
@@ -610,14 +643,14 @@ export class HostedUserRunner {
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       reason: resolveRunnerProgressReason(demand, input.reason),
     });
-    return {
+    return finish({
       containerResult: null,
       demand,
       localEnsurePromise: localEnsureInFlight,
       kind: "processing-started",
       nextAlarmAt: initialAlarmAt,
       record,
-    };
+    });
   }
 
   private async readRunnerProgressDemand(): Promise<RunnerProgressDemand | null> {
@@ -644,9 +677,33 @@ export class HostedUserRunner {
   private async readMailboxBacklogDemand(
     record: RunnerStateRecord,
   ): Promise<Extract<RunnerProgressDemand, { kind: "mailbox-backlog" }> | null> {
+    const statusReadStartedAt = Date.now();
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...buildRunnerRecordTimingLogDetails(record),
+      },
+      message: "Hosted runner mailbox backlog status read started.",
+      phase: "scheduled",
+      userId: null,
+    });
     const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
+    const mailboxBacklogPresent = hasMailboxBacklog(webStatus.mailboxLag);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        mailboxBacklogPresent,
+        mailboxLagLaneCount: webStatus.mailboxLag.length,
+        statusReadDurationMs: Date.now() - statusReadStartedAt,
+        workspacePresent: webStatus.workspace !== null,
+        workspaceVersion: webStatus.workspace?.version ?? null,
+      },
+      message: "Hosted runner mailbox backlog status read completed.",
+      phase: "scheduled",
+      userId: null,
+    });
 
-    if (hasMailboxBacklog(webStatus.mailboxLag)) {
+    if (mailboxBacklogPresent) {
       return {
         kind: "mailbox-backlog",
         record,
@@ -827,20 +884,74 @@ export class HostedUserRunner {
   }
 
   private async runLocalEnsureLoop(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
+    const loopStartedAt = Date.now();
+    let loopIteration = 0;
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        localEnsureReason: input.reason,
+      },
+      message: "Hosted runner local ensure loop started.",
+      phase: "scheduled",
+      userId: null,
+    });
     let lastResult: HostedWorkspaceInvocationResult = {
       nextWakeAt: null,
       status: "idle",
     };
 
     while (true) {
+      loopIteration += 1;
+      const demandReadStartedAt = Date.now();
       const demand = await this.readRunnerProgressDemand();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          demandKind: demand?.kind ?? null,
+          demandReadDurationMs: Date.now() - demandReadStartedAt,
+          localEnsureElapsedMs: Date.now() - loopStartedAt,
+          localEnsureIteration: loopIteration,
+          localEnsureReason: input.reason,
+          ...(demand ? buildRunnerRecordTimingLogDetails(demand.record) : {}),
+        },
+        message: "Hosted runner local ensure loop demand checked.",
+        phase: "scheduled",
+        userId: null,
+      });
       if (!demand) {
         await this.syncAlarm(await this.stateStore.readState());
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            localEnsureDurationMs: Date.now() - loopStartedAt,
+            localEnsureFinishReason: "caught-up",
+            localEnsureIteration: loopIteration,
+            localEnsureReason: input.reason,
+            lastRuntimeStatus: lastResult.status,
+            nextWakePresent: lastResult.nextWakeAt !== null,
+          },
+          message: "Hosted runner local ensure loop completed.",
+          phase: "scheduled",
+          userId: null,
+        });
         return lastResult;
       }
 
       if (demand.record.writeFence) {
         await this.syncAlarm(demand.record);
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildRunnerRecordTimingLogDetails(demand.record),
+            localEnsureDurationMs: Date.now() - loopStartedAt,
+            localEnsureFinishReason: "active-write-fence",
+            localEnsureIteration: loopIteration,
+            localEnsureReason: input.reason,
+          },
+          message: "Hosted runner local ensure loop completed.",
+          phase: "scheduled",
+          userId: null,
+        });
         return {
           nextWakeAt: readRunnerStateAlarmAt(demand.record),
           status: "scheduled",
@@ -849,26 +960,90 @@ export class HostedUserRunner {
 
       if (isRunnerBackoffActive(demand.record, Date.now())) {
         await this.syncAlarmAt(readRunnerRuntimeDueAt(demand.record));
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildRunnerRecordTimingLogDetails(demand.record),
+            localEnsureDurationMs: Date.now() - loopStartedAt,
+            localEnsureFinishReason: "backoff-active",
+            localEnsureIteration: loopIteration,
+            localEnsureReason: input.reason,
+          },
+          message: "Hosted runner local ensure loop completed.",
+          phase: "scheduled",
+          userId: null,
+        });
         return {
           nextWakeAt: readRunnerRuntimeDueAt(demand.record),
           status: "scheduled",
         };
       }
 
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          demandKind: demand.kind,
+          localEnsureElapsedMs: Date.now() - loopStartedAt,
+          localEnsureIteration: loopIteration,
+          runtimeReason: resolveRunnerProgressReason(demand, input.reason),
+        },
+        message: "Hosted runner local ensure loop starting runtime wake.",
+        phase: "runtime.starting",
+        userId: null,
+      });
+      const runtimeWakeStartedAt = Date.now();
       lastResult = await this.runRuntimeWake({
         aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
         reason: resolveRunnerProgressReason(demand, input.reason),
       });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          localEnsureElapsedMs: Date.now() - loopStartedAt,
+          localEnsureIteration: loopIteration,
+          nextWakePresent: lastResult.nextWakeAt !== null,
+          runtimeWakeDurationMs: Date.now() - runtimeWakeStartedAt,
+          runtimeWakeStatus: lastResult.status,
+        },
+        message: "Hosted runner local ensure loop runtime wake completed.",
+        phase: "checkpoint",
+        userId: null,
+      });
       if (lastResult.status === "scheduled") {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            localEnsureDurationMs: Date.now() - loopStartedAt,
+            localEnsureFinishReason: "runtime-scheduled",
+            localEnsureIteration: loopIteration,
+            localEnsureReason: input.reason,
+            nextWakePresent: lastResult.nextWakeAt !== null,
+          },
+          message: "Hosted runner local ensure loop completed.",
+          phase: "scheduled",
+          userId: null,
+        });
         return lastResult;
       }
     }
   }
 
   private async runRuntimeWake(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
+    const runtimeWakeStartedAt = Date.now();
     const initialRecord = await this.stateStore.readState();
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...buildRunnerRecordTimingLogDetails(initialRecord),
+        runtimeReason: input.reason,
+      },
+      message: "Hosted runner runtime wake started.",
+      phase: "runtime.starting",
+      userId: null,
+    });
     let token: RunnerWriteFenceToken;
     try {
+      const writeFenceStartedAt = Date.now();
       token = await this.stateStore.beginWriteFence({
         expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
         kind: "runtime",
@@ -876,6 +1051,18 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
       });
       await this.syncAlarm(await this.stateStore.readState());
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          runtimeReason: input.reason,
+          writeFenceAcquireDurationMs: Date.now() - writeFenceStartedAt,
+          workspaceAttemptId: token.attemptId,
+          workspaceWriteFenceGeneration: token.generation,
+        },
+        message: "Hosted runner runtime wake write fence acquired.",
+        phase: "runtime.starting",
+        userId: null,
+      });
     } catch (error) {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
@@ -954,6 +1141,7 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           nextWakePresent: result.nextWakeAt != null,
+          runtimeWakeDurationMs: Date.now() - runtimeWakeStartedAt,
           workspaceAttemptId: token.attemptId,
           workspaceStatus: result.status,
         },
@@ -1716,6 +1904,32 @@ function buildEnsureRunnerProgressLogDetails(
       }
       : {}),
     wakePending: progress.record.wakePending,
+  };
+}
+
+function buildRunnerRecordTimingLogDetails(
+  record: RunnerStateRecord,
+  nowMs = Date.now(),
+): HostedExecutionStructuredLogDetails {
+  const writeFence = record.writeFence;
+  const writeFenceStartedAtMs = writeFence ? Date.parse(writeFence.startedAt) : NaN;
+  const writeFenceExpiresAtMs = writeFence ? Date.parse(writeFence.expiresAt) : NaN;
+  const runtimeDueAt = readRunnerRuntimeDueAt(record);
+
+  return {
+    activeWriteFenceAgeMs: Number.isFinite(writeFenceStartedAtMs)
+      ? Math.max(0, nowMs - writeFenceStartedAtMs)
+      : null,
+    activeWriteFenceExpiresInMs: Number.isFinite(writeFenceExpiresAtMs)
+      ? Math.max(0, writeFenceExpiresAtMs - nowMs)
+      : null,
+    activeWriteFenceGeneration: writeFence?.generation ?? null,
+    activeWriteFencePresent: writeFence !== null,
+    activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
+    backoffActive: isRunnerBackoffActive(record, nowMs),
+    runtimeDueAt,
+    runtimeDuePresent: runtimeDueAt !== null,
+    wakePending: record.wakePending,
   };
 }
 

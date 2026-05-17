@@ -1869,6 +1869,52 @@ describe("handleRunnerOutboundRequest", () => {
     expect(getByName).toHaveBeenCalledTimes(2);
     expect(bindUser).not.toHaveBeenCalled();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactAuthorized: true,
+          method: "PUT",
+          operation: "artifact_upload",
+          userIdPresent: true,
+        }),
+        message: "Hosted runner artifact write fence validation completed.",
+        phase: "wake.running",
+      }),
+    );
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactAuthorized: true,
+          artifactByteLength: 3,
+          method: "PUT",
+          operation: "artifact_upload",
+          userIdPresent: true,
+        }),
+        message: "Hosted runner artifact request body read completed.",
+        phase: "wake.running",
+      }),
+    );
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactAuthorized: true,
+          artifactByteLength: 3,
+          method: "PUT",
+          operation: "artifact_upload",
+          userIdPresent: true,
+        }),
+        message: "Hosted runner artifact write completed.",
+        phase: "wake.running",
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain(sha256);
   });
 
   it("logs missing artifact GETs without artifact keys or user ids", async () => {

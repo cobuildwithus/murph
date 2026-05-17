@@ -2079,6 +2079,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(requireFetchRequest(fetchMock.mock.calls[1], "second artifact upload").url).toBe(
       `http://artifacts.worker/objects/${"b".repeat(64)}`,
     );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactByteLength: 3,
+          artifactUploadOrdinal: 1,
+          method: "PUT",
+          operation: "artifact_upload",
+          path: "/objects/REDACTED",
+          responseOrigin: "http://artifacts.worker",
+        }),
+        message: "Hosted runtime artifact upload started.",
+        phase: "checkpoint",
+        userId: null,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactUploadOrdinal: 1,
+          responseOk: true,
+          responseStatus: 200,
+        }),
+        message: "Hosted runtime artifact upload response received.",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactUploadOrdinal: 1,
+          responseStatus: 200,
+        }),
+        message: "Hosted runtime artifact upload completed.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      mocks.emitHostedExecutionStructuredLog.mock.calls.filter(([input]) =>
+        input?.component === "hosted.runtime.artifact-store"
+      ),
+    );
+    expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
   it("shares concurrent same-SHA artifact uploads with the in-flight request", async () => {
@@ -2153,6 +2196,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("does not mark failed artifact uploads as deduplicated", async () => {
+    const artifactSha = "a".repeat(64);
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
         return new Response("temporary failure", { status: 503 });
@@ -2167,14 +2211,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(platform.artifactStore.put({
       bytes: new Uint8Array([1, 2, 3]),
-      sha256: "a".repeat(64),
+      sha256: artifactSha,
     })).rejects.toThrow(/Hosted artifact upload/u);
     await platform.artifactStore.put({
       bytes: new Uint8Array([1, 2, 3]),
-      sha256: "a".repeat(64),
+      sha256: artifactSha,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactByteLength: 3,
+          artifactUploadOrdinal: 1,
+          contentLengthPresent: false,
+          contentTypePresent: true,
+          method: "PUT",
+          operation: "artifact_upload",
+          path: "/objects/REDACTED",
+          responseOk: false,
+          responseStatus: 503,
+        }),
+        level: "warn",
+        message: "Hosted runtime artifact upload response received.",
+        phase: "checkpoint",
+        userId: null,
+      }),
+    );
+    const serializedLogs = JSON.stringify(
+      mocks.emitHostedExecutionStructuredLog.mock.calls.filter(([input]) =>
+        input?.component === "hosted.runtime.artifact-store"
+      ),
+    );
+    expect(serializedLogs).not.toContain(artifactSha);
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain("runtime_write_123");
+    expect(serializedLogs).not.toContain("temporary failure");
   });
 
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
