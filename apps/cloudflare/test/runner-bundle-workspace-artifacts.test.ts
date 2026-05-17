@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { availableParallelism, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 describe("runner bundle runtime artifact staging", () => {
-  it("builds the workspace closure through pnpm's bounded parallel workspace runner", () => {
+  it("honors explicit runner bundle workspace build concurrency", () => {
     expect(
       buildHostedRunnerWorkspaceBuildArgs(
         ["@murphai/contracts", "@murphai/runtime-state"],
@@ -48,14 +48,14 @@ describe("runner bundle runtime artifact staging", () => {
     ]);
   });
 
-  it("defaults runner bundle workspace builds to bounded parallel package execution", () => {
+  it("defaults runner bundle workspace builds to serial package execution", () => {
     expect(
       buildHostedRunnerWorkspaceBuildArgs(
         ["@murphai/contracts", "@murphai/runtime-state"],
         {},
       ),
     ).toEqual([
-      `--workspace-concurrency=${String(Math.min(4, availableParallelism()))}`,
+      "--workspace-concurrency=1",
       "--filter",
       "@murphai/contracts",
       "--filter",
