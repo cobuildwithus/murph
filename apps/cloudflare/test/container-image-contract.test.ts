@@ -366,6 +366,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       "ARG WHISPER_CPP_SHA256=b7c6b05635e5fda85cbcc5a012d29b3a4ca1cc22d9fa54d5b6c33e4ac271e5e0",
     );
+    expect(baseDockerfile).toContain("ARG WHISPER_CPP_BUILD_JOBS=1");
     expect(baseDockerfile).toContain(
       "ARG WHISPER_MODEL_SHA256=a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
     );
@@ -387,7 +388,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("-DGGML_NATIVE=OFF");
     expect(baseDockerfile).not.toContain("GGML_CPU_ARM_ARCH");
     expect(baseDockerfile).toContain(
-      "cmake --build build -j\"$(nproc)\" --config Release --target whisper-cli",
+      "cmake --build build -j\"${WHISPER_CPP_BUILD_JOBS}\" --config Release --target whisper-cli",
     );
     expect(baseDockerfile).toContain("cp -a build/bin/libggml-cpu*.so /opt/whisper/bin/");
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
