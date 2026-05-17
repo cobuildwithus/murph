@@ -435,7 +435,7 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
   }
 });
 
-it("treats recent foreground conversation mailbox imports as local hosted completion", async () => {
+it("does not treat recent foreground conversation imports as completion while durable lag remains", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {
     inFlight: false,
@@ -482,7 +482,13 @@ it("treats recent foreground conversation mailbox imports as local hosted comple
       version: "1",
     },
   } satisfies HostedRunnerStatusResponse;
-  const fetch = vi.fn(async () => Response.json(status));
+  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+    if (String(request).includes("/__test/users/member_local_import/run-until-idle?reason=manual")) {
+      return Response.json({ status: "idle" });
+    }
+
+    return Response.json(status);
+  });
   vi.stubGlobal("fetch", fetch);
 
   const harness = await startHostedLocalDevHarness({
@@ -497,24 +503,18 @@ it("treats recent foreground conversation mailbox imports as local hosted comple
   try {
     await expect(harness.waitForHostedCompletion("member_local_import", {
       pollIntervalMs: 1,
-      timeoutMs: 5_000,
-    })).resolves.toMatchObject({
-      mailboxLag: [{
-        importedSeq: "1",
-        lag: "0",
-        lane: "conversation",
-        maxSeq: "1",
-      }],
-      userId: "member_local_import",
-    });
+      timeoutMs: 50,
+    })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_import/run-until-idle?reason=manual")
+    )).toBe(true);
   } finally {
     await harness.stop();
   }
 });
 
-it("waits for an assistant pass before treating foreground conversation imports as local hosted completion", async () => {
+it("waits for durable conversation lag to clear after local import evidence", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const importOnlyStatus = {
     inFlight: false,
@@ -567,6 +567,17 @@ it("waits for an assistant pass before treating foreground conversation imports 
       ...importOnlyStatus.recentLogs,
     ],
   } satisfies HostedRunnerStatusResponse;
+  const durableCompletedStatus = {
+    ...completedStatus,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "1",
+      },
+    ],
+  } satisfies HostedRunnerStatusResponse;
   let statusRequests = 0;
   const fetch = vi.fn(async (request: RequestInfo | URL) => {
     if (String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")) {
@@ -574,7 +585,13 @@ it("waits for an assistant pass before treating foreground conversation imports 
     }
 
     statusRequests += 1;
-    return Response.json(statusRequests === 1 ? importOnlyStatus : completedStatus);
+    return Response.json(
+      statusRequests === 1
+        ? importOnlyStatus
+        : statusRequests === 2
+          ? completedStatus
+          : durableCompletedStatus,
+    );
   });
   vi.stubGlobal("fetch", fetch);
 
@@ -601,16 +618,16 @@ it("waits for an assistant pass before treating foreground conversation imports 
       userId: "member_local_import_wait",
     });
 
-    expect(statusRequests).toBe(2);
+    expect(statusRequests).toBe(3);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import_wait/run-until-idle?reason=manual")
-    )).toBe(false);
+    )).toBe(true);
   } finally {
     await harness.stop();
   }
 });
 
-it("treats processed foreground system mailbox imports as local hosted completion", async () => {
+it("does not treat processed foreground system imports as completion while durable lag remains", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {
     inFlight: false,
@@ -659,7 +676,13 @@ it("treats processed foreground system mailbox imports as local hosted completio
       version: "1",
     },
   } satisfies HostedRunnerStatusResponse;
-  const fetch = vi.fn(async () => Response.json(status));
+  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+    if (String(request).includes("/__test/users/member_local_system_import/run-until-idle?reason=manual")) {
+      return Response.json({ status: "idle" });
+    }
+
+    return Response.json(status);
+  });
   vi.stubGlobal("fetch", fetch);
 
   const harness = await startHostedLocalDevHarness({
@@ -674,24 +697,18 @@ it("treats processed foreground system mailbox imports as local hosted completio
   try {
     await expect(harness.waitForHostedCompletion("member_local_system_import", {
       pollIntervalMs: 1,
-      timeoutMs: 5_000,
-    })).resolves.toMatchObject({
-      mailboxLag: [{
-        importedSeq: "1",
-        lag: "0",
-        lane: "system",
-        maxSeq: "1",
-      }],
-      userId: "member_local_system_import",
-    });
+      timeoutMs: 50,
+    })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/__test/users/member_local_system_import/run-until-idle?reason=manual")
+    )).toBe(true);
   } finally {
     await harness.stop();
   }
 });
 
-it("treats foreground system mailbox imports as local hosted completion without a durable checkpoint", async () => {
+it("does not treat foreground system imports as completion without a durable checkpoint", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {
     inFlight: false,
@@ -751,24 +768,12 @@ it("treats foreground system mailbox imports as local hosted completion without 
   try {
     await expect(harness.waitForHostedCompletion("member_local_import_checkpoint", {
       pollIntervalMs: 1,
-      timeoutMs: 5_000,
-    })).resolves.toMatchObject({
-      mailboxLag: [{
-        importedSeq: "1",
-        lag: "0",
-        lane: "system",
-        maxSeq: "1",
-      }],
-      userId: "member_local_import_checkpoint",
-      workspace: {
-        version: "0",
-      },
-    });
+      timeoutMs: 50,
+    })).rejects.toThrow(/Timed out waiting for hosted completion/u);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.some(([request]) =>
       String(request).includes("/__test/users/member_local_import_checkpoint/run-until-idle?reason=manual")
-    )).toBe(false);
+    )).toBe(true);
   } finally {
     await harness.stop();
   }

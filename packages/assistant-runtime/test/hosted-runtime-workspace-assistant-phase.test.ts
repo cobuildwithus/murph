@@ -405,6 +405,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.nextWakeAt).toBeNull();
   });
 
+  it("drops stale assistant automation wakes before reporting scheduled work", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: "2026-04-26T23:59:59.000Z",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
+    }));
+
+    expect(result).toEqual({
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        hostedAssistantProgressed: false,
+      }),
+    });
+  });
+
   it("does not checkpoint no-op alarms only because automation returned a future wake", async () => {
     const nextWakeAt = "2026-04-27T00:01:00.000Z";
     const existingWakeAt = "2026-04-27T00:05:00.000Z";
@@ -776,6 +802,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
       reason: "alarm",
     }));
 

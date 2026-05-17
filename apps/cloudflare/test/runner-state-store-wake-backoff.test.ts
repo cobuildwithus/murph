@@ -91,6 +91,24 @@ describe("RunnerStateStore wake/backoff authority", () => {
     });
   });
 
+  it("does not clamp stale scheduled runtime wakes into new due work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { store } = createHarness();
+    await store.bindUser("member_123");
+
+    const scheduled = await store.scheduleNextWake({
+      nextWakeAt: "2026-04-26T23:59:59.000Z",
+    });
+
+    expect(scheduled).toMatchObject({
+      wakeAt: null,
+    });
+    await expect(store.readDueWork(Date.parse(NOW))).resolves.toMatchObject({
+      kind: "idle",
+    });
+  });
+
   it("does not let a stale completion clear the active write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));

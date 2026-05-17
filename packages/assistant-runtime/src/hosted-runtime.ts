@@ -80,6 +80,9 @@ import {
 import {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
+import {
+  normalizeHostedFutureWakeAt,
+} from "./hosted-runtime/wake-time.ts";
 export {
   createCoalescingRuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
@@ -1047,6 +1050,7 @@ function buildHostedWorkspaceInvocationProjection(input: {
   result: HostedWorkspaceRunnerResult;
   workspace: HostedWorkspaceState | null;
 }): HostedWorkspaceInvocationProjection {
+  const projectionNowMs = Date.now();
   const committedWorkspace = input.result.latestWorkspace
     ?? input.result.initialMailboxImport.checkpoint?.workspace
     ?? input.workspace;
@@ -1056,6 +1060,7 @@ function buildHostedWorkspaceInvocationProjection(input: {
     assistantPhaseResult: input.result.assistantPhaseResult,
     committedWorkspace,
     mailboxImportRetryAt,
+    nowMs: projectionNowMs,
   });
   const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
     effectiveMailboxImport.importResult,
@@ -1577,6 +1582,7 @@ function resolveHostedWorkspaceRunNextWake(input: {
   ];
   committedWorkspace: HostedWorkspaceState | null;
   mailboxImportRetryAt?: string | null;
+  nowMs: number;
 }): {
   nextWakeAt: string | null;
   nextWakeReason: string | null;
@@ -1598,10 +1604,17 @@ function resolveHostedWorkspaceRunNextWake(input: {
     ]);
   }
 
+  const committedWorkspaceNextWakeAt = normalizeHostedFutureWakeAt(
+    input.committedWorkspace?.nextWakeAt ?? null,
+    input.nowMs,
+  );
+
   return selectEarliestHostedRuntimeWake([
     {
-      at: input.committedWorkspace?.nextWakeAt ?? null,
-      reason: input.committedWorkspace?.nextWakeReason ?? null,
+      at: committedWorkspaceNextWakeAt,
+      reason: committedWorkspaceNextWakeAt
+        ? input.committedWorkspace?.nextWakeReason ?? null
+        : null,
     },
     {
       at: mailboxImportRetryAt,

@@ -568,18 +568,27 @@ function logHostedLinqWebhookPlannerDecisionAndReturn<T extends HostedOnboarding
   plan: T,
   details: HostedOnboardingStructuredLogDetails,
 ): T {
+  const plannerResultLog = sanitizeHostedOnboardingPlannerResultForLog(plan.response);
   console.info("Hosted Linq webhook planner decision.", {
     ...sanitizeHostedOnboardingStructuredLogDetails(details),
     desiredSideEffectCount: plan.desiredSideEffects.length,
-    duplicate: Boolean(plan.response.duplicate),
-    ignored: Boolean(plan.response.ignored),
-    ok: plan.response.ok,
-    responseReason: sanitizeHostedOnboardingPlannerLogValue(plan.response.reason),
+    ...plannerResultLog,
     wakeMailboxItemPresent: Boolean(plan.wakeMailboxItemId),
     wakeUserPresent: Boolean(plan.wakeUserId),
   });
 
   return plan;
+}
+
+function sanitizeHostedOnboardingPlannerResultForLog(
+  result: HostedOnboardingLinqDirectPlan["response"],
+): HostedOnboardingStructuredLogDetails {
+  return {
+    duplicate: Boolean(result.duplicate),
+    ignored: Boolean(result.ignored),
+    ok: result.ok,
+    responseReason: sanitizeHostedOnboardingPlannerLogValue(result.reason),
+  };
 }
 
 function sanitizeHostedOnboardingPlannerLogValue(

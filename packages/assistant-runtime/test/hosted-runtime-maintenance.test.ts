@@ -356,7 +356,7 @@ describe("runHostedAssistantAutomation", () => {
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
-      nextWakeAt: "2026-05-07T00:00:00.000Z",
+      nextWakeAt: "2026-05-07T00:00:01.000Z",
       progressed: true,
     });
 
@@ -381,7 +381,7 @@ describe("runHostedAssistantAutomation", () => {
     );
 
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-05-07T00:00:00.000Z",
+      nextWakeAt: "2026-05-07T00:00:01.000Z",
     }));
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -413,7 +413,7 @@ describe("runHostedAssistantAutomation", () => {
       },
     ),
     ).resolves.toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      nextWakeAt: null,
       progressed: false,
       redactedLogEntries: expect.any(Array),
     }));

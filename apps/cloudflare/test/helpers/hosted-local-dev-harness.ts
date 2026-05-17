@@ -266,7 +266,7 @@ export async function startHostedLocalDevHarness(input: {
             && !status.inFlight
             && !status.lastErrorCode
             && now >= nextCompletionRetryAt
-            && resolveLocallyDrainedMailboxLag(status) !== null
+            && hasLocalMailboxDrainEvidence(status)
           ) {
             nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
             await runHostedManualInvocationForTest(userId)
@@ -485,21 +485,12 @@ function resolveHostedCompletionStatus(
     return status.workspace !== null ? status : null;
   }
 
-  if (status.workspace === null) {
-    return null;
-  }
-
-  const locallyDrainedLag = resolveLocallyDrainedMailboxLag(status);
-  return locallyDrainedLag ? {
-    ...status,
-    mailboxLag: locallyDrainedLag,
-  } : null;
+  return null;
 }
 
-function resolveLocallyDrainedMailboxLag(
+function hasLocalMailboxDrainEvidence(
   status: HostedRunnerStatusResponse,
-): HostedRunnerStatusResponse["mailboxLag"] | null {
-  const resolved: HostedRunnerStatusResponse["mailboxLag"] = [];
+): boolean {
   const importedLogs: Array<{
     index: number;
     lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
@@ -507,31 +498,20 @@ function resolveLocallyDrainedMailboxLag(
 
   for (const lane of status.mailboxLag) {
     if (lane.lag === "0") {
-      resolved.push(lane);
       continue;
     }
 
     const imported = readRecentMailboxImportedSeq(status, lane.lane);
     if (!imported || compareMailboxSeq(imported.seq, lane.maxSeq) < 0) {
-      return null;
+      return false;
     }
     importedLogs.push({
       index: imported.index,
       lane: lane.lane,
     });
-
-    resolved.push({
-      ...lane,
-      importedSeq: lane.maxSeq,
-      lag: "0",
-    });
   }
 
-  if (!hasLocalCompletionAfterMailboxImports(status, importedLogs)) {
-    return null;
-  }
-
-  return resolved;
+  return hasLocalCompletionAfterMailboxImports(status, importedLogs);
 }
 
 function readRecentMailboxImportedSeq(

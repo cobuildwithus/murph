@@ -156,6 +156,22 @@ export function normalizePreferredWakeAt(value: string | null): string | null {
   return new Date(Math.max(parsedMs, Date.now())).toISOString();
 }
 
+export function normalizeFutureWakeAt(
+  value: string | null,
+  nowMs = Date.now(),
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsedMs = Date.parse(value);
+  if (!Number.isFinite(parsedMs) || parsedMs <= nowMs) {
+    return null;
+  }
+
+  return new Date(parsedMs).toISOString();
+}
+
 export function resolveRunnerNextWakeAt(record: RunnerStateRecord | {
   nextWakeAt?: string | null;
   preferredWakeAt?: string | null;

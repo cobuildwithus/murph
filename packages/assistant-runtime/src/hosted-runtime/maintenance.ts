@@ -51,6 +51,7 @@ import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
 } from "../device-sync-service.ts";
+import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
@@ -368,6 +369,7 @@ export async function runHostedAssistantAutomation(
       result.currentTurnDeliveryIntentIds ?? [];
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       foregroundReplayScanLimit,
+      nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
       scanLimit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
       scanResult: {
@@ -462,6 +464,7 @@ function normalizeHostedForegroundReplayScanLimit(count: number): number {
 
 function resolveHostedAssistantAutomationNextWakeAt(input: {
   foregroundReplayScanLimit: number | null;
+  nowMs: number;
   resultNextWakeAt: string | null;
   scanLimit: number;
   scanResult: {
@@ -474,9 +477,17 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
   };
 }): string | null {
   return earliestHostedMaintenanceWakeAt(
-    input.resultNextWakeAt,
+    normalizeHostedFutureWakeAt(
+      input.resultNextWakeAt,
+      input.nowMs,
+    ),
     resolveHostedAssistantBacklogWakeAt(input),
   );
+}
+
+function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
+  const occurredAtMs = Date.parse(wake.occurredAt);
+  return Number.isFinite(occurredAtMs) ? occurredAtMs : Date.now();
 }
 
 function resolveHostedAssistantBacklogWakeAt(input: {
