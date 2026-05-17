@@ -4503,6 +4503,55 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("drops stale workspace wake when no mailbox import runs", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const staleWakeAt = "2000-04-27T00:05:00.000Z";
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Snapshot should not run without mailbox state changes.");
+        },
+        async importItem() {
+          throw new Error("Import should not run when no mailbox items are fetched.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events,
+            workspace: createWorkspaceState({
+              nextWakeAt: staleWakeAt,
+              nextWakeReason: "alarm",
+              version: "0",
+            }),
+          }),
+        }),
+        async runAssistantPhase() {
+          return { progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.deepEqual(events, ["workspace.read", "mailbox.fetch"]);
+      assert.deepEqual(result, {
+        nextWakeAt: null,
+        redactedStatus: {
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemImportedSeq: "0",
+        },
+        status: "idle",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("clears consumed alarm wake when the assistant phase ends idle", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

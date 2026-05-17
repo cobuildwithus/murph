@@ -49,6 +49,7 @@ import {
   recordHostedProviderCleanupBeforeCommit,
   type HostedProviderCleanupCheckpoint,
 } from "./provider-cleanup.ts";
+import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
@@ -454,8 +455,12 @@ export async function runHostedWorkspaceAssistantPhase(
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
+    const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+      input,
+      nextWakeAt: assistantMetrics.nextWakeAt,
+    });
     const nextWakeAt = resolveHostedAssistantNextWake([
-      assistantMetrics.nextWakeAt,
+      assistantNextWakeAt,
       skippedDeviceSyncWakeAt,
       outboxWakeAt,
       systemMailboxWakeAt,
@@ -519,7 +524,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   })
                 : null;
               const baseNextWakeAt = resolveHostedAssistantNextWake([
-                assistantMetrics.nextWakeAt,
+                assistantNextWakeAt,
                 skippedDeviceSyncWakeAt,
                 deviceSyncPostCheckpoint?.nextWakeAt ?? null,
                 systemMailboxWakeAt,
@@ -700,7 +705,10 @@ async function runSystemMailboxMaintenancePhase(input: {
         vaultRoot: phaseInput.restored.vaultRoot,
       });
   const systemMailboxMetricsWakeAt = "metrics" in systemMailboxPreparation
-    ? systemMailboxPreparation.metrics.nextWakeAt ?? null
+    ? resolveHostedAssistantAutomationNextWakeAt({
+        input: phaseInput,
+        nextWakeAt: systemMailboxPreparation.metrics.nextWakeAt ?? null,
+      })
     : null;
   const dirtyDeviceSyncWakeAt = dirtyDeviceSyncMetrics
     ? resolveEarliestHostedWorkspaceWakeAt(
@@ -1081,8 +1089,12 @@ async function runForegroundAssistantReplyPhase(input: {
   const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
+  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.nextWakeAt,
+  });
   const nextWakeAt = resolveHostedAssistantNextWake([
-    input.assistantMetrics.nextWakeAt,
+    assistantNextWakeAt,
     input.skippedDeviceSyncWakeAt,
     outboxWakeAt,
     input.systemMailboxWakeAt,
@@ -1142,7 +1154,7 @@ async function runForegroundAssistantReplyPhase(input: {
                 })
               : null;
             const baseNextWakeAt = resolveHostedAssistantNextWake([
-              input.assistantMetrics.nextWakeAt,
+              assistantNextWakeAt,
               input.skippedDeviceSyncWakeAt,
               deviceSyncPostCheckpoint?.nextWakeAt ?? null,
               input.systemMailboxWakeAt,
@@ -2073,9 +2085,13 @@ function resolveHostedFastDispatchBaseNextWakeAt(input: {
   const skippedDeviceSyncWakeAt = shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input)
     ? null
     : input.skippedDeviceSyncWakeAt;
+  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.nextWakeAt,
+  });
   return resolveEarliestHostedWorkspaceWakeAt(
     resolveEarliestHostedWorkspaceWakeAt(
-      input.assistantMetrics.nextWakeAt,
+      assistantNextWakeAt,
       skippedDeviceSyncWakeAt,
     ),
     resolveEarliestHostedWorkspaceWakeAt(
@@ -2160,6 +2176,16 @@ function resolveHostedAssistantNextWake(
   return wakeAts.reduce<string | null>(
     (nextWakeAt, wakeAt) => resolveEarliestHostedWorkspaceWakeAt(nextWakeAt, wakeAt ?? null),
     null,
+  );
+}
+
+function resolveHostedAssistantAutomationNextWakeAt(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  nextWakeAt: string | null;
+}): string | null {
+  return normalizeHostedFutureWakeAt(
+    input.nextWakeAt,
+    resolveHostedAssistantPhaseNowMs(input.input),
   );
 }
 

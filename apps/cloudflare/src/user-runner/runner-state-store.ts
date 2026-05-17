@@ -8,6 +8,7 @@ import type {
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
+  normalizeFutureWakeAt,
   normalizeIsoDate,
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
@@ -475,7 +476,7 @@ export class RunnerStateStore {
     nextWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    meta.wake_at = normalizePreferredWakeAt(input.nextWakeAt ?? null);
+    meta.wake_at = normalizeFutureWakeAt(input.nextWakeAt ?? null);
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }
