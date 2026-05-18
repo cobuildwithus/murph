@@ -25,7 +25,9 @@ export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v3" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
-  "murph.age.architecture-summary.v2" as const;
+  "murph.age.architecture-summary.v3" as const;
+export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
+  "murph.age.public-lab-wearable-shadow-evidence-status.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION =
@@ -269,6 +271,57 @@ export interface MurphAgeArchitectureLayerSummary {
   sourceRouteIds: MurphAgeSourceRouteId[];
 }
 
+export type MurphAgePublicLabWearableShadowEvidencePacketId =
+  | "r1038-nhanes-modern-lab-activity-loop"
+  | "r1049-nhanes-activity-control-diagnostic"
+  | "r1065-nhanes-wrist-activity-shadow-loop"
+  | "r1066-nhanes-wrist-activity-robustness-loop"
+  | "r1067-nhanes-wrist-final-stress-test";
+
+export type MurphAgePublicLabWearableShadowEvidenceConclusion =
+  "public_activity_shadow_signal_mixed_keep_wearable_context_only";
+
+export type MurphAgePublicLabWearableShadowEvidenceNextAction =
+  "run_external_or_partner_lab_wearable_aggregate_delta";
+
+export interface MurphAgePublicLabWearableShadowEvidenceMetricDeltas {
+  auc?: number;
+  brier?: number;
+  calibrationSlope?: number;
+  eOverO?: number;
+  logLoss?: number;
+}
+
+export interface MurphAgePublicLabWearableShadowEvidencePacket {
+  aggregateMetricDeltas: MurphAgePublicLabWearableShadowEvidenceMetricDeltas;
+  conclusion: string;
+  evidenceRole: "same-family-public-shadow-diagnostic";
+  negativeControlsBeaten: boolean | null;
+  packetId: MurphAgePublicLabWearableShadowEvidencePacketId;
+  productDisplayAuthorized: false;
+  sourceRouteId: MurphAgeSourceRouteId;
+  usableAsConsumerWearableValidation: false;
+  wearableScoreBearingAuthorized: false;
+}
+
+export interface MurphAgePublicLabWearableShadowEvidenceStatus {
+  conclusion: MurphAgePublicLabWearableShadowEvidenceConclusion;
+  externalConsumerLabWearableAggregateStillMissing: true;
+  includedPacketIds: MurphAgePublicLabWearableShadowEvidencePacketId[];
+  inputPriority: "ordinary-16-50-labs-plus-wearable-activity";
+  nextAction: MurphAgePublicLabWearableShadowEvidenceNextAction;
+  nextExternalOrPartnerRouteIdsByPriority: MurphAgeSourceRouteId[];
+  packets: MurphAgePublicLabWearableShadowEvidencePacket[];
+  productDisplayAuthorized: false;
+  publicAggregateOnly: true;
+  reviewGptEscalation: "only-after-source-boundary-change-or-real-aggregate-delta";
+  reviewGptRequiredNow: false;
+  schemaVersion: typeof MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION;
+  sourceRouteIdsByEvidencePriority: MurphAgeSourceRouteId[];
+  usableAsConsumerWearableValidation: false;
+  wearableScoreBearingAuthorized: false;
+}
+
 export interface MurphAgeArchitectureSummary {
   layerOrder: MurphAgeArchitectureLayerId[];
   layers: MurphAgeArchitectureLayerSummary[];
@@ -276,6 +329,7 @@ export interface MurphAgeArchitectureSummary {
   ordinaryLabWearableSourceRouteIdsByPriority: MurphAgeSourceRouteId[];
   productDisplayAuthorized: false;
   productPromotionAuthorized: false;
+  publicLabWearableShadowEvidenceStatus: MurphAgePublicLabWearableShadowEvidenceStatus;
   riskToAgeDisplayAuthorized: false;
   schemaVersion: typeof MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION;
   sourceRouteIdsByPriority: MurphAgeSourceRouteId[];
@@ -1910,6 +1964,80 @@ const MURPH_AGE_ARCHITECTURE_LAYER_ORDER = [
   "product-display",
 ] as const satisfies readonly MurphAgeArchitectureLayerId[];
 
+const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS: readonly MurphAgePublicLabWearableShadowEvidencePacket[] = [
+  {
+    aggregateMetricDeltas: {
+      auc: 0.00541653,
+      brier: -0.00046046,
+      calibrationSlope: 1.06082719,
+      eOverO: 1.01882003,
+      logLoss: -0.00112145,
+    },
+    conclusion: "wrist_activity_signal_ready_for_r1034_review",
+    evidenceRole: "same-family-public-shadow-diagnostic",
+    negativeControlsBeaten: true,
+    packetId: "r1065-nhanes-wrist-activity-shadow-loop",
+    productDisplayAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-lmf",
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  },
+  {
+    aggregateMetricDeltas: {
+      auc: 0.00517369,
+      brier: -0.00043868,
+      logLoss: -0.00111926,
+    },
+    conclusion: "wrist_activity_robustness_inconclusive_keep_shadow",
+    evidenceRole: "same-family-public-shadow-diagnostic",
+    negativeControlsBeaten: false,
+    packetId: "r1066-nhanes-wrist-activity-robustness-loop",
+    productDisplayAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-lmf",
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  },
+  {
+    aggregateMetricDeltas: {},
+    conclusion: "activity_wear_signal_unstable_keep_shadow",
+    evidenceRole: "same-family-public-shadow-diagnostic",
+    negativeControlsBeaten: null,
+    packetId: "r1067-nhanes-wrist-final-stress-test",
+    productDisplayAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-lmf",
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  },
+  {
+    aggregateMetricDeltas: {
+      auc: -0.000688,
+      brier: -0.0045907,
+      calibrationSlope: 0.9905458,
+      eOverO: 0.83820495,
+      logLoss: -0.01019197,
+    },
+    conclusion: "activity_signal_shadow_hold_for_calibration_or_external_validation",
+    evidenceRole: "same-family-public-shadow-diagnostic",
+    negativeControlsBeaten: true,
+    packetId: "r1038-nhanes-modern-lab-activity-loop",
+    productDisplayAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-lmf",
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  },
+  {
+    aggregateMetricDeltas: {},
+    conclusion: "nhanes_activity_signal_control_clean_global_calibration_limited",
+    evidenceRole: "same-family-public-shadow-diagnostic",
+    negativeControlsBeaten: true,
+    packetId: "r1049-nhanes-activity-control-diagnostic",
+    productDisplayAuthorized: false,
+    sourceRouteId: "nhanes-activity-shadow-lmf",
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  },
+];
+
 export function listMurphAgeModelCardPolicies(): MurphAgeModelCardPolicy[] {
   return MURPH_AGE_MODEL_CARD_POLICIES.map(cloneMurphAgeModelCardPolicy);
 }
@@ -1926,12 +2054,46 @@ export function listMurphAgeInputBundleMetricKeys(): string[] {
   return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
 }
 
+export function summarizeMurphAgePublicLabWearableShadowEvidenceStatus():
+  MurphAgePublicLabWearableShadowEvidenceStatus {
+  const sourceRouteIdsByExecutionPriority = listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority().map(
+    (route) => route.routeId,
+  );
+  const nextExternalOrPartnerRouteIdsByPriority = sourceRouteIdsByExecutionPriority.filter(
+    (routeId) => routeId !== "nhanes-activity-shadow-lmf",
+  );
+
+  return {
+    conclusion: "public_activity_shadow_signal_mixed_keep_wearable_context_only",
+    externalConsumerLabWearableAggregateStillMissing: true,
+    includedPacketIds: MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS.map((packet) => packet.packetId),
+    inputPriority: "ordinary-16-50-labs-plus-wearable-activity",
+    nextAction: "run_external_or_partner_lab_wearable_aggregate_delta",
+    nextExternalOrPartnerRouteIdsByPriority,
+    packets: MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS.map(
+      cloneMurphAgePublicLabWearableShadowEvidencePacket,
+    ),
+    productDisplayAuthorized: false,
+    publicAggregateOnly: true,
+    reviewGptEscalation: "only-after-source-boundary-change-or-real-aggregate-delta",
+    reviewGptRequiredNow: false,
+    schemaVersion: MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION,
+    sourceRouteIdsByEvidencePriority: uniqueStrings([
+      "nhanes-activity-shadow-lmf",
+      ...nextExternalOrPartnerRouteIdsByPriority,
+    ]) as MurphAgeSourceRouteId[],
+    usableAsConsumerWearableValidation: false,
+    wearableScoreBearingAuthorized: false,
+  };
+}
+
 export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
   const ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority =
     listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority().map((route) => route.routeId);
   const ordinaryLabWearableSourceRouteIdsByPriority = listMurphAgeOrdinaryLabWearableSourceRoutes().map(
     (route) => route.routeId,
   );
+  const publicLabWearableShadowEvidenceStatus = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
   const sourceRouteIdsByPriority = listMurphAgePrioritySourceRoutes().map((route) => route.routeId);
   const layers: MurphAgeArchitectureLayerSummary[] = [
     architectureLayerFromPolicies({
@@ -2040,9 +2202,19 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
     ordinaryLabWearableSourceRouteIdsByPriority,
     productDisplayAuthorized: false,
     productPromotionAuthorized: false,
+    publicLabWearableShadowEvidenceStatus,
     riskToAgeDisplayAuthorized: false,
     schemaVersion: MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION,
     sourceRouteIdsByPriority,
+  };
+}
+
+function cloneMurphAgePublicLabWearableShadowEvidencePacket(
+  packet: MurphAgePublicLabWearableShadowEvidencePacket,
+): MurphAgePublicLabWearableShadowEvidencePacket {
+  return {
+    ...packet,
+    aggregateMetricDeltas: { ...packet.aggregateMetricDeltas },
   };
 }
 
