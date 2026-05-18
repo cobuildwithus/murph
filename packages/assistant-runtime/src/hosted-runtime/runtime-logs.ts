@@ -90,3 +90,16 @@ export function summarizeHostedRuntimeStatusCounts(
       .join(","),
   };
 }
+
+export function summarizeHostedAssistantAutoReplyEligibleAfter(
+  entries: readonly {
+    channel: string;
+    eligibleAfter?: unknown | null;
+  }[],
+): string {
+  return entries
+    .map((entry) =>
+      `${toHostedRuntimeLogCode(entry.channel)}:${entry.eligibleAfter == null ? "none" : "present"}`
+    )
+    .join(",");
+}

@@ -1342,6 +1342,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       phase: "outbox",
       redactedJson: expect.objectContaining({
         attempted: 1,
+        deliveryErrorCodeSummary: "external_code:1",
         failed: 1,
         retryable: 1,
         sent: 0,

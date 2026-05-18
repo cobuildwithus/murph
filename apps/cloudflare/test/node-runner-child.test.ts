@@ -593,6 +593,63 @@ describe("runHostedExecutionChild", () => {
     });
   });
 
+  it("classifies bundle archive failures with runner operation metadata", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runtimeError = Object.assign(
+      new Error("Hosted bundle archive is invalid."),
+      {
+        code: "bundle_archive_validation_error",
+        details: {
+          bundleArchiveOperation: "runner-output",
+          bundleRefKeyPresent: false,
+          bundleRefPresent: false,
+          bundleRefSize: 1234,
+        },
+        name: "HostedBundleArchiveValidationError",
+      },
+    );
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_bundle_validation",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeBundleArchiveOperation: "runner-output",
+      childRuntimeBundleRefKeyPresent: false,
+      childRuntimeBundleRefPresent: true,
+      childRuntimeBundleRefSize: 1234,
+      childRuntimeErrorCode: "bundle_archive_validation_error",
+      childRuntimeErrorName: "HostedBundleArchiveValidationError",
+      childRuntimeFailureKind: "bundle_archive_validation",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
+
   it("classifies missing runtime artifacts without requiring raw artifact hashes", async () => {
     const sendResult = vi.fn();
     const setExitCode = vi.fn();

@@ -4,6 +4,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   type HostedExecutionLogPhase,
@@ -984,9 +985,20 @@ function buildHostedRuntimePhaseFailureMetadata(
   if (error === undefined) {
     return {};
   }
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
 
   return {
     failureDetailsPresent: hasHostedRuntimePhaseOwnProperty(error, "details"),
+    ...(typeof diagnostics?.errorCode === "string"
+      ? { failureErrorCode: diagnostics.errorCode }
+      : {}),
+    ...(typeof diagnostics?.errorName === "string"
+      ? { failureErrorName: diagnostics.errorName }
+      : {}),
+    failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+    ...(typeof diagnostics?.errorStatus === "number"
+      ? { failureErrorStatus: diagnostics.errorStatus }
+      : {}),
     failureMessagePresent: error instanceof Error && error.message.trim().length > 0,
     failureName: readHostedExecutionSafeErrorName(error) ?? null,
   };

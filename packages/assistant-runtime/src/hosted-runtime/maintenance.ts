@@ -8,8 +8,11 @@ import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-run
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   type AssistantExecutionContext,
+  type AssistantInputCandidateBatch,
+  type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantRunEvent,
+  type AssistantTurnConversationInputQuery,
   readAssistantAutomationState,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
@@ -42,6 +45,8 @@ import {
   createHostedAssistantInputSource,
 } from "./turn-input.ts";
 import {
+  summarizeHostedAssistantAutoReplyEligibleAfter,
+  summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
@@ -55,6 +60,7 @@ import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
+const HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT = 20;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
   "JUNCTION_API_KEY",
@@ -209,6 +215,10 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
+    assistantInputCandidateListed:
+      assistantResult.timings?.inputCandidateListed ?? false,
+    assistantInputCandidateQueryCount:
+      assistantResult.timings?.inputCandidateQueryCount ?? 0,
     deviceSyncElapsedMs,
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
@@ -245,6 +255,8 @@ export async function runHostedAssistantAutomation(
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
     beforeStateElapsedMs: number;
+    inputCandidateListed?: boolean | null;
+    inputCandidateQueryCount?: number | null;
     passElapsedMs: number;
     totalElapsedMs: number;
   };
@@ -255,7 +267,10 @@ export async function runHostedAssistantAutomation(
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
+  let redactedInputQueryLogCount = 0;
   let activeTurnInputIngested = false;
+  let inputCandidateListed = false;
+  let inputCandidateQueryCount = 0;
   const baseInputSource = createHostedAssistantInputSource({
     foregroundReplayInputIds,
     foregroundReplayPromptInputIds,
@@ -264,10 +279,53 @@ export async function runHostedAssistantAutomation(
   });
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
+    async listInputCandidates(query) {
+      const queryIndex = inputCandidateQueryCount;
+      inputCandidateQueryCount += 1;
+      const startedAt = Date.now();
+      const result = await baseInputSource.listInputCandidates(query);
+      if (result.inputs.length > 0) {
+        inputCandidateListed = true;
+      }
+      if (redactedInputQueryLogCount < HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT) {
+        redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+          component: "runtime",
+          details: buildHostedAssistantInputCandidateQueryLogDetails({
+            elapsedMs: elapsedSince(startedAt),
+            foregroundReplayInputCount: foregroundReplayInputIds.length,
+            foregroundReplayPromptInputCount: foregroundReplayPromptInputIds.length,
+            preferredInputCount: preferredInputIds.length,
+            query,
+            queryIndex,
+            result,
+          }),
+          wake,
+          message: "Hosted assistant input candidate query finished.",
+          phase: "wake.running",
+        }));
+        redactedInputQueryLogCount += 1;
+      }
+      return result;
+    },
     async listNewConversationInputs(query) {
+      const startedAt = Date.now();
       const result = await baseInputSource.listNewConversationInputs(query);
       if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
+      }
+      if (redactedInputQueryLogCount < HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT) {
+        redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+          component: "runtime",
+          details: buildHostedAssistantNewConversationInputQueryLogDetails({
+            elapsedMs: elapsedSince(startedAt),
+            query,
+            result,
+          }),
+          wake,
+          message: "Hosted assistant new conversation input query finished.",
+          phase: "wake.running",
+        }));
+        redactedInputQueryLogCount += 1;
       }
       return result;
     },
@@ -279,9 +337,12 @@ export async function runHostedAssistantAutomation(
     component: "runtime",
     details: {
       autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
-      autoReplyEligibleAfterSummary: beforeState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
-      ).join(","),
+      autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
+        beforeState.autoReply,
+      ),
+      foregroundReplayInputCount: foregroundReplayInputIds.length,
+      foregroundReplayPromptInputCount: foregroundReplayPromptInputIds.length,
+      preferredInputCount: preferredInputIds.length,
       requestId,
     },
     wake,
@@ -382,13 +443,15 @@ export async function runHostedAssistantAutomation(
       details: {
         ...buildHostedAssistantAutomationEventCountLogDetails(automationEventCounts),
         autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
-        autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
-          `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
-        ).join(","),
+        autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
+          afterState.autoReply,
+        ),
         cronProcessed: result.cronProcessed,
         nextWakeAt,
         outboxAttempted: result.outboxAttempted,
         progressed: result.progressed,
+        inputCandidateListed,
+        inputCandidateQueryCount,
         requestId,
         replyConsidered: replies.considered,
         replyFailed: replies.failed,
@@ -413,6 +476,8 @@ export async function runHostedAssistantAutomation(
         activeTurnInputIngested,
         afterStateElapsedMs,
         beforeStateElapsedMs,
+        inputCandidateListed,
+        inputCandidateQueryCount,
         passElapsedMs,
         totalElapsedMs: elapsedSince(startedAt),
       },
@@ -528,6 +593,84 @@ function buildHostedAssistantAutomationEventCountLogDetails(
   }
   details.automationEventTypeCount = counts.size;
   return details;
+}
+
+function buildHostedAssistantInputCandidateQueryLogDetails(input: {
+  elapsedMs: number;
+  foregroundReplayInputCount: number;
+  foregroundReplayPromptInputCount: number;
+  preferredInputCount: number;
+  query: AssistantInputCandidateQuery;
+  queryIndex: number;
+  result: AssistantInputCandidateBatch;
+}): Record<string, boolean | number | string | null> {
+  return {
+    afterCursorPresent: input.query.afterCursor != null,
+    candidateConversationCount: input.result.inputs.filter((candidate) =>
+      candidate.event.conversation !== null
+    ).length,
+    candidateCount: input.result.inputs.length,
+    candidateProjectionStatusSummary: summarizeHostedRuntimeLogCodeCounts(
+      input.result.inputs.map((candidate) => candidate.projection.status),
+    ),
+    candidateReplyTargetPresentCount: input.result.inputs.filter((candidate) =>
+      candidate.event.replyTarget !== null
+    ).length,
+    candidateSelfAuthoredCount: input.result.inputs.filter((candidate) =>
+      candidate.event.conversation?.actorIsSelf === true
+    ).length,
+    candidateSourceSummary: summarizeHostedRuntimeLogCodeCounts(
+      input.result.inputs.map((candidate) => candidate.event.source),
+    ),
+    elapsedMs: input.elapsedMs,
+    foregroundReplayInputCount: input.foregroundReplayInputCount,
+    foregroundReplayPromptInputCount: input.foregroundReplayPromptInputCount,
+    knownInputIdCount: input.query.knownInputIds?.length ?? 0,
+    limit: normalizeHostedRuntimeLogLimit(input.query.limit),
+    nextCursorPresent: input.result.nextCursor !== null,
+    preferredInputCount: input.preferredInputCount,
+    queryIndex: input.queryIndex,
+    sourceId: normalizeHostedRuntimeLogSourceId(input.query.sourceId ?? null),
+    sourceIdPresent: input.query.sourceId != null,
+    type: "assistant.input_candidates.listed",
+  };
+}
+
+function buildHostedAssistantNewConversationInputQueryLogDetails(input: {
+  elapsedMs: number;
+  query: AssistantTurnConversationInputQuery;
+  result: AssistantInputCandidateBatch;
+}): Record<string, boolean | number | string | null> {
+  return {
+    afterCursorPresent: input.query.afterCursor != null,
+    candidateCount: input.result.inputs.length,
+    conversationActorIsSelf: input.query.conversation.actorIsSelf,
+    conversationDirect: input.query.conversation.threadIsDirect,
+    conversationSource: normalizeHostedRuntimeLogSourceId(input.query.conversation.source),
+    elapsedMs: input.elapsedMs,
+    knownInputIdCount: input.query.knownInputIds?.length ?? 0,
+    knownProjectionCaptureIdCount: input.query.knownProjectionCaptureIds?.length ?? 0,
+    limit: normalizeHostedRuntimeLogLimit(input.query.limit),
+    nextCursorPresent: input.result.nextCursor !== null,
+    type: "assistant.new_conversation_inputs.listed",
+  };
+}
+
+function summarizeHostedRuntimeLogCodeCounts(values: readonly string[]): string {
+  const safeValues = values.map((value) => toHostedRuntimeLogCode(value));
+  const summary = summarizeHostedRuntimeStatusCounts(safeValues).statusSummary;
+  return typeof summary === "string" ? summary : "";
+}
+
+function normalizeHostedRuntimeLogLimit(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(1, Math.trunc(value));
+}
+
+function normalizeHostedRuntimeLogSourceId(value: string | null | undefined): string | null {
+  return value ? toHostedRuntimeLogCode(value) : null;
 }
 
 function elapsedSince(startedAt: number): number {

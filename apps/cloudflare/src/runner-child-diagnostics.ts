@@ -23,6 +23,7 @@ export type HostedExecutionChildRuntimeStage =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_STAGES[number];
 
 export const HOSTED_EXECUTION_CHILD_RUNTIME_FAILURE_KINDS = [
+  "bundle_archive_validation",
   "control_plane_fetch",
   "control_plane_http",
   "control_plane_invalid_json",
@@ -112,6 +113,12 @@ export const HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUSES = [
 
 export type HostedExecutionChildRuntimeObservedPhaseStatus =
   typeof HOSTED_EXECUTION_CHILD_RUNTIME_OBSERVED_PHASE_STATUSES[number];
+
+const HOSTED_EXECUTION_CHILD_RUNTIME_BUNDLE_ARCHIVE_OPERATIONS = new Set<string>([
+  "cleanup-authoritative-next",
+  "runner-input",
+  "runner-output",
+]);
 
 type HostedExecutionChildRuntimeObservedPhaseTraceEntry = {
   phase: HostedExecutionChildRuntimeObservedPhase;
@@ -474,6 +481,24 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
     metadata.childRuntimeErrorStatus = childRuntimeErrorStatus;
   }
 
+  const childRuntimeBundleArchiveOperation = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeBundleArchiveOperation,
+    HOSTED_EXECUTION_CHILD_RUNTIME_BUNDLE_ARCHIVE_OPERATIONS,
+  );
+  if (childRuntimeBundleArchiveOperation) {
+    metadata.childRuntimeBundleArchiveOperation = childRuntimeBundleArchiveOperation;
+  }
+
+  const childRuntimeBundleRefSize = record.childRuntimeBundleRefSize;
+  if (
+    typeof childRuntimeBundleRefSize === "number"
+    && Number.isSafeInteger(childRuntimeBundleRefSize)
+    && childRuntimeBundleRefSize >= 0
+    && childRuntimeBundleRefSize <= 1024 * 1024 * 1024
+  ) {
+    metadata.childRuntimeBundleRefSize = childRuntimeBundleRefSize;
+  }
+
   const childRuntimeFetchTimeoutMs = record.childRuntimeFetchTimeoutMs;
   if (
     typeof childRuntimeFetchTimeoutMs === "number"
@@ -485,6 +510,8 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   }
 
   for (const key of [
+    "childRuntimeBundleRefKeyPresent",
+    "childRuntimeBundleRefPresent",
     "childRuntimeFetchCallerSignalAborted",
     "childRuntimeFetchRequestSignalAborted",
     "childRuntimeFetchTimeoutSignalAborted",

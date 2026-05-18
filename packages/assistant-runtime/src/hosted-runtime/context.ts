@@ -41,6 +41,9 @@ import {
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./codex-runtime-env.ts";
+import {
+  summarizeHostedAssistantAutoReplyEligibleAfter,
+} from "./runtime-logs.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -296,9 +299,9 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       assistantConfigured,
       autoReplyChanged: beforeEnabled !== afterEnabled,
       autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
-      autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
-      ).join(","),
+      autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
+        afterState.autoReply,
+      ),
       capabilityReady: target.capabilityReady,
       channel: target.channel,
       previouslyEnabled: beforeEnabled,
@@ -466,9 +469,9 @@ export async function reconcileHostedAssistantChannelState(
         assistantConfigured,
         autoReplyChanged: reconciliation.changed,
         autoReplyChannels: reconciliation.state.autoReply.map((entry) => entry.channel).join(","),
-        autoReplyEligibleAfterSummary: reconciliation.state.autoReply.map((entry) =>
-          `${entry.channel}:${entry.eligibleAfter?.inputId ?? "null"}`
-        ).join(","),
+        autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
+          reconciliation.state.autoReply,
+        ),
         desiredAutoReplyChannels: desiredChannels.join(","),
       },
       wake: options.wake,
