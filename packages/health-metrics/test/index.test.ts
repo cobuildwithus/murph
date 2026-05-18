@@ -8,6 +8,7 @@ import {
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
@@ -34,6 +35,7 @@ import {
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
+  listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgePrioritySourceRoutes,
   listMurphAgeSourceRoutes,
@@ -67,6 +69,7 @@ import {
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeLocalModelCardArtifactPolicy,
   validateMurphAgeIncrementEvaluationCard,
+  validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   validateMurphAgeRiskModel,
   validateMurphAgeSourceRouteRegistry,
   validateMurphAgeWearableShadowIncrementResultCard,
@@ -74,6 +77,7 @@ import {
   type MetricPoint,
   type MetricSeriesPoint,
   type MurphAgeModelCardPolicy,
+  type MurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   type MurphAgeRiskModel,
   type MurphAgeSourceRoute,
   type MurphAgeValidationEvidenceTier,
@@ -476,6 +480,91 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   const freshCardia = resolveMurphAgeSourceRoute("cardia-biomarker-activity");
   assert.equal(freshCardia?.ordinarySubmitterFit.inputFamilies.includes("sleep"), false);
 
+  const ordinaryAutoresearchPriority = listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority();
+  assert.deepEqual(ordinaryAutoresearchPriority.map((route) => route.routeId), [
+    "nhanes-activity-shadow-lmf",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
+    "uk-biobank-integrated",
+  ]);
+  assert.deepEqual(ordinaryAutoresearchPriority.map((route) => route.executionPriorityRank), [
+    1,
+    2,
+    3,
+    4,
+    5,
+  ]);
+  assert.equal(ordinaryAutoresearchPriority[0]?.ordinarySubmitterRank, 4);
+  assert.equal(ordinaryAutoresearchPriority[0]?.executionMode, "public-locked-benchmark");
+  assert.equal(ordinaryAutoresearchPriority[0]?.rankReasonIds.includes("fastest-public-row-path"), true);
+  assert.equal(ordinaryAutoresearchPriority[1]?.ordinarySubmitterRank, 1);
+  assert.equal(ordinaryAutoresearchPriority[1]?.executionMode, "free-registered-activation");
+  assert.equal(ordinaryAutoresearchPriority[3]?.executionMode, "human-admin-workbench");
+  assert.equal(
+    ordinaryAutoresearchPriority.every((route) =>
+      route.schemaVersion === MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION
+      && route.productAuthorized === false
+      && route.rowParsingAuthorized === false
+      && route.sourceTextStorageAllowed === false
+      && route.reviewGptEscalation === "only-after-source-boundary-change-or-real-aggregate-delta"
+      && route.blockedUntil.length > 0
+      && route.rankReasonIds.length > 0
+      && route.inputFamilies.includes("bloodwork-labs")
+      && route.inputFamilies.includes("daily-activity")
+    ),
+    true,
+  );
+  if (ordinaryAutoresearchPriority[0]) {
+    ordinaryAutoresearchPriority[0].blockedUntil.push("mutated blocker");
+    ordinaryAutoresearchPriority[0].inputFamilies.push("sleep");
+    ordinaryAutoresearchPriority[0].rankReasonIds.push("partial-age-band-fit");
+  }
+  const freshOrdinaryAutoresearchPriority = listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority();
+  assert.equal(freshOrdinaryAutoresearchPriority[0]?.blockedUntil.includes("mutated blocker"), false);
+  assert.equal(freshOrdinaryAutoresearchPriority[0]?.inputFamilies.includes("sleep"), false);
+  assert.equal(freshOrdinaryAutoresearchPriority[0]?.rankReasonIds.includes("partial-age-band-fit"), false);
+  assert.equal(validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority().status, "valid");
+  assert.deepEqual(validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority().issues, []);
+
+  const invalidAutoresearchPriority: MurphAgeOrdinaryLabWearableAutoresearchSourcePriority[] =
+    freshOrdinaryAutoresearchPriority.map((route) => ({
+      ...route,
+      blockedUntil: [...route.blockedUntil],
+      inputFamilies: [...route.inputFamilies],
+      rankReasonIds: [...route.rankReasonIds],
+    }));
+  if (invalidAutoresearchPriority[0]) {
+    invalidAutoresearchPriority[0].blockedUntil = ["/tmp/murph-age-source-cache"];
+    (invalidAutoresearchPriority[0] as { executionMode: string }).executionMode = "private-parser";
+    invalidAutoresearchPriority[0].executionPriorityRank = 0;
+    invalidAutoresearchPriority[0].inputFamilies = ["age-sex"];
+    invalidAutoresearchPriority[0].nextAction = "Do not store review material from https://example.invalid.";
+    invalidAutoresearchPriority[0].ordinarySubmitterRank = 0;
+    (invalidAutoresearchPriority[0] as { productAuthorized: boolean }).productAuthorized = true;
+    (invalidAutoresearchPriority[0] as { reviewGptEscalation: string }).reviewGptEscalation = "always";
+    (invalidAutoresearchPriority[0] as { rowParsingAuthorized: boolean }).rowParsingAuthorized = true;
+    (invalidAutoresearchPriority[0] as { sourceTextStorageAllowed: boolean }).sourceTextStorageAllowed = true;
+  }
+  if (invalidAutoresearchPriority[1]) {
+    invalidAutoresearchPriority[1].executionPriorityRank = 3;
+  }
+  if (invalidAutoresearchPriority[4]) {
+    (invalidAutoresearchPriority[4] as { schemaVersion: string }).schemaVersion =
+      "murph.age.ordinary-lab-wearable-autoresearch-source-priority.v0";
+    (invalidAutoresearchPriority[4] as { routeId: string }).routeId = "Not A Simple Route";
+  }
+  const invalidAutoresearchValidation =
+    validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority(invalidAutoresearchPriority);
+  assert.equal(invalidAutoresearchValidation.status, "invalid");
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "DUPLICATE_SOURCE_PRIORITY_RANK"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "INVALID_ROUTE_ID"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "INVALID_SCHEMA"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "INVALID_SOURCE_PRIORITY"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "INVALID_SUBMITTER_FIT"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "PROHIBITED_TEXT"), true);
+  assert.equal(invalidAutoresearchValidation.issues.some((issue) => issue.code === "PRODUCT_AUTHORIZED"), true);
+
   if (midus) {
     (midus.layers as string[]).push("outcome-anchor");
     (midus.artifactBoundary as { rowValueExportAllowed: boolean }).rowValueExportAllowed = true;
@@ -551,6 +640,13 @@ test("summarizes Murph Age architecture layers without product display authoriza
     "hchs-sol-biomarker-activity",
     "all-of-us-fitbit-labs-ehr",
     "nhanes-activity-shadow-lmf",
+    "uk-biobank-integrated",
+  ]);
+  assert.deepEqual(summary.ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority, [
+    "nhanes-activity-shadow-lmf",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
     "uk-biobank-integrated",
   ]);
 

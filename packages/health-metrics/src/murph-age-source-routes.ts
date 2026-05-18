@@ -114,6 +114,47 @@ export interface MurphAgeSourceRouteOrdinarySubmitterFit {
   rank: number | null;
 }
 
+export const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION =
+  "murph.age.ordinary-lab-wearable-autoresearch-source-priority.v1" as const;
+
+export type MurphAgeOrdinaryLabWearableAutoresearchExecutionMode =
+  | "free-registered-activation"
+  | "human-admin-workbench"
+  | "public-locked-benchmark";
+
+const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_EXECUTION_MODES = [
+  "free-registered-activation",
+  "human-admin-workbench",
+  "public-locked-benchmark",
+] as const satisfies readonly MurphAgeOrdinaryLabWearableAutoresearchExecutionMode[];
+
+export type MurphAgeOrdinaryLabWearableAutoresearchRankReason =
+  | "admin-heavy-high-fit"
+  | "adult-lab-activity-transport"
+  | "fastest-public-row-path"
+  | "lab-activity-linked-outcome"
+  | "partial-age-band-fit"
+  | "young-adult-midlife-fit";
+
+export interface MurphAgeOrdinaryLabWearableAutoresearchSourcePriority {
+  accessMode: MurphAgeSourceRouteAccessMode;
+  activationStatus: MurphAgeSourceRouteActivationStatus;
+  blockedUntil: string[];
+  executionMode: MurphAgeOrdinaryLabWearableAutoresearchExecutionMode;
+  executionPriorityRank: number;
+  inputFamilies: MurphAgeSourceRouteOrdinarySubmitterInputFamily[];
+  nextAction: string;
+  ordinarySubmitterAgeBandFit: MurphAgeSourceRouteOrdinarySubmitterAgeBandFit;
+  ordinarySubmitterRank: number;
+  productAuthorized: false;
+  rankReasonIds: MurphAgeOrdinaryLabWearableAutoresearchRankReason[];
+  reviewGptEscalation: "only-after-source-boundary-change-or-real-aggregate-delta";
+  routeId: MurphAgeSourceRouteId;
+  rowParsingAuthorized: false;
+  schemaVersion: typeof MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION;
+  sourceTextStorageAllowed: false;
+}
+
 export interface MurphAgeSourceRouteArtifactBoundary {
   aggregateOutputsOnly: true;
   localPathStorageAllowed: false;
@@ -150,10 +191,12 @@ export interface MurphAgeSourceRoute {
 export interface MurphAgeSourceRouteRegistryValidationIssue {
   code:
     | "DUPLICATE_ROUTE_ID"
+    | "DUPLICATE_SOURCE_PRIORITY_RANK"
     | "INVALID_BOUNDARY"
     | "INVALID_PRIORITY"
     | "INVALID_ROUTE_ID"
     | "INVALID_SCHEMA"
+    | "INVALID_SOURCE_PRIORITY"
     | "INVALID_SUBMITTER_FIT"
     | "PROHIBITED_TEXT"
     | "PRODUCT_AUTHORIZED";
@@ -162,6 +205,11 @@ export interface MurphAgeSourceRouteRegistryValidationIssue {
 }
 
 export interface MurphAgeSourceRouteRegistryValidationResult {
+  issues: MurphAgeSourceRouteRegistryValidationIssue[];
+  status: "invalid" | "valid";
+}
+
+export interface MurphAgeOrdinaryLabWearableAutoresearchSourcePriorityValidationResult {
   issues: MurphAgeSourceRouteRegistryValidationIssue[];
   status: "invalid" | "valid";
 }
@@ -190,6 +238,86 @@ const MURPH_AGE_SOURCE_ROUTE_ARTIFACT_BOUNDARY = {
   rowValueExportAllowed: false,
   sourceTextStorageAllowed: false,
 } satisfies MurphAgeSourceRouteArtifactBoundary;
+
+const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS = [
+  {
+    blockedUntil: [
+      "locked public benchmark card",
+      "aggregate-only receipt template",
+    ],
+    executionMode: "public-locked-benchmark",
+    executionPriorityRank: 1,
+    nextAction: "Design the locked public lab plus activity benchmark card before any NHANES row parsing.",
+    rankReasonIds: [
+      "fastest-public-row-path",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "nhanes-activity-shadow-lmf",
+  },
+  {
+    blockedUntil: [
+      "source activation labels",
+      "aggregate receipt requirements",
+    ],
+    executionMode: "free-registered-activation",
+    executionPriorityRank: 2,
+    nextAction: "Fill CARDIA activation labels for lab, vitals, activity, follow-up, and aggregate export boundaries.",
+    rankReasonIds: [
+      "young-adult-midlife-fit",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "cardia-biomarker-activity",
+  },
+  {
+    blockedUntil: [
+      "source activation labels",
+      "aggregate receipt requirements",
+    ],
+    executionMode: "free-registered-activation",
+    executionPriorityRank: 3,
+    nextAction: "Fill HCHS/SOL activation labels for adult lab, activity, follow-up, and aggregate export boundaries.",
+    rankReasonIds: [
+      "adult-lab-activity-transport",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "hchs-sol-biomarker-activity",
+  },
+  {
+    blockedUntil: [
+      "human-admin workbench authority",
+      "frozen aggregate evaluator boundary",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 4,
+    nextAction: "Keep All of Us as the high-fit workbench route; define aggregate evaluator needs before access work.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "all-of-us-fitbit-labs-ehr",
+  },
+  {
+    blockedUntil: [
+      "human-admin workbench authority",
+      "source-rights promotion review",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 5,
+    nextAction: "Keep UK Biobank as a high-powered but partial-age-band workbench route.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "partial-age-band-fit",
+    ],
+    routeId: "uk-biobank-integrated",
+  },
+] as const satisfies readonly {
+  blockedUntil: readonly string[];
+  executionMode: MurphAgeOrdinaryLabWearableAutoresearchExecutionMode;
+  executionPriorityRank: number;
+  nextAction: string;
+  rankReasonIds: readonly MurphAgeOrdinaryLabWearableAutoresearchRankReason[];
+  routeId: MurphAgeSourceRouteId;
+}[];
 
 const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
   {
@@ -771,6 +899,43 @@ export function listMurphAgeOrdinaryLabWearableSourceRoutes(): MurphAgeSourceRou
     .map(cloneMurphAgeSourceRoute);
 }
 
+export function listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority():
+  MurphAgeOrdinaryLabWearableAutoresearchSourcePriority[] {
+  return MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS
+    .map((definition) => {
+      const route = MURPH_AGE_SOURCE_ROUTES.find((candidate) => candidate.routeId === definition.routeId);
+      if (!route) {
+        throw new Error(`Murph Age autoresearch source priority references an unknown route: ${definition.routeId}`);
+      }
+      if (
+        route.ordinarySubmitterFit.rank === null
+        || !route.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs")
+        || !route.ordinarySubmitterFit.inputFamilies.some(isOrdinaryWearableLikeInputFamily)
+      ) {
+        throw new Error(`Murph Age autoresearch source priority references a non-ordinary lab/wearable route: ${route.routeId}`);
+      }
+      return {
+        accessMode: route.accessMode,
+        activationStatus: route.activationStatus,
+        blockedUntil: [...definition.blockedUntil],
+        executionMode: definition.executionMode,
+        executionPriorityRank: definition.executionPriorityRank,
+        inputFamilies: [...route.ordinarySubmitterFit.inputFamilies],
+        nextAction: definition.nextAction,
+        ordinarySubmitterAgeBandFit: route.ordinarySubmitterFit.ageBandFit,
+        ordinarySubmitterRank: route.ordinarySubmitterFit.rank,
+        productAuthorized: false as const,
+        rankReasonIds: [...definition.rankReasonIds],
+        reviewGptEscalation: "only-after-source-boundary-change-or-real-aggregate-delta" as const,
+        routeId: route.routeId,
+        rowParsingAuthorized: false as const,
+        schemaVersion: MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION,
+        sourceTextStorageAllowed: false as const,
+      };
+    })
+    .sort((a, b) => a.executionPriorityRank - b.executionPriorityRank || a.routeId.localeCompare(b.routeId));
+}
+
 export function listMurphAgePrioritySourceRoutes(): MurphAgeSourceRoute[] {
   return MURPH_AGE_SOURCE_ROUTES
     .filter((route) =>
@@ -841,6 +1006,93 @@ export function validateMurphAgeSourceRouteRegistry(
         code: "PROHIBITED_TEXT",
         message: `Murph Age source route text cannot include URLs, local paths, credentials, or source excerpts: ${prohibitedTextFields.join(", ")}.`,
         routeId: route.routeId,
+      });
+    }
+  }
+  return {
+    issues,
+    status: issues.length === 0 ? "valid" : "invalid",
+  };
+}
+
+export function validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority(
+  priorities: readonly MurphAgeOrdinaryLabWearableAutoresearchSourcePriority[] =
+    listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority(),
+): MurphAgeOrdinaryLabWearableAutoresearchSourcePriorityValidationResult {
+  const issues: MurphAgeSourceRouteRegistryValidationIssue[] = [];
+  const seenRanks = new Set<number>();
+  for (const priority of priorities) {
+    const route = resolveMurphAgeSourceRoute(priority.routeId);
+    if (priority.schemaVersion !== MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION) {
+      issues.push({
+        code: "INVALID_SCHEMA",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority has an unsupported schema version.",
+        routeId: priority.routeId,
+      });
+    }
+    if (!isSimpleRouteId(priority.routeId) || !route) {
+      issues.push({
+        code: "INVALID_ROUTE_ID",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority route ids must reference registered routes.",
+        routeId: priority.routeId,
+      });
+    }
+    if (
+      !MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_EXECUTION_MODES.includes(
+        priority.executionMode as MurphAgeOrdinaryLabWearableAutoresearchExecutionMode,
+      )
+    ) {
+      issues.push({
+        code: "INVALID_SOURCE_PRIORITY",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority execution mode must be known.",
+        routeId: priority.routeId,
+      });
+    }
+    if (!Number.isInteger(priority.executionPriorityRank) || priority.executionPriorityRank <= 0) {
+      issues.push({
+        code: "INVALID_SOURCE_PRIORITY",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority ranks must be positive integers.",
+        routeId: priority.routeId,
+      });
+    } else if (seenRanks.has(priority.executionPriorityRank)) {
+      issues.push({
+        code: "DUPLICATE_SOURCE_PRIORITY_RANK",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority ranks must be unique.",
+        routeId: priority.routeId,
+      });
+    }
+    seenRanks.add(priority.executionPriorityRank);
+    if (
+      !priority.inputFamilies.includes("bloodwork-labs")
+      || !priority.inputFamilies.some(isOrdinaryWearableLikeInputFamily)
+      || priority.ordinarySubmitterRank <= 0
+      || route?.ordinarySubmitterFit.rank === null
+      || route?.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs") !== true
+      || route?.ordinarySubmitterFit.inputFamilies.some(isOrdinaryWearableLikeInputFamily) !== true
+    ) {
+      issues.push({
+        code: "INVALID_SUBMITTER_FIT",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority must reference ordinary lab plus wearable routes.",
+        routeId: priority.routeId,
+      });
+    }
+    if (
+      priority.productAuthorized !== false
+      || priority.rowParsingAuthorized !== false
+      || priority.sourceTextStorageAllowed !== false
+      || priority.reviewGptEscalation !== "only-after-source-boundary-change-or-real-aggregate-delta"
+    ) {
+      issues.push({
+        code: "PRODUCT_AUTHORIZED",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority must stay metadata-only and product-blocked.",
+        routeId: priority.routeId,
+      });
+    }
+    if (getProhibitedAutoresearchPriorityTextFields(priority).length > 0) {
+      issues.push({
+        code: "PROHIBITED_TEXT",
+        message: "Murph Age ordinary lab/wearable autoresearch source priority text cannot include URLs, local paths, credentials, or source excerpts.",
+        routeId: priority.routeId,
       });
     }
   }
@@ -944,6 +1196,18 @@ function getProhibitedTextFields(route: MurphAgeSourceRoute): string[] {
     ["nextAction", route.nextAction],
     ...route.allowedResearchUses.map((value, index) => [`allowedResearchUses[${index}]`, value] as const),
     ...route.blockedCurrentUses.map((value, index) => [`blockedCurrentUses[${index}]`, value] as const),
+  ] as const;
+  return fields
+    .filter(([, value]) => hasProhibitedRouteText(value))
+    .map(([fieldName]) => fieldName);
+}
+
+function getProhibitedAutoresearchPriorityTextFields(
+  priority: MurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
+): string[] {
+  const fields = [
+    ["nextAction", priority.nextAction],
+    ...priority.blockedUntil.map((value, index) => [`blockedUntil[${index}]`, value] as const),
   ] as const;
   return fields
     .filter(([, value]) => hasProhibitedRouteText(value))

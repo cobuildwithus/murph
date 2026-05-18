@@ -1,5 +1,6 @@
 import { resolveMetricDefinition, resolveMetricInputKey, uniqueStrings } from "./catalog.ts";
 import {
+  listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgePrioritySourceRoutes,
   resolveMurphAgeSourceRoute,
@@ -24,7 +25,7 @@ export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v3" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
-  "murph.age.architecture-summary.v1" as const;
+  "murph.age.architecture-summary.v2" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
   "murph.age.wearable-shadow-increment.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION =
@@ -271,6 +272,7 @@ export interface MurphAgeArchitectureLayerSummary {
 export interface MurphAgeArchitectureSummary {
   layerOrder: MurphAgeArchitectureLayerId[];
   layers: MurphAgeArchitectureLayerSummary[];
+  ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority: MurphAgeSourceRouteId[];
   ordinaryLabWearableSourceRouteIdsByPriority: MurphAgeSourceRouteId[];
   productDisplayAuthorized: false;
   productPromotionAuthorized: false;
@@ -1925,6 +1927,8 @@ export function listMurphAgeInputBundleMetricKeys(): string[] {
 }
 
 export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
+  const ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority =
+    listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority().map((route) => route.routeId);
   const ordinaryLabWearableSourceRouteIdsByPriority = listMurphAgeOrdinaryLabWearableSourceRoutes().map(
     (route) => route.routeId,
   );
@@ -2032,6 +2036,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
   return {
     layerOrder: [...MURPH_AGE_ARCHITECTURE_LAYER_ORDER],
     layers,
+    ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority,
     ordinaryLabWearableSourceRouteIdsByPriority,
     productDisplayAuthorized: false,
     productPromotionAuthorized: false,
