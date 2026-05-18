@@ -923,6 +923,20 @@ export interface MurphAgeIncrementEvaluationCard {
   sourceRouteId: string;
 }
 
+export interface MurphAgeIncrementEvaluationCardBuildInput {
+  aggregateMetricDeltas: MurphAgeIncrementEvaluationAggregateMetricDeltas;
+  aggregateSample?: MurphAgeIncrementEvaluationAggregateSampleSummary;
+  anchorCardId: MurphAgeScoreBearingCardId;
+  anchorMetrics?: MurphAgeIncrementEvaluationAggregateMetricSummary;
+  candidateBatchId: string;
+  candidateId: string;
+  candidateMetrics?: MurphAgeIncrementEvaluationAggregateMetricSummary;
+  evidenceTier: MurphAgeIncrementEvaluationEvidenceTier;
+  layer: MurphAgeIncrementEvaluationLayer;
+  riskEffect: "aggregate-estimated" | "not-estimated";
+  sourceRouteId: MurphAgeSourceRouteId;
+}
+
 type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
   MurphAgeWearableShadowIncrementPolicy,
   "allowedMetricKeys"
@@ -1261,6 +1275,20 @@ const MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY = {
   productDisplayExportAllowed: false,
   rowValuesExportAllowed: false,
 } satisfies MurphAgeWearableShadowIncrementOutputBoundary;
+
+const MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY = {
+  aggregateOnly: true,
+  coefficientsExportAllowed: false,
+  localArtifactPathExportAllowed: false,
+  modelParametersExportAllowed: false,
+  participantIdentifiersExportAllowed: false,
+  participantLevelExportAllowed: false,
+  predictionsExportAllowed: false,
+  productDisplayExportAllowed: false,
+  rowValuesExportAllowed: false,
+  sourceTextExportAllowed: false,
+  splitMembershipExportAllowed: false,
+} satisfies MurphAgeIncrementEvaluationOutputBoundary;
 
 const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
   "r399_nhis_proxy_10y_acm_research",
@@ -2096,6 +2124,34 @@ export function assessMurphAgeWearableShadowIncrements(
   return MURPH_AGE_WEARABLE_SHADOW_INCREMENT_POLICIES.map((policy) =>
     assessMurphAgeWearableShadowIncrementPolicy({ input, policy })
   );
+}
+
+export function buildMurphAgeIncrementEvaluationCard(
+  input: MurphAgeIncrementEvaluationCardBuildInput,
+): MurphAgeIncrementEvaluationCard {
+  return {
+    anchorCardId: input.anchorCardId,
+    candidateBatchId: input.candidateBatchId,
+    candidateId: input.candidateId,
+    evaluation: {
+      aggregateMetricDeltas: { ...input.aggregateMetricDeltas },
+      comparator: "anchor-vs-anchor-plus-increment",
+      evidenceTier: input.evidenceTier,
+      sameDenominator: true,
+      ...(input.aggregateSample ? { aggregateSample: { ...input.aggregateSample } } : {}),
+      ...(input.anchorMetrics ? { anchorMetrics: { ...input.anchorMetrics } } : {}),
+      ...(input.candidateMetrics ? { candidateMetrics: { ...input.candidateMetrics } } : {}),
+    },
+    flatteningAuthorized: false,
+    layer: input.layer,
+    outputBoundary: { ...MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY },
+    productAuthorized: false,
+    riskEffect: input.riskEffect,
+    schemaVersion: MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: input.sourceRouteId,
+  };
 }
 
 export function validateMurphAgeWearableShadowIncrementResultCard(
