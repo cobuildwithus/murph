@@ -10,13 +10,19 @@ import {
   isHostedPrivyAuthMethod,
   type HostedPrivyAuthMethod,
 } from "@/src/lib/hosted-onboarding/types";
-import { resolveHostedPrivyAuthMethodFromIdentity } from "@/src/lib/hosted-onboarding/privy-auth-method";
+import {
+  readHostedPrivyVerifiedAuthMethods,
+  resolveHostedPrivyAuthMethodFromIdentity,
+} from "@/src/lib/hosted-onboarding/privy-auth-method";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
-import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import {
+  remapHostedPrivyCompletionLagError,
+  type HostedPrivyIdentity,
+} from "@/src/lib/hosted-onboarding/privy";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
@@ -39,6 +45,8 @@ export const POST = withJsonError(async (request: Request) => {
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
+    }).catch((error: unknown) => {
+      throw remapHostedPrivyCompletionLagError(error);
     });
     const status = await getHostedInviteStatus({
       authenticatedMember: result.member,
@@ -86,6 +94,20 @@ function resolveHostedPrivyCompletionAuthMethod(input: {
 
     throw hostedOnboardingError({
       code: "HOSTED_AUTH_INTENT_INVALID",
+      message: "Choose phone, email, or Telegram before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  const availableMethods = readHostedPrivyVerifiedAuthMethods(input.identity);
+
+  if (availableMethods.length === 1) {
+    return availableMethods[0];
+  }
+
+  if (availableMethods.length > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTH_INTENT_REQUIRED",
       message: "Choose phone, email, or Telegram before continuing.",
       httpStatus: 400,
     });

@@ -10,16 +10,9 @@ export function resolveHostedPrivyAuthMethodFromIdentity(input: {
     return input.authMethod;
   }
 
-  if (input.identity.phone) {
-    return "phone";
-  }
-
-  if (input.identity.email?.verifiedAt) {
-    return "email";
-  }
-
-  if (input.identity.telegram?.telegramUserId) {
-    return "telegram";
+  const [authMethod] = readHostedPrivyVerifiedAuthMethods(input.identity);
+  if (authMethod) {
+    return authMethod;
   }
 
   throw hostedOnboardingError({
@@ -27,4 +20,14 @@ export function resolveHostedPrivyAuthMethodFromIdentity(input: {
     message: "Use a verified phone number, email address, or Telegram account to continue.",
     httpStatus: 400,
   });
+}
+
+export function readHostedPrivyVerifiedAuthMethods(
+  identity: HostedPrivyIdentity,
+): HostedPrivyAuthMethod[] {
+  return [
+    ...(identity.phone ? ["phone" as const] : []),
+    ...(identity.email?.verifiedAt ? ["email" as const] : []),
+    ...(identity.telegram?.telegramUserId ? ["telegram" as const] : []),
+  ];
 }

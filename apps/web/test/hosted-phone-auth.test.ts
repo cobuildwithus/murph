@@ -1846,7 +1846,7 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("switches from manual resume to sign-out recovery when the wallet conflicts", async () => {
+  it("switches from manual resume to sign-out recovery when the verified identity conflicts", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
       logout: mocks.logout,
@@ -1890,7 +1890,7 @@ describe("HostedPhoneAuth", () => {
     const fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         error: {
-          code: "PRIVY_WALLET_MISMATCH",
+          code: "PRIVY_IDENTITY_CONFLICT",
           message: "This phone number is already linked to a different Privy account.",
         },
       }), {

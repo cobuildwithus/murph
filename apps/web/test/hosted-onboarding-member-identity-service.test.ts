@@ -1,4 +1,7 @@
-import { HostedBillingStatus } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  Prisma,
+} from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -15,6 +18,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 
 const NOW = new Date("2026-04-06T10:00:00.000Z");
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
+const SYNTHETIC_TEST_WALLET_ADDRESS = "0x00000000000000000000000000000000000000a1";
 
 describe("hosted-onboarding member-identity-service", () => {
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
@@ -294,6 +298,139 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).not.toHaveBeenCalled();
   });
 
+  it("drops a secondary wallet and retries when reconciliation hits a wallet unique race", async () => {
+    const identityUpsert = vi.fn(async ({
+      create,
+      update: updateData,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...updateData,
+    }))
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("duplicate wallet", {
+          clientVersion: "test",
+          code: "P2002",
+          meta: {
+            target: ["walletAddressLookupKey"],
+          },
+        }),
+      );
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumber: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        wallet: {
+          address: SYNTHETIC_TEST_WALLET_ADDRESS,
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      id: "member_123",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledTimes(2);
+    expect(identityUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
+        walletChainType: "ethereum",
+        walletCreatedAt: NOW,
+        walletProvider: "privy",
+      }),
+    }));
+    expect(identityUpsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      }),
+    }));
+  });
+
+  it("does not retry non-wallet unique races as secondary wallet conflicts", async () => {
+    const identityUpsert = vi.fn().mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("duplicate privy user", {
+        clientVersion: "test",
+        code: "P2002",
+        meta: {
+          target: ["privyUserLookupKey"],
+        },
+      }),
+    );
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumber: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        wallet: {
+          address: SYNTHETIC_TEST_WALLET_ADDRESS,
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "PRIVY_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(identityUpsert).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves every matching identity binding when Privy identity lookup hits the same member twice", async () => {
     const member = makeMember();
     const identityRecord = {
@@ -314,7 +451,7 @@ describe("hosted-onboarding member-identity-service", () => {
       walletAddressEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-identity.wallet-address",
         memberId: member.id,
-        value: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        value: SYNTHETIC_TEST_WALLET_ADDRESS,
       }),
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
@@ -333,7 +470,7 @@ describe("hosted-onboarding member-identity-service", () => {
       lookupHostedMemberForPrivyIdentity({
         identity: makeIdentity({
           wallet: {
-            address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+            address: SYNTHETIC_TEST_WALLET_ADDRESS,
             chainType: "ethereum",
             id: "wallet_123",
             type: "wallet",
@@ -347,7 +484,7 @@ describe("hosted-onboarding member-identity-service", () => {
       identity: expect.objectContaining({
         memberId: member.id,
         privyUserId: "did:privy:user_123",
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       }),
       matchedBy: [
         "privyUserId",
