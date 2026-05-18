@@ -76,6 +76,14 @@ const ALLOWED_VALUE_KIND_IDS = [
   "booleans_only",
   "fixed_enumerated_ids_only",
 ] as const;
+const ROW_OWNER_SAFE_CONFIRMATION_ASK_ID =
+  "confirm_feature_only_lab_wearable_availability_without_private_values" as const;
+const ROW_OWNER_SAFE_CONFIRMATION_ASK_TEXT =
+  "Confirm only these non-private facts: target age band is roughly 16-50, glycemia bloodwork/lab export is available, daily phone/watch/wearable activity export is available, and the confirmation includes no private paths, headers, filenames, row values, identifiers, source text, predictions, coefficients, model parameters, or small cells." as const;
+const ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KIND_IDS = [
+  "explicit_yes_all_required_assertions_confirmed",
+  "not_confirmed_or_unsure",
+] as const;
 const OBJECTIVE_REQUIREMENT_IDS = [
   "ordinary_16_50_priority_selected",
   "minimum_lab_wearable_pair_visible",
@@ -118,6 +126,8 @@ type SafeCompletionChecklistItemId = typeof SAFE_COMPLETION_CHECKLIST_ITEM_IDS[n
 type RequiredAssertionChecklistId = typeof REQUIRED_ASSERTION_CHECKLIST_IDS[number];
 type BlockedContentId = typeof BLOCKED_CONTENT_IDS[number];
 type AllowedValueKindId = typeof ALLOWED_VALUE_KIND_IDS[number];
+type RowOwnerSafeConfirmationAskId = typeof ROW_OWNER_SAFE_CONFIRMATION_ASK_ID;
+type RowOwnerSafeConfirmationResponseKindId = typeof ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KIND_IDS[number];
 type ObjectiveRequirementId = typeof OBJECTIVE_REQUIREMENT_IDS[number];
 type ObjectiveRequirementStatus = "blocked" | "satisfied";
 type R1179NextActionId = typeof R1179_NEXT_ACTION_IDS[number];
@@ -154,6 +164,28 @@ interface ObjectiveRequirementStatusEntry {
   privateDetailsStored: false;
   requirementId: ObjectiveRequirementId;
   status: ObjectiveRequirementStatus;
+}
+
+interface RowOwnerSafeConfirmationAsk {
+  acceptableResponseKindIds: RowOwnerSafeConfirmationResponseKindId[];
+  allowedValueKindIds: AllowedValueKindId[];
+  askId: RowOwnerSafeConfirmationAskId;
+  askText: typeof ROW_OWNER_SAFE_CONFIRMATION_ASK_TEXT;
+  audience: "ordinary_submitter_roughly_16_50_row_owner";
+  blockedContentIds: BlockedContentId[];
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  modelEvidencePromotionAllowed: false;
+  prioritizedInputKindIds: RequiredInputKindId[];
+  privateDetailsStored: false;
+  productDisplayAuthorized: false;
+  requiredAssertionChecklistIds: RequiredAssertionChecklistId[];
+  rowLevelDataAcceptedByR1179: false;
+  rowOwnerConfirmationInferredByR1179: false;
+  rowOwnerOnly: true;
+  rowOwnerPrivateValuesStored: false;
+  rowOwnerProvidedValuesStored: false;
+  rowParsingPerformedByR1179: false;
+  safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
 }
 
 export interface R1179AverageSubmitterObjectiveGapAuditOptions {
@@ -225,6 +257,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowOwnerConfirmationInferredByR1179: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1179: false;
+    rowOwnerSafeConfirmationAsk: RowOwnerSafeConfirmationAsk;
     safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
@@ -255,6 +288,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowOwnerConfirmationInferredByR1179: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1179: false;
+    rowOwnerSafeConfirmationAsk: RowOwnerSafeConfirmationAsk;
     safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
@@ -368,6 +402,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     && realLabWearableRouteMetricsRecorded;
   const readyToMarkComplete = goalAchieved;
   const createdAt = createdAtFor(options.createdAt);
+  const rowOwnerSafeConfirmationAsk = buildRowOwnerSafeConfirmationAsk();
   const summary: R1179AverageSubmitterObjectiveGapAuditOutput["summary"] = {
     blockedRequirementIds,
     conclusion,
@@ -388,6 +423,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     rowOwnerConfirmationInferredByR1179: false,
     rowOwnerPrivateValuesStored: false,
     rowParsingPerformedByR1179: false,
+    rowOwnerSafeConfirmationAsk,
     safeCurrentLoopCommandVisible,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
     sourcePriority: TARGET_INPUT_PRIORITY,
@@ -451,6 +487,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       rowOwnerConfirmationInferredByR1179: false,
       rowOwnerPrivateValuesStored: false,
       rowParsingPerformedByR1179: false,
+      rowOwnerSafeConfirmationAsk,
       safeCurrentLoopCommandVisible,
       safeCompletionChecklistItemIds: summary.safeCompletionChecklistItemIds,
       sourcePriority: TARGET_INPUT_PRIORITY,
@@ -572,6 +609,30 @@ function statusEntry(params: {
     privateDetailsStored: false,
     requirementId: params.requirementId,
     status: params.satisfied ? "satisfied" : "blocked",
+  };
+}
+
+function buildRowOwnerSafeConfirmationAsk(): RowOwnerSafeConfirmationAsk {
+  return {
+    acceptableResponseKindIds: [...ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KIND_IDS],
+    allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
+    askId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
+    askText: ROW_OWNER_SAFE_CONFIRMATION_ASK_TEXT,
+    audience: "ordinary_submitter_roughly_16_50_row_owner",
+    blockedContentIds: [...BLOCKED_CONTENT_IDS],
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    modelEvidencePromotionAllowed: false,
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    privateDetailsStored: false,
+    productDisplayAuthorized: false,
+    requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST_IDS],
+    rowLevelDataAcceptedByR1179: false,
+    rowOwnerConfirmationInferredByR1179: false,
+    rowOwnerOnly: true,
+    rowOwnerPrivateValuesStored: false,
+    rowOwnerProvidedValuesStored: false,
+    rowParsingPerformedByR1179: false,
+    safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
   };
 }
 
@@ -989,6 +1050,8 @@ async function main(): Promise<void> {
       productDisplayAuthorized: output.summary.productDisplayAuthorized,
       readyToMarkComplete: output.summary.readyToMarkComplete,
       rowOwnerActionRouteStatus: output.summary.rowOwnerActionRouteStatus,
+      rowOwnerSafeConfirmationAskId: output.summary.rowOwnerSafeConfirmationAsk.askId,
+      rowOwnerSafeConfirmationAskVisible: true,
       safeCurrentLoopCommandVisible: output.summary.safeCurrentLoopCommandVisible,
       topBlockedRequirementId: output.summary.firstBlockedRequirementId,
     })}\n`);
