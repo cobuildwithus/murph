@@ -1607,7 +1607,9 @@ function resolveHostedWorkspaceRunNextWake(input: {
     return selectEarliestHostedRuntimeWake([
       {
         at: input.assistantPhaseResult.nextWakeAt ?? null,
-        reason: input.assistantPhaseResult.nextWakeAt ? "assistant" : null,
+        reason: input.assistantPhaseResult.nextWakeAt
+          ? input.assistantPhaseResult.nextWakeReason ?? "assistant"
+          : null,
       },
       {
         at: mailboxImportRetryAt,

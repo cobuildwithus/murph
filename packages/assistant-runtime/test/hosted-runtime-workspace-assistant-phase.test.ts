@@ -596,6 +596,90 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("runs device-sync work for a due device-sync alarm without active input", async () => {
+    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: false,
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: false,
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
+  it("preserves a skipped due device-sync alarm reason when fresh input owns the hot path", async () => {
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "alarm",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: true,
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
   it("exposes hosted device connect providers and link helper from the platform port", async () => {
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -1047,6 +1131,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("preserves device-sync next-wake reason after post-checkpoint delivery drains", async () => {
+    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      reason: "alarm",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+    }));
+  });
+
   it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
@@ -1213,6 +1331,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: "2026-05-08T02:28:42.000Z",
+      nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
   });
@@ -1419,6 +1538,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedDeviceSyncDirtyAckRecorded: true,
         hostedDeviceSyncDirtyStillPending: false,
         nextWakeAt: "2026-04-27T00:10:00.000Z",
+      }),
+    }));
+  });
+
+  it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
+    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_wake",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecorded: 1,
       }),
     }));
   });

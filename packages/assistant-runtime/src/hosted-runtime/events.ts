@@ -282,6 +282,9 @@ export async function executeHostedMailboxEvent(input: {
     conversationMetrics: mailboxEffect.conversationMetrics,
     mailboxLane: mailboxEffect.mailboxLane,
     nextWakeAt: mailboxEffect.nextWakeAt,
+    ...(Object.hasOwn(mailboxEffect, "nextWakeReason")
+      ? { nextWakeReason: mailboxEffect.nextWakeReason ?? null }
+      : {}),
     postCheckpointRecord: mailboxEffect.postCheckpointRecord,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
   };
@@ -356,6 +359,9 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "device-sync",
         nextWakeAt: deviceSyncMetrics.nextWakeAt,
+        ...(deviceSyncMetrics.nextWakeAt
+          ? { nextWakeReason: "device-sync.reconcile" }
+          : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
   }
@@ -480,12 +486,16 @@ function createNoopMailboxEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
   mailboxLane: HostedMailboxLane;
   nextWakeAt?: HostedMailboxOutcome["nextWakeAt"];
+  nextWakeReason?: HostedMailboxOutcome["nextWakeReason"];
   postCheckpointRecord?: HostedMailboxOutcome["postCheckpointRecord"];
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
 }): HostedMailboxOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
     nextWakeAt: input.nextWakeAt ?? null,
+    ...(input.nextWakeReason === undefined
+      ? {}
+      : { nextWakeReason: input.nextWakeReason ?? null }),
     mailboxLane: input.mailboxLane,
     postCheckpointRecord: input.postCheckpointRecord ?? null,
     redactedLogEntries: input.redactedLogEntries ?? [],

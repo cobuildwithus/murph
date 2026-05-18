@@ -149,6 +149,7 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "device-sync",
       nextWakeAt: "2026-04-08T00:20:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });

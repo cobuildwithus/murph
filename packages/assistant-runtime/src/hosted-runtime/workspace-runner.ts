@@ -143,6 +143,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
@@ -1235,6 +1236,7 @@ function mergeDeferredPostCheckpointWake(input: {
   }
 
   input.assistantPhaseResult.nextWakeAt = input.postCheckpoint.nextWakeAt ?? null;
+  input.assistantPhaseResult.nextWakeReason = input.postCheckpoint.nextWakeReason ?? null;
 }
 
 async function writeHostedForegroundCheckpointDeferredLog(input: {

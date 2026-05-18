@@ -1918,6 +1918,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncProcessed: 1,
       deviceSyncSkipped: false,
       nextWakeAt: "2026-04-08T00:30:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
