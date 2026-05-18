@@ -49,6 +49,9 @@ const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
+type HostedUserStatus =
+  Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
+
 afterAll(async () => {
   await scenario?.stop();
   scenario = null;
@@ -98,11 +101,21 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     const schedulingResult = await requireScenario().harness.runHostedManualInvocationForTest(userId);
     expect(schedulingResult.status).toBe("scheduled");
-    expect(schedulingResult.nextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
 
-    const scheduledStatus = await requireScenario().harness.readUserStatus(userId);
+    const scheduledStatus = await waitForScheduledAlarmAt(scheduledReminderTimes.dueAtIso);
+    expect(scheduledStatus.lastErrorCode ?? null).toBeNull();
     expect(scheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
     expect(scheduledStatus.nextAlarmAt).toBe(scheduledReminderTimes.dueAtIso);
+    expect(scheduledStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventCode: "assistant.automation_detail",
+        redactedJson: expect.objectContaining({
+          failureReason: "not_due",
+          safeDetails: "not_due",
+          type: "cron.scan.job",
+        }),
+      }),
+    ]));
 
     await sleepUntil(scheduledReminderTimes.dueAtIso);
     requireScenario().queueAssistantResponses([
@@ -253,6 +266,32 @@ async function runHostedScheduledAlarm(): Promise<void> {
   }
 
   throw new Error("Hosted local worker restart retry loop exhausted.");
+}
+
+async function waitForScheduledAlarmAt(expectedNextAlarmAt: string): Promise<HostedUserStatus> {
+  const startedAt = Date.now();
+  let lastStatus: HostedUserStatus | null = null;
+
+  while ((Date.now() - startedAt) < 10_000) {
+    const status = await requireScenario().harness.readUserStatus(userId);
+    lastStatus = status;
+
+    if (status.lastErrorCode) {
+      throw new Error(`Hosted runner errored before scheduling reminder alarm: ${status.lastErrorCode}`);
+    }
+
+    if (status.nextAlarmAt === expectedNextAlarmAt) {
+      return status;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(JSON.stringify({
+    expectedNextAlarmAt,
+    lastErrorCode: lastStatus?.lastErrorCode ?? null,
+    lastNextAlarmAt: lastStatus?.nextAlarmAt ?? null,
+  }));
 }
 
 function isHostedLocalWorkerRestartError(error: unknown): boolean {
