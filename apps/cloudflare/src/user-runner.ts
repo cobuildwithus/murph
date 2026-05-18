@@ -1484,29 +1484,6 @@ export class HostedUserRunner {
     }
 
     const runtimeResultNextWakeAt = normalizeFutureWakeAt(input.result.nextWakeAt ?? null);
-    if (isImmediateRuntimeWakeRequest(input.result.nextWakeAt ?? null)) {
-      const recheck = await this.scheduleShortProgressRecheck();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          mailboxBacklogPresent,
-          mailboxLagLaneCount: webStatus.mailboxLag.length,
-          runtimeResultNextWakeAtPresent: true,
-          scheduledWakeAt: recheck.nextAlarmAt,
-          workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
-          workspaceVersion: webStatus.workspace?.version ?? null,
-        },
-        message: "Hosted runner reconciled immediate runtime wake request.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return {
-        ...input.result,
-        nextWakeAt: recheck.nextAlarmAt,
-        status: "scheduled",
-      };
-    }
-
     const nextWakeAt = earliestIsoDate(
       normalizeFutureWakeAt(webStatus.workspace?.nextWakeAt ?? null),
       runtimeResultNextWakeAt,
@@ -1629,7 +1606,7 @@ export class HostedUserRunner {
   }
 
   private async syncAlarm(record: RunnerStateRecord): Promise<void> {
-    const nextAlarmAt = readRunnerStateAlarmAt(record);
+    const nextAlarmAt = readRunnerOperationalAlarmAt(record);
     await this.syncAlarmAt(nextAlarmAt);
   }
 
@@ -2090,6 +2067,13 @@ function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
   return readRunnerRuntimeDueAt(record);
 }
 
+function readRunnerOperationalAlarmAt(record: RunnerStateRecord): string | null {
+  if (record.writeFence) {
+    return earliestIsoDate(normalizeFutureWakeAt(record.wakeAt), record.writeFence.expiresAt);
+  }
+  return readRunnerRuntimeDueAt(record);
+}
+
 function hasMailboxBacklog(
   mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
 ): boolean {
@@ -2312,15 +2296,6 @@ function readEnsureRunnerProgressNextAlarmAt(
     return progress.nextAlarmAt;
   }
   return readRunnerStateAlarmAt(progress.record);
-}
-
-function isImmediateRuntimeWakeRequest(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const parsedMs = Date.parse(value);
-  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
 }
 
 function buildRunnerRecordTimingLogDetails(
