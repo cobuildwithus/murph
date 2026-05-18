@@ -356,11 +356,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
 
       if (usageGate.reason === "ai_usage_limit_exceeded") {
-        await claimHostedAiUsageLimitNotice({
+        const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
           memberId: existingMember.id,
           periodStart: usageGate.periodStart,
           prisma: input.prisma,
         });
+
+        if (!claimedUsageLimitNotice) {
+          return logHostedLinqWebhookPlannerDecisionAndReturn(
+            buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+            buildHostedLinqWebhookPlannerDetails(input.event, context, {
+              existingMemberActive: true,
+              existingMemberMatch,
+              reason: "ai-usage-gate-denied",
+              routeStage: "active-member-ai-usage-denied",
+            }),
+          );
+        }
       }
 
       return logHostedLinqWebhookPlannerDecisionAndReturn(

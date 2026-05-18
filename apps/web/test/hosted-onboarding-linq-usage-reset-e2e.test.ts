@@ -480,7 +480,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
   });
 
-  it("still sends the usage-limit reply when the exhausted period notice was already claimed", async () => {
+  it("suppresses the usage-limit reply when the exhausted period notice was already claimed", async () => {
     const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
     const alreadyClaimedAt = new Date("2026-04-29T16:30:00.000Z");
     const usage = createUsageResetPrismaFixture({
@@ -515,16 +515,9 @@ describe("hosted Linq usage reset e2e", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "ai-usage-gate-denied",
     });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
-      chatId: CHAT_ID,
-      idempotencyKey: "linq-message:evt_after_notice_claimed",
-      message: USAGE_LIMIT_MESSAGE,
-      replyToMessageId: "msg_after_notice_claimed",
-      signal: undefined,
-    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
       limitNoticeSentAt: alreadyClaimedAt,
