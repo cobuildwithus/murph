@@ -124,12 +124,27 @@ const R1076_CURRENT_LOOP_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1076-current-autoresearch-loop-executor.ts" as const;
 const R1145_COMPLETION_AUDIT_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1145-ordinary-consumer-current-chain-completion-audit.ts" as const;
+const R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1173-ordinary-consumer-safe-assertion-answer-sheet.ts" as const;
 const R1174_SAFE_NEXT_STEP_PACKET_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1174-ordinary-consumer-safe-next-step-packet.ts" as const;
 const R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND =
   "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true pnpm exec tsx scripts/murph-age/r1176-r1172-r1165-row-owner-safe-assertion-chain-runner.ts" as const;
 const R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND =
   "MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH=<r1163-runner.json> pnpm exec tsx scripts/murph-age/r1164-ordinary-consumer-feature-only-research-handoff.ts" as const;
+const ROW_OWNER_ACTION_AUDIENCE = "ordinary_submitter_roughly_16_50_row_owner" as const;
+const REQUIRED_ASSERTION_CHECKLIST_IDS = [
+  "assert_target_age_band_roughly_16_50",
+  "assert_glycemia_bloodwork_export_available",
+  "assert_daily_wearable_activity_export_available",
+  "assert_no_private_values_identifiers_paths_headers_or_rows",
+] as const;
+const ROW_OWNER_ACTION_IDS = [
+  "review_r1173_safe_assertion_answer_sheet",
+  "review_r1174_safe_next_step_packet",
+  "explicitly_run_r1176_live_chain_if_all_safe_assertions_are_true",
+  "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
+] as const;
 
 type MinimumFeaturePairSourceFamilyId = typeof MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS[number];
 type RequiredInputKindId = typeof REQUIRED_INPUT_KIND_IDS[number];
@@ -146,6 +161,12 @@ type R1177Conclusion = typeof R1177_CONCLUSIONS[number];
 type R1177NextAction = typeof R1177_NEXT_ACTIONS[number];
 type SafeR1076Conclusion = typeof SAFE_R1076_CONCLUSIONS[number];
 type SafeR1076Action = typeof SAFE_R1076_ACTIONS[number];
+type RequiredAssertionChecklistId = typeof REQUIRED_ASSERTION_CHECKLIST_IDS[number];
+type RowOwnerActionId = typeof ROW_OWNER_ACTION_IDS[number];
+type RowOwnerActionRouteStatus =
+  | "feature_only_research_handoff_ready"
+  | "waiting_on_current_loop_or_priority_packet"
+  | "waiting_on_row_owner_feature_only_assertion";
 type SurfacingConclusion =
   | "average_submitter_priority_visible_in_current_loop"
   | "average_submitter_priority_waiting_on_current_loop_and_priority_packets"
@@ -208,6 +229,33 @@ interface ArtifactSummary {
   packetId: string | null;
   schemaVersion: string | null;
   status: "available" | "missing";
+}
+
+interface RowOwnerOnlyAction {
+  actionId: RowOwnerActionId;
+  command: string;
+  rowOwnerOnly: true;
+  storesPrivateDetailsInPacket: false;
+}
+
+interface RowOwnerActionRoute {
+  allowedValueKindIds: AllowedValueKindId[];
+  audience: typeof ROW_OWNER_ACTION_AUDIENCE;
+  blockedContentIds: BlockedContentId[];
+  firstRunnableActionId: RowOwnerActionId | null;
+  liveChainCommand: typeof R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND;
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  nextAction: SurfacingNextAction;
+  productDisplayAuthorized: false;
+  requiredAssertionChecklistIds: RequiredAssertionChecklistId[];
+  requiredInputKindIds: RequiredInputKindId[];
+  rowOwnerActionRouteStatus: RowOwnerActionRouteStatus;
+  rowOwnerOnlyActions: RowOwnerOnlyAction[];
+  rowOwnerPrivateValuesStored: false;
+  rowParsingPerformedByR1178: false;
+  safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
+  sourcePriority: typeof TARGET_INPUT_PRIORITY;
+  targetAgeBand: typeof TARGET_AGE_BAND;
 }
 
 export interface R1178AverageSubmitterCurrentLoopSurfacingOptions {
@@ -279,6 +327,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
     rowOwnerConfirmationInferredByR1178: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1178: false;
+    rowOwnerActionRoute: RowOwnerActionRoute;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
     targetAgeBand: typeof TARGET_AGE_BAND;
@@ -321,6 +370,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
     rowOwnerConfirmationInferredByR1178: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1178: false;
+    rowOwnerActionRoute: RowOwnerActionRoute;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
     targetAgeBand: typeof TARGET_AGE_BAND;
@@ -368,6 +418,11 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
   const topRequirementId = currentSurfacingBlockerIds[0]
     ?? currentMissingRequirementIds[0]
     ?? null;
+  const rowOwnerActionRoute = rowOwnerActionRouteFor({
+    minimumFeaturePairConfirmed,
+    nextAction,
+    priorityVisibleInCurrentLoop,
+  });
   const createdAt = createdAtFor(options.createdAt);
 
   const summary: R1178AverageSubmitterCurrentLoopSurfacingOutput["summary"] = {
@@ -397,6 +452,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     rowOwnerConfirmationInferredByR1178: false,
     rowOwnerPrivateValuesStored: false,
     rowParsingPerformedByR1178: false,
+    rowOwnerActionRoute,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
     sourcePriority: TARGET_INPUT_PRIORITY,
     targetAgeBand: TARGET_AGE_BAND,
@@ -434,6 +490,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
       rowOwnerConfirmationInferredByR1178: false,
       rowOwnerPrivateValuesStored: false,
       rowParsingPerformedByR1178: false,
+      rowOwnerActionRoute: summary.rowOwnerActionRoute,
       safeCompletionChecklistItemIds: summary.safeCompletionChecklistItemIds,
       sourcePriority: summary.sourcePriority,
       targetAgeBand: summary.targetAgeBand,
@@ -633,6 +690,79 @@ function commandForNextAction(nextAction: SurfacingNextAction): string {
   return COMMAND_BY_SURFACING_NEXT_ACTION[nextAction];
 }
 
+function rowOwnerActionRouteFor(input: {
+  minimumFeaturePairConfirmed: boolean;
+  nextAction: SurfacingNextAction;
+  priorityVisibleInCurrentLoop: boolean;
+}): RowOwnerActionRoute {
+  const rowOwnerActionRouteStatus = rowOwnerActionRouteStatusFor(input);
+  return {
+    allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
+    audience: ROW_OWNER_ACTION_AUDIENCE,
+    blockedContentIds: [...BLOCKED_CONTENT_IDS],
+    firstRunnableActionId: firstRunnableRowOwnerActionIdFor(rowOwnerActionRouteStatus),
+    liveChainCommand: R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND,
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    nextAction: input.nextAction,
+    productDisplayAuthorized: false,
+    requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST_IDS],
+    requiredInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    rowOwnerActionRouteStatus,
+    rowOwnerOnlyActions: rowOwnerOnlyActionsFor(),
+    rowOwnerPrivateValuesStored: false,
+    rowParsingPerformedByR1178: false,
+    safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
+    sourcePriority: TARGET_INPUT_PRIORITY,
+    targetAgeBand: TARGET_AGE_BAND,
+  };
+}
+
+function rowOwnerActionRouteStatusFor(input: {
+  minimumFeaturePairConfirmed: boolean;
+  priorityVisibleInCurrentLoop: boolean;
+}): RowOwnerActionRouteStatus {
+  if (!input.priorityVisibleInCurrentLoop) return "waiting_on_current_loop_or_priority_packet";
+  if (input.minimumFeaturePairConfirmed) return "feature_only_research_handoff_ready";
+  return "waiting_on_row_owner_feature_only_assertion";
+}
+
+function firstRunnableRowOwnerActionIdFor(status: RowOwnerActionRouteStatus): RowOwnerActionId | null {
+  if (status === "waiting_on_current_loop_or_priority_packet") return null;
+  if (status === "feature_only_research_handoff_ready") {
+    return "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed";
+  }
+  return "review_r1173_safe_assertion_answer_sheet";
+}
+
+function rowOwnerOnlyActionsFor(): RowOwnerOnlyAction[] {
+  return [
+    {
+      actionId: "review_r1173_safe_assertion_answer_sheet",
+      command: R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND,
+      rowOwnerOnly: true,
+      storesPrivateDetailsInPacket: false,
+    },
+    {
+      actionId: "review_r1174_safe_next_step_packet",
+      command: R1174_SAFE_NEXT_STEP_PACKET_COMMAND,
+      rowOwnerOnly: true,
+      storesPrivateDetailsInPacket: false,
+    },
+    {
+      actionId: "explicitly_run_r1176_live_chain_if_all_safe_assertions_are_true",
+      command: R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND,
+      rowOwnerOnly: true,
+      storesPrivateDetailsInPacket: false,
+    },
+    {
+      actionId: "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
+      command: R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND,
+      rowOwnerOnly: true,
+      storesPrivateDetailsInPacket: false,
+    },
+  ];
+}
+
 function summarizeArtifact(input: {
   artifact: string;
   expectedPacketId: string;
@@ -802,6 +932,8 @@ function cliSummary(output: R1178AverageSubmitterCurrentLoopSurfacingOutput): Re
     r1177PriorityPacketRecognized: output.summary.r1177PriorityPacketRecognized,
     rowLevelDataAcceptedByR1178: output.summary.rowLevelDataAcceptedByR1178,
     rowOwnerConfirmationInferredByR1178: output.summary.rowOwnerConfirmationInferredByR1178,
+    rowOwnerActionRouteStatus: output.summary.rowOwnerActionRoute.rowOwnerActionRouteStatus,
+    rowOwnerFirstRunnableActionId: output.summary.rowOwnerActionRoute.firstRunnableActionId,
     rowOwnerPrivateValuesStored: output.summary.rowOwnerPrivateValuesStored,
     rowParsingPerformedByR1178: output.summary.rowParsingPerformedByR1178,
     schemaVersion: output.schemaVersion,

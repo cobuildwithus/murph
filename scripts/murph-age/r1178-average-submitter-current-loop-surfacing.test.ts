@@ -58,8 +58,18 @@ const R1177_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1177-ordinary-consumer-average-submitter-priority-packet.ts";
 const R1076_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1076-current-autoresearch-loop-executor.ts";
+const R1173_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1173-ordinary-consumer-safe-assertion-answer-sheet.ts";
+const R1174_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1174-ordinary-consumer-safe-next-step-packet.ts";
 const R1164_COMMAND =
   "MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH=<r1163-runner.json> pnpm exec tsx scripts/murph-age/r1164-ordinary-consumer-feature-only-research-handoff.ts";
+const REQUIRED_ASSERTION_CHECKLIST = [
+  "assert_target_age_band_roughly_16_50",
+  "assert_glycemia_bloodwork_export_available",
+  "assert_daily_wearable_activity_export_available",
+  "assert_no_private_values_identifiers_paths_headers_or_rows",
+] as const;
 
 describe("R1178 average-submitter current-loop surfacing", () => {
   it("surfaces the R1177 lab-plus-wearable priority as the current-loop action", async () => {
@@ -99,6 +109,22 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         rowOwnerConfirmationInferredByR1178: false,
         rowOwnerPrivateValuesStored: false,
         rowParsingPerformedByR1178: false,
+        rowOwnerActionRoute: {
+          audience: "ordinary_submitter_roughly_16_50_row_owner",
+          firstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
+          liveChainCommand: R1176_ROW_OWNER_COMMAND,
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          nextAction: "rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
+          productDisplayAuthorized: false,
+          requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST],
+          requiredInputKindIds: [...REQUIRED_INPUT_KINDS],
+          rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+          rowOwnerPrivateValuesStored: false,
+          rowParsingPerformedByR1178: false,
+          safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST],
+          sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+          targetAgeBand: "roughly_16_50",
+        },
         safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST],
         sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
         targetAgeBand: "roughly_16_50",
@@ -111,7 +137,37 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         priorityVisibleInCurrentLoop: true,
+        rowOwnerActionRoute: {
+          firstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
+          rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+        },
       });
+      expect(output.summary.rowOwnerActionRoute.rowOwnerOnlyActions).toEqual([
+        {
+          actionId: "review_r1173_safe_assertion_answer_sheet",
+          command: R1173_COMMAND,
+          rowOwnerOnly: true,
+          storesPrivateDetailsInPacket: false,
+        },
+        {
+          actionId: "review_r1174_safe_next_step_packet",
+          command: R1174_COMMAND,
+          rowOwnerOnly: true,
+          storesPrivateDetailsInPacket: false,
+        },
+        {
+          actionId: "explicitly_run_r1176_live_chain_if_all_safe_assertions_are_true",
+          command: R1176_ROW_OWNER_COMMAND,
+          rowOwnerOnly: true,
+          storesPrivateDetailsInPacket: false,
+        },
+        {
+          actionId: "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
+          command: R1164_COMMAND,
+          rowOwnerOnly: true,
+          storesPrivateDetailsInPacket: false,
+        },
+      ]);
       expect(JSON.stringify(output)).not.toContain(tmp);
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
     } finally {
@@ -136,8 +192,20 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         currentMissingRequirementIds: [],
         minimumFeaturePairConfirmed: true,
         nextAction: "run_r1164_feature_only_research_handoff",
+        rowOwnerActionRoute: {
+          firstRunnableActionId: "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
+          nextAction: "run_r1164_feature_only_research_handoff",
+          rowOwnerActionRouteStatus: "feature_only_research_handoff_ready",
+        },
         topRequirementId: null,
         upstreamR1177Conclusion: "ordinary_average_submitter_priority_packet_ready_for_feature_only_research_handoff",
+      });
+      expect(output.currentLoopSurfacing).toMatchObject({
+        rowOwnerActionRoute: {
+          firstRunnableActionId: "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
+          nextAction: "run_r1164_feature_only_research_handoff",
+          rowOwnerActionRouteStatus: "feature_only_research_handoff_ready",
+        },
       });
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
     } finally {
@@ -168,7 +236,19 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         priorityVisibleInCurrentLoop: false,
         r1076CurrentLoopRecognized: true,
         r1177PriorityPacketRecognized: false,
+        rowOwnerActionRoute: {
+          firstRunnableActionId: null,
+          nextAction: "refresh_r1177_average_submitter_priority_packet",
+          rowOwnerActionRouteStatus: "waiting_on_current_loop_or_priority_packet",
+        },
         topRequirementId: "r1177_average_submitter_priority_packet_missing_or_stale",
+      });
+      expect(output.currentLoopSurfacing).toMatchObject({
+        rowOwnerActionRoute: {
+          firstRunnableActionId: null,
+          nextAction: "refresh_r1177_average_submitter_priority_packet",
+          rowOwnerActionRouteStatus: "waiting_on_current_loop_or_priority_packet",
+        },
       });
       expect(output.inputArtifacts.r1177AverageSubmitterPriorityPacket).toMatchObject({
         artifact: "r1177-ordinary-consumer-average-submitter-priority-packet.latest.json",
@@ -412,12 +492,16 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         firstSubmitterAskIds?: unknown;
         packetId?: unknown;
         prioritizedInputKindIds?: unknown;
+        rowOwnerActionRouteStatus?: unknown;
+        rowOwnerFirstRunnableActionId?: unknown;
       };
       expect(cli).toMatchObject({
         conclusion: "average_submitter_priority_visible_in_current_loop",
         firstSubmitterAskIds: [...FIRST_SUBMITTER_ASKS],
         packetId: "r1178-average-submitter-current-loop-surfacing",
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+        rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+        rowOwnerFirstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
       });
       await expect(stat(path.join(outDir, "r1178-average-submitter-current-loop-surfacing.latest.json"))).resolves.toBeTruthy();
     } finally {
