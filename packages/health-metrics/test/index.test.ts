@@ -59,6 +59,7 @@ import {
   selectMetricValue,
   selectMetricWindowComparison,
   summarizeMurphAgeArchitecture,
+  summarizeMurphAgeOrdinaryLabWearableAggregateEvidence,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
   toPublicMurphAgeCalculatorReport,
@@ -2889,7 +2890,7 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
     riskEffect: "aggregate-estimated",
     sourceRouteId: "cardia-biomarker-activity",
   });
-  const blockedOrdinaryAssessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard({
+  const blockedOrdinaryCard = {
     ...readyOrdinaryCard,
     evaluation: {
       ...readyOrdinaryCard.evaluation,
@@ -2901,7 +2902,8 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
     },
     riskEffect: "not-estimated",
     sourceRouteId: "midus-biomarker-mortality",
-  });
+  };
+  const blockedOrdinaryAssessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(blockedOrdinaryCard);
   assert.equal(blockedOrdinaryAssessment.status, "blocked");
   for (const expectedBlocker of [
     "source_route_not_ordinary_lab_wearable",
@@ -2911,6 +2913,41 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
   ]) {
     assert.equal(blockedOrdinaryAssessment.blockers.includes(expectedBlocker), true, expectedBlocker);
   }
+  const readyHchsCard = buildMurphAgeIncrementEvaluationCard({
+    aggregateMetricDeltas: { brierDelta: -0.0002 },
+    aggregateSample: {
+      evaluatedRowCount: 320,
+      eventCount: 32,
+      minimumCellCount: 16,
+    },
+    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+    candidateBatchId: "ordinary-lab-wearable-aggregate-v1",
+    candidateId: "hchs-sol-biomarker-activity-wearable-shadow-increment",
+    evidenceTier: "external-validation",
+    layer: "wearable-shadow-increment",
+    riskEffect: "aggregate-estimated",
+    sourceRouteId: "hchs-sol-biomarker-activity",
+  });
+  const evidenceSummary = summarizeMurphAgeOrdinaryLabWearableAggregateEvidence([
+    blockedOrdinaryCard,
+    readyHchsCard,
+    readyOrdinaryCard,
+  ]);
+  assert.equal(evidenceSummary.status, "ready");
+  assert.equal(evidenceSummary.readyCardCount, 2);
+  assert.deepEqual(evidenceSummary.readySourceRouteIds, [
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+  ]);
+  assert.deepEqual(evidenceSummary.missingSourceRouteIds.slice(0, 2), [
+    "all-of-us-fitbit-labs-ehr",
+    "nhanes-activity-shadow-lmf",
+  ]);
+  const emptyEvidenceSummary = summarizeMurphAgeOrdinaryLabWearableAggregateEvidence([]);
+  assert.equal(emptyEvidenceSummary.status, "blocked");
+  assert.equal(emptyEvidenceSummary.readyCardCount, 0);
+  assert.equal(emptyEvidenceSummary.readySourceRouteIds.length, 0);
+  assert.equal(emptyEvidenceSummary.missingSourceRouteIds[0], "cardia-biomarker-activity");
 
   const notEstimatedValidation = validateMurphAgeIncrementEvaluationCard({
     ...evidenceCard,

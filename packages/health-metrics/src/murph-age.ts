@@ -947,6 +947,14 @@ export interface MurphAgeOrdinaryLabWearableAggregateEvidenceAssessment {
   warnings: MurphAgeWarning[];
 }
 
+export interface MurphAgeOrdinaryLabWearableAggregateEvidenceSummary {
+  assessments: MurphAgeOrdinaryLabWearableAggregateEvidenceAssessment[];
+  missingSourceRouteIds: MurphAgeSourceRouteId[];
+  readyCardCount: number;
+  readySourceRouteIds: MurphAgeSourceRouteId[];
+  status: MurphAgeOrdinaryLabWearableAggregateEvidenceStatus;
+}
+
 type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
   MurphAgeWearableShadowIncrementPolicy,
   "allowedMetricKeys"
@@ -2247,6 +2255,32 @@ export function assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(
     status: blockers.length === 0 ? "ready" : "blocked",
     validation,
     warnings,
+  };
+}
+
+export function summarizeMurphAgeOrdinaryLabWearableAggregateEvidence(
+  candidates: readonly unknown[],
+): MurphAgeOrdinaryLabWearableAggregateEvidenceSummary {
+  const assessments = candidates.map(assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard);
+  const readyRouteIds = new Set(
+    assessments
+      .filter((assessment) => assessment.status === "ready" && assessment.routeId)
+      .map((assessment) => assessment.routeId),
+  );
+  const ordinaryRoutes = listMurphAgeOrdinaryLabWearableSourceRoutes();
+  const readySourceRouteIds = ordinaryRoutes
+    .map((route) => route.routeId)
+    .filter((routeId) => readyRouteIds.has(routeId));
+  const missingSourceRouteIds = ordinaryRoutes
+    .map((route) => route.routeId)
+    .filter((routeId) => !readyRouteIds.has(routeId));
+
+  return {
+    assessments,
+    missingSourceRouteIds,
+    readyCardCount: assessments.filter((assessment) => assessment.status === "ready").length,
+    readySourceRouteIds,
+    status: readySourceRouteIds.length > 0 ? "ready" : "blocked",
   };
 }
 
