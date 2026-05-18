@@ -78,7 +78,7 @@ export function ProblemSlide() {
       <SlideHeading wide>
         People want to get healthier together.
         <br />
-        Today, it is too hard to make that real.
+        There’s no way to try, track, and learn.
       </SlideHeading>
       <p className="mt-5 max-w-[60ch] text-base leading-[1.7] text-[#635a48]">
         A group chat or cohort can come up with a health challenge in
@@ -165,8 +165,8 @@ export function InsightSlide() {
         motivation.
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        Murph turns health data into a social game: a challenge, a
-        leaderboard, and a reason to show up tomorrow.
+        Murph turns health data into a social loop: a challenge, shared
+        progress, and a reason to show up tomorrow.
       </p>
 
       {/* The contrast: inert dashboard vs motivating challenge */}
@@ -217,7 +217,7 @@ export function InsightSlide() {
           </p>
         </div>
 
-        {/* Right — the challenge: social, warm, hard to ignore */}
+        {/* Right — the challenge: a progress board, not just a ranking */}
         <div className="rounded-2xl border border-[#7a8c6e]/40 bg-[#7a8c6e]/[0.1] p-6">
           <div className="flex items-center justify-between gap-3">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#9fb389]">
@@ -227,34 +227,68 @@ export function InsightSlide() {
               Day 12 of 30
             </span>
           </div>
-          <div className="mt-4 flex items-center gap-1.5">
-            {["P", "M", "D", "S", "Y"].map((initial, index) => (
-              <span
-                key={index}
-                className="flex size-7 items-center justify-center rounded-full bg-[#9fb389]/20 font-mono text-[10px] font-semibold text-[#9fb389]"
-              >
-                {initial}
+
+          {/* You — personal progress on the challenge metric */}
+          <div className="mt-4 rounded-lg bg-[#9fb389]/15 px-4 py-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-[12px] font-medium text-[#f5f0e8]">
+                You
               </span>
-            ))}
-            <span className="ml-1 text-[12px] text-[#e9e2d4]/55">
-              5 friends in
-            </span>
+              <span className="font-serif text-[1.4rem] font-semibold leading-none tabular-nums text-[#9fb389]">
+                +8%
+              </span>
+            </div>
+            <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/55">
+              Deep sleep vs baseline
+            </p>
           </div>
-          <div className="mt-4 flex flex-col gap-1.5">
+
+          {/* Group progress — everyone is moving, not just the winner */}
+          <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
+            Group progress
+          </p>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
             {[
-              { rank: "1", name: "Priya", delta: "+12%", down: false },
-              { rank: "2", name: "You", delta: "+8%", down: false },
-              { rank: "3", name: "Sam", delta: "−2%", down: true },
-            ].map((row, index) => (
+              { label: "people active", value: "5" },
+              { label: "improved", value: "4 of 5" },
+              { label: "avg improvement", value: "+6%" },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-md bg-[#f5f0e8]/[0.04] px-2.5 py-2"
+              >
+                <p className="font-serif text-[15px] font-semibold leading-none tabular-nums text-[#f5f0e8]">
+                  {stat.value}
+                </p>
+                <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.08em] text-[#e9e2d4]/45">
+                  {stat.label}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Progress board — checking in and improving, not ranked */}
+          <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
+            Progress board
+          </p>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {[
+              { name: "Priya", delta: "+12%", down: false, you: false },
+              { name: "You", delta: "+8%", down: false, you: true },
+              { name: "Sam", delta: "−2%", down: true, you: false },
+            ].map((row) => (
               <div
                 key={row.name}
                 className={`flex items-center gap-3 rounded-lg px-3 py-1.5 ${
-                  index === 0 ? "bg-[#9fb389]/15" : "bg-[#f5f0e8]/[0.04]"
+                  row.you ? "bg-[#9fb389]/15" : "bg-[#f5f0e8]/[0.04]"
                 }`}
               >
-                <span className="font-serif text-[14px] font-semibold tabular-nums text-[#f5f0e8]">
-                  {row.rank}
-                </span>
+                <span
+                  aria-hidden="true"
+                  className={`size-1.5 rounded-full ${
+                    row.down ? "bg-[#e9e2d4]/30" : "bg-[#9fb389]"
+                  }`}
+                />
                 <span className="flex-1 text-[13px] font-medium text-[#f5f0e8]">
                   {row.name}
                 </span>
@@ -268,16 +302,12 @@ export function InsightSlide() {
               </div>
             ))}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="rounded-md bg-[#9fb389]/15 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#9fb389]">
-              Loser buys dinner
+
+          <p className="mt-4 flex items-center gap-2 text-[12px] text-[#e9e2d4]/75">
+            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9fb389]">
+              Stake
             </span>
-            <span className="rounded-md bg-[#f5f0e8]/[0.06] px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/55">
-              Leaderboard posts 8am
-            </span>
-          </div>
-          <p className="mt-4 text-[13px] leading-[1.5] text-[#e9e2d4]/75">
-            A reason to show up tomorrow.
+            Loser buys dinner
           </p>
         </div>
       </div>
