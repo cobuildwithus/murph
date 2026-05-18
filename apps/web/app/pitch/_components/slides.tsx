@@ -292,7 +292,7 @@ export function InsightSlide() {
             <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9fb389]">
               Stake
             </span>
-            Loser buys dinner
+            Last place buys dinner
           </p>
         </div>
       </div>
@@ -670,7 +670,186 @@ export function ProductSlide() {
   );
 }
 
-/* ━━━ 05 · HOW IT SPREADS ━━━ */
+/* ━━━ 05 · EXAMPLE EXPERIMENT ━━━ */
+
+// Panel one — the protocol being run, as label/value spec rows.
+const PROTOCOL_SPEC = [
+  { label: "Cadence", value: "3× / week" },
+  { label: "Length", value: "21 days" },
+  { label: "Session", value: "15–20 min" },
+  { label: "Baseline", value: "7 days" },
+] as const;
+
+// Panel three — Will's real Finnish-sauna run, measured against his
+// locked baseline. Every delta is an improvement, so all read sage.
+const WILL_RESULTS = [
+  {
+    label: "Resting heart rate",
+    value: "45.8",
+    unit: "bpm",
+    delta: "↓ 2 bpm",
+    from: "from 47.8",
+  },
+  {
+    label: "HRV rMSSD",
+    value: "69.4",
+    unit: "ms",
+    delta: "↑ 8.7 ms",
+    from: "from 60.7",
+  },
+  {
+    label: "Deep sleep",
+    value: "106.9",
+    unit: "min",
+    delta: "↑ 1.8 min",
+    from: "from 105.2",
+  },
+] as const;
+
+export function ExperimentSlide() {
+  return (
+    <Slide index={5} tone="dark" label="Example experiment">
+      <Eyebrow dark>Example Experiment</Eyebrow>
+      <SlideHeading dark wide>
+        Murph turns one protocol into
+        <br />compounding health outcomes.
+      </SlideHeading>
+      <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#e9e2d4]/70">
+        A challenge is what gets someone started. From there, Murph locks
+        a baseline, tracks every session, measures the change, and saves
+        the result to their health vault.
+      </p>
+
+      {/* The run, end to end: protocol → adherence → measured result */}
+      <div className="mt-9 grid gap-3 lg:grid-cols-[minmax(0,0.92fr)_24px_minmax(0,0.92fr)_24px_minmax(0,1.16fr)] lg:items-stretch">
+        {/* 1 — the protocol being run */}
+        <div className="flex flex-col rounded-xl border border-[#f5f0e8]/12 bg-[#f5f0e8]/[0.04] p-5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/55">
+            The protocol
+          </p>
+          <p className="mt-4 font-serif text-[1.3rem] font-semibold leading-tight text-[#f5f0e8]">
+            Finnish dry sauna
+          </p>
+          <div className="mt-3 flex flex-col">
+            {PROTOCOL_SPEC.map((row, index, rows) => (
+              <div
+                key={row.label}
+                className={`flex items-center justify-between py-2.5 ${
+                  index < rows.length - 1
+                    ? "border-b border-[#f5f0e8]/10"
+                    : ""
+                }`}
+              >
+                <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
+                  {row.label}
+                </span>
+                <span className="text-[13px] font-medium text-[#f5f0e8]">
+                  {row.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <FlowConnector />
+
+        {/* 2 — the run: baseline locked, every session tracked */}
+        <div className="flex flex-col rounded-xl border border-[#f5f0e8]/12 bg-[#f5f0e8]/[0.04] p-5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/55">
+            During the run
+          </p>
+
+          {/* Phase progress — baseline locked, protocol active */}
+          <div className="mt-4 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.1em]">
+            <span className="text-[#9fb389]">Baseline ✓</span>
+            <span className="text-[#e9e2d4]/25">·</span>
+            <span className="font-semibold text-[#f5f0e8]">Active, day 16</span>
+            <span className="text-[#e9e2d4]/25">·</span>
+            <span className="text-[#e9e2d4]/35">Analysis</span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#f5f0e8]/10">
+            <div className="h-full w-[76%] rounded-full bg-[#9fb389]" />
+          </div>
+
+          {/* Adherence — one segment per scheduled session */}
+          <div className="mt-5 flex items-center justify-between">
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
+              Adherence
+            </span>
+            <span className="text-[12px] text-[#e9e2d4]/70">
+              6 of 9 sessions
+            </span>
+          </div>
+          <div className="mt-2 flex gap-1.5">
+            {Array.from({ length: 9 }, (_, index) => (
+              <span
+                key={index}
+                aria-hidden="true"
+                className={`h-2 flex-1 rounded-full ${
+                  index < 6 ? "bg-[#9fb389]" : "bg-[#f5f0e8]/12"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+
+        <FlowConnector />
+
+        {/* 3 — Will's real measured results, saved to his vault */}
+        <div className="flex flex-col rounded-xl border border-[#7a8c6e]/45 bg-[#7a8c6e]/[0.1] p-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9fb389]">
+              Will&rsquo;s actual results*
+            </p>
+            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/45">
+              vs baseline
+            </span>
+          </div>
+          <div className="mt-4 flex flex-col gap-2">
+            {WILL_RESULTS.map((result) => (
+              <div
+                key={result.label}
+                className="rounded-lg bg-[#f5f0e8]/[0.05] px-3.5 py-3"
+              >
+                <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/50">
+                  {result.label}
+                </p>
+                <div className="mt-1.5 flex items-center justify-between gap-3">
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="font-serif text-[1.75rem] font-semibold leading-none text-[#f5f0e8]">
+                      {result.value}
+                    </span>
+                    <span className="text-[11px] text-[#e9e2d4]/50">
+                      {result.unit}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-full bg-[#9fb389]/15 px-2 py-0.5 font-mono text-[10px] font-medium text-[#9fb389]">
+                      {result.delta}
+                    </span>
+                    <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-[#e9e2d4]/40">
+                      {result.from}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-4 text-[12px] leading-[1.5] text-[#e9e2d4]/45">
+        * Actual results from Will&rsquo;s recent sauna experiment
+      </p>
+
+      <p className="mt-8 font-serif text-[clamp(1.3rem,2.4vw,1.8rem)] italic leading-[1.3] text-[#f5f0e8]">
+        Challenges come and go. The results stack up.
+      </p>
+    </Slide>
+  );
+}
+
+/* ━━━ 06 · HOW IT SPREADS ━━━ */
 
 // The two growth loops shown on the spread slide. Each renders as a
 // numbered card; the final `repeat` step loops back to the first.
@@ -697,7 +876,7 @@ const SPREAD_LOOPS = [
 
 export function SpreadSlide() {
   return (
-    <Slide index={5} tone="cream" label="How it spreads">
+    <Slide index={6} tone="cream" label="How it spreads">
       <Eyebrow>How It Spreads</Eyebrow>
       <SlideHeading>
         Murph spreads through private groups and public cohorts.
@@ -778,10 +957,10 @@ export function SpreadSlide() {
   );
 }
 
-/* ━━━ 06 · EARLY VALIDATION ━━━ */
+/* ━━━ 07 · EARLY VALIDATION ━━━ */
 export function ValidationSlide() {
   return (
-    <Slide index={6} tone="sand" label="Progress">
+    <Slide index={7} tone="sand" label="Progress">
       <Eyebrow>Progress</Eyebrow>
       <SlideHeading>
         The product is live.
@@ -854,10 +1033,10 @@ export function ValidationSlide() {
   );
 }
 
-/* ━━━ 07 · COMPETITION ━━━ */
+/* ━━━ 08 · COMPETITION ━━━ */
 export function CompetitionSlide() {
   return (
-    <Slide index={7} tone="cream" label="Competition">
+    <Slide index={8} tone="cream" label="Competition">
       <Eyebrow>Competition</Eyebrow>
       <SlideHeading wide>
         Devices track individuals.
@@ -880,10 +1059,10 @@ export function CompetitionSlide() {
   );
 }
 
-/* ━━━ 08 · MOAT ━━━ */
+/* ━━━ 09 · MOAT ━━━ */
 export function MoatSlide() {
   return (
-    <Slide index={8} tone="dark" label="The moat">
+    <Slide index={9} tone="dark" label="The moat">
       <Eyebrow dark>The Moat</Eyebrow>
       <SlideHeading dark>
         Every challenge teaches Murph what works.
@@ -1012,7 +1191,7 @@ export function MoatSlide() {
   );
 }
 
-/* ━━━ 09 · TEAM / ROADMAP ━━━ */
+/* ━━━ 10 · TEAM / ROADMAP ━━━ */
 const TEAM_STATS = [
   { label: "products to product-market fit", value: "5" },
   { label: "monthly active users", value: "50K+" },
@@ -1025,7 +1204,7 @@ const FOUNDERS = [
   {
     name: "Will",
     role: "Co-founder & CEO",
-    image: "/team/will-6.png",
+    image: "/team/will.png",
     github: "https://github.com/rocketman-21",
     achievements: [
       "Co-founded MomentRanks, 250k+ MAUs, raised ~$6M",
@@ -1046,7 +1225,7 @@ const FOUNDERS = [
       "Founded iGol.pl, one of Poland's most popular football sites",
       "Built the MVP that secured a London fintech its FCA license",
       "Co-founded a creative studio in Poland, leading 5-7 developers across 10+ projects",
-      "Repeat founder — launched SaaS products across self-funded, DAO-funded, and VC-backed ventures",
+      "Built TeamBuddy, a Slack app for remote team building and social connection",
       "Built products at ustwo, the Apple Design Award-winning studio",
       "MSc in Computer Science · 18 years building software",
     ],
@@ -1057,7 +1236,7 @@ export function TeamSlide() {
   const [activeFounder, setActiveFounder] = useState<string | null>(null);
   const active = FOUNDERS.find((founder) => founder.name === activeFounder);
   return (
-    <Slide index={9} tone="dark" label="Team and roadmap">
+    <Slide index={10} tone="dark" label="Team and roadmap">
       <Eyebrow dark>Team &amp; Roadmap</Eyebrow>
       <SlideHeading dark>
         Built by founders who ship social coordination products.
@@ -1132,10 +1311,10 @@ export function TeamSlide() {
   );
 }
 
-/* ━━━ 10 · THE ASK ━━━ */
+/* ━━━ 11 · THE ASK ━━━ */
 export function AskSlide() {
   return (
-    <Slide index={10} tone="dark" label="The ask">
+    <Slide index={11} tone="dark" label="The ask">
       <div className="mx-auto max-w-[760px] text-center">
         <Eyebrow dark>The Ask</Eyebrow>
         <h2 className="mx-auto mt-6 max-w-[20ch] font-serif text-[clamp(2.2rem,4.6vw,3.6rem)] font-semibold leading-[1.08] tracking-[-0.035em] text-[#f5f0e8]">
@@ -1203,7 +1382,7 @@ export function AskSlide() {
   );
 }
 
-// Slide 09: a clickable founder card. Selecting it swaps the team
+// Slide 10: a clickable founder card. Selecting it swaps the team
 // stats below for that founder's achievements.
 function FounderCard({
   name,
@@ -1252,7 +1431,7 @@ function profileHandle(url: string): string {
   return url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
 }
 
-// Slide 09: the panel that replaces the team stats while a founder is
+// Slide 10: the panel that replaces the team stats while a founder is
 // selected, listing that founder's achievements and profile links.
 function FounderAchievements({
   founder,

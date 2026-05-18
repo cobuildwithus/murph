@@ -228,7 +228,7 @@ export function PivotCard({
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ MURPH LOOP ━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-// Slide 07: the product loop. Every source feeds a private health
+// Slide 08: the product loop. Every source feeds a private health
 // vault you can chat with, which powers habit coordination, which
 // teaches Murph what works — for you and for people like you.
 const MURPH_LOOP = [
