@@ -31,6 +31,8 @@ export const MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION =
   "murph.age.wearable-shadow-result-card.v1" as const;
 export const MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION =
   "murph.age.increment-evaluation-card.v1" as const;
+export const MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SCHEMA_VERSION =
+  "murph.age.ordinary-lab-wearable-evidence-template.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
   "murph.age.wearable-bridge-feature.v1" as const;
 export const MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION = "murph.age.model-card-artifact.v1" as const;
@@ -937,6 +939,35 @@ export interface MurphAgeIncrementEvaluationCardBuildInput {
   sourceRouteId: MurphAgeSourceRouteId;
 }
 
+export type MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateDeltaField =
+  keyof MurphAgeIncrementEvaluationAggregateMetricDeltas;
+export type MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateSampleField =
+  keyof MurphAgeIncrementEvaluationAggregateSampleSummary;
+
+export interface MurphAgeOrdinaryLabWearableAggregateEvidenceTemplate {
+  acceptedAggregateMetricDeltaFields: MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateDeltaField[];
+  anchorCardId: MurphAgeScoreBearingCardId;
+  candidateBatchId: string;
+  candidateId: string;
+  flatteningAuthorized: false;
+  layer: MurphAgeIncrementEvaluationLayer;
+  outputBoundary: MurphAgeIncrementEvaluationOutputBoundary;
+  productAuthorized: false;
+  requiredAggregateSampleFields: MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateSampleField[];
+  riskEffect: "aggregate-estimated";
+  schemaVersion: typeof MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SCHEMA_VERSION;
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  sourceRouteId: MurphAgeSourceRouteId;
+}
+
+export interface MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateListInput {
+  anchorCardId?: MurphAgeScoreBearingCardId;
+  candidateBatchId?: string;
+  layers?: readonly MurphAgeIncrementEvaluationLayer[];
+  sourceRouteIds?: readonly MurphAgeSourceRouteId[];
+}
+
 export type MurphAgeOrdinaryLabWearableAggregateEvidenceStatus = "blocked" | "ready";
 
 export interface MurphAgeOrdinaryLabWearableAggregateEvidenceAssessment {
@@ -1307,6 +1338,21 @@ const MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY = {
   sourceTextExportAllowed: false,
   splitMembershipExportAllowed: false,
 } satisfies MurphAgeIncrementEvaluationOutputBoundary;
+
+const MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_DELTA_FIELDS = [
+  "aucDelta",
+  "brierDelta",
+  "calibrationInterceptDelta",
+  "calibrationSlopeDelta",
+  "cIndexDelta",
+  "logLossDelta",
+] as const satisfies readonly MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateDeltaField[];
+
+const MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SAMPLE_FIELDS = [
+  "evaluatedRowCount",
+  "eventCount",
+  "minimumCellCount",
+] as const satisfies readonly MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateSampleField[];
 
 const MURPH_AGE_WEARABLE_SHADOW_ANCHOR_CARD_IDS = [
   "r399_nhis_proxy_10y_acm_research",
@@ -2170,6 +2216,46 @@ export function buildMurphAgeIncrementEvaluationCard(
     scoreContributionAuthorized: false,
     sourceRouteId: input.sourceRouteId,
   };
+}
+
+export function listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates(
+  input: MurphAgeOrdinaryLabWearableAggregateEvidenceTemplateListInput = {},
+): MurphAgeOrdinaryLabWearableAggregateEvidenceTemplate[] {
+  const requestedRouteIds = input.sourceRouteIds ? new Set(input.sourceRouteIds) : null;
+  const requestedLayers = input.layers ? new Set(input.layers) : null;
+  const anchorCardId = input.anchorCardId ?? "r399_nhis_proxy_10y_acm_research";
+  const candidateBatchId = input.candidateBatchId ?? "ordinary-lab-wearable-aggregate-v1";
+  if (!isNonEmptySimpleKey(candidateBatchId)) {
+    throw new TypeError("Ordinary lab/wearable evidence template candidate batch id must be a non-empty simple key.");
+  }
+
+  return listMurphAgeOrdinaryLabWearableSourceRoutes()
+    .filter((route) => !requestedRouteIds || requestedRouteIds.has(route.routeId))
+    .flatMap((route) =>
+      MURPH_AGE_INCREMENT_EVALUATION_LAYERS
+        .filter((layer) => route.layers.includes(layer))
+        .filter((layer) => !requestedLayers || requestedLayers.has(layer))
+        .map((layer) => ({
+          acceptedAggregateMetricDeltaFields: [
+            ...MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_DELTA_FIELDS,
+          ],
+          anchorCardId,
+          candidateBatchId,
+          candidateId: `${route.routeId}-${layer}`,
+          flatteningAuthorized: false,
+          layer,
+          outputBoundary: { ...MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY },
+          productAuthorized: false,
+          requiredAggregateSampleFields: [
+            ...MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SAMPLE_FIELDS,
+          ],
+          riskEffect: "aggregate-estimated",
+          schemaVersion: MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SCHEMA_VERSION,
+          scoreBearing: false,
+          scoreContributionAuthorized: false,
+          sourceRouteId: route.routeId,
+        }))
+    );
 }
 
 export function assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(
