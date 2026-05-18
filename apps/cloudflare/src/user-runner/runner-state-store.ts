@@ -339,6 +339,11 @@ export class RunnerStateStore {
 
   async clearWriteFenceIfCurrent(input: {
     attemptId: string;
+    failure?: {
+      backoffUntil?: string | null;
+      error: unknown;
+      failedAt?: string | null;
+    };
     generation: string;
     userId: string;
     wakeAt?: string | null;
@@ -359,6 +364,14 @@ export class RunnerStateStore {
     }
 
     this.clearActiveRunMetaSync(meta);
+    if (input.failure) {
+      const failedAt = normalizeIsoDateOrNull(input.failure.failedAt ?? null)
+        ?? new Date().toISOString();
+      meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
+      meta.last_error_at = failedAt;
+      meta.last_error_code = deriveHostedExecutionErrorCode(input.failure.error);
+      meta.backoff_until = normalizeIsoDateOrNull(input.failure.backoffUntil ?? null);
+    }
     meta.wake_at = normalizePreferredWakeAt(input.wakeAt ?? new Date().toISOString())
       ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
@@ -493,6 +506,18 @@ export class RunnerStateStore {
     meta.last_error_at = lastErrorAt;
     meta.last_error_code = errorCode;
     meta.wake_at = meta.wake_at ?? lastErrorAt;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async parkAfterRetryCap(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    if (meta.active_attempt_id) {
+      return this.readStateFromMetaSync(meta);
+    }
+
+    meta.backoff_until = null;
+    meta.wake_at = null;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
   }

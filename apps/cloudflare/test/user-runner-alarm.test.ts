@@ -1357,6 +1357,242 @@ describe("HostedUserRunner wake scheduling", () => {
     );
   });
 
+  it("parks without another alarm after repeated runtime wake failures reach the cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const secondRetryAt = "2026-04-27T00:00:15.000Z";
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [
+        new Error("container failed once"),
+        new Error("container failed twice"),
+        new Error("container failed three times"),
+      ],
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await flushWaitUntil();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: RETRY_AT,
+      failure_count: 1,
+      wake_at: FIXED_NOW,
+    });
+
+    vi.setSystemTime(new Date(RETRY_AT));
+    await runner.alarm();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: secondRetryAt,
+      failure_count: 2,
+      wake_at: RETRY_AT,
+    });
+    expect(alarms.at(-1)).toBe(secondRetryAt);
+
+    vi.setSystemTime(new Date(secondRetryAt));
+    await runner.alarm();
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 3,
+      last_error_code: "runtime_error",
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          failureCount: 3,
+          maxEventAttempts: 3,
+          retryCapReason: "runtime-wake-failure",
+        }),
+        message: "Hosted runner parked after retry cap.",
+        phase: "scheduled",
+      }),
+    );
+  });
+
+  it("counts stale active write-fence replacement toward the retry cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const wakeRuntime = vi.fn(async () => ({
+      kind: "unknown" as const,
+      reason: "container-rpc-error" as const,
+    }));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "9" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?,
+           failure_count = ?
+       WHERE singleton = 1`,
+      "attempt_unknown",
+      2,
+      "runtime",
+      "2026-04-26T23:59:44.000Z",
+      "2026-04-27T00:01:00.000Z",
+      "7",
+      2,
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: false,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "retry-scheduled",
+      nextAlarmAt: null,
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 3,
+      last_error_at: FIXED_NOW,
+      last_error_code: "runtime_error",
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("does not let passive mailbox backlog rechecks bypass the retry cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET failure_count = ?, last_error_at = ?, last_error_code = ?
+       WHERE singleton = 1`,
+      3,
+      FIXED_NOW,
+      "runtime_error",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: false,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "retry-scheduled",
+      nextAlarmAt: null,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 3,
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("does not let status-read rechecks bypass the retry cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead: () => {
+        throw new Error("status unavailable");
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET failure_count = ?, last_error_at = ?, last_error_code = ?
+       WHERE singleton = 1`,
+      3,
+      FIXED_NOW,
+      "runtime_error",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: false,
+      immediateDriveStarted: false,
+      kind: "retry-scheduled",
+      nextAlarmAt: null,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: null,
+      failure_count: 3,
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("parks detached local ensure failures after the retry cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let statusReadCount = 0;
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead: () => {
+        statusReadCount += 1;
+        if (statusReadCount > 1) {
+          throw new Error("status unavailable");
+        }
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET failure_count = ?, last_error_at = ?, last_error_code = ?
+       WHERE singleton = 1`,
+      2,
+      FIXED_NOW,
+      "runtime_error",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      immediateDriveStarted: true,
+    });
+    await expect(flushWaitUntil()).rejects.toThrow("status unavailable");
+    await Promise.resolve();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 3,
+      last_error_code: "runtime_error",
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          failureCount: 3,
+          maxEventAttempts: 3,
+          retryCapReason: "detached-ensure-failure",
+        }),
+        message: "Hosted runner parked after retry cap.",
+        phase: "scheduled",
+      }),
+    );
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const { alarms, runner, sql } = createRunnerHarness({
@@ -1860,6 +2096,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
   backoff_until: string | null;
   failure_count: number;
   last_error_at: string | null;
+  last_error_code: string | null;
   last_invocation_at: string | null;
   wake_at: string | null;
 } {
@@ -1870,6 +2107,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
     backoff_until: string | null;
     failure_count: number;
     last_error_at: string | null;
+    last_error_code: string | null;
     last_invocation_at: string | null;
     wake_at: string | null;
   }>(
@@ -1879,6 +2117,7 @@ function readRunnerMeta(sql: TestSqlStorageLike): {
             backoff_until,
             failure_count,
             last_error_at,
+            last_error_code,
             last_invocation_at,
             wake_at
      FROM runner_meta

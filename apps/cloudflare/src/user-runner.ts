@@ -73,6 +73,7 @@ import type {
   DurableObjectStateLike,
   RunnerStateRecord,
 } from "./user-runner/types.js";
+import { computeRetryDelayMs } from "./user-runner/types.js";
 import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
@@ -550,6 +551,18 @@ export class HostedUserRunner {
     }
 
     const record = demand.record;
+    const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+      record,
+      reason: "progress-demand",
+    });
+    if (parkedByRetryCap) {
+      return finish({
+        containerResult: null,
+        demand,
+        kind: "retry-scheduled",
+        record: parkedByRetryCap,
+      });
+    }
 
     if (record.writeFence) {
       const containerResult = await this.ensureActiveRuntimeProcessing({
@@ -628,8 +641,16 @@ export class HostedUserRunner {
       }
 
       const previousFence = record.writeFence;
+      const preemptionError = new Error(
+        "Hosted runner active write fence was replaced after liveness could not be confirmed.",
+      );
       const preempted = await this.stateStore.clearWriteFenceIfCurrent({
         attemptId: previousFence.attemptId,
+        failure: {
+          backoffUntil: null,
+          error: preemptionError,
+          failedAt: new Date().toISOString(),
+        },
         generation: String(previousFence.generation),
         userId: record.userId,
         wakeAt: new Date().toISOString(),
@@ -641,6 +662,19 @@ export class HostedUserRunner {
       }
 
       this.retireCurrentEnsurePromise();
+      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+        error: preemptionError,
+        reason: "active-fence-replacement",
+        record: preempted.record,
+      });
+      if (parkedByRetryCap) {
+        return finish({
+          containerResult,
+          demand,
+          kind: "retry-scheduled",
+          record: parkedByRetryCap,
+        });
+      }
       await this.syncAlarm(preempted.record);
 
       const localEnsureInFlight = this.kickLocalEnsure({
@@ -837,13 +871,23 @@ export class HostedUserRunner {
   private async scheduleShortProgressRecheck(input: {
     respectBackoff?: boolean;
   } = {}): Promise<{
-    nextAlarmAt: string;
+    nextAlarmAt: string | null;
     record: RunnerStateRecord;
   }> {
     const preferredWakeAt = new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString();
     const record = await this.stateStore.markWakePending({
       preferredWakeAt,
     });
+    const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+      record,
+      reason: "progress-recheck",
+    });
+    if (parkedByRetryCap) {
+      return {
+        nextAlarmAt: readRunnerStateAlarmAt(parkedByRetryCap),
+        record: parkedByRetryCap,
+      };
+    }
     const nextAlarmAt = input.respectBackoff === true
       ? readRunnerRuntimeDueAt(record) ?? preferredWakeAt
       : preferredWakeAt;
@@ -987,6 +1031,30 @@ export class HostedUserRunner {
           userId: null,
         });
         return lastResult;
+      }
+
+      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+        record: demand.record,
+        reason: "local-ensure-loop",
+      });
+      if (parkedByRetryCap) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildRunnerRecordTimingLogDetails(parkedByRetryCap),
+            localEnsureDurationMs: Date.now() - loopStartedAt,
+            localEnsureFinishReason: "retry-cap-reached",
+            localEnsureIteration: loopIteration,
+            localEnsureReason: input.reason,
+          },
+          message: "Hosted runner local ensure loop completed.",
+          phase: "scheduled",
+          userId: null,
+        });
+        return {
+          nextWakeAt: readRunnerStateAlarmAt(parkedByRetryCap),
+          status: "scheduled",
+        };
       }
 
       if (demand.record.writeFence) {
@@ -1216,7 +1284,7 @@ export class HostedUserRunner {
       });
       return reconciledResult;
     } catch (error) {
-      const retryDelayMs = this.resolveRetryDelayMs();
+      const retryDelayMs = this.resolveRetryDelayMs(initialRecord.failureCount + 1);
       const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
       const failed = await this.stateStore.clearWriteFenceAfterFailure({
         error,
@@ -1230,6 +1298,8 @@ export class HostedUserRunner {
           component: "hosted.runner",
           details: {
             ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            failureCount: failed.record.failureCount,
+            maxEventAttempts: this.env.maxEventAttempts,
             workspaceAttemptId: token.attemptId,
             workspaceWriteFenceGeneration: token.generation,
             workspaceReason: input.reason,
@@ -1247,10 +1317,23 @@ export class HostedUserRunner {
           status: "scheduled",
         };
       }
+      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+        error,
+        reason: "runtime-wake-failure",
+        record: failed.record,
+      });
+      if (parkedByRetryCap) {
+        return {
+          nextWakeAt: readRunnerStateAlarmAt(parkedByRetryCap),
+          status: "scheduled",
+        };
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          failureCount: failed.record.failureCount,
+          maxEventAttempts: this.env.maxEventAttempts,
           workspaceAttemptId: token.attemptId,
           workspaceWriteFenceGeneration: token.generation,
           workspaceReason: input.reason,
@@ -1491,22 +1574,83 @@ export class HostedUserRunner {
     await this.state.storage.setAlarm(new Date(nextAlarmAt));
   }
 
+  private async parkRunnerAfterRetryCap(input: {
+    error?: unknown;
+    reason: string;
+    record: RunnerStateRecord;
+  }): Promise<RunnerStateRecord> {
+    const parked = input.record.writeFence
+      ? input.record
+      : await this.stateStore.parkAfterRetryCap();
+    await this.syncAlarm(parked);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...buildHostedRunnerMetadataOnlyErrorDetails(input.error),
+        activeWriteFencePresent: parked.writeFence !== null,
+        failureCount: parked.failureCount,
+        lastErrorCode: parked.lastErrorCode,
+        maxEventAttempts: this.env.maxEventAttempts,
+        retryCapReason: input.reason,
+      },
+      level: "warn",
+      message: "Hosted runner parked after retry cap.",
+      phase: "scheduled",
+      userId: null,
+    });
+    return parked;
+  }
+
+  private async parkIfRunnerRetryCapReached(input: {
+    error?: unknown;
+    reason: string;
+    record: RunnerStateRecord;
+  }): Promise<RunnerStateRecord | null> {
+    if (
+      input.record.writeFence
+      || !isRunnerRetryCapReached(input.record, this.env.maxEventAttempts)
+    ) {
+      return null;
+    }
+
+    return this.parkRunnerAfterRetryCap(input);
+  }
+
   private async scheduleRetryAfterFailure(error: unknown): Promise<void> {
     try {
       if (error instanceof HostedRunnerRetryAlreadyRecordedError) {
+        const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+          error,
+          reason: "retry-already-recorded",
+          record: error.record,
+        });
+        if (parkedByRetryCap) {
+          return;
+        }
         await this.syncAlarm(error.record);
         return;
       }
-      const retryDelayMs = this.resolveRetryDelayMs();
+      const currentRecord = await this.stateStore.readState();
+      const retryDelayMs = this.resolveRetryDelayMs(currentRecord.failureCount + 1);
       const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
       const record = await this.stateStore.scheduleRetry({
         error,
         retryAt,
       });
+      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
+        error,
+        reason: "detached-ensure-failure",
+        record,
+      });
+      if (parkedByRetryCap) {
+        return;
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          failureCount: record.failureCount,
+          maxEventAttempts: this.env.maxEventAttempts,
           runtimeRetryDelayMs: retryDelayMs,
           runtimeRetryAt: retryAt,
         },
@@ -1528,8 +1672,11 @@ export class HostedUserRunner {
     }
   }
 
-  private resolveRetryDelayMs(): number {
-    return Math.max(IMMEDIATE_WAKE_RETRY_DELAY_MS, this.env.retryDelayMs);
+  private resolveRetryDelayMs(attempts: number): number {
+    return computeRetryDelayMs(
+      Math.max(IMMEDIATE_WAKE_RETRY_DELAY_MS, this.env.retryDelayMs),
+      attempts,
+    );
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -1924,6 +2071,13 @@ function isRunnerBackoffActive(record: RunnerStateRecord, nowMs: number): boolea
   return Number.isFinite(backoffUntilMs) && backoffUntilMs > nowMs;
 }
 
+function isRunnerRetryCapReached(
+  record: RunnerStateRecord,
+  maxEventAttempts: number,
+): boolean {
+  return record.failureCount >= Math.max(1, maxEventAttempts);
+}
+
 function earliestIsoDate(left: string | null, right: string | null): string | null {
   if (!left) {
     return right;
@@ -2120,6 +2274,8 @@ function buildRunnerRecordTimingLogDetails(
     activeWriteFencePresent: writeFence !== null,
     activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
     backoffActive: isRunnerBackoffActive(record, nowMs),
+    failureCount: record.failureCount,
+    lastErrorCode: record.lastErrorCode,
     runtimeDueAt,
     runtimeDuePresent: runtimeDueAt !== null,
     wakePending: record.wakePending,
