@@ -6,6 +6,7 @@ import { DeckChrome, TONES, TOTAL } from "./_components/primitives";
 import {
   AskSlide,
   CompetitionSlide,
+  ExperimentSlide,
   InsightSlide,
   MoatSlide,
   ProblemSlide,
@@ -97,6 +98,7 @@ export function PitchDeck() {
       <InsightSlide />
       <WhyNowSlide />
       <ProductSlide />
+      <ExperimentSlide />
       <SpreadSlide />
       <ValidationSlide />
       <CompetitionSlide />
