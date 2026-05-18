@@ -45,6 +45,8 @@ const R1173_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1173-ordinary-consumer-safe-assertion-answer-sheet.ts";
 const R1176_COMMAND =
   "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true pnpm exec tsx scripts/murph-age/r1176-r1172-r1165-row-owner-safe-assertion-chain-runner.ts";
+const R1164_COMMAND =
+  "MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH=<r1163-runner.json> pnpm exec tsx scripts/murph-age/r1164-ordinary-consumer-feature-only-research-handoff.ts";
 
 describe("R1179 average submitter objective gap audit", () => {
   it("audits the current ordinary 16-50 lab-plus-wearable gap without inferring row-owner evidence", async () => {
@@ -83,6 +85,7 @@ describe("R1179 average submitter objective gap audit", () => {
         rowOwnerConfirmationInferredByR1179: false,
         rowOwnerPrivateValuesStored: false,
         rowParsingPerformedByR1179: false,
+        safeCurrentLoopCommandVisible: true,
         safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST],
         sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
         targetAgeBand: "roughly_16_50",
@@ -98,6 +101,7 @@ describe("R1179 average submitter objective gap audit", () => {
         { requirementId: "ordinary_16_50_priority_selected", status: "satisfied" },
         { requirementId: "minimum_lab_wearable_pair_visible", status: "satisfied" },
         { requirementId: "row_owner_action_route_visible", status: "satisfied" },
+        { requirementId: "safe_current_loop_command_visible", status: "satisfied" },
         { requirementId: "safe_assertion_answer_sheet_available", status: "satisfied" },
         { requirementId: "safe_next_step_packet_available", status: "satisfied" },
         { requirementId: "r1176_live_chain_available", status: "satisfied" },
@@ -107,6 +111,84 @@ describe("R1179 average submitter objective gap audit", () => {
         { requirementId: "product_display_blocked_until_validation", status: "satisfied" },
       ]);
       expect(JSON.stringify(output)).not.toContain(tmp);
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("blocks completion auditing when R1178 points the waiting current loop at the auto-confirm runner", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-r1178-command-gate-"));
+    try {
+      const paths = await writeInputs(tmp, { confirmed: false, realMetrics: false });
+      const r1178 = await readJsonObject(paths.r1178Path);
+      const summary = recordAt(r1178, "summary");
+      const currentLoopSurfacing = recordAt(r1178, "currentLoopSurfacing");
+      summary.currentLoopCommand = R1176_COMMAND;
+      currentLoopSurfacing.currentLoopCommand = R1176_COMMAND;
+      await writeFile(paths.r1178Path, `${JSON.stringify(r1178)}\n`);
+
+      const { output } = await runR1179AverageSubmitterObjectiveGapAudit({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        ...paths,
+      });
+
+      expect(output.summary).toMatchObject({
+        blockedRequirementIds: [
+          "safe_current_loop_command_visible",
+          "row_owner_safe_assertion_confirmed",
+          "feature_only_research_handoff_ready",
+          "real_lab_wearable_route_metrics_recorded",
+        ],
+        firstBlockedRequirementId: "safe_current_loop_command_visible",
+        goalAchieved: false,
+        nextAction: "refresh_r1178_current_loop_surfacing",
+        readyToMarkComplete: false,
+        rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+        safeCurrentLoopCommandVisible: false,
+      });
+      expect(output.objectiveGapAudit.requirementStatuses.find(
+        (entry) => entry.requirementId === "safe_current_loop_command_visible",
+      )).toMatchObject({
+        evidenceArtifactIds: ["r1178-average-submitter-current-loop-surfacing"],
+        nextAction: "refresh_r1178_current_loop_surfacing",
+        status: "blocked",
+      });
+      expect(output.summary.nextActionCommand).toBe(
+        "pnpm exec tsx scripts/murph-age/r1178-average-submitter-current-loop-surfacing.ts",
+      );
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("blocks completion auditing when R1178 current loop command fields disagree", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-r1178-command-mismatch-"));
+    try {
+      const paths = await writeInputs(tmp, { confirmed: false, realMetrics: false });
+      const r1178 = await readJsonObject(paths.r1178Path);
+      const currentLoopSurfacing = recordAt(r1178, "currentLoopSurfacing");
+      currentLoopSurfacing.currentLoopCommand = R1164_COMMAND;
+      await writeFile(paths.r1178Path, `${JSON.stringify(r1178)}\n`);
+
+      const { output } = await runR1179AverageSubmitterObjectiveGapAudit({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        ...paths,
+      });
+
+      expect(output.summary).toMatchObject({
+        firstBlockedRequirementId: "safe_current_loop_command_visible",
+        nextAction: "refresh_r1178_current_loop_surfacing",
+        safeCurrentLoopCommandVisible: false,
+      });
+      expect(output.objectiveGapAudit.requirementStatuses.find(
+        (entry) => entry.requirementId === "safe_current_loop_command_visible",
+      )).toMatchObject({
+        status: "blocked",
+      });
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
     } finally {
       await rm(tmp, { force: true, recursive: true });
@@ -132,6 +214,7 @@ describe("R1179 average submitter objective gap audit", () => {
         nextActionCommand: null,
         readyToMarkComplete: false,
         rowOwnerActionRouteStatus: "feature_only_research_handoff_ready",
+        safeCurrentLoopCommandVisible: true,
       });
       expect(output.objectiveGapAudit.requirementStatuses.find(
         (entry) => entry.requirementId === "feature_only_research_handoff_ready",
@@ -415,6 +498,7 @@ describe("R1179 average submitter objective gap audit", () => {
         conclusion?: unknown;
         nextAction?: unknown;
         packetId?: unknown;
+        safeCurrentLoopCommandVisible?: unknown;
         topBlockedRequirementId?: unknown;
       };
       expect(cli).toMatchObject({
@@ -422,6 +506,7 @@ describe("R1179 average submitter objective gap audit", () => {
         nextAction:
           "review_r1173_safe_assertion_answer_sheet_then_rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
         packetId: "r1179-average-submitter-objective-gap-audit",
+        safeCurrentLoopCommandVisible: true,
         topBlockedRequirementId: "row_owner_safe_assertion_confirmed",
       });
       await expect(stat(path.join(outDir, "r1179-average-submitter-objective-gap-audit.latest.json"))).resolves.toBeTruthy();
@@ -548,16 +633,21 @@ async function writeInputs(
 }
 
 function r1178Fixture(confirmed: boolean): Record<string, unknown> {
+  const currentLoopCommand = confirmed ? R1164_COMMAND : R1173_COMMAND;
   return {
     artifactBoundary: {
       aggregateOnly: true,
       productDisplayAuthorized: false,
+    },
+    currentLoopSurfacing: {
+      currentLoopCommand,
     },
     packetId: "r1178-average-submitter-current-loop-surfacing",
     productDisplayAuthorized: false,
     schemaVersion: R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION,
     status: "research-local-aggregate-only",
     summary: {
+      currentLoopCommand,
       currentMissingRequirementIds: confirmed ? [] : [...BLOCKED_REQUIREMENTS],
       minimumFeaturePairConfirmed: confirmed,
       minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
