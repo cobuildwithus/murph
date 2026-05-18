@@ -57,6 +57,10 @@ import {
   R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND,
   R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_SCHEMA_VERSION,
 } from "./r1185-average-submitter-safe-response-smoke-proof.ts";
+import {
+  R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND,
+  R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_SCHEMA_VERSION,
+} from "./r1187-average-submitter-route-metric-readiness.ts";
 
 const ORDINARY_SOURCE_FAMILY_IDS = [
   "join_time_alignment",
@@ -132,6 +136,8 @@ const R1172_SAFE_ASSERTION_MATERIALIZER_NEXT_ACTION =
 const R1176_SAFE_ASSERTION_LIVE_CHAIN_NEXT_ACTION =
   "rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation";
 const R1185_SAFE_RESPONSE_NEXT_REAL_ACTION = "obtain_real_row_owner_safe_confirmation_then_rerun_r1183";
+const R1187_SAFE_CONFIRMATION_COMMAND =
+  "MURPH_AGE_R1183_ROW_OWNER_SAFE_RESPONSE_ASSERTIONS_CONFIRMED=true pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
 const REQUIRED_SOURCE_FAMILY_IDS = [
   "outcome_linkage",
   "join_time_alignment",
@@ -2137,6 +2143,90 @@ describe("R1076 current autoresearch loop executor", () => {
     }
   });
 
+  it("promotes the R1187 route metric readiness safe confirmation action", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1076-r1187-"));
+    try {
+      const scanRoot = path.join(tmp, "scan");
+      await mkdir(scanRoot);
+      const fixtures = await writeFixtures(tmp);
+      await Promise.all([
+        writeFile(fixtures.r1101Path, `${JSON.stringify(r1101Fixture(
+          "consumer_loop_ready_awaiting_aggregate_receipt",
+          "fill_r1124_first_pass_aggregate_metrics_template",
+        ))}\n`),
+        writeFile(fixtures.r1187Path, `${JSON.stringify(r1187Fixture())}\n`),
+      ]);
+
+      const { output } = await runR1076CurrentAutoresearchLoopExecutor({
+        outputDir: path.join(tmp, "out"),
+        scanRoots: [scanRoot],
+        ...fixtures,
+      });
+
+      expect(output.summary.nextAction).toBe("complete_r1186_boolean_only_safe_confirmation_first");
+      expect(output.summary.conclusion).toBe("executor_waiting_on_consumer_safe_submission_confirmation");
+      expect(output.summary.reviewGptRequiredNow).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessArtifact).toBe(
+        "r1187-average-submitter-route-metric-readiness.latest.json",
+      );
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessCommand).toBe(
+        R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND,
+      );
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessConclusion).toBe(
+        "average_submitter_route_metric_readiness_waiting_on_safe_submission_confirmation",
+      );
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessNextAction).toBe(
+        "complete_r1186_boolean_only_safe_confirmation_first",
+      );
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessNextActionCommand).toBe(
+        R1187_SAFE_CONFIRMATION_COMMAND,
+      );
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired)
+        .toEqual(FEATURE_ONLY_SOURCE_FAMILY_IDS);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds)
+        .toEqual(FEATURE_ONLY_FILL_GUIDE_INPUT_KIND_IDS);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds).toEqual([
+        "L1_tiny_glycemia_only",
+        "L2_common_lab_core_shadow",
+        "W1_activity_steps_minutes",
+        "QC_missingness_coverage",
+      ]);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing).toBe(true);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing).toBe(true);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded)
+        .toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired).toBe(true);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired)
+        .toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored).toBe(false);
+      expect(output.summary.consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187).toBe(false);
+      expect(output.nextLoop.consumerAverageSubmitterRouteMetricReadinessNextAction).toBe(
+        "complete_r1186_boolean_only_safe_confirmation_first",
+      );
+      expect(output.nextLoop.consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds).toEqual([
+        "L1_tiny_glycemia_only",
+        "L2_common_lab_core_shadow",
+        "W1_activity_steps_minutes",
+        "QC_missingness_coverage",
+      ]);
+      expect(output.nextLoop.commands).toContain(R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND);
+      expect(output.nextLoop.commands).toContain(R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND);
+      expect(output.nextLoop.commands.indexOf(R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND)).toBe(
+        output.nextLoop.commands.indexOf(R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND) + 1,
+      );
+      expect(output.nextLoop.commands).toContain(R1187_SAFE_CONFIRMATION_COMMAND);
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+      expect(JSON.stringify(output)).not.toContain(tmp);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
   it("falls back to the R1159 answer sheet action when R1160 transcription proof is missing", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1076-r1160-missing-"));
     try {
@@ -2876,6 +2966,10 @@ describe("R1076 current autoresearch loop executor", () => {
           MURPH_AGE_R1161_FEATURE_ONLY_SAFE_AVAILABILITY_CONFIRMATION_MATERIALIZER_PATH: fixtures.r1161Path,
           MURPH_AGE_R1162_FEATURE_ONLY_SAFE_CONFIRMATION_ASSERTION_HANDOFF_PATH: fixtures.r1162Path,
           MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH: fixtures.r1163Path,
+          MURPH_AGE_R1174_ORDINARY_CONSUMER_SAFE_NEXT_STEP_PACKET_PATH: fixtures.r1174Path,
+          MURPH_AGE_R1176_R1172_R1165_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH: fixtures.r1176Path,
+          MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH: fixtures.r1185Path,
+          MURPH_AGE_R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_PATH: fixtures.r1187Path,
           MURPH_AGE_RESEARCH_OUTPUT_DIR: path.join(tmp, "out"),
         },
       });
@@ -3447,6 +3541,7 @@ async function writeFixtures(
   r1174Path: string;
   r1176Path: string;
   r1185Path: string;
+  r1187Path: string;
 }> {
   const r1057Path = path.join(tmp, "r1057.json");
   const r1059Path = path.join(tmp, "r1059.json");
@@ -3491,6 +3586,7 @@ async function writeFixtures(
   const r1174Path = path.join(tmp, "missing-r1174.json");
   const r1176Path = path.join(tmp, "missing-r1176.json");
   const r1185Path = path.join(tmp, "missing-r1185.json");
+  const r1187Path = path.join(tmp, "missing-r1187.json");
   await Promise.all([
     writeFile(r1057Path, `${JSON.stringify({
       artifactBoundary: safeBoundary("R1057"),
@@ -3617,6 +3713,7 @@ async function writeFixtures(
     r1174Path,
     r1176Path,
     r1185Path,
+    r1187Path,
   };
 }
 
@@ -6488,6 +6585,104 @@ function r1185Fixture(): Record<string, unknown> {
       productDisplayAuthorized: false,
       syntheticPathAdvancedToFeatureOnlyResearchPlanning: true,
       syntheticSmokeRan: true,
+    },
+  };
+}
+
+function r1187Fixture(): Record<string, unknown> {
+  return {
+    artifactBoundary: {
+      aggregateOnly: true,
+      codebookTextStored: false,
+      coefficientsStored: false,
+      headerValuesStored: false,
+      localPathsStored: false,
+      modelEvidencePromotedByR1187: false,
+      modelParametersStored: false,
+      participantIdentifiersStored: false,
+      participantIdentifiersWritten: false,
+      predictionsStored: false,
+      privateConfigValuesStored: false,
+      privateDetailsStored: false,
+      privateFieldRefValuesStored: false,
+      privateFieldRefsStored: false,
+      privateTableRefValuesStored: false,
+      privateTableRefsStored: false,
+      productClaimsIncluded: false,
+      productDisplayAuthorized: false,
+      productPromotionAuthorized: false,
+      recommendationClaimsIncluded: false,
+      rowLevelDataAcceptedByR1187: false,
+      rowOwnerPrivateValuesStored: false,
+      rowParsingPerformedByR1187: false,
+      rowValuesStored: false,
+      safeBooleanValuesStoredInR1187Packet: false,
+      smallCellsStored: false,
+      sourceBodiesStored: false,
+      sourceFileNamesStored: false,
+      sourceVariableNamesStored: false,
+    },
+    packetId: "r1187-average-submitter-route-metric-readiness",
+    productDisplayAuthorized: false,
+    routeMetricReadiness: {
+      commands: {
+        aggregateMetricIntakeCommand: null,
+        aggregateReceiptValidationCommand: null,
+        partialPrivateChainCommand: null,
+        privateConfigIntakeCommand: null,
+        privateRunnerCommand: null,
+        safeConfirmationCommand: R1187_SAFE_CONFIRMATION_COMMAND,
+      },
+      firstPassCandidateIds: [
+        "L1_tiny_glycemia_only",
+        "L2_common_lab_core_shadow",
+        "W1_activity_steps_minutes",
+        "QC_missingness_coverage",
+      ],
+      minimumFeaturePairRequired: FEATURE_ONLY_SOURCE_FAMILY_IDS,
+      modelEvidencePromotionAllowed: false,
+      prioritizedInputKindIds: FEATURE_ONLY_FILL_GUIDE_INPUT_KIND_IDS,
+      productDisplayAuthorized: false,
+      reviewGptPolicy: "only_after_real_aggregate_delta_from_r1124_or_r1130",
+      routeMetricStageOrder: [
+        "safe_boolean_confirmation",
+        "row_owner_private_config",
+        "private_runner",
+        "aggregate_metric_intake",
+        "reviewgpt_real_delta_only",
+      ],
+      rowLevelDataAcceptedByR1187: false,
+      rowOwnerPrivateValuesStored: false,
+      rowParsingPerformedByR1187: false,
+      targetAgeBand: "roughly_16_50",
+      targetInputPriority: "consumer_bloodwork_labs_wearables_16_50_first",
+    },
+    schemaVersion: R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_SCHEMA_VERSION,
+    status: "research-local-aggregate-only",
+    summary: {
+      aggregateMetricsStillMissing: true,
+      aggregateMetricTemplateReady: true,
+      conclusion: "average_submitter_route_metric_readiness_waiting_on_safe_submission_confirmation",
+      featureOnlyResearchPlanningReady: false,
+      minimumFeaturePairRequired: FEATURE_ONLY_SOURCE_FAMILY_IDS,
+      modelEvidencePromotionAllowed: false,
+      nextAction: "complete_r1186_boolean_only_safe_confirmation_first",
+      nextActionCommand: R1187_SAFE_CONFIRMATION_COMMAND,
+      prioritizedInputKindIds: FEATURE_ONLY_FILL_GUIDE_INPUT_KIND_IDS,
+      productDisplayAuthorized: false,
+      privateConfigStillRequired: false,
+      realAggregateStillMissing: true,
+      realLabWearableRouteMetricsRecorded: false,
+      reviewGptRequiredNow: false,
+      rowLevelDataAcceptedByR1187: false,
+      rowOwnerPrivateConfigStillRequired: false,
+      rowOwnerPrivateValuesStored: false,
+      rowOwnerSafeConfirmationStillRequired: true,
+      rowParsingPerformedByR1187: false,
+      safeConfirmationStillRequired: true,
+      safeSubmissionPacketRefreshRequired: false,
+      targetAgeBand: "roughly_16_50",
+      targetInputPriority: "consumer_bloodwork_labs_wearables_16_50_first",
     },
   };
 }
