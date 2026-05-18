@@ -1102,9 +1102,9 @@ function currentLoopCommandFor(
       safeResponseHandoff.nextAction ===
         "fill_r1180_safe_confirmation_response_template" &&
       safeResponseHandoff.nextActionCommand ===
-        R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND
+        R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND
     ) {
-      return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+      return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
     }
     return R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND;
   }
@@ -1401,7 +1401,9 @@ function commandForR1182NextAction(nextAction: R1182NextAction | null): string |
     nextAction === "fill_r1180_safe_confirmation_response_template" ||
     nextAction === "rerun_r1180_with_valid_safe_confirmation_response"
   ) {
-    return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+    return nextAction === "fill_r1180_safe_confirmation_response_template"
+      ? R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND
+      : R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
   }
   if (nextAction === "refresh_r1181_feature_only_execution_contract") {
     return R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND;
@@ -1675,7 +1677,7 @@ function rowOwnerOnlyActionsFor(): RowOwnerOnlyAction[] {
   return [
     {
       actionId: "fill_r1180_safe_confirmation_response_template",
-      command: R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND,
+      command: R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND,
       rowOwnerOnly: true,
       storesPrivateDetailsInPacket: false,
     },

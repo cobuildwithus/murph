@@ -37,6 +37,8 @@ const SAFE_SLOT_IDS = [
   "daily_activity_presence",
   "daily_wear_coverage_presence",
 ] as const;
+const R1183_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
 
 describe("R1182 average submitter safe response handoff", () => {
   it("emits the safe response template when R1181 is missing", async () => {
@@ -114,7 +116,7 @@ describe("R1182 average submitter safe response handoff", () => {
         featureOnlyExecutionContractReady: false,
         handoffReadyForResearchPlanningOnly: false,
         nextAction: "fill_r1180_safe_confirmation_response_template",
-        nextActionCommand: "pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts",
+        nextActionCommand: R1183_COMMAND,
         safeExecutionFeatureSlotIds: null,
       });
       expect(output.r1181State).toMatchObject({
@@ -341,6 +343,11 @@ function r1181Fixture(
     : rejected
       ? "rerun_r1180_with_valid_safe_confirmation_response"
       : "fill_r1180_safe_confirmation_response_template";
+  const nextActionCommand = ready
+    ? null
+    : rejected
+      ? "pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts"
+      : R1183_COMMAND;
 
   return {
     artifactBoundary: { aggregateOnly: true },
@@ -398,7 +405,7 @@ function r1181Fixture(
       minimumFeaturePairRequired: [...MINIMUM_PAIR],
       modelEvidencePromotionAllowed: false,
       nextAction,
-      nextActionCommand: ready ? null : "pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts",
+      nextActionCommand,
       prioritizedInputKindIds: [...INPUT_KINDS],
       productDisplayAuthorized: false,
       researchPlanningAllowed: ready,

@@ -28,6 +28,8 @@ const OUTPUT_FILE_NAME = "r1182-average-submitter-safe-response-handoff.latest.j
 const R1181_ARTIFACT = "r1181-average-submitter-feature-only-execution-contract.latest.json" as const;
 const R1181_PACKET_ID = "r1181-average-submitter-feature-only-execution-contract" as const;
 const R1182_PACKET_ID = "r1182-average-submitter-safe-response-handoff" as const;
+const R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts" as const;
 const TARGET_INPUT_PRIORITY = "consumer_bloodwork_labs_wearables_16_50_first" as const;
 const TARGET_AGE_BAND = "roughly_16_50" as const;
 const ROW_OWNER_SAFE_CONFIRMATION_ASK_ID =
@@ -450,10 +452,10 @@ function r1181ReadyForResearchPlanning(state: R1181State): boolean {
 }
 
 function commandForNextAction(nextAction: R1182NextActionId): string | null {
-  if (
-    nextAction === "fill_r1180_safe_confirmation_response_template"
-    || nextAction === "rerun_r1180_with_valid_safe_confirmation_response"
-  ) {
+  if (nextAction === "fill_r1180_safe_confirmation_response_template") {
+    return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
+  }
+  if (nextAction === "rerun_r1180_with_valid_safe_confirmation_response") {
     return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
   }
   if (nextAction === "refresh_r1181_feature_only_execution_contract") {

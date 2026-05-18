@@ -147,7 +147,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
           targetAgeBand: "roughly_16_50",
         },
-        currentLoopCommand: R1180_COMMAND,
+        currentLoopCommand: R1183_COMMAND,
         currentLoopConclusionBeforePriorityPacket: "executor_waiting_on_consumer_safe_availability_confirmation",
         currentLoopNextActionBeforePriorityPacket:
           "rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
@@ -208,7 +208,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
           modelEvidencePromotionAllowed: false,
           nextAction: "fill_r1180_safe_confirmation_response_template",
-          nextActionCommand: R1180_COMMAND,
+          nextActionCommand: R1183_COMMAND,
           prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
           productDisplayAuthorized: false,
           recognized: true,
@@ -281,7 +281,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         },
         averageSubmitterPriorityPacketCommand: R1177_COMMAND,
-        currentLoopCommand: R1180_COMMAND,
+        currentLoopCommand: R1183_COMMAND,
         minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         priorityVisibleInCurrentLoop: true,
@@ -291,7 +291,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         },
         safeResponseHandoff: {
           nextAction: "fill_r1180_safe_confirmation_response_template",
-          nextActionCommand: R1180_COMMAND,
+          nextActionCommand: R1183_COMMAND,
           recognized: true,
         },
         safeResponseSmokeProof: {
@@ -304,7 +304,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       expect(output.summary.rowOwnerActionRoute.rowOwnerOnlyActions).toEqual([
         {
           actionId: "fill_r1180_safe_confirmation_response_template",
-          command: R1180_COMMAND,
+          command: R1183_COMMAND,
           rowOwnerOnly: true,
           storesPrivateDetailsInPacket: false,
         },
@@ -343,7 +343,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
     }
   });
 
-  it("keeps the current-loop command on the R1180 safe response template when R1177 is waiting on a live-chain packet", async () => {
+  it("keeps the current-loop command on the R1183 safe response materializer when R1177 is waiting on a live-chain packet", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1178-live-chain-waiting-"));
     try {
       const paths = await writeInputs(tmp, { priorityReady: false });
@@ -364,7 +364,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
 
       expect(output.summary).toMatchObject({
         conclusion: "average_submitter_priority_visible_in_current_loop",
-        currentLoopCommand: R1180_COMMAND,
+        currentLoopCommand: R1183_COMMAND,
         minimumFeaturePairConfirmed: false,
         nextAction: "refresh_r1176_row_owner_safe_assertion_chain",
         rowOwnerActionRoute: {
@@ -375,7 +375,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         upstreamR1177Conclusion: "ordinary_average_submitter_priority_packet_waiting_on_live_chain_packet",
         upstreamR1177NextAction: "refresh_r1176_row_owner_safe_assertion_chain",
       });
-      expect(output.currentLoopSurfacing.currentLoopCommand).toBe(R1180_COMMAND);
+      expect(output.currentLoopSurfacing.currentLoopCommand).toBe(R1183_COMMAND);
       expect(output.summary.currentLoopCommand).not.toContain(
         "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true",
       );
@@ -829,7 +829,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
         ],
         conclusion: "average_submitter_priority_visible_in_current_loop",
-        currentLoopCommand: R1180_COMMAND,
+        currentLoopCommand: R1183_COMMAND,
         deferredUntilMinimumPairConfirmedIds: [
           ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
         ],
@@ -844,7 +844,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           "average_submitter_safe_response_handoff_waiting_on_row_owner_confirmation",
         safeResponseHandoffNextAction:
           "fill_r1180_safe_confirmation_response_template",
-        safeResponseHandoffNextActionCommand: R1180_COMMAND,
+        safeResponseHandoffNextActionCommand: R1183_COMMAND,
         safeResponseHandoffRecognized: true,
         safeResponseSmokeProofConclusion:
           "average_submitter_safe_response_smoke_passed_non_evidence",
@@ -1075,7 +1075,7 @@ function r1182Fixture(): Record<string, unknown> {
       minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
       modelEvidencePromotionAllowed: false,
       nextAction: "fill_r1180_safe_confirmation_response_template",
-      nextActionCommand: R1180_COMMAND,
+      nextActionCommand: R1183_COMMAND,
       prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
       productDisplayAuthorized: false,
       requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST],
@@ -1107,7 +1107,7 @@ function r1182Fixture(): Record<string, unknown> {
       minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
       modelEvidencePromotionAllowed: false,
       nextAction: "fill_r1180_safe_confirmation_response_template",
-      nextActionCommand: R1180_COMMAND,
+      nextActionCommand: R1183_COMMAND,
       productDisplayAuthorized: false,
       requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
       responseTemplateSchemaVersion: R1180_RESPONSE_SCHEMA_VERSION,
