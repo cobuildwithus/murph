@@ -29,5 +29,6 @@ export default defineConfig({
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["scripts/**/*.test.ts"],
+    exclude: ["scripts/murph-age/**/*.test.ts"],
   },
 });
