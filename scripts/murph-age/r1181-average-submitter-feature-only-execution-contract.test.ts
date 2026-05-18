@@ -566,6 +566,7 @@ function r1180Fixture(options: { responseStatus: "invalid" | "missing" | "ready"
       "assert_daily_wearable_activity_export_available",
       "assert_no_private_values_identifiers_paths_headers_or_rows",
     ],
+    requiredResponseFieldIds: [...REQUIRED_RESPONSE_FIELDS],
     responseKind: ready ? "explicit_yes_all_required_assertions_confirmed" : null,
     responseStatus: options.responseStatus,
     reviewGptRequiredNow: false,

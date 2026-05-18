@@ -178,6 +178,7 @@ export interface R1180AverageSubmitterSafeConfirmationResponseIntakeOutput {
     prioritizedInputKindIds: RequiredInputKindId[];
     productDisplayAuthorized: false;
     requiredAssertionChecklistIds: RequiredAssertionChecklistId[];
+    requiredResponseFieldIds: RequiredResponseFieldId[];
     responseKind: ResponseKindId | null;
     responseStatus: ResponseStatus;
     responseTemplate: SafeConfirmationResponseTemplate;
@@ -230,6 +231,7 @@ export async function runR1180AverageSubmitterSafeConfirmationResponseIntake(
     prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
     productDisplayAuthorized: false,
     requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST_IDS],
+    requiredResponseFieldIds: [...REQUIRED_RESPONSE_FIELD_IDS],
     responseKind: responseEvaluation.responseKind,
     responseStatus: responseEvaluation.responseStatus,
     reviewGptRequiredNow: false,
