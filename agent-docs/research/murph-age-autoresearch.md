@@ -1,6 +1,6 @@
 # Murph Age Autoresearch
 
-Last verified: 2026-05-09
+Last verified: 2026-05-18
 
 ## Purpose
 
@@ -45,6 +45,14 @@ Current live research anchor:
 - held-out test metrics: weighted AUC 0.874688, unweighted AUC 0.877295, Brier 0.061991, log loss 0.216226, mean prediction error 0.000702, calibration slope 0.983047
 
 R401 ReviewGPT consensus froze this NHIS anchor for diagnostics and explicitly rejected more L2-grid searching on the same split. R405 accepted the residual diagnostic brief and recommended using the frozen anchor residual map to choose the next locked benchmark or external public source lane, not to keep tuning the NHIS test split.
+
+## Repository Boundary
+
+The executable `scripts/murph-age/` research scratch corpus is local-only and ignored by Git. Use it for fast local probes, one-off R-artifact reducers, and source-specific experiments that should not become repository API surface.
+
+Existing local files in that directory may remain on disk, but they must not be staged or committed; this boundary change stops future tracking and does not rewrite past Git history.
+
+Durable, reviewed Murph Age product/runtime code remains in tracked owner packages such as `packages/query`, `packages/health-metrics`, and `packages/cli`. Promote local research code into those packages only after the boundary, tests, privacy posture, and product authorization are clear.
 
 Important supporting anchors:
 
