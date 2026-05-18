@@ -19,6 +19,7 @@ import {
   assessMurphAgeInputBundle,
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
+  buildMurphAgeIncrementEvaluationCard,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   createCustomMetricDefinition,
@@ -2830,6 +2831,45 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
   const validation = validateMurphAgeIncrementEvaluationCard(evidenceCard);
   assert.equal(validation.status, "valid");
   assert.deepEqual(validation.warnings, []);
+
+  const ordinaryRoutes = listMurphAgeOrdinaryLabWearableSourceRoutes().slice(0, 2);
+  assert.deepEqual(ordinaryRoutes.map((route) => route.routeId), [
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+  ]);
+  for (const route of ordinaryRoutes) {
+    for (const layer of ["biomarker-increment", "wearable-shadow-increment"] as const) {
+      const builtCard = buildMurphAgeIncrementEvaluationCard({
+        aggregateMetricDeltas: {
+          aucDelta: 0.001,
+          brierDelta: -0.0001,
+        },
+        aggregateSample: {
+          evaluatedRowCount: 240,
+          eventCount: 24,
+          minimumCellCount: 24,
+          suppressedCellCount: 0,
+        },
+        anchorCardId: "r399_nhis_proxy_10y_acm_research",
+        candidateBatchId: "ordinary-lab-wearable-aggregate-v1",
+        candidateId: `${route.routeId}-${layer}`,
+        evidenceTier: "external-validation",
+        layer,
+        riskEffect: "aggregate-estimated",
+        sourceRouteId: route.routeId,
+      });
+      assert.equal(builtCard.productAuthorized, false);
+      assert.equal(builtCard.scoreBearing, false);
+      assert.equal(builtCard.scoreContributionAuthorized, false);
+      assert.equal(builtCard.flatteningAuthorized, false);
+      assert.equal(builtCard.outputBoundary.aggregateOnly, true);
+      assert.equal(builtCard.outputBoundary.rowValuesExportAllowed, false);
+      assert.equal(builtCard.outputBoundary.predictionsExportAllowed, false);
+      assert.equal(builtCard.outputBoundary.coefficientsExportAllowed, false);
+      assert.equal(builtCard.outputBoundary.modelParametersExportAllowed, false);
+      assert.equal(validateMurphAgeIncrementEvaluationCard(builtCard).status, "valid");
+    }
+  }
 
   const notEstimatedValidation = validateMurphAgeIncrementEvaluationCard({
     ...evidenceCard,
