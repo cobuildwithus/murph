@@ -679,6 +679,53 @@ test("Junction normalizer maps respiratory rate unit aliases to the canonical sa
   }
 });
 
+test("Junction normalizer maps blood oxygen unit aliases to the canonical sample unit", async () => {
+  const bloodOxygenUnits = [
+    undefined,
+    "spo2",
+    "sp_o2",
+    "oxygen_saturation",
+  ] as const;
+
+  for (const unit of bloodOxygenUnits) {
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      connectionId: "conn-junction-garmin",
+      sourceKind: "poll",
+      deliveryMode: "scheduled_reconcile",
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        importedAt: "2026-04-22T12:00:00.000Z",
+        timeseries: {
+          blood_oxygen: {
+            groups: {
+              garmin: [{
+                data: [{
+                  timestamp: "2026-04-22T07:15:00Z",
+                  ...(unit === undefined ? {} : { unit }),
+                  value: 97.2,
+                }],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+        },
+      },
+    });
+
+    const spo2Sample = payload.samples?.find((sample) => sample.stream === "spo2");
+    const canonicalRecord = payload.canonicalWearableRecords?.find((record) =>
+      record.kind === "sample" && record.metric === "spo2"
+    );
+
+    assert.deepEqual(payload.provenance?.timeseriesResources, ["blood_oxygen"]);
+    assert.equal(spo2Sample?.unit, "%");
+    assert.equal(spo2Sample?.sample.value, 97.2);
+    assert.ok(canonicalRecord && canonicalRecord.kind === "sample");
+    assert.equal(canonicalRecord.unit, "%");
+  }
+});
+
 test("Junction snapshot import minimizes grouped source identifiers in raw envelopes", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",

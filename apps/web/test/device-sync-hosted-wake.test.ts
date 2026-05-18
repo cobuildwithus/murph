@@ -1243,8 +1243,11 @@ describe("appendHostedDeviceSyncWake", () => {
         {
           count: 1,
           jobKind: "reconcile",
-          resource: "reconcile",
-          resourceCategory: "reconcile",
+          payload: {
+            windowStart: "2026-03-19T00:00:00.000Z",
+          },
+          resource: null,
+          resourceCategory: null,
           sourceProviderSlug: null,
           windowEnd: null,
           windowStart: "2026-03-19T00:00:00.000Z",
@@ -1676,8 +1679,11 @@ describe("appendHostedDeviceSyncWake", () => {
       {
         count: 1,
         jobKind: "reconcile",
-        resource: "reconcile",
-        resourceCategory: "reconcile",
+        payload: {
+          windowStart: "2026-03-19T00:00:00.000Z",
+        },
+        resource: null,
+        resourceCategory: null,
         sourceProviderSlug: null,
         windowEnd: null,
         windowStart: "2026-03-19T00:00:00.000Z",
@@ -1788,8 +1794,14 @@ describe("appendHostedDeviceSyncWake", () => {
       {
         count: 1,
         jobKind: "resource",
-        resource: "resource",
-        resourceCategory: "resource",
+        payload: {
+          eventType: "workout.updated",
+          occurredAt: "2026-03-26T11:58:00.000Z",
+          resourceId: "workout-7",
+          resourceType: "workout",
+        },
+        resource: null,
+        resourceCategory: null,
         sourceProviderSlug: null,
         windowEnd: null,
         windowStart: null,
@@ -1797,8 +1809,14 @@ describe("appendHostedDeviceSyncWake", () => {
       {
         count: 1,
         jobKind: "delete",
-        resource: "delete",
-        resourceCategory: "delete",
+        payload: {
+          eventType: "workout.deleted",
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          resourceId: "workout-8",
+          resourceType: "workout",
+        },
+        resource: null,
+        resourceCategory: null,
         sourceProviderSlug: null,
         windowEnd: null,
         windowStart: null,
@@ -1925,8 +1943,14 @@ describe("appendHostedDeviceSyncWake", () => {
       {
         count: 1,
         jobKind: "delete",
-        resource: "delete",
-        resourceCategory: "delete",
+        payload: {
+          dataType: "session",
+          objectId: "session-42",
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          sourceEventType: "session.deleted",
+        },
+        resource: null,
+        resourceCategory: null,
         sourceProviderSlug: null,
         windowEnd: null,
         windowStart: null,

@@ -3,7 +3,7 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
-import { deviceSyncError } from "../errors.ts";
+import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import {
   addMilliseconds,
   normalizeString,
@@ -25,7 +25,6 @@ import {
 
 import type {
   DeviceConnectionSourceStatus,
-  DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
@@ -245,12 +244,12 @@ export function createJunctionDeviceSyncProvider(
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId);
     await projectJunctionSources(context, sourceProviders);
 
-    const summaries = await fetchSummarySnapshots(context.account, window.windowStart, window.windowEnd);
+    const summaries = await fetchSummarySnapshots(context, window.windowStart, window.windowEnd);
     const timeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
     const timeseries = await fetchTimeseriesSnapshots(
-      context.account,
+      context,
       timeseriesWindowStart,
       window.windowEnd,
     );
@@ -290,24 +289,28 @@ export function createJunctionDeviceSyncProvider(
       if (!isConfiguredJunctionResource(inferredCategory, resource)) {
         context.logger.warn?.("Skipping Junction resource webhook job for a resource that is not enabled.", {
           provider: "junction",
-          accountId: context.account.id,
           resource,
           resourceCategory: inferredCategory,
         });
       } else if (inferredCategory === "timeseries") {
         timeseries[resource] = await fetchTimeseriesResourceInChunks(
-          context.account.externalAccountId,
+          context,
           resource,
           window.windowStart,
           window.windowEnd,
         );
       } else {
-        summaries[resource] = await client.listSummary({
+        summaries[resource] = await fetchOptionalJunctionResourceRecords(
+          context,
+          "summary",
           resource,
-          userId: context.account.externalAccountId,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-        });
+          () => client.listSummary({
+            resource,
+            userId: context.account.externalAccountId,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+          }),
+        );
       }
     }
 
@@ -387,26 +390,31 @@ export function createJunctionDeviceSyncProvider(
   }
 
   async function fetchSummarySnapshots(
-    account: DeviceSyncAccount,
+    context: ProviderJobContext,
     windowStart: string,
     windowEnd: string,
   ): Promise<Record<string, unknown[]>> {
     const snapshots: Record<string, unknown[]> = {};
 
     for (const resource of summaryResources) {
-      snapshots[resource] = await client.listSummary({
+      snapshots[resource] = await fetchOptionalJunctionResourceRecords(
+        context,
+        "summary",
         resource,
-        userId: account.externalAccountId,
-        windowStart,
-        windowEnd,
-      });
+        () => client.listSummary({
+          resource,
+          userId: context.account.externalAccountId,
+          windowStart,
+          windowEnd,
+        }),
+      );
     }
 
     return snapshots;
   }
 
   async function fetchTimeseriesSnapshots(
-    account: DeviceSyncAccount,
+    context: ProviderJobContext,
     windowStart: string,
     windowEnd: string,
   ): Promise<Record<string, unknown[]>> {
@@ -414,7 +422,7 @@ export function createJunctionDeviceSyncProvider(
 
     for (const resource of timeseriesResources) {
       snapshots[resource] = await fetchTimeseriesResourceInChunks(
-        account.externalAccountId,
+        context,
         resource,
         windowStart,
         windowEnd,
@@ -425,27 +433,59 @@ export function createJunctionDeviceSyncProvider(
   }
 
   async function fetchTimeseriesResourceInChunks(
-    userId: string,
+    context: ProviderJobContext,
     resource: string,
     windowStart: string,
     windowEnd: string,
   ): Promise<unknown[]> {
-    const records: unknown[] = [];
-    let chunkStart = Date.parse(windowStart);
-    const end = Date.parse(windowEnd);
+    return fetchOptionalJunctionResourceRecords(
+      context,
+      "timeseries",
+      resource,
+      async () => {
+        const records: unknown[] = [];
+        let chunkStart = Date.parse(windowStart);
+        const end = Date.parse(windowEnd);
 
-    while (chunkStart < end) {
-      const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
-      records.push(...await client.listTimeseries({
+        while (chunkStart < end) {
+          const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
+          records.push(...await client.listTimeseries({
+            resource,
+            userId: context.account.externalAccountId,
+            windowStart: new Date(chunkStart).toISOString(),
+            windowEnd: new Date(chunkEnd).toISOString(),
+          }));
+          chunkStart = chunkEnd;
+        }
+
+        return dedupeJunctionTimeseriesRecords(resource, records);
+      },
+    );
+  }
+
+  async function fetchOptionalJunctionResourceRecords(
+    context: ProviderJobContext,
+    resourceCategory: "summary" | "timeseries",
+    resource: string,
+    load: () => Promise<unknown[]>,
+  ): Promise<unknown[]> {
+    try {
+      return await load();
+    } catch (error) {
+      const status = readOptionalJunctionResourceFailureStatus(error);
+      if (status === null) {
+        throw error;
+      }
+
+      context.logger.warn?.("Skipping unavailable Junction resource response.", {
+        errorCode: "JUNCTION_API_REQUEST_FAILED",
+        provider: "junction",
         resource,
-        userId,
-        windowStart: new Date(chunkStart).toISOString(),
-        windowEnd: new Date(chunkEnd).toISOString(),
-      }));
-      chunkStart = chunkEnd;
+        resourceCategory,
+        responseStatus: status,
+      });
+      return [];
     }
-
-    return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
   function buildInitialJobs(now: string): DeviceSyncJobInput[] {
@@ -484,6 +524,15 @@ export function createJunctionDeviceSyncProvider(
       executeJob,
     },
   };
+}
+
+function readOptionalJunctionResourceFailureStatus(error: unknown): number | null {
+  if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
+    return null;
+  }
+
+  const status = error.details?.status;
+  return status === 404 || status === 422 ? status : null;
 }
 
 export function buildJunctionClientUserId(secret: string, ownerId: string): string {

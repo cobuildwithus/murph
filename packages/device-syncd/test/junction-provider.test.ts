@@ -1421,6 +1421,128 @@ test("Junction source projection uses provider-level keys for slug-only sources"
   assert.equal(sources[0]?.resourceAvailabilitySummary.sourceInstanceKeyFallback, undefined);
 });
 
+test("Junction polling skips optional unavailable resource collections", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              steps: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [{ id: "activity-1", steps: 1200 }] });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({ error: "not found" }, 404);
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/steps/grouped")) {
+      return createJsonResponse({
+        groups: {
+          oura: [{
+            data: [{ timestamp: "2026-04-02T00:00:00Z", unit: "count", value: 1200 }],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      return createJsonResponse({ error: "unsupported" }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity", "profile"],
+    timeseriesResources: ["steps", "blood_oxygen"],
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: () => ({
+      id: "src-1",
+      connectionId: "acct-junction-1",
+      sourceInstanceKey: "src-key",
+      sourceProviderSlug: "oura",
+      displayName: "Oura Ring",
+      status: "connected",
+      resourceAvailabilitySummary: {},
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      createdAt: "2026-04-03T00:00:00.000Z",
+      updatedAt: "2026-04-03T00:00:00.000Z",
+    }),
+    refreshAccountTokens: async () => createAccount(),
+    logger: {
+      warn(_message, context) {
+        warnings.push(context ?? {});
+      },
+    },
+  };
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, unknown[]>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  assert.equal(snapshot.summaries?.activity?.length, 1);
+  assert.deepEqual(snapshot.summaries?.profile, []);
+  assert.equal(snapshot.timeseries?.steps?.length, 1);
+  assert.deepEqual(snapshot.timeseries?.blood_oxygen, []);
+  assert.deepEqual(
+    warnings.map((warning) => ({
+      accountId: warning.accountId,
+      resource: warning.resource,
+      resourceCategory: warning.resourceCategory,
+      responseStatus: warning.responseStatus,
+    })),
+    [
+      {
+        accountId: undefined,
+        resource: "profile",
+        resourceCategory: "summary",
+        responseStatus: 404,
+      },
+      {
+        accountId: undefined,
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        responseStatus: 422,
+      },
+    ],
+  );
+});
+
 test("Junction resource jobs fetch only the hinted resource window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
