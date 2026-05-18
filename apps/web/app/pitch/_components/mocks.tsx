@@ -298,7 +298,7 @@ export function MurphLoop() {
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ POSITIONING CHART ━━━━━━━━━━━━━━━━━━━ */
 
 // Vertical axis: depth of persistent health context. Horizontal axis:
-// solo habits vs. friend-group habit coordination. Murph sits alone in
+// individual habits vs. a social health layer. Murph sits alone in
 // the top-right quadrant.
 const POSITIONING_POINTS = [
   { left: 25, name: "ChatGPT / Claude", top: 30 },
@@ -361,8 +361,8 @@ export function PositioningChart() {
 
         {/* Horizontal-axis poles */}
         <div className="mt-2 flex w-full justify-between font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-          <span>Solo</span>
-          <span>Friend-group native</span>
+          <span>Individual</span>
+          <span>Social health layer</span>
         </div>
         {/* Horizontal-axis name */}
         <p className="mt-1 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-[#5a6e32]">

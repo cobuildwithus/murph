@@ -36,12 +36,9 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
             Murph turns group chats into health challenges.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Murph is a group-chat bot that lets friends run health
-            challenges across different wearables. Add Murph to iMessage,
-            WhatsApp, or Telegram. Everyone connects the device they
-            already use &mdash; Oura, Whoop, Apple Watch, Garmin, Fitbit,
-            or manual check-ins &mdash; and Murph sets the rules, keeps
-            score, posts leaderboards, and shows what changed.
+            Murph lets people run health challenges together across
+            different wearables. Start one in a group chat, join a public
+            cohort, or compare with people like you.
           </p>
           <button
             type="button"
@@ -79,9 +76,15 @@ export function ProblemSlide() {
     <Slide index={1} tone="cream" label="The problem">
       <Eyebrow>The Problem</Eyebrow>
       <SlideHeading wide>
-        People want to get healthier with friends. Today, it is too hard
-        to make that real.
+        People want to get healthier together.
+        <br />
+        Today, it is too hard to make that real.
       </SlideHeading>
+      <p className="mt-5 max-w-[60ch] text-base leading-[1.7] text-[#635a48]">
+        A group chat or cohort can come up with a health challenge in
+        five seconds: walk more, sleep better, drink less, try creatine,
+        improve recovery.
+      </p>
 
       {/* One message is easy to send; running the challenge is seven jobs */}
       <div className="mt-10 grid items-stretch gap-4 lg:grid-cols-2">
@@ -337,8 +340,8 @@ export function WhyNowSlide() {
 // clicking one reveals a small mock of what that step looks like.
 const PRODUCT_STEPS = [
   {
-    title: "Start a challenge",
-    detail: "Anyone kicks one off in the group chat.",
+    title: "Start or join a challenge",
+    detail: "Create one with friends or join a cohort.",
     panelLabel: "It starts with one message in the group chat",
     panel: (
       <div className="flex max-w-[440px] flex-col gap-1.5">
@@ -355,8 +358,8 @@ const PRODUCT_STEPS = [
     ),
   },
   {
-    title: "Everyone joins",
-    detail: "Each connects a wearable; Murph builds their baseline.",
+    title: "Build your baseline",
+    detail: "Connect your wearable; Murph learns your starting point.",
     panelLabel: "Six friends, six devices, one challenge",
     panel: (
       <div className="grid max-w-[560px] gap-x-12 sm:grid-cols-2">
@@ -389,7 +392,7 @@ const PRODUCT_STEPS = [
   },
   {
     title: "Murph runs it",
-    detail: "Rules, reminders, and a live leaderboard.",
+    detail: "Rules, reminders, check-ins, and leaderboards.",
     panelLabel: "A live leaderboard the whole way through",
     panel: (
       <div className="max-w-[460px]">
@@ -432,7 +435,7 @@ const PRODUCT_STEPS = [
   },
   {
     title: "Results update your vault",
-    detail: "Each person sees what changed.",
+    detail: "Each person sees what changed, and the protocol gets smarter.",
     panelLabel: "Priya's results · 30-day sleep challenge",
     panel: (
       <div className="grid max-w-[880px] gap-5 lg:grid-cols-[minmax(0,1fr)_28px_minmax(0,0.82fr)] lg:items-center">
@@ -584,14 +587,13 @@ export function ProductSlide() {
     <Slide index={4} tone="sand" label="The product">
       <Eyebrow>The Product</Eyebrow>
       <SlideHeading>
-        Murph is the AI referee for health challenges with friends.
+        Murph is the AI referee for social health challenges.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        Add Murph to a group chat and it runs the whole challenge, start
-        to finish. Each friend connects the wearable they already use.
-        Murph builds a private baseline for each person, runs the shared
-        challenge, and saves the results back to each person&rsquo;s
-        health vault over time.
+        Add Murph to a group chat or join a cohort. Each person connects
+        the wearable they already use. Murph builds a private baseline,
+        runs the shared challenge, keeps score, and saves the result back
+        to each person&rsquo;s health vault.
       </p>
       {/* The loop: one challenge, from kickoff to outcome */}
       <div className="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
@@ -709,10 +711,6 @@ export function SpreadSlide() {
           </p>
         </div>
       </div>
-      <p className="mt-8 max-w-[62ch] text-[15px] leading-[1.6] text-[#736a58]">
-        Consumer health apps pay for users. Murph spreads because the
-        product only works with friends.
-      </p>
     </Slide>
   );
 }
@@ -799,17 +797,17 @@ export function CompetitionSlide() {
     <Slide index={7} tone="cream" label="Competition">
       <Eyebrow>Competition</Eyebrow>
       <SlideHeading wide>
-        Devices track health.
+        Devices track individuals.
         <br />
-        ChatGPT answers questions.
+        ChatGPT answers prompts.
         <br />
-        Murph coordinates healthy habits with friends.
+        Murph coordinates social health experiments.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        Oura and Whoop see one device. ChatGPT sees one prompt. Murph
-        connects your wearables, labs, meals, protocols, and outcomes into
-        a health vault &mdash; then uses that context to run challenges,
-        reminders, leaderboards, and experiments with your friends.
+        Oura and Whoop see one device. ChatGPT sees one prompt. Murph connects wearables, labs, protocols,
+        and outcomes into a private health vault &mdash; then uses that
+        context to run challenges with friends, cohorts, and people like
+        you.
       </p>
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <MurphLoop />
