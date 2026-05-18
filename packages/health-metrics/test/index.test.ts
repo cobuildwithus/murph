@@ -11,6 +11,7 @@ import {
   MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
@@ -65,6 +66,7 @@ import {
   summarizeMurphAgeOrdinaryLabWearableAggregateEvidence,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
+  summarizeMurphAgePublicLabWearableShadowEvidenceStatus,
   toPublicMurphAgeCalculatorReport,
   toPublicMurphAgeDisplaySummary,
   validateMurphAgeLocalModelCardArtifactPolicy,
@@ -634,6 +636,17 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(summary.productDisplayAuthorized, false);
   assert.equal(summary.productPromotionAuthorized, false);
   assert.equal(summary.riskToAgeDisplayAuthorized, false);
+  assert.deepEqual(
+    summary.publicLabWearableShadowEvidenceStatus,
+    summarizeMurphAgePublicLabWearableShadowEvidenceStatus(),
+  );
+  assert.equal(
+    summary.publicLabWearableShadowEvidenceStatus.schemaVersion,
+    MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION,
+  );
+  assert.equal(summary.publicLabWearableShadowEvidenceStatus.wearableScoreBearingAuthorized, false);
+  assert.equal(summary.publicLabWearableShadowEvidenceStatus.usableAsConsumerWearableValidation, false);
+  assert.equal(summary.publicLabWearableShadowEvidenceStatus.reviewGptRequiredNow, false);
   assert.equal(summary.sourceRouteIdsByPriority[0], "nhis-r399-outcome-anchor");
   assert.deepEqual(summary.ordinaryLabWearableSourceRouteIdsByPriority, [
     "cardia-biomarker-activity",
@@ -723,6 +736,88 @@ test("summarizes Murph Age architecture layers without product display authoriza
   }
 
   const serialized = JSON.stringify(summary);
+  for (const forbidden of [
+    "selectedPointIds",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "prediction",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+});
+
+test("summarizes public lab and wearable shadow evidence as mixed and non-score-bearing", () => {
+  const status = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
+
+  assert.equal(status.schemaVersion, MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION);
+  assert.equal(status.inputPriority, "ordinary-16-50-labs-plus-wearable-activity");
+  assert.equal(status.conclusion, "public_activity_shadow_signal_mixed_keep_wearable_context_only");
+  assert.equal(status.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
+  assert.equal(status.externalConsumerLabWearableAggregateStillMissing, true);
+  assert.equal(status.publicAggregateOnly, true);
+  assert.equal(status.productDisplayAuthorized, false);
+  assert.equal(status.wearableScoreBearingAuthorized, false);
+  assert.equal(status.usableAsConsumerWearableValidation, false);
+  assert.equal(status.reviewGptRequiredNow, false);
+  assert.equal(status.reviewGptEscalation, "only-after-source-boundary-change-or-real-aggregate-delta");
+  assert.deepEqual(status.includedPacketIds, [
+    "r1065-nhanes-wrist-activity-shadow-loop",
+    "r1066-nhanes-wrist-activity-robustness-loop",
+    "r1067-nhanes-wrist-final-stress-test",
+    "r1038-nhanes-modern-lab-activity-loop",
+    "r1049-nhanes-activity-control-diagnostic",
+  ]);
+  assert.deepEqual(status.nextExternalOrPartnerRouteIdsByPriority, [
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
+    "uk-biobank-integrated",
+  ]);
+  assert.deepEqual(status.sourceRouteIdsByEvidencePriority, [
+    "nhanes-activity-shadow-lmf",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
+    "uk-biobank-integrated",
+  ]);
+
+  const packetsById = new Map(status.packets.map((packet) => [packet.packetId, packet]));
+  assert.deepEqual(packetsById.get("r1065-nhanes-wrist-activity-shadow-loop")?.aggregateMetricDeltas, {
+    auc: 0.00541653,
+    brier: -0.00046046,
+    calibrationSlope: 1.06082719,
+    eOverO: 1.01882003,
+    logLoss: -0.00112145,
+  });
+  assert.equal(packetsById.get("r1065-nhanes-wrist-activity-shadow-loop")?.negativeControlsBeaten, true);
+  assert.equal(packetsById.get("r1066-nhanes-wrist-activity-robustness-loop")?.negativeControlsBeaten, false);
+  assert.deepEqual(packetsById.get("r1067-nhanes-wrist-final-stress-test")?.aggregateMetricDeltas, {});
+  assert.equal(
+    packetsById.get("r1038-nhanes-modern-lab-activity-loop")?.aggregateMetricDeltas.eOverO,
+    0.83820495,
+  );
+  assert.equal(
+    packetsById.get("r1049-nhanes-activity-control-diagnostic")?.conclusion,
+    "nhanes_activity_signal_control_clean_global_calibration_limited",
+  );
+  for (const packet of status.packets) {
+    assert.equal(packet.productDisplayAuthorized, false);
+    assert.equal(packet.wearableScoreBearingAuthorized, false);
+    assert.equal(packet.usableAsConsumerWearableValidation, false);
+  }
+
+  const cloned = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
+  cloned.packets[0]?.aggregateMetricDeltas && (cloned.packets[0].aggregateMetricDeltas.auc = 99);
+  assert.equal(
+    summarizeMurphAgePublicLabWearableShadowEvidenceStatus().packets[0]?.aggregateMetricDeltas.auc,
+    0.00541653,
+  );
+
+  const serialized = JSON.stringify(status);
   for (const forbidden of [
     "selectedPointIds",
     "metric-point:",
