@@ -55,6 +55,10 @@ import {
   R1176_R1172_R1165_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_SCHEMA_VERSION,
   R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND,
 } from "./r1176-r1172-r1165-row-owner-safe-assertion-chain-runner.ts";
+import {
+  R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND,
+  R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_SCHEMA_VERSION,
+} from "./r1187-average-submitter-route-metric-readiness.ts";
 export const R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_SCHEMA_VERSION =
   "murph-age-r1076-current-autoresearch-loop-executor.v1" as const;
 
@@ -74,6 +78,18 @@ const R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_SCHEMA_VERSION =
   "murph-age-r1185-average-submitter-safe-response-smoke-proof.v1" as const;
 const R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1185-average-submitter-safe-response-smoke-proof.ts" as const;
+const R1187_ROUTE_METRIC_SAFE_CONFIRMATION_COMMAND =
+  "MURPH_AGE_R1183_ROW_OWNER_SAFE_RESPONSE_ASSERTIONS_CONFIRMED=true pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts" as const;
+const R1187_ROUTE_METRIC_PRIVATE_CONFIG_COMMAND =
+  "MURPH_AGE_LOCAL_PRIVATE_CONSUMER_RECEIPT_RUNNER_CONFIG_PATH=<private-config.json> pnpm exec tsx scripts/murph-age/r1122-local-private-consumer-receipt-runner-config-intake.ts" as const;
+const R1187_ROUTE_METRIC_PRIVATE_RUNNER_COMMAND =
+  "MURPH_AGE_LOCAL_PRIVATE_CONSUMER_RECEIPT_RUNNER_CONFIG_PATH=<private-config.json> pnpm exec tsx scripts/murph-age/r1125-local-private-first-pass-aggregate-metric-runner.ts" as const;
+const R1187_ROUTE_METRIC_INTAKE_COMMAND =
+  "MURPH_AGE_CONSUMER_FIRST_PASS_AGGREGATE_METRICS_PATH=<aggregate-metrics.json> pnpm exec tsx scripts/murph-age/r1124-consumer-first-pass-aggregate-metric-intake.ts" as const;
+const R1187_ROUTE_METRIC_SAFE_SUBMISSION_PACKET_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1186-average-submitter-safe-submission-packet.ts" as const;
+const R1187_ROUTE_METRIC_PARTIAL_PRIVATE_CHAIN_COMMAND =
+  "MURPH_AGE_ORDINARY_CONSUMER_DATA_AVAILABILITY_MANIFEST_PATH=<availability-manifest.json> MURPH_AGE_ORDINARY_CONSUMER_PARTIAL_PRIVATE_RUNNER_CONFIG_PATH=<partial-private-config.json> pnpm exec tsx scripts/murph-age/r1142-ordinary-consumer-partial-private-chain-runner.ts" as const;
 const TARGET_AGE_BAND = "roughly_16_50" as const;
 const TARGET_INPUT_PRIORITY = "consumer_bloodwork_labs_wearables_16_50_first" as const;
 const FEATURE_ONLY_SOURCE_FAMILY_IDS = ["bloodwork_glycemia", "wearable_activity_daily"] as const;
@@ -138,6 +154,32 @@ const R1176_ROW_OWNER_HANDOFF_REASON_ID =
   "confirm_feature_only_lab_wearable_availability_before_r1176_live_chain" as const;
 const FEATURE_ONLY_SAFE_AVAILABILITY_NEXT_ACTION =
   "run_r1153_feature_only_chain_with_safe_availability" as const;
+const R1187_ROUTE_METRIC_CONCLUSIONS = [
+  "average_submitter_route_metric_readiness_ready_for_private_runner",
+  "average_submitter_route_metric_readiness_ready_for_reviewgpt_real_delta",
+  "average_submitter_route_metric_readiness_waiting_on_aggregate_metrics",
+  "average_submitter_route_metric_readiness_waiting_on_route_metric_input_refresh",
+  "average_submitter_route_metric_readiness_waiting_on_row_owner_private_config",
+  "average_submitter_route_metric_readiness_waiting_on_safe_manifest",
+  "average_submitter_route_metric_readiness_waiting_on_safe_submission_packet_refresh",
+  "average_submitter_route_metric_readiness_waiting_on_safe_submission_confirmation",
+] as const;
+const R1187_ROUTE_METRIC_NEXT_ACTIONS = [
+  "complete_r1186_boolean_only_safe_confirmation_first",
+  "complete_private_config_for_real_outcome_linked_labs_wearables",
+  "fill_or_ingest_l1_l2_w1_qc_aggregate_metrics",
+  "refresh_r1186_safe_submission_packet",
+  "refresh_route_metric_readiness_inputs",
+  "run_r1125_private_runner_then_r1124_real_metric_intake",
+  "run_r1142_partial_private_chain_after_safe_manifest",
+  "send_real_consumer_first_pass_delta_to_reviewgpt",
+] as const;
+const R1187_ROUTE_METRIC_FIRST_PASS_CANDIDATE_IDS = [
+  "L1_tiny_glycemia_only",
+  "L2_common_lab_core_shadow",
+  "W1_activity_steps_minutes",
+  "QC_missingness_coverage",
+] as const;
 const R1128_EXPECTED = {
   artifact: "r1128-ordinary-consumer-pipeline-smoke-proof.latest.json",
   packetId: "r1128-ordinary-consumer-pipeline-smoke-proof",
@@ -353,6 +395,11 @@ const R1185_EXPECTED = {
   packetId: "r1185-average-submitter-safe-response-smoke-proof",
   schemaVersion: R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_SCHEMA_VERSION,
 } as const;
+const R1187_EXPECTED = {
+  artifact: "r1187-average-submitter-route-metric-readiness.latest.json",
+  packetId: "r1187-average-submitter-route-metric-readiness",
+  schemaVersion: R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_SCHEMA_VERSION,
+} as const;
 
 type ExecutorConclusion =
   | "executor_blocked_on_true_wearable_data"
@@ -365,8 +412,10 @@ type ExecutorConclusion =
   | "executor_ready_for_function_adjudication"
   | "executor_ready_for_nsrr_aggregate_receipt"
   | "executor_ready_for_reviewgpt_scientific_delta"
+  | "executor_refresh_consumer_route_metric_readiness"
   | "executor_refresh_consumer_safe_action_chain"
   | "executor_waiting_on_consumer_safe_availability_confirmation"
+  | "executor_waiting_on_consumer_safe_submission_confirmation"
   | "executor_repair_direction_inputs";
 
 interface ArtifactSummary {
@@ -448,6 +497,7 @@ export interface R1076CurrentAutoresearchLoopExecutorOptions {
   r1175Path?: string;
   r1176Path?: string;
   r1185Path?: string;
+  r1187Path?: string;
   scanRoots?: string[];
 }
 
@@ -1015,6 +1065,26 @@ export interface R1076CurrentAutoresearchLoopExecutorOutput {
     consumerAverageSubmitterSafeResponseSmokeProofRowOwnerPrivateValuesStored: boolean | null;
     consumerAverageSubmitterSafeResponseSmokeProofRowParsingPerformedByR1185: boolean | null;
     consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessArtifact: string | null;
+    consumerAverageSubmitterRouteMetricReadinessCommand: string | null;
+    consumerAverageSubmitterRouteMetricReadinessConclusion: string | null;
+    consumerAverageSubmitterRouteMetricReadinessNextAction: string | null;
+    consumerAverageSubmitterRouteMetricReadinessNextActionCommand: string | null;
+    consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired: string[];
+    consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds: string[];
+    consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds: string[];
+    consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187: boolean | null;
     consumerAverageSubmitterMissingSlotCount: number | null;
     consumerAverageSubmitterMissingSlotTypes: string[];
     consumerAverageSubmitterNextAction: string | null;
@@ -1593,6 +1663,26 @@ export interface R1076CurrentAutoresearchLoopExecutorOutput {
     consumerAverageSubmitterSafeResponseSmokeProofRowOwnerPrivateValuesStored: boolean | null;
     consumerAverageSubmitterSafeResponseSmokeProofRowParsingPerformedByR1185: boolean | null;
     consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessArtifact: string | null;
+    consumerAverageSubmitterRouteMetricReadinessCommand: string | null;
+    consumerAverageSubmitterRouteMetricReadinessConclusion: string | null;
+    consumerAverageSubmitterRouteMetricReadinessNextAction: string | null;
+    consumerAverageSubmitterRouteMetricReadinessNextActionCommand: string | null;
+    consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired: string[];
+    consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds: string[];
+    consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds: string[];
+    consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored: boolean | null;
+    consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187: boolean | null;
     consumerAverageSubmitterMissingSlotCount: number | null;
     consumerAverageSubmitterMissingSlotTypes: string[];
     consumerAverageSubmitterNextAction: string | null;
@@ -3536,6 +3626,71 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
   const consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185 = r1185Expected
     ? readBooleanAt(r1185, ["smokeProof", "liveArtifactsMutatedByR1185"])
     : null;
+  const r1187 = await readJsonIfPresent(
+    options.r1187Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1187_EXPECTED.artifact),
+  );
+  validateOptionalInputBoundary("r1187", r1187);
+  const r1187Expected = r1187MatchesExpected(r1187);
+  const consumerAverageSubmitterRouteMetricReadinessArtifact = r1187Expected
+    ? R1187_EXPECTED.artifact
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessCommand = r1187Expected
+    ? R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessConclusion = r1187Expected
+    ? readStringAt(r1187, ["summary", "conclusion"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessNextAction = r1187Expected
+    ? readStringAt(r1187, ["summary", "nextAction"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessNextActionCommand = r1187Expected
+    ? readStringAt(r1187, ["summary", "nextActionCommand"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired = r1187Expected
+    ? readStringArrayAt(r1187, ["summary", "minimumFeaturePairRequired"])
+    : [];
+  const consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds = r1187Expected
+    ? readStringArrayAt(r1187, ["summary", "prioritizedInputKindIds"])
+    : [];
+  const consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds = r1187Expected
+    ? readStringArrayAt(r1187, ["routeMetricReadiness", "firstPassCandidateIds"])
+    : [];
+  const consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "aggregateMetricsStillMissing"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "privateConfigStillRequired"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "realAggregateStillMissing"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "realLabWearableRouteMetricsRecorded"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "reviewGptRequiredNow"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "safeConfirmationStillRequired"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "safeSubmissionPacketRefreshRequired"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "modelEvidencePromotionAllowed"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "productDisplayAuthorized"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187 = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "rowLevelDataAcceptedByR1187"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "rowOwnerPrivateValuesStored"])
+    : null;
+  const consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187 = r1187Expected
+    ? readBooleanAt(r1187, ["summary", "rowParsingPerformedByR1187"])
+    : null;
   const routerNextAction = r1075.output.summary.nextAction;
   const nextAction = concreteNextActionFor({
     consumerAverageSubmitterAvailabilityChainNextAction,
@@ -3574,6 +3729,7 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
     consumerAverageSubmitterSafeConfirmationTranscriptionProofNextAction,
     consumerAverageSubmitterSafeConfirmationTranscriptionProofReadyForRowOwnerConfirmation,
     consumerAverageSubmitterSafeAvailabilityConfirmationNextAction,
+    consumerAverageSubmitterRouteMetricReadinessNextAction,
     consumerRealEvidenceHandoffNextAction,
     routerNextAction,
   });
@@ -4162,6 +4318,26 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
       consumerAverageSubmitterSafeResponseSmokeProofRowOwnerPrivateValuesStored,
       consumerAverageSubmitterSafeResponseSmokeProofRowParsingPerformedByR1185,
       consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185,
+      consumerAverageSubmitterRouteMetricReadinessArtifact,
+      consumerAverageSubmitterRouteMetricReadinessCommand,
+      consumerAverageSubmitterRouteMetricReadinessConclusion,
+      consumerAverageSubmitterRouteMetricReadinessNextAction,
+      consumerAverageSubmitterRouteMetricReadinessNextActionCommand,
+      consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired,
+      consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds,
+      consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds,
+      consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing,
+      consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired,
+      consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing,
+      consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded,
+      consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow,
+      consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired,
+      consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired,
+      consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed,
+      consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized,
+      consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187,
+      consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored,
+      consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187,
       consumerAverageSubmitterMissingSlotCount,
       consumerAverageSubmitterMissingSlotTypes,
       consumerAverageSubmitterNextAction,
@@ -4195,10 +4371,12 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
       commands: executorCommandsFor({
         fallbackCommands: r1075.output.nextLoop.commands,
         nextAction: routerNextAction,
+        promotedNextActionCommand: consumerAverageSubmitterRouteMetricReadinessNextActionCommand,
       }),
       nextAction,
       productDisplayAuthorized: false,
-      reviewGptRequiredNow: r1075.output.summary.reviewGptRequiredNow,
+      reviewGptRequiredNow: consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow === true
+        || r1075.output.summary.reviewGptRequiredNow,
       reviewGptUse: "only_for_real_aggregate_delta_or_major_architecture_fork",
       routerConclusion: r1075.output.summary.conclusion,
       routerNextAction,
@@ -4214,7 +4392,8 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
       }),
       nextAction,
       productDisplayAuthorized: false,
-      reviewGptRequiredNow: r1075.output.summary.reviewGptRequiredNow,
+      reviewGptRequiredNow: consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow === true
+        || r1075.output.summary.reviewGptRequiredNow,
       rowParsingPerformedByR1076: false,
       routerConclusion: r1075.output.summary.conclusion,
       routerNextAction,
@@ -4748,6 +4927,26 @@ export async function runR1076CurrentAutoresearchLoopExecutor(
       consumerAverageSubmitterSafeResponseSmokeProofRowOwnerPrivateValuesStored,
       consumerAverageSubmitterSafeResponseSmokeProofRowParsingPerformedByR1185,
       consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185,
+      consumerAverageSubmitterRouteMetricReadinessArtifact,
+      consumerAverageSubmitterRouteMetricReadinessCommand,
+      consumerAverageSubmitterRouteMetricReadinessConclusion,
+      consumerAverageSubmitterRouteMetricReadinessNextAction,
+      consumerAverageSubmitterRouteMetricReadinessNextActionCommand,
+      consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired,
+      consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds,
+      consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds,
+      consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing,
+      consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired,
+      consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing,
+      consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded,
+      consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow,
+      consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired,
+      consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired,
+      consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed,
+      consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized,
+      consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187,
+      consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored,
+      consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187,
       consumerAverageSubmitterMissingSlotCount,
       consumerAverageSubmitterMissingSlotTypes,
       consumerAverageSubmitterNextAction,
@@ -4881,6 +5080,30 @@ function conclusionFor(input: {
   routerConclusion: string;
 }): ExecutorConclusion {
   if (input.routerConclusion === "current_loop_ready_for_consumer_first_pass_aggregate_metrics") {
+    if (input.nextAction === "complete_r1186_boolean_only_safe_confirmation_first") {
+      return "executor_waiting_on_consumer_safe_submission_confirmation";
+    }
+    if (
+      input.nextAction === "refresh_r1186_safe_submission_packet"
+      || input.nextAction === "refresh_route_metric_readiness_inputs"
+    ) {
+      return "executor_refresh_consumer_route_metric_readiness";
+    }
+    if (input.nextAction === "complete_private_config_for_real_outcome_linked_labs_wearables") {
+      return "executor_ready_for_consumer_private_config";
+    }
+    if (
+      input.nextAction === "run_r1125_private_runner_then_r1124_real_metric_intake"
+      || input.nextAction === "run_r1142_partial_private_chain_after_safe_manifest"
+    ) {
+      return "executor_ready_for_consumer_route_metrics";
+    }
+    if (input.nextAction === "send_real_consumer_first_pass_delta_to_reviewgpt") {
+      return "executor_ready_for_reviewgpt_scientific_delta";
+    }
+    if (input.nextAction === "fill_or_ingest_l1_l2_w1_qc_aggregate_metrics") {
+      return "executor_ready_for_consumer_first_pass_aggregate_metrics";
+    }
     if (isSafeAvailabilityConfirmationAction(input.nextAction)) {
       return "executor_waiting_on_consumer_safe_availability_confirmation";
     }
@@ -4972,6 +5195,7 @@ function concreteNextActionFor(input: {
   consumerAverageSubmitterSafeConfirmationTranscriptionProofNextAction: string | null;
   consumerAverageSubmitterSafeConfirmationTranscriptionProofReadyForRowOwnerConfirmation: boolean | null;
   consumerAverageSubmitterSafeAvailabilityConfirmationNextAction: string | null;
+  consumerAverageSubmitterRouteMetricReadinessNextAction: string | null;
   consumerRealEvidenceHandoffNextAction: string | null;
   routerNextAction: string;
 }): string {
@@ -5069,6 +5293,12 @@ function concreteNextActionFor(input: {
     return nextAction;
   };
 
+  if (
+    input.routerNextAction === "fill_consumer_first_pass_aggregate_metrics_template"
+    && input.consumerAverageSubmitterRouteMetricReadinessNextAction
+  ) {
+    return input.consumerAverageSubmitterRouteMetricReadinessNextAction;
+  }
   if (
     input.routerNextAction === "fill_consumer_first_pass_aggregate_metrics_template"
     && input.consumerAverageSubmitterPostConfirmationPrivateConfigIntakeSafeActionGuardPresent === false
@@ -5192,6 +5422,7 @@ function concreteNextActionFor(input: {
 function executorCommandsFor(input: {
   fallbackCommands: string[];
   nextAction: string;
+  promotedNextActionCommand: string | null;
 }): string[] {
   if (input.nextAction === "download_nsrr_or_secure_workbench_access") {
     return [
@@ -5500,13 +5731,28 @@ function executorCommandsFor(input: {
           R1175_R1172_TO_R1165_SAFE_ASSERTION_BRIDGE_SMOKE_COMMAND,
           R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND,
         );
-    return withSafeAssertionLiveChain.includes(R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND)
+    const withSafeResponseSmokeProof = withSafeAssertionLiveChain.includes(
+      R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND,
+    )
       ? withSafeAssertionLiveChain
       : insertAfter(
           withSafeAssertionLiveChain,
           R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND,
           R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND,
         );
+    const withRouteMetricReadiness = withSafeResponseSmokeProof.includes(
+      R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND,
+    )
+      ? withSafeResponseSmokeProof
+      : insertAfter(
+          withSafeResponseSmokeProof,
+          R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND,
+          R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND,
+        );
+    return input.promotedNextActionCommand
+        && !withRouteMetricReadiness.includes(input.promotedNextActionCommand)
+      ? [...withRouteMetricReadiness, input.promotedNextActionCommand]
+      : withRouteMetricReadiness;
   }
   return input.fallbackCommands;
 }
@@ -5603,6 +5849,7 @@ async function main(): Promise<void> {
     r1175Path: process.env.MURPH_AGE_R1175_R1172_TO_R1165_SAFE_ASSERTION_BRIDGE_SMOKE_PATH,
     r1176Path: process.env.MURPH_AGE_R1176_R1172_R1165_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH,
     r1185Path: process.env.MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH,
+    r1187Path: process.env.MURPH_AGE_R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_PATH,
     scanRoots: parseScanRoots(process.env.MURPH_AGE_NSRR_SCAN_ROOTS),
   });
   process.stdout.write(`${JSON.stringify({
@@ -6592,6 +6839,46 @@ async function main(): Promise<void> {
       output.summary.consumerAverageSubmitterSafeResponseSmokeProofRowParsingPerformedByR1185,
     consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185:
       output.summary.consumerAverageSubmitterSafeResponseSmokeProofLiveArtifactsMutatedByR1185,
+    consumerAverageSubmitterRouteMetricReadinessArtifact:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessArtifact,
+    consumerAverageSubmitterRouteMetricReadinessCommand:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessCommand,
+    consumerAverageSubmitterRouteMetricReadinessConclusion:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessConclusion,
+    consumerAverageSubmitterRouteMetricReadinessNextAction:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessNextAction,
+    consumerAverageSubmitterRouteMetricReadinessNextActionCommand:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessNextActionCommand,
+    consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessMinimumFeaturePairRequired,
+    consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessPrioritizedInputKindIds,
+    consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessFirstPassCandidateIds,
+    consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessAggregateMetricsStillMissing,
+    consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessPrivateConfigStillRequired,
+    consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessRealAggregateStillMissing,
+    consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessRealLabWearableRouteMetricsRecorded,
+    consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessReviewGptRequiredNow,
+    consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessSafeConfirmationStillRequired,
+    consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessSafeSubmissionPacketRefreshRequired,
+    consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessModelEvidencePromotionAllowed,
+    consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessProductDisplayAuthorized,
+    consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessRowLevelDataAcceptedByR1187,
+    consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessRowOwnerPrivateValuesStored,
+    consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187:
+      output.summary.consumerAverageSubmitterRouteMetricReadinessRowParsingPerformedByR1187,
     consumerAverageSubmitterMissingSlotCount: output.summary.consumerAverageSubmitterMissingSlotCount,
     consumerAverageSubmitterMissingSlotTypes: output.summary.consumerAverageSubmitterMissingSlotTypes,
     consumerAverageSubmitterNextAction: output.summary.consumerAverageSubmitterNextAction,
@@ -7743,6 +8030,76 @@ function r1185MatchesExpected(value: unknown | null): boolean {
     && readBooleanAt(value, ["productDisplayAuthorized"]) === false;
 }
 
+function r1187MatchesExpected(value: unknown | null): boolean {
+  const conclusion = readStringAt(value, ["summary", "conclusion"]);
+  const nextAction = readStringAt(value, ["summary", "nextAction"]);
+  const nextActionCommand = readStringAt(value, ["summary", "nextActionCommand"]);
+  const nextActionCommandMatches =
+    (nextAction === "complete_r1186_boolean_only_safe_confirmation_first"
+      && nextActionCommand === R1187_ROUTE_METRIC_SAFE_CONFIRMATION_COMMAND)
+    || (nextAction === "complete_private_config_for_real_outcome_linked_labs_wearables"
+      && nextActionCommand === R1187_ROUTE_METRIC_PRIVATE_CONFIG_COMMAND)
+    || (nextAction === "fill_or_ingest_l1_l2_w1_qc_aggregate_metrics"
+      && nextActionCommand === R1187_ROUTE_METRIC_INTAKE_COMMAND)
+    || (nextAction === "refresh_r1186_safe_submission_packet"
+      && nextActionCommand === R1187_ROUTE_METRIC_SAFE_SUBMISSION_PACKET_COMMAND)
+    || (nextAction === "refresh_route_metric_readiness_inputs"
+      && nextActionCommand === R1187_AVERAGE_SUBMITTER_ROUTE_METRIC_READINESS_COMMAND)
+    || (nextAction === "run_r1125_private_runner_then_r1124_real_metric_intake"
+      && nextActionCommand === R1187_ROUTE_METRIC_PRIVATE_RUNNER_COMMAND)
+    || (nextAction === "run_r1142_partial_private_chain_after_safe_manifest"
+      && nextActionCommand === R1187_ROUTE_METRIC_PARTIAL_PRIVATE_CHAIN_COMMAND)
+    || (nextAction === "send_real_consumer_first_pass_delta_to_reviewgpt"
+      && nextActionCommand === null);
+  return readStringAt(value, ["packetId"]) === R1187_EXPECTED.packetId
+    && readStringAt(value, ["schemaVersion"]) === R1187_EXPECTED.schemaVersion
+    && readStringAt(value, ["status"]) === "research-local-aggregate-only"
+    && readBooleanAt(value, ["artifactBoundary", "aggregateOnly"]) === true
+    && readBooleanAt(value, ["artifactBoundary", "productDisplayAuthorized"]) === false
+    && readBooleanAt(value, ["artifactBoundary", "rowLevelDataAcceptedByR1187"]) === false
+    && readBooleanAt(value, ["artifactBoundary", "rowOwnerPrivateValuesStored"]) === false
+    && readBooleanAt(value, ["artifactBoundary", "rowParsingPerformedByR1187"]) === false
+    && readBooleanAt(value, ["artifactBoundary", "safeBooleanValuesStoredInR1187Packet"]) === false
+    && stringInSet(conclusion, R1187_ROUTE_METRIC_CONCLUSIONS)
+    && stringInSet(nextAction, R1187_ROUTE_METRIC_NEXT_ACTIONS)
+    && nextActionCommandMatches
+    && exactStringSet(
+      readStringArrayAt(value, ["summary", "minimumFeaturePairRequired"]),
+      FEATURE_ONLY_SOURCE_FAMILY_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["summary", "prioritizedInputKindIds"]),
+      ["lab_portal_export_or_spreadsheet", "phone_watch_or_wearable_activity_export"],
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["routeMetricReadiness", "firstPassCandidateIds"]),
+      R1187_ROUTE_METRIC_FIRST_PASS_CANDIDATE_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["routeMetricReadiness", "minimumFeaturePairRequired"]),
+      FEATURE_ONLY_SOURCE_FAMILY_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["routeMetricReadiness", "prioritizedInputKindIds"]),
+      ["lab_portal_export_or_spreadsheet", "phone_watch_or_wearable_activity_export"],
+    )
+    && readStringAt(value, ["routeMetricReadiness", "targetAgeBand"]) === TARGET_AGE_BAND
+    && readStringAt(value, ["routeMetricReadiness", "targetInputPriority"]) === TARGET_INPUT_PRIORITY
+    && readBooleanAt(value, ["routeMetricReadiness", "modelEvidencePromotionAllowed"]) === false
+    && readBooleanAt(value, ["routeMetricReadiness", "productDisplayAuthorized"]) === false
+    && readBooleanAt(value, ["routeMetricReadiness", "rowLevelDataAcceptedByR1187"]) === false
+    && readBooleanAt(value, ["routeMetricReadiness", "rowOwnerPrivateValuesStored"]) === false
+    && readBooleanAt(value, ["routeMetricReadiness", "rowParsingPerformedByR1187"]) === false
+    && readStringAt(value, ["summary", "targetAgeBand"]) === TARGET_AGE_BAND
+    && readStringAt(value, ["summary", "targetInputPriority"]) === TARGET_INPUT_PRIORITY
+    && readBooleanAt(value, ["summary", "modelEvidencePromotionAllowed"]) === false
+    && readBooleanAt(value, ["summary", "productDisplayAuthorized"]) === false
+    && readBooleanAt(value, ["summary", "rowLevelDataAcceptedByR1187"]) === false
+    && readBooleanAt(value, ["summary", "rowOwnerPrivateValuesStored"]) === false
+    && readBooleanAt(value, ["summary", "rowParsingPerformedByR1187"]) === false
+    && readBooleanAt(value, ["productDisplayAuthorized"]) === false;
+}
+
 function postConfirmationPrivateConfigIntakeSafeActionGuardPresent(r1148: unknown | null): boolean {
   const packetReadyForConfigIntake = readBooleanAt(r1148, ["summary", "packetReadyForConfigIntake"]);
   const nextAction = readStringAt(r1148, ["summary", "nextAction"]);
@@ -7790,6 +8147,10 @@ function postConfirmationPrivateConfigIntakeSafeActionGuardPresent(r1148: unknow
 
 function includesAll(actual: readonly string[], expected: readonly string[]): boolean {
   return expected.every((item) => actual.includes(item));
+}
+
+function stringInSet(value: string | null, expected: readonly string[]): boolean {
+  return value !== null && expected.includes(value);
 }
 
 function exactStringSet(actual: readonly string[], expected: readonly string[]): boolean {
