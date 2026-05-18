@@ -294,12 +294,17 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
-  it("schedules a short recheck when runtime completion requests immediate follow-up work", async () => {
+  it("drops stale runtime-result assistant wakes after mailbox catch-up", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const staleWakeAt = "2026-04-26T23:59:59.000Z";
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
-      invocationResults: [{ nextWakeAt: FIXED_NOW, status: "scheduled" }],
-      workspace: createWorkspaceState({ version: "5" }),
+      invocationResults: [{ nextWakeAt: staleWakeAt, status: "scheduled" }],
+      workspace: createWorkspaceState({
+        nextWakeAt: staleWakeAt,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
     });
     await runner.bindUser("member_123");
     sql.exec(
@@ -313,16 +318,15 @@ describe("HostedUserRunner wake scheduling", () => {
       accepted: true,
       immediateDriveStarted: true,
       kind: "processing-ensured",
-      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
     await flushWaitUntil();
 
     expect(invoke).toHaveBeenCalledOnce();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      wake_at: "2026-04-27T00:00:01.000Z",
+      wake_at: null,
     });
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+    expect(alarms.at(-1)).toBe("deleted");
   });
 
   it("schedules a short recheck when runtime completion leaves mailbox lag", async () => {
@@ -1593,6 +1597,59 @@ describe("HostedUserRunner wake scheduling", () => {
       backoff_until: null,
       failure_count: 0,
       wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe(activeExpiresAt);
+  });
+
+  it("ignores a stale recheck alarm when status reads fail behind an active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeExpiresAt = "2026-04-27T00:01:00.000Z";
+    const staleRecheckAt = "2026-04-26T23:59:59.000Z";
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status unavailable");
+    });
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?,
+           wake_at = ?
+       WHERE singleton = 1`,
+      "attempt_active",
+      1,
+      "runtime",
+      FIXED_NOW,
+      activeExpiresAt,
+      "5",
+      staleRecheckAt,
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      kind: "retry-scheduled",
+      nextAlarmAt: activeExpiresAt,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_active",
+      active_expires_at: activeExpiresAt,
+      backoff_until: null,
+      failure_count: 0,
+      wake_at: staleRecheckAt,
     });
     expect(alarms.at(-1)).toBe(activeExpiresAt);
   });
