@@ -28,6 +28,23 @@ const REQUIRED_RESPONSE_FIELDS = [
   "confirm_daily_wearable_activity_export_available",
   "confirm_no_private_values_in_confirmation",
 ] as const;
+const R1181_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1181-average-submitter-feature-only-execution-contract.ts";
+const R1183_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
+const R1183_FILLABLE_RESPONSE_ARTIFACT =
+  "r1183-fillable-average-submitter-safe-confirmation-response.json";
+const R1180_WITH_FILLABLE_RESPONSE_COMMAND =
+  `MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH=<${R1183_FILLABLE_RESPONSE_ARTIFACT}> pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts`;
+const RESPONSE_TEMPLATE_KEY_ORDER = [
+  "askId",
+  "confirmDailyWearableActivityExportAvailable",
+  "confirmGlycemiaBloodworkExportAvailable",
+  "confirmNoPrivateValuesIncluded",
+  "confirmTargetAgeBandRoughly16To50",
+  "responseKind",
+  "schemaVersion",
+] as const;
 
 describe("R1180 average submitter safe confirmation response intake", () => {
   it("emits a safe fillable response template while waiting on row-owner confirmation", async () => {
@@ -54,7 +71,7 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         missingRequiredResponseFieldIds: [...REQUIRED_RESPONSE_FIELDS],
         modelEvidencePromotionAllowed: false,
         nextAction: "fill_safe_confirmation_response_template",
-        nextActionCommand: null,
+        nextActionCommand: R1183_COMMAND,
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         productDisplayAuthorized: false,
         responseKind: null,
@@ -66,6 +83,17 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         rowOwnerProvidedPrivateValuesStored: false,
         rowOwnerProvidedSafeBooleansStored: false,
         rowParsingPerformedByR1180: false,
+        safeResponseTemplateGuidance: {
+          fillableResponseArtifact: R1183_FILLABLE_RESPONSE_ARTIFACT,
+          materializeFillableResponseCommand: R1183_COMMAND,
+          modelEvidencePromotionAllowed: false,
+          productDisplayAuthorized: false,
+          responsePathEnvVar: "MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH",
+          responseTemplateKeyOrder: [...RESPONSE_TEMPLATE_KEY_ORDER],
+          rowOwnerOnly: true,
+          runIntakeWithFilledTemplateCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
+          storesPrivateDetailsInPacket: false,
+        },
       });
       expect(output.safeConfirmationResponseIntake.responseTemplate).toMatchObject({
         askId: ASK_ID,
@@ -124,6 +152,7 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         missingRequiredResponseFieldIds: [],
         modelEvidencePromotionAllowed: false,
         nextAction: "carry_safe_confirmation_to_feature_only_chain",
+        nextActionCommand: R1181_COMMAND,
         productDisplayAuthorized: false,
         responseKind: "explicit_yes_all_required_assertions_confirmed",
         responseStatus: "ready",
@@ -163,6 +192,7 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         featureOnlySafeConfirmationReady: false,
         missingRequiredResponseFieldIds: ["confirm_daily_wearable_activity_export_available"],
         nextAction: "fill_safe_confirmation_response_template",
+        nextActionCommand: R1183_COMMAND,
         responseStatus: "incomplete",
       });
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
@@ -195,6 +225,7 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         featureOnlySafeConfirmationReady: false,
         invalidResponseReasonIds: ["unexpected_keys"],
         nextAction: "rerun_safe_confirmation_response_with_valid_json_object",
+        nextActionCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
         responseStatus: "invalid",
       });
       expect(serialized).not.toContain("privatePath");
@@ -238,6 +269,7 @@ describe("R1180 average submitter safe confirmation response intake", () => {
         ],
         missingRequiredResponseFieldIds: [...REQUIRED_RESPONSE_FIELDS],
         nextAction: "rerun_safe_confirmation_response_with_valid_json_object",
+        nextActionCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
         responseKind: null,
         responseStatus: "invalid",
       });
@@ -311,15 +343,24 @@ describe("R1180 average submitter safe confirmation response intake", () => {
       const cli = JSON.parse(result.stdout) as {
         askId?: unknown;
         featureOnlySafeConfirmationReady?: unknown;
+        nextActionCommand?: unknown;
         packetId?: unknown;
         responseTemplate?: unknown;
         responseStatus?: unknown;
+        safeResponseTemplateGuidance?: unknown;
       };
       expect(cli).toMatchObject({
         askId: ASK_ID,
         featureOnlySafeConfirmationReady: true,
+        nextActionCommand: R1181_COMMAND,
         packetId: "r1180-average-submitter-safe-confirmation-response-intake",
         responseStatus: "ready",
+        safeResponseTemplateGuidance: {
+          fillableResponseArtifact: R1183_FILLABLE_RESPONSE_ARTIFACT,
+          materializeFillableResponseCommand: R1183_COMMAND,
+          responsePathEnvVar: "MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH",
+          runIntakeWithFilledTemplateCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
+        },
       });
       expect(cli.responseTemplate).toBeUndefined();
       await expect(stat(path.join(outDir, "r1180-average-submitter-safe-confirmation-response-intake.latest.json")))

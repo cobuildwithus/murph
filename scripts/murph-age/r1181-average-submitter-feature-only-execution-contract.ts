@@ -25,6 +25,16 @@ const OUTPUT_FILE_NAME = "r1181-average-submitter-feature-only-execution-contrac
 const R1180_ARTIFACT = "r1180-average-submitter-safe-confirmation-response-intake.latest.json" as const;
 const R1180_PACKET_ID = "r1180-average-submitter-safe-confirmation-response-intake" as const;
 const R1181_PACKET_ID = "r1181-average-submitter-feature-only-execution-contract" as const;
+const R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND_FOR_GUIDANCE =
+  "pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts" as const;
+const R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts" as const;
+const R1183_FILLABLE_RESPONSE_FILE_NAME =
+  "r1183-fillable-average-submitter-safe-confirmation-response.json" as const;
+const R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR =
+  "MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH" as const;
+const R1180_WITH_FILLABLE_RESPONSE_COMMAND =
+  `${R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR}=<${R1183_FILLABLE_RESPONSE_FILE_NAME}> ${R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND_FOR_GUIDANCE}` as const;
 const TARGET_INPUT_PRIORITY = "consumer_bloodwork_labs_wearables_16_50_first" as const;
 const TARGET_AGE_BAND = "roughly_16_50" as const;
 const EXECUTION_ROLE = "feature_only_research_planning_not_model_evidence" as const;
@@ -239,6 +249,7 @@ const R1180_SHARED_INTAKE_KEYS = [
   "rowOwnerProvidedSafeBooleansStored",
   "rowParsingPerformedByR1180",
   "safeCompletionChecklistItemIds",
+  "safeResponseTemplateGuidance",
   "sourcePriority",
   "targetAgeBand",
 ] as const;
@@ -250,6 +261,19 @@ const R1180_SAFE_CONFIRMATION_RESPONSE_TEMPLATE_KEYS = [
   "confirmTargetAgeBandRoughly16To50",
   "responseKind",
   "schemaVersion",
+] as const;
+const R1180_SAFE_RESPONSE_TEMPLATE_GUIDANCE_KEYS = [
+  "allowedValueKindIds",
+  "blockedContentIds",
+  "fillableResponseArtifact",
+  "materializeFillableResponseCommand",
+  "modelEvidencePromotionAllowed",
+  "productDisplayAuthorized",
+  "responsePathEnvVar",
+  "responseTemplateKeyOrder",
+  "rowOwnerOnly",
+  "runIntakeWithFilledTemplateCommand",
+  "storesPrivateDetailsInPacket",
 ] as const;
 const R1180_SAFE_FALSE_FLAG_KEYS = [
   "modelEvidencePromotionAllowed",
@@ -523,7 +547,7 @@ function r1180ReadyForContract(state: R1180State): boolean {
     && state.explicitRowOwnerSafeConfirmationProvided === true
     && state.invalidResponseReasonsEmpty
     && state.nextAction === "carry_safe_confirmation_to_feature_only_chain"
-    && state.nextActionCommand === null
+    && state.nextActionCommand === R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND
     && state.responseArtifactStatus === "available"
     && state.responseStatus === "ready"
     && state.responseKind === "explicit_yes_all_required_assertions_confirmed"
@@ -663,6 +687,9 @@ function validateR1180SharedIntakeShape(section: Record<string, unknown>): void 
   assertStringInSetOrNull(section.responseKind, R1180_RESPONSE_KIND_IDS);
   assertStringInSet(section.responseStatus, R1180_RESPONSE_STATUS_IDS);
   assertExactStringArray(section.safeCompletionChecklistItemIds, R1180_SAFE_COMPLETION_CHECKLIST_ITEM_IDS);
+  validateR1180SafeResponseTemplateGuidanceShape(
+    requirePlainRecordForR1180Shape(section.safeResponseTemplateGuidance),
+  );
   assertString(section.sourcePriority);
   assertString(section.targetAgeBand);
 }
@@ -676,6 +703,24 @@ function validateR1180ResponseTemplateShape(template: Record<string, unknown>): 
   assertFalse(template.confirmTargetAgeBandRoughly16To50);
   assertExactString(template.responseKind, "explicit_yes_all_required_assertions_confirmed");
   assertExactString(template.schemaVersion, R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION);
+}
+
+function validateR1180SafeResponseTemplateGuidanceShape(guidance: Record<string, unknown>): void {
+  assertExactKeys(guidance, R1180_SAFE_RESPONSE_TEMPLATE_GUIDANCE_KEYS);
+  assertExactStringArray(guidance.allowedValueKindIds, R1180_ALLOWED_VALUE_KIND_IDS);
+  assertExactStringArray(guidance.blockedContentIds, BLOCKED_CONTENT_IDS);
+  assertExactString(guidance.fillableResponseArtifact, R1183_FILLABLE_RESPONSE_FILE_NAME);
+  assertExactString(
+    guidance.materializeFillableResponseCommand,
+    R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND,
+  );
+  assertFalse(guidance.modelEvidencePromotionAllowed);
+  assertFalse(guidance.productDisplayAuthorized);
+  assertExactString(guidance.responsePathEnvVar, R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR);
+  assertExactStringArray(guidance.responseTemplateKeyOrder, R1180_SAFE_CONFIRMATION_RESPONSE_TEMPLATE_KEYS);
+  assertTrue(guidance.rowOwnerOnly);
+  assertExactString(guidance.runIntakeWithFilledTemplateCommand, R1180_WITH_FILLABLE_RESPONSE_COMMAND);
+  assertFalse(guidance.storesPrivateDetailsInPacket);
 }
 
 function assertSharedIntakeMirrorsSummary(
@@ -828,6 +873,12 @@ function assertBoolean(value: unknown): void {
 
 function assertFalse(value: unknown): void {
   if (value !== false) {
+    rejectUnexpectedR1180Shape();
+  }
+}
+
+function assertTrue(value: unknown): void {
+  if (value !== true) {
     rejectUnexpectedR1180Shape();
   }
 }
