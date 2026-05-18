@@ -655,61 +655,109 @@ export function ProductSlide() {
   );
 }
 
-/* ━━━ 05 · USER FLOW / SOCIAL LOOP ━━━ */
+/* ━━━ 05 · HOW IT SPREADS ━━━ */
+
+// The two growth loops shown on the spread slide. Each renders as a
+// numbered card; the final `repeat` step loops back to the first.
+const SPREAD_LOOPS = [
+  {
+    label: "Private group loop",
+    steps: [
+      "One person starts a challenge",
+      "They invite friends",
+      "The group gets results",
+    ],
+    repeat: "Someone starts the next challenge",
+  },
+  {
+    label: "Cohort loop",
+    steps: [
+      "A protocol page attracts users",
+      "People join the cohort",
+      "Outcomes improve the protocol page",
+    ],
+    repeat: "Better evidence attracts more users",
+  },
+] as const;
+
 export function SpreadSlide() {
   return (
     <Slide index={5} tone="cream" label="How it spreads">
       <Eyebrow>How It Spreads</Eyebrow>
       <SlideHeading>
-        From idea to challenge in under 60 seconds. Then it spreads.
+        Murph spreads through private groups and public cohorts.
       </SlideHeading>
-      <div className="mt-10 grid gap-8 lg:grid-cols-2 lg:items-start">
-        <ChatMock
-          members={5}
-          messages={[
-            {
-              kind: "you",
-              text: "Murph, start a 30-day sleep challenge. Winner improves sleep score the most. Loser does karaoke.",
-            },
-            {
-              kind: "murph",
-              text: "Sleep Challenge created. 30 days. Metric: sleep score improvement vs your 7-day baseline. Stake: karaoke for last place.",
-            },
-            {
-              kind: "murph",
-              text: "5 invited. Connect Oura, Whoop, or Apple Health to lock in your baseline.",
-            },
-          ]}
-          title="Sleep Crew"
-        />
-        <div className="rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
+      <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
+        Murph doesn&rsquo;t only spread through friend invites. It also
+        compounds through protocol pages that become public destinations.
+      </p>
+
+      {/* Two growth loops: friend invites, and protocol-page cohorts */}
+      <div className="mt-10 grid gap-4 lg:grid-cols-2">
+        {SPREAD_LOOPS.map((loop) => (
+          <div
+            key={loop.label}
+            className="rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6"
+          >
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+              {loop.label}
+            </p>
+            <ol className="mt-4 flex flex-col gap-3">
+              {loop.steps.map((step, index) => (
+                <li key={step} className="flex items-start gap-3">
+                  <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-[#5a6e32]/12 font-mono text-[11px] font-semibold text-[#5a6e32]">
+                    {index + 1}
+                  </span>
+                  <span className="text-[15px] leading-[1.5] text-[#2d3436]">
+                    {step}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-4 flex items-start gap-3 rounded-lg bg-[#5a6e32]/[0.08] px-3.5 py-3">
+              <span aria-hidden="true" className="text-[#5a6e32]">
+                &#8635;
+              </span>
+              <span className="text-[14px] leading-[1.5] text-[#3d5028]">
+                {loop.repeat}
+              </span>
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* The cohort loop's artifact: a protocol page that is a destination */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-xl border border-[#5a6e32]/30 bg-[#5a6e32]/[0.06] p-5">
+        <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-            The viral loop
+            Protocol page &middot; public cohort
           </p>
-          <ol className="mt-4 flex flex-col gap-3">
-            {[
-              "One person creates a challenge",
-              "They invite 5 to 10 friends",
-              "Friends compete, banter, and share results",
-              "The results become social proof",
-            ].map((step, index) => (
-              <li key={step} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-[#5a6e32]/12 font-mono text-[11px] font-semibold text-[#5a6e32]">
-                  {index + 1}
-                </span>
-                <span className="text-[15px] leading-[1.5] text-[#2d3436]">
-                  {step}
-                </span>
-              </li>
-            ))}
-          </ol>
-          <p className="mt-4 flex items-start gap-3 rounded-lg bg-[#5a6e32]/[0.08] px-3.5 py-3">
-            <span className="text-[#5a6e32]">&#8635;</span>
-            <span className="text-[14px] leading-[1.5] text-[#3d5028]">
-              Someone starts the next challenge in another group chat.
-            </span>
+          <p className="mt-1.5 font-serif text-[1.3rem] font-semibold leading-tight text-[#2d3436]">
+            30-day sleep challenge
           </p>
         </div>
+        <div className="flex gap-8">
+          {[
+            { value: "1,284", label: "runs logged" },
+            { value: "+6.8%", label: "avg improvement" },
+          ].map((stat) => (
+            <div key={stat.label}>
+              <p className="font-serif text-[1.5rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
+                {stat.value}
+              </p>
+              <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+                {stat.label}
+              </p>
+            </div>
+          ))}
+        </div>
+        <span className="rounded-md bg-[#5a6e32]/12 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#5a6e32]">
+          Best for late-night screen users
+        </span>
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-[#5a6e32] px-4 py-2.5 text-[13px] font-medium text-white">
+          Join next cohort
+          <span aria-hidden="true">&rarr;</span>
+        </span>
       </div>
     </Slide>
   );
@@ -1082,14 +1130,22 @@ export function AskSlide() {
       </div>
       {/* The trajectory: today's wedge, the network it builds, the vision */}
       <div className="mt-10 overflow-hidden rounded-2xl border border-[#f5f0e8]/15">
-        <div className="grid divide-y divide-[#f5f0e8]/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-[#f5f0e8]/10 sm:grid-cols-2 sm:divide-x lg:grid-cols-4 lg:divide-y-0">
           <div className="bg-[#f5f0e8]/[0.04] p-6">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#e9e2d4]/50">
               Today
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              Murph turns group chats into health challenges across
-              different wearables.
+              Private health challenges in group chats.
+            </p>
+          </div>
+          <div className="bg-[#f5f0e8]/[0.04] p-6">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#e9e2d4]/50">
+              Next
+            </p>
+            <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
+              Public cohorts around protocols: sleep, steps, alcohol,
+              recovery, supplements.
             </p>
           </div>
           <div className="bg-[#f5f0e8]/[0.04] p-6">
@@ -1097,7 +1153,7 @@ export function AskSlide() {
               At scale
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              Every challenge becomes shared evidence of what works: for
+              Matched benchmarks and shared evidence: what works, for
               whom, on which biomarkers, and under what conditions.
             </p>
           </div>
