@@ -405,7 +405,6 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
   const currentSurfacingBlockerIds = surfacingBlockerIdsFor({ r1076Ready, r1177Ready });
   const conclusion = conclusionFor({ r1076Ready, r1177Ready });
   const nextAction = nextActionFor({ r1076Ready, r1177Ready, upstreamR1177NextAction });
-  const currentLoopCommand = commandForNextAction(nextAction);
   const priorityVisibleInCurrentLoop = r1076Ready && r1177Ready;
   const minimumFeaturePairConfirmed = r1177Ready
     && readBooleanAt(r1177, ["summary", "minimumFeaturePairConfirmed"]) === true;
@@ -423,6 +422,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     nextAction,
     priorityVisibleInCurrentLoop,
   });
+  const currentLoopCommand = currentLoopCommandFor(rowOwnerActionRoute);
   const createdAt = createdAtFor(options.createdAt);
 
   const summary: R1178AverageSubmitterCurrentLoopSurfacingOutput["summary"] = {
@@ -688,6 +688,16 @@ function nextActionFor(input: {
 
 function commandForNextAction(nextAction: SurfacingNextAction): string {
   return COMMAND_BY_SURFACING_NEXT_ACTION[nextAction];
+}
+
+function currentLoopCommandFor(rowOwnerActionRoute: RowOwnerActionRoute): string {
+  if (rowOwnerActionRoute.rowOwnerActionRouteStatus === "waiting_on_row_owner_feature_only_assertion") {
+    return R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND;
+  }
+  if (rowOwnerActionRoute.rowOwnerActionRouteStatus === "feature_only_research_handoff_ready") {
+    return R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND;
+  }
+  return commandForNextAction(rowOwnerActionRoute.nextAction);
 }
 
 function rowOwnerActionRouteFor(input: {

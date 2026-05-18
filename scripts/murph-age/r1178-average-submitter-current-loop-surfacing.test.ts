@@ -87,7 +87,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       expect(output.schemaVersion).toBe(R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION);
       expect(output.summary).toMatchObject({
         conclusion: "average_submitter_priority_visible_in_current_loop",
-        currentLoopCommand: R1176_ROW_OWNER_COMMAND,
+        currentLoopCommand: R1173_COMMAND,
         currentLoopConclusionBeforePriorityPacket: "executor_waiting_on_consumer_safe_availability_confirmation",
         currentLoopNextActionBeforePriorityPacket:
           "rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
@@ -134,6 +134,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       });
       expect(output.currentLoopSurfacing).toMatchObject({
         averageSubmitterPriorityPacketCommand: R1177_COMMAND,
+        currentLoopCommand: R1173_COMMAND,
         minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         priorityVisibleInCurrentLoop: true,
@@ -168,7 +169,51 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           storesPrivateDetailsInPacket: false,
         },
       ]);
+      expect(output.summary.currentLoopCommand).not.toContain(
+        "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true",
+      );
       expect(JSON.stringify(output)).not.toContain(tmp);
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the current-loop command on the answer sheet when R1177 is waiting on a live-chain packet", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1178-live-chain-waiting-"));
+    try {
+      const paths = await writeInputs(tmp, { priorityReady: false });
+      const r1177 = await readJsonObject(paths.r1177Path);
+      const summary = recordAt(r1177, "summary");
+      summary.conclusion = "ordinary_average_submitter_priority_packet_waiting_on_live_chain_packet";
+      summary.nextAction = "refresh_r1176_row_owner_safe_assertion_chain";
+      await writeFile(paths.r1177Path, `${JSON.stringify(r1177)}\n`);
+
+      const { output } = await runR1178AverageSubmitterCurrentLoopSurfacing({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        r1076Path: paths.r1076Path,
+        r1177Path: paths.r1177Path,
+      });
+
+      expect(output.summary).toMatchObject({
+        conclusion: "average_submitter_priority_visible_in_current_loop",
+        currentLoopCommand: R1173_COMMAND,
+        minimumFeaturePairConfirmed: false,
+        nextAction: "refresh_r1176_row_owner_safe_assertion_chain",
+        rowOwnerActionRoute: {
+          firstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
+          nextAction: "refresh_r1176_row_owner_safe_assertion_chain",
+          rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+        },
+        upstreamR1177Conclusion: "ordinary_average_submitter_priority_packet_waiting_on_live_chain_packet",
+        upstreamR1177NextAction: "refresh_r1176_row_owner_safe_assertion_chain",
+      });
+      expect(output.currentLoopSurfacing.currentLoopCommand).toBe(R1173_COMMAND);
+      expect(output.summary.currentLoopCommand).not.toContain(
+        "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true",
+      );
+      expect(output.summary.rowOwnerActionRoute.liveChainCommand).toBe(R1176_ROW_OWNER_COMMAND);
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
     } finally {
       await rm(tmp, { force: true, recursive: true });
@@ -489,6 +534,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       expect(result.stdout).not.toContain(tmp);
       const cli = JSON.parse(result.stdout) as {
         conclusion?: unknown;
+        currentLoopCommand?: unknown;
         firstSubmitterAskIds?: unknown;
         packetId?: unknown;
         prioritizedInputKindIds?: unknown;
@@ -497,12 +543,16 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       };
       expect(cli).toMatchObject({
         conclusion: "average_submitter_priority_visible_in_current_loop",
+        currentLoopCommand: R1173_COMMAND,
         firstSubmitterAskIds: [...FIRST_SUBMITTER_ASKS],
         packetId: "r1178-average-submitter-current-loop-surfacing",
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
         rowOwnerFirstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
       });
+      expect(result.stdout).not.toContain(
+        "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true",
+      );
       await expect(stat(path.join(outDir, "r1178-average-submitter-current-loop-surfacing.latest.json"))).resolves.toBeTruthy();
     } finally {
       await rm(tmp, { force: true, recursive: true });
