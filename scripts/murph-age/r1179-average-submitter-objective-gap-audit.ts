@@ -1183,10 +1183,10 @@ function buildSafeConfirmationResponseTemplate(): SafeConfirmationResponseTempla
 }
 
 function commandForR1182NextAction(nextAction: R1182NextAction | null): string | null {
-  if (
-    nextAction === "fill_r1180_safe_confirmation_response_template"
-    || nextAction === "rerun_r1180_with_valid_safe_confirmation_response"
-  ) {
+  if (nextAction === "fill_r1180_safe_confirmation_response_template") {
+    return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
+  }
+  if (nextAction === "rerun_r1180_with_valid_safe_confirmation_response") {
     return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
   }
   if (nextAction === "refresh_r1181_feature_only_execution_contract") {
@@ -1372,7 +1372,7 @@ function routeAppropriateR1178CurrentLoopCommandVisible(
   if (summaryCommand === R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND) return false;
   if (rowOwnerActionRouteStatus === "waiting_on_row_owner_feature_only_assertion") {
     return summaryCommand === R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND
-      || summaryCommand === R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+      || summaryCommand === R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
   }
   if (rowOwnerActionRouteStatus === "feature_only_research_handoff_ready") {
     return summaryCommand === R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND;
@@ -1538,7 +1538,7 @@ function commandForNextAction(nextAction: R1179NextActionId): string | null {
     return R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND;
   }
   if (nextAction === "fill_r1180_safe_confirmation_response_template") {
-    return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+    return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
   }
   if (
     nextAction

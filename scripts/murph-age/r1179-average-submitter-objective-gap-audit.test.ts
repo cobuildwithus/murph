@@ -164,7 +164,7 @@ describe("R1179 average submitter objective gap audit", () => {
         modelEvidencePromotionAllowed: false,
         nextAction:
           "fill_r1180_safe_confirmation_response_template",
-        nextActionCommand: R1180_COMMAND,
+        nextActionCommand: R1183_COMMAND,
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         productDisplayAuthorized: false,
         readyToMarkComplete: false,
@@ -185,7 +185,7 @@ describe("R1179 average submitter objective gap audit", () => {
           minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
           modelEvidencePromotionAllowed: false,
           nextAction: "fill_r1180_safe_confirmation_response_template",
-          nextActionCommand: R1180_COMMAND,
+          nextActionCommand: R1183_COMMAND,
           prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
           productDisplayAuthorized: false,
           recognized: true,
@@ -884,7 +884,7 @@ describe("R1179 average submitter objective gap audit", () => {
           "average_submitter_safe_response_handoff_waiting_on_row_owner_confirmation",
         safeResponseHandoffNextAction:
           "fill_r1180_safe_confirmation_response_template",
-        safeResponseHandoffNextActionCommand: R1180_COMMAND,
+        safeResponseHandoffNextActionCommand: R1183_COMMAND,
         safeResponseHandoffRecognized: true,
         safeResponseHandoffResponseTemplateKeyOrder: [
           ...SAFE_RESPONSE_TEMPLATE_KEY_ORDER,
@@ -1034,7 +1034,7 @@ async function writeInputs(
 }
 
 function r1178Fixture(confirmed: boolean): Record<string, unknown> {
-  const currentLoopCommand = confirmed ? R1164_COMMAND : R1180_COMMAND;
+  const currentLoopCommand = confirmed ? R1164_COMMAND : R1183_COMMAND;
   return {
     artifactBoundary: {
       aggregateOnly: true,
@@ -1144,7 +1144,7 @@ function r1182Fixture(): Record<string, unknown> {
       minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
       modelEvidencePromotionAllowed: false,
       nextAction: "fill_r1180_safe_confirmation_response_template",
-      nextActionCommand: R1180_COMMAND,
+      nextActionCommand: R1183_COMMAND,
       prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
       productDisplayAuthorized: false,
       requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST],
@@ -1180,7 +1180,7 @@ function r1182Fixture(): Record<string, unknown> {
       minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
       modelEvidencePromotionAllowed: false,
       nextAction: "fill_r1180_safe_confirmation_response_template",
-      nextActionCommand: R1180_COMMAND,
+      nextActionCommand: R1183_COMMAND,
       productDisplayAuthorized: false,
       requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
       responseTemplateSchemaVersion: R1180_RESPONSE_SCHEMA_VERSION,
