@@ -95,6 +95,8 @@ const R1182_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1182-average-submitter-safe-response-handoff.ts";
 const R1183_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
+const R1184_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1184-average-submitter-safe-response-chain-status.ts";
 const R1185_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1185-average-submitter-safe-response-smoke-proof.ts";
 const SAFE_RESPONSE_TEMPLATE_KEY_ORDER = [
@@ -211,6 +213,38 @@ describe("R1179 average submitter objective gap audit", () => {
           sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
           targetAgeBand: "roughly_16_50",
         },
+        safeResponseChainStatus: {
+          artifact: "r1184-average-submitter-safe-response-chain-status.latest.json",
+          command: R1184_COMMAND,
+          conclusion:
+            "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
+          confirmedResponseArtifactPresent: false,
+          confirmedResponseArtifactReadyForR1180: false,
+          explicitRowOwnerSafeConfirmationProvided: false,
+          featureOnlyExecutionContractReady: false,
+          featureOnlySafeConfirmationReady: false,
+          fillableResponseArtifactPresent: true,
+          handoffReadyForResearchPlanningOnly: false,
+          materializerReadyForRowOwnerConfirmation: true,
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          modelEvidencePromotionAllowed: false,
+          nextAction: "rerun_r1183_with_row_owner_safe_response_assertion",
+          nextActionCommand: R1183_COMMAND,
+          nextActionRequiresExplicitRowOwnerAssertion: true,
+          prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+          productDisplayAuthorized: false,
+          recognized: true,
+          requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
+          reviewGptRequiredNow: false,
+          rowLevelDataAcceptedByR1184: false,
+          rowOwnerConfirmationInferredByR1184: false,
+          rowOwnerPrivateValuesStored: false,
+          rowOwnerSafeResponseAssertionStillRequired: true,
+          rowParsingPerformedByR1184: false,
+          sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+          staleConfirmedResponseArtifactDetected: false,
+          targetAgeBand: "roughly_16_50",
+        },
         safeResponseSmokeProof: {
           artifact: "r1185-average-submitter-safe-response-smoke-proof.latest.json",
           command: R1185_COMMAND,
@@ -282,9 +316,13 @@ describe("R1179 average submitter objective gap audit", () => {
       expect(output.objectiveGapAudit.safeResponseHandoff).toEqual(
         output.summary.safeResponseHandoff,
       );
+      expect(output.objectiveGapAudit.safeResponseChainStatus).toEqual(
+        output.summary.safeResponseChainStatus,
+      );
       expect(output.summary.currentEvidenceArtifactIds).toEqual([
         "r1178-average-submitter-current-loop-surfacing",
         "r1182-average-submitter-safe-response-handoff",
+        "r1184-average-submitter-safe-response-chain-status",
         "r1145-ordinary-consumer-current-chain-completion-audit",
         "r1173-ordinary-consumer-safe-assertion-answer-sheet",
         "r1174-ordinary-consumer-safe-next-step-packet",
@@ -296,6 +334,7 @@ describe("R1179 average submitter objective gap audit", () => {
         { requirementId: "average_submitter_submission_priority_visible", status: "satisfied" },
         { requirementId: "safe_response_smoke_proof_visible", status: "satisfied" },
         { requirementId: "safe_response_handoff_visible", status: "satisfied" },
+        { requirementId: "safe_response_chain_status_visible", status: "satisfied" },
         { requirementId: "row_owner_action_route_visible", status: "satisfied" },
         { requirementId: "safe_current_loop_command_visible", status: "satisfied" },
         { requirementId: "safe_assertion_answer_sheet_available", status: "satisfied" },
@@ -796,6 +835,55 @@ describe("R1179 average submitter objective gap audit", () => {
     }
   });
 
+  it("blocks the objective when the R1184 safe-response chain status is missing", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-r1184-missing-"));
+    try {
+      const paths = await writeInputs(tmp, { confirmed: false, realMetrics: false });
+      await rm(paths.r1184Path, { force: true });
+
+      const { output } = await runR1179AverageSubmitterObjectiveGapAudit({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        ...paths,
+      });
+
+      expect(output.summary).toMatchObject({
+        blockedRequirementIds: [
+          "safe_response_chain_status_visible",
+          "row_owner_safe_assertion_confirmed",
+          "feature_only_research_handoff_ready",
+          "real_lab_wearable_route_metrics_recorded",
+        ],
+        conclusion: "average_submitter_objective_gap_audit_blocked_on_row_owner_safe_assertion",
+        firstBlockedRequirementId: "safe_response_chain_status_visible",
+        nextAction: "refresh_r1184_safe_response_chain_status",
+        nextActionCommand: R1184_COMMAND,
+        safeResponseChainStatus: {
+          command: null,
+          conclusion: null,
+          fillableResponseArtifactPresent: null,
+          nextAction: null,
+          recognized: false,
+        },
+      });
+      expect(output.objectiveGapAudit.requirementStatuses.find(
+        (entry) => entry.requirementId === "safe_response_chain_status_visible",
+      )).toMatchObject({
+        evidenceArtifactIds: [],
+        nextAction: "refresh_r1184_safe_response_chain_status",
+        status: "blocked",
+      });
+      expect(output.inputArtifacts.r1184SafeResponseChainStatus).toMatchObject({
+        packetId: null,
+        schemaVersion: null,
+        status: "missing",
+      });
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
   it("does not publish the row-owner confirmation env flag when the R1176 live chain is missing", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-missing-r1176-"));
     try {
@@ -837,6 +925,7 @@ describe("R1179 average submitter objective gap audit", () => {
         MURPH_AGE_R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH: paths.r1176Path,
         MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH: paths.r1178Path,
         MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH: paths.r1182Path,
+        MURPH_AGE_R1184_SAFE_RESPONSE_CHAIN_STATUS_PATH: paths.r1184Path,
         MURPH_AGE_R1179_CREATED_AT: CREATED_AT,
         MURPH_AGE_R1179_OUTPUT_DIR: outDir,
       });
@@ -854,6 +943,11 @@ describe("R1179 average submitter objective gap audit", () => {
         rowOwnerSafeConfirmationAskText?: unknown;
         rowOwnerSafeConfirmationAskId?: unknown;
         rowOwnerSafeConfirmationAskVisible?: unknown;
+        safeResponseChainStatusConclusion?: unknown;
+        safeResponseChainStatusFillableResponseArtifactPresent?: unknown;
+        safeResponseChainStatusNextAction?: unknown;
+        safeResponseChainStatusNextActionCommand?: unknown;
+        safeResponseChainStatusRecognized?: unknown;
         safeResponseHandoffConclusion?: unknown;
         safeResponseHandoffNextAction?: unknown;
         safeResponseHandoffNextActionCommand?: unknown;
@@ -880,6 +974,13 @@ describe("R1179 average submitter objective gap audit", () => {
         packetId: "r1179-average-submitter-objective-gap-audit",
         rowOwnerSafeConfirmationAskId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
         rowOwnerSafeConfirmationAskVisible: true,
+        safeResponseChainStatusConclusion:
+          "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
+        safeResponseChainStatusFillableResponseArtifactPresent: true,
+        safeResponseChainStatusNextAction:
+          "rerun_r1183_with_row_owner_safe_response_assertion",
+        safeResponseChainStatusNextActionCommand: R1183_COMMAND,
+        safeResponseChainStatusRecognized: true,
         safeResponseHandoffConclusion:
           "average_submitter_safe_response_handoff_waiting_on_row_owner_confirmation",
         safeResponseHandoffNextAction:
@@ -928,6 +1029,7 @@ describe("R1179 average submitter objective gap audit", () => {
         MURPH_AGE_R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH: paths.r1176Path,
         MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH: paths.r1178Path,
         MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH: paths.r1182Path,
+        MURPH_AGE_R1184_SAFE_RESPONSE_CHAIN_STATUS_PATH: paths.r1184Path,
         MURPH_AGE_R1179_OUTPUT_DIR: outputDir,
       }, false);
 
@@ -956,6 +1058,7 @@ describe("R1179 average submitter objective gap audit", () => {
         MURPH_AGE_R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH: paths.r1176Path,
         MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH: paths.r1178Path,
         MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH: paths.r1182Path,
+        MURPH_AGE_R1184_SAFE_RESPONSE_CHAIN_STATUS_PATH: paths.r1184Path,
         MURPH_AGE_R1179_CREATED_AT: `${tmp}/private-created-at`,
         MURPH_AGE_R1179_OUTPUT_DIR: path.join(tmp, "out"),
       }, false);
@@ -987,6 +1090,7 @@ describe("R1179 average submitter objective gap audit", () => {
         MURPH_AGE_R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH: paths.r1176Path,
         MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH: paths.r1178Path,
         MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH: paths.r1182Path,
+        MURPH_AGE_R1184_SAFE_RESPONSE_CHAIN_STATUS_PATH: paths.r1184Path,
         MURPH_AGE_R1179_OUTPUT_DIR: path.join(tmp, "out"),
       }, false);
 
@@ -1014,6 +1118,7 @@ async function writeInputs(
   r1176Path: string;
   r1178Path: string;
   r1182Path: string;
+  r1184Path: string;
 }> {
   await mkdir(root, { recursive: true });
   const r1178Path = path.join(root, "r1178.json");
@@ -1022,6 +1127,7 @@ async function writeInputs(
   const r1174Path = path.join(root, "r1174.json");
   const r1176Path = path.join(root, "r1176.json");
   const r1182Path = path.join(root, "r1182.json");
+  const r1184Path = path.join(root, "r1184.json");
   await Promise.all([
     writeFile(r1178Path, `${JSON.stringify(r1178Fixture(options.confirmed))}\n`),
     writeFile(r1145Path, `${JSON.stringify(r1145Fixture(options.realMetrics))}\n`),
@@ -1029,8 +1135,9 @@ async function writeInputs(
     writeFile(r1174Path, `${JSON.stringify(r1174Fixture())}\n`),
     writeFile(r1176Path, `${JSON.stringify(r1176Fixture(options.confirmed))}\n`),
     writeFile(r1182Path, `${JSON.stringify(r1182Fixture())}\n`),
+    writeFile(r1184Path, `${JSON.stringify(r1184Fixture(options.confirmed))}\n`),
   ]);
-  return { r1145Path, r1173Path, r1174Path, r1176Path, r1178Path, r1182Path };
+  return { r1145Path, r1173Path, r1174Path, r1176Path, r1178Path, r1182Path, r1184Path };
 }
 
 function r1178Fixture(confirmed: boolean): Record<string, unknown> {
@@ -1192,6 +1299,67 @@ function r1182Fixture(): Record<string, unknown> {
       sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
       targetAgeBand: "roughly_16_50",
     },
+  };
+}
+
+function r1184Fixture(confirmed: boolean): Record<string, unknown> {
+  const nextAction = confirmed
+    ? "use_r1181_feature_only_execution_contract_for_research_planning_only"
+    : "rerun_r1183_with_row_owner_safe_response_assertion";
+  const summary = {
+    confirmedResponseArtifact: null,
+    confirmedResponseArtifactPresent: false,
+    confirmedResponseArtifactReadyForR1180: false,
+    conclusion: confirmed
+      ? "average_submitter_safe_response_chain_ready_for_feature_only_research_planning"
+      : "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
+    explicitRowOwnerSafeConfirmationProvided: confirmed,
+    featureOnlyExecutionContractReady: confirmed,
+    featureOnlySafeConfirmationReady: confirmed,
+    fillableResponseArtifact: confirmed
+      ? null
+      : "r1183-fillable-average-submitter-safe-confirmation-response.json",
+    fillableResponseArtifactPresent: !confirmed,
+    handoffReadyForResearchPlanningOnly: confirmed,
+    materializerReadyForRowOwnerConfirmation: !confirmed,
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+    modelEvidencePromotionAllowed: false,
+    nextAction,
+    nextActionCommand: confirmed ? null : R1183_COMMAND,
+    nextActionInputArtifact: null,
+    nextActionRequiresExplicitRowOwnerAssertion: !confirmed,
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+    productDisplayAuthorized: false,
+    requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
+    reviewGptRequiredNow: false,
+    rowLevelDataAcceptedByR1184: false,
+    rowOwnerConfirmationInferredByR1184: false,
+    rowOwnerPrivateValuesStored: false,
+    rowOwnerSafeResponseAssertionStillRequired: !confirmed,
+    rowOwnerSafeResponseValuesStoredInR1184Packet: false,
+    rowParsingPerformedByR1184: false,
+    safeExecutionFeatureSlotIds: confirmed ? [...SAFE_RESPONSE_EXECUTION_FEATURE_SLOTS] : null,
+    sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+    staleConfirmedResponseArtifactDetected: false,
+    targetAgeBand: "roughly_16_50",
+  };
+  return {
+    artifactBoundary: {
+      aggregateOnly: true,
+      productDisplayAuthorized: false,
+    },
+    chainStatus: summary,
+    packetId: "r1184-average-submitter-safe-response-chain-status",
+    productDisplayAuthorized: false,
+    responseArtifactState: {
+      confirmedResponseArtifactPresent: false,
+      confirmedResponseArtifactReadyForR1180: false,
+      fillableResponseArtifactPresent: !confirmed,
+      staleConfirmedResponseArtifactDetected: false,
+    },
+    schemaVersion: "murph-age-r1184-average-submitter-safe-response-chain-status.v1",
+    status: "research-local-aggregate-only",
+    summary,
   };
 }
 
