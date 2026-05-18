@@ -228,29 +228,14 @@ export function InsightSlide() {
             </span>
           </div>
 
-          {/* You — personal progress on the challenge metric */}
-          <div className="mt-4 rounded-lg bg-[#9fb389]/15 px-4 py-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[12px] font-medium text-[#f5f0e8]">
-                You
-              </span>
-              <span className="font-serif text-[1.4rem] font-semibold leading-none tabular-nums text-[#9fb389]">
-                +8%
-              </span>
-            </div>
-            <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/55">
-              Deep sleep vs baseline
-            </p>
-          </div>
-
           {/* Group progress — everyone is moving, not just the winner */}
           <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
             Group progress
           </p>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
             {[
-              { label: "people active", value: "5" },
-              { label: "improved", value: "4 of 5" },
+              { label: "people active", value: "21" },
+              { label: "improved", value: "17 of 21" },
               { label: "avg improvement", value: "+6%" },
             ].map((stat) => (
               <div
