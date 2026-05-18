@@ -80,6 +80,7 @@ const OBJECTIVE_REQUIREMENT_IDS = [
   "ordinary_16_50_priority_selected",
   "minimum_lab_wearable_pair_visible",
   "row_owner_action_route_visible",
+  "safe_current_loop_command_visible",
   "safe_assertion_answer_sheet_available",
   "safe_next_step_packet_available",
   "r1176_live_chain_available",
@@ -224,6 +225,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowOwnerConfirmationInferredByR1179: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1179: false;
+    safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
     targetAgeBand: typeof TARGET_AGE_BAND;
@@ -253,6 +255,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowOwnerConfirmationInferredByR1179: false;
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1179: false;
+    safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
     targetAgeBand: typeof TARGET_AGE_BAND;
@@ -311,6 +314,8 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       readStringArrayAt(r1178, ["summary", "rowOwnerActionRoute", "requiredAssertionChecklistIds"]),
       REQUIRED_ASSERTION_CHECKLIST_IDS,
     );
+  const safeCurrentLoopCommandVisible = evidence.r1178
+    && routeAppropriateR1178CurrentLoopCommandVisible(r1178, rowOwnerActionRouteStatus);
   const r1176ChainReady = evidence.r1176
     && readBooleanAt(r1176, ["summary", "chainReady"]) === true
     && readBooleanAt(r1176, ["summary", "explicitRowOwnerAssertionProvided"]) === true
@@ -341,6 +346,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     realLabWearableRouteMetricsRecorded,
     rowOwnerActionRouteVisible,
     rowOwnerSafeAssertionConfirmed,
+    safeCurrentLoopCommandVisible,
   });
   const blockedRequirementIds = requirementStatuses
     .filter((entry) => entry.status === "blocked")
@@ -382,6 +388,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     rowOwnerConfirmationInferredByR1179: false,
     rowOwnerPrivateValuesStored: false,
     rowParsingPerformedByR1179: false,
+    safeCurrentLoopCommandVisible,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
     sourcePriority: TARGET_INPUT_PRIORITY,
     targetAgeBand: TARGET_AGE_BAND,
@@ -444,6 +451,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       rowOwnerConfirmationInferredByR1179: false,
       rowOwnerPrivateValuesStored: false,
       rowParsingPerformedByR1179: false,
+      safeCurrentLoopCommandVisible,
       safeCompletionChecklistItemIds: summary.safeCompletionChecklistItemIds,
       sourcePriority: TARGET_INPUT_PRIORITY,
       targetAgeBand: TARGET_AGE_BAND,
@@ -473,6 +481,7 @@ function buildRequirementStatuses(params: {
   realLabWearableRouteMetricsRecorded: boolean;
   rowOwnerActionRouteVisible: boolean;
   rowOwnerSafeAssertionConfirmed: boolean;
+  safeCurrentLoopCommandVisible: boolean;
 }): ObjectiveRequirementStatusEntry[] {
   return [
     statusEntry({
@@ -492,6 +501,12 @@ function buildRequirementStatuses(params: {
       nextAction: "refresh_r1178_current_loop_surfacing",
       requirementId: "row_owner_action_route_visible",
       satisfied: params.rowOwnerActionRouteVisible,
+    }),
+    statusEntry({
+      evidenceArtifactIds: params.evidence.r1178 ? [R1178_PACKET_ID] : [],
+      nextAction: "refresh_r1178_current_loop_surfacing",
+      requirementId: "safe_current_loop_command_visible",
+      satisfied: params.safeCurrentLoopCommandVisible,
     }),
     statusEntry({
       evidenceArtifactIds: params.evidence.r1173 ? [R1173_PACKET_ID] : [],
@@ -586,6 +601,23 @@ function matchesR1178AverageSubmitterCurrentLoopSurfacing(value: unknown | null)
     && readBooleanAt(value, ["summary", "rowOwnerPrivateValuesStored"]) === false
     && readBooleanAt(value, ["summary", "rowParsingPerformedByR1178"]) === false
     && allowedRowOwnerRouteStatus(readStringAt(value, ["summary", "rowOwnerActionRoute", "rowOwnerActionRouteStatus"]));
+}
+
+function routeAppropriateR1178CurrentLoopCommandVisible(
+  value: unknown | null,
+  rowOwnerActionRouteStatus: string | null,
+): boolean {
+  const summaryCommand = readStringAt(value, ["summary", "currentLoopCommand"]);
+  const surfacingCommand = readStringAt(value, ["currentLoopSurfacing", "currentLoopCommand"]);
+  if (summaryCommand === null || surfacingCommand !== summaryCommand) return false;
+  if (summaryCommand === R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND) return false;
+  if (rowOwnerActionRouteStatus === "waiting_on_row_owner_feature_only_assertion") {
+    return summaryCommand === R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND;
+  }
+  if (rowOwnerActionRouteStatus === "feature_only_research_handoff_ready") {
+    return summaryCommand === R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND;
+  }
+  return rowOwnerActionRouteStatus === "waiting_on_current_loop_or_priority_packet";
 }
 
 function matchesR1145CompletionAudit(value: unknown | null): boolean {
@@ -957,6 +989,7 @@ async function main(): Promise<void> {
       productDisplayAuthorized: output.summary.productDisplayAuthorized,
       readyToMarkComplete: output.summary.readyToMarkComplete,
       rowOwnerActionRouteStatus: output.summary.rowOwnerActionRouteStatus,
+      safeCurrentLoopCommandVisible: output.summary.safeCurrentLoopCommandVisible,
       topBlockedRequirementId: output.summary.firstBlockedRequirementId,
     })}\n`);
   } catch (error) {
