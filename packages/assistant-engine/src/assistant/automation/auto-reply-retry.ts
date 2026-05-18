@@ -155,6 +155,14 @@ export function isAssistantProviderUsageLimitError(error: unknown): boolean {
   const code = readAssistantProviderErrorCode(error)
   const context = readAssistantProviderErrorContext(error)
 
+  if (context?.assistantDeliveryFailure === true) {
+    return false
+  }
+
+  if (isAssistantDeliveryBoundaryErrorCode(code)) {
+    return false
+  }
+
   if (code === 'ASSISTANT_CODEX_USAGE_LIMIT') {
     return true
   }
@@ -163,13 +171,7 @@ export function isAssistantProviderUsageLimitError(error: unknown): boolean {
     return true
   }
 
-  return (
-    message.includes('usage limit') ||
-    message.includes('purchase more credits') ||
-    message.includes('out of credits') ||
-    message.includes('credit balance') ||
-    message.includes('plan and billing details')
-  )
+  return hasAssistantProviderUsageLimitMessage(message)
 }
 
 export function isAssistantAutoReplyRepairableConfigError(
@@ -191,6 +193,10 @@ function readAssistantProviderErrorCode(error: unknown): string {
     : ''
 }
 
+function isAssistantDeliveryBoundaryErrorCode(code: string): boolean {
+  return code.includes('DELIVERY') || code.includes('OUTBOX')
+}
+
 function readAssistantProviderErrorContext(
   error: unknown,
 ): Record<string, unknown> | null {
@@ -206,4 +212,17 @@ function readAssistantProviderErrorContext(
   }
 
   return (error as { context: Record<string, unknown> }).context
+}
+
+function hasAssistantProviderUsageLimitMessage(message: string): boolean {
+  return (
+    message.includes('usage limit') ||
+    message.includes('quota exceeded') ||
+    message.includes('current quota') ||
+    message.includes('insufficient quota') ||
+    message.includes('purchase more credits') ||
+    message.includes('out of credits') ||
+    message.includes('credit balance') ||
+    message.includes('plan and billing details')
+  )
 }

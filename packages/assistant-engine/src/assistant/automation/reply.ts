@@ -94,6 +94,8 @@ import {
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
+const ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE =
+  'ASSISTANT_AUTO_REPLY_DELIVERY_FAILED'
 const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
   'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 
@@ -1162,7 +1164,9 @@ async function executeAssistantAutoReply(input: {
       result,
     })
   } catch (error) {
-    throw watchdog.normalizeError(error)
+    throw markAssistantAutoReplyDeliveryFailureIfNeeded(
+      watchdog.normalizeError(error),
+    )
   } finally {
     watchdog.dispose()
   }
@@ -2108,6 +2112,12 @@ function resolveAssistantAutoReplySendResult(input: {
       input.result.deliveryError?.message ??
         'assistant generated a response, but the outbound delivery channel did not confirm the send',
     )
+    Object.defineProperty(error, 'code', {
+      configurable: true,
+      enumerable: false,
+      value: ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE,
+      writable: true,
+    })
     if (input.result.deliveryIntentId) {
       Object.defineProperty(error, 'outboxIntentId', {
         configurable: true,
@@ -2116,10 +2126,84 @@ function resolveAssistantAutoReplySendResult(input: {
         writable: true,
       })
     }
-    throw error
+    throw markAssistantAutoReplyDeliveryFailure(error)
   }
 
   return input.result
+}
+
+function markAssistantAutoReplyDeliveryFailureIfNeeded(error: unknown): unknown {
+  if (!isAssistantAutoReplyDeliveryFailureCandidate(error)) {
+    return error
+  }
+  return markAssistantAutoReplyDeliveryFailure(error)
+}
+
+function markAssistantAutoReplyDeliveryFailure(error: unknown): unknown {
+  if (!error || typeof error !== 'object') {
+    return error
+  }
+
+  const context = readAssistantAutoReplyErrorContext(error)
+  try {
+    Object.defineProperty(error, 'context', {
+      configurable: true,
+      enumerable: false,
+      value: {
+        ...(context ?? {}),
+        assistantDeliveryFailure: true,
+      },
+      writable: true,
+    })
+  } catch {
+    return error
+  }
+
+  return error
+}
+
+function isAssistantAutoReplyDeliveryFailureCandidate(error: unknown): boolean {
+  const code = readAssistantAutoReplyErrorCode(error)
+  return (
+    code.includes('DELIVERY') ||
+    code.includes('OUTBOX') ||
+    hasAssistantAutoReplyOutboxIntentId(error)
+  )
+}
+
+function readAssistantAutoReplyErrorCode(error: unknown): string {
+  return error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code.toUpperCase()
+    : ''
+}
+
+function readAssistantAutoReplyErrorContext(
+  error: unknown,
+): Record<string, unknown> | null {
+  if (
+    !error ||
+    typeof error !== 'object' ||
+    !('context' in error) ||
+    typeof (error as { context?: unknown }).context !== 'object' ||
+    (error as { context?: unknown }).context === null ||
+    Array.isArray((error as { context?: unknown }).context)
+  ) {
+    return null
+  }
+
+  return (error as { context: Record<string, unknown> }).context
+}
+
+function hasAssistantAutoReplyOutboxIntentId(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'outboxIntentId' in error &&
+      typeof (error as { outboxIntentId?: unknown }).outboxIntentId === 'string',
+  )
 }
 
 function classifyAssistantAutoReplyFailure(input: {
