@@ -84,6 +84,9 @@ import {
 import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
+import {
+  selectHostedRuntimeWakeCandidate,
+} from "./hosted-runtime/wake-candidates.ts";
 export {
   createCoalescingRuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
@@ -1643,39 +1646,10 @@ function selectEarliestHostedRuntimeWake(
   nextWakeAt: string | null;
   nextWakeReason: string | null;
 } {
-  let selected: { at: string; reason: string | null } | null = null;
-  for (const candidate of candidates) {
-    if (!candidate.at) {
-      continue;
-    }
-    if (
-      !selected
-      || compareHostedRuntimeWakeAt(candidate.at, selected.at) < 0
-    ) {
-      selected = {
-        at: candidate.at,
-        reason: candidate.reason,
-      };
-    }
-  }
+  const selected = selectHostedRuntimeWakeCandidate(candidates);
 
   return {
-    nextWakeAt: selected?.at ?? null,
-    nextWakeReason: selected?.reason ?? null,
+    nextWakeAt: selected.at,
+    nextWakeReason: selected.reason,
   };
-}
-
-function compareHostedRuntimeWakeAt(left: string, right: string): number {
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs) && !Number.isFinite(rightMs)) {
-    return 0;
-  }
-  if (!Number.isFinite(leftMs)) {
-    return 1;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return -1;
-  }
-  return leftMs - rightMs;
 }

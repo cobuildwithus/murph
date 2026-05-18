@@ -57,6 +57,11 @@ import {
   createHostedRuntimeDeviceSyncService,
 } from "../device-sync-service.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
+import {
+  HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+  createHostedRuntimeWakeCandidate,
+  selectHostedRuntimeWakeCandidate,
+} from "./wake-candidates.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
@@ -202,19 +207,19 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
-  const deviceSyncNextWakeAt = earliestHostedMaintenanceWakeAt(
-    deviceSyncResult.nextWakeAt,
-    deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
-  );
-  const nextWake = selectEarliestHostedMaintenanceWake([
-    {
-      at: assistantResult.nextWakeAt,
-      reason: null,
-    },
-    {
-      at: deviceSyncNextWakeAt,
-      reason: "device-sync.reconcile",
-    },
+  const deviceSyncNextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      deviceSyncResult.nextWakeAt,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(
+      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(assistantResult.nextWakeAt, null),
+    deviceSyncNextWake,
   ]);
 
   return {
@@ -894,17 +899,22 @@ export async function runHostedDeviceSyncWakeLane(input: {
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
     },
   );
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      deviceSyncResult.nextWakeAt,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(
+      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
 
   return {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: earliestHostedMaintenanceWakeAt(
-      deviceSyncResult.nextWakeAt,
-      deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
-    ),
-    ...(deviceSyncResult.nextWakeAt || deviceSyncResult.postCheckpointRecord?.nextWakeAt
-      ? { nextWakeReason: "device-sync.reconcile" }
-      : {}),
+    nextWakeAt: nextWake.at,
+    ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
   };
@@ -945,28 +955,6 @@ function earliestHostedMaintenanceWakeAt(left: string | null, right: string | nu
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
-}
-
-function selectEarliestHostedMaintenanceWake(
-  candidates: readonly { at: string | null; reason: string | null }[],
-): { at: string | null; reason: string | null } {
-  let selected: { at: string; reason: string | null } | null = null;
-  for (const candidate of candidates) {
-    if (!candidate.at) {
-      continue;
-    }
-    if (!selected || Date.parse(candidate.at) < Date.parse(selected.at)) {
-      selected = {
-        at: candidate.at,
-        reason: candidate.reason,
-      };
-    }
-  }
-
-  return {
-    at: selected?.at ?? null,
-    reason: selected?.reason ?? null,
-  };
 }
 
 function reportHostedDeviceSyncControlPlaneFailure(

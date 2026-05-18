@@ -1525,6 +1525,49 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("keeps device-sync ownership when assistant and device-sync wake times tie", async () => {
+    const nextWakeAt = "2026-04-08T00:30:00.000Z";
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt,
+      progressed: false,
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => nextWakeAt,
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    const result = await runHostedAssistantRuntimeTimerLane({
+      wake: {
+        eventId: "evt_tied_device_sync_wake",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_tied_device_sync_wake",
+      runtime: createHostedAutomationRuntime({
+        deviceSync: DEVICE_SYNC_CONFIG,
+      }),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(result).toMatchObject({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+    });
+  });
+
   it("bounds foreground replay scans to the replay window", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt: null,
