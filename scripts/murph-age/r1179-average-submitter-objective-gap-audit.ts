@@ -23,6 +23,10 @@ export const R1179_AVERAGE_SUBMITTER_OBJECTIVE_GAP_AUDIT_SCHEMA_VERSION =
   "murph-age-r1179-average-submitter-objective-gap-audit.v1" as const;
 export const R1179_AVERAGE_SUBMITTER_OBJECTIVE_GAP_AUDIT_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1179-average-submitter-objective-gap-audit.ts" as const;
+const R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_SCHEMA_VERSION =
+  "murph-age-r1184-average-submitter-safe-response-chain-status.v1" as const;
+const R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1184-average-submitter-safe-response-chain-status.ts" as const;
 
 const DEFAULT_MODEL_RUNS_DIR = path.join(
   ".runtime",
@@ -38,6 +42,7 @@ const R1173_ARTIFACT = "r1173-ordinary-consumer-safe-assertion-answer-sheet.late
 const R1174_ARTIFACT = "r1174-ordinary-consumer-safe-next-step-packet.latest.json" as const;
 const R1176_ARTIFACT = "r1176-r1172-r1165-row-owner-safe-assertion-chain-runner.latest.json" as const;
 const R1182_ARTIFACT = "r1182-average-submitter-safe-response-handoff.latest.json" as const;
+const R1184_ARTIFACT = "r1184-average-submitter-safe-response-chain-status.latest.json" as const;
 const R1178_PACKET_ID = "r1178-average-submitter-current-loop-surfacing" as const;
 const R1145_PACKET_ID = "r1145-ordinary-consumer-current-chain-completion-audit" as const;
 const R1145_SCHEMA_VERSION = "murph-age-r1145-ordinary-consumer-current-chain-completion-audit.v1" as const;
@@ -49,6 +54,7 @@ const R1176_PACKET_ID = "r1176-r1172-r1165-row-owner-safe-assertion-chain-runner
 const R1176_SCHEMA_VERSION =
   "murph-age-r1176-r1172-r1165-row-owner-safe-assertion-chain-runner.v1" as const;
 const R1182_PACKET_ID = "r1182-average-submitter-safe-response-handoff" as const;
+const R1184_PACKET_ID = "r1184-average-submitter-safe-response-chain-status" as const;
 const TARGET_INPUT_PRIORITY = "consumer_bloodwork_labs_wearables_16_50_first" as const;
 const TARGET_AGE_BAND = "roughly_16_50" as const;
 const MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS = [
@@ -144,6 +150,7 @@ const OBJECTIVE_REQUIREMENT_IDS = [
   "average_submitter_submission_priority_visible",
   "safe_response_smoke_proof_visible",
   "safe_response_handoff_visible",
+  "safe_response_chain_status_visible",
   "row_owner_action_route_visible",
   "safe_current_loop_command_visible",
   "safe_assertion_answer_sheet_available",
@@ -161,6 +168,7 @@ const R1179_NEXT_ACTION_IDS = [
   "refresh_r1174_safe_next_step_packet",
   "refresh_r1176_row_owner_safe_assertion_chain",
   "refresh_r1182_safe_response_handoff",
+  "refresh_r1184_safe_response_chain_status",
   "fill_r1180_safe_confirmation_response_template",
   "review_r1173_safe_assertion_answer_sheet_then_rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
   "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed",
@@ -180,8 +188,6 @@ const R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND =
   "MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH=<r1163-runner.json> pnpm exec tsx scripts/murph-age/r1164-ordinary-consumer-feature-only-research-handoff.ts" as const;
 const R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts" as const;
-const R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_COMMAND =
-  "pnpm exec tsx scripts/murph-age/r1184-average-submitter-safe-response-chain-status.ts" as const;
 const R1185_ARTIFACT =
   "r1185-average-submitter-safe-response-smoke-proof.latest.json" as const;
 const R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_COMMAND =
@@ -195,6 +201,20 @@ const R1184_CONCLUSIONS = [
   "average_submitter_safe_response_chain_waiting_on_r1183_refresh",
   "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
 ] as const;
+const R1184_NEXT_ACTIONS = [
+  "fill_r1180_safe_confirmation_response_template",
+  "refresh_r1181_feature_only_execution_contract",
+  "refresh_r1182_safe_response_handoff",
+  "refresh_r1183_safe_response_materializer",
+  "rerun_r1183_with_row_owner_safe_response_assertion",
+  "run_r1180_with_r1183_confirmed_safe_response_artifact",
+  "run_r1181_feature_only_execution_contract",
+  "use_r1181_feature_only_execution_contract_for_research_planning_only",
+] as const;
+const R1183_CONFIRMED_RESPONSE_FILE_NAME =
+  "r1183-confirmed-average-submitter-safe-confirmation-response.json" as const;
+const R1184_R1180_CONFIRMED_RESPONSE_INTAKE_COMMAND =
+  `MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH=<${R1183_CONFIRMED_RESPONSE_FILE_NAME}> pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts` as const;
 const R1185_CONCLUSIONS = [
   "average_submitter_safe_response_smoke_passed_non_evidence",
   "average_submitter_safe_response_smoke_waiting_on_live_r1184_row_owner_blocker",
@@ -240,14 +260,16 @@ type InputArtifactKey =
   | "r1174SafeNextStepPacket"
   | "r1176RowOwnerSafeAssertionChain"
   | "r1178AverageSubmitterCurrentLoopSurfacing"
-  | "r1182SafeResponseHandoff";
+  | "r1182SafeResponseHandoff"
+  | "r1184SafeResponseChainStatus";
 type EvidenceArtifactId =
   | typeof R1145_PACKET_ID
   | typeof R1173_PACKET_ID
   | typeof R1174_PACKET_ID
   | typeof R1176_PACKET_ID
   | typeof R1178_PACKET_ID
-  | typeof R1182_PACKET_ID;
+  | typeof R1182_PACKET_ID
+  | typeof R1184_PACKET_ID;
 type GapAuditConclusion =
   | "average_submitter_objective_gap_audit_blocked_on_feature_only_handoff"
   | "average_submitter_objective_gap_audit_blocked_on_product_safety"
@@ -256,10 +278,15 @@ type GapAuditConclusion =
   | "average_submitter_objective_gap_audit_waiting_on_current_packets"
   | "average_submitter_objective_gap_audit_ready_to_mark_complete";
 type R1184Conclusion = typeof R1184_CONCLUSIONS[number];
+type R1184NextAction = typeof R1184_NEXT_ACTIONS[number];
 type R1185Conclusion = typeof R1185_CONCLUSIONS[number];
 type R1185NextRealAction = typeof R1185_NEXT_REAL_ACTIONS[number];
 type R1182Conclusion = typeof R1182_CONCLUSIONS[number];
 type R1182NextAction = typeof R1182_NEXT_ACTIONS[number];
+type EvidenceReadyMap = Record<
+  "r1145" | "r1173" | "r1174" | "r1176" | "r1178" | "r1182" | "r1184",
+  boolean
+>;
 
 interface ArtifactSummary {
   artifact: string;
@@ -343,6 +370,38 @@ interface SafeResponseSmokeProofSummary {
   targetAgeBand: typeof TARGET_AGE_BAND;
 }
 
+interface SafeResponseChainStatusSummary {
+  artifact: typeof R1184_ARTIFACT;
+  command: typeof R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_COMMAND | null;
+  conclusion: R1184Conclusion | null;
+  confirmedResponseArtifactPresent: boolean | null;
+  confirmedResponseArtifactReadyForR1180: boolean | null;
+  explicitRowOwnerSafeConfirmationProvided: boolean | null;
+  featureOnlyExecutionContractReady: boolean | null;
+  featureOnlySafeConfirmationReady: boolean | null;
+  fillableResponseArtifactPresent: boolean | null;
+  handoffReadyForResearchPlanningOnly: boolean | null;
+  materializerReadyForRowOwnerConfirmation: boolean | null;
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  modelEvidencePromotionAllowed: false;
+  nextAction: R1184NextAction | null;
+  nextActionCommand: string | null;
+  nextActionRequiresExplicitRowOwnerAssertion: boolean | null;
+  prioritizedInputKindIds: RequiredInputKindId[];
+  productDisplayAuthorized: false;
+  recognized: boolean;
+  requiredResponseFieldIds: RequiredSafeResponseFieldId[];
+  reviewGptRequiredNow: false;
+  rowLevelDataAcceptedByR1184: boolean | null;
+  rowOwnerConfirmationInferredByR1184: boolean | null;
+  rowOwnerPrivateValuesStored: boolean | null;
+  rowOwnerSafeResponseAssertionStillRequired: boolean | null;
+  rowParsingPerformedByR1184: boolean | null;
+  sourcePriority: typeof TARGET_INPUT_PRIORITY;
+  staleConfirmedResponseArtifactDetected: boolean | null;
+  targetAgeBand: typeof TARGET_AGE_BAND;
+}
+
 interface SafeConfirmationResponseTemplate {
   askId: typeof ROW_OWNER_SAFE_CONFIRMATION_ASK_ID;
   confirmDailyWearableActivityExportAvailable: false;
@@ -390,6 +449,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOptions {
   r1176Path?: string;
   r1178Path?: string;
   r1182Path?: string;
+  r1184Path?: string;
 }
 
 export interface R1179AverageSubmitterObjectiveGapAuditOutput {
@@ -454,6 +514,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowParsingPerformedByR1179: false;
     rowOwnerSafeConfirmationAsk: RowOwnerSafeConfirmationAsk;
     safeResponseHandoff: SafeResponseHandoffSummary;
+    safeResponseChainStatus: SafeResponseChainStatusSummary;
     safeResponseSmokeProof: SafeResponseSmokeProofSummary;
     safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
@@ -488,6 +549,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
     rowParsingPerformedByR1179: false;
     rowOwnerSafeConfirmationAsk: RowOwnerSafeConfirmationAsk;
     safeResponseHandoff: SafeResponseHandoffSummary;
+    safeResponseChainStatus: SafeResponseChainStatusSummary;
     safeResponseSmokeProof: SafeResponseSmokeProofSummary;
     safeCurrentLoopCommandVisible: boolean;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
@@ -506,13 +568,15 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
   const r1174Path = options.r1174Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1174_ARTIFACT);
   const r1176Path = options.r1176Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1176_ARTIFACT);
   const r1182Path = options.r1182Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1182_ARTIFACT);
-  const [r1178, r1145, r1173, r1174, r1176, r1182] = await Promise.all([
+  const r1184Path = options.r1184Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1184_ARTIFACT);
+  const [r1178, r1145, r1173, r1174, r1176, r1182, r1184] = await Promise.all([
     readJsonIfPresent(r1178Path),
     readJsonIfPresent(r1145Path),
     readJsonIfPresent(r1173Path),
     readJsonIfPresent(r1174Path),
     readJsonIfPresent(r1176Path),
     readJsonIfPresent(r1182Path),
+    readJsonIfPresent(r1184Path),
   ]);
   validateAggregateSafe("r1178 current-loop surfacing", r1178);
   validateAggregateSafe("r1145 completion audit", r1145);
@@ -520,6 +584,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
   validateAggregateSafe("r1174 safe next-step packet", r1174);
   validateAggregateSafe("r1176 row-owner safe assertion chain", r1176);
   validateAggregateSafe("r1182 safe response handoff", r1182);
+  validateAggregateSafe("r1184 safe response chain status", r1184);
 
   const evidence = {
     r1145: matchesR1145CompletionAudit(r1145),
@@ -528,6 +593,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     r1176: matchesR1176RowOwnerSafeAssertionChain(r1176),
     r1178: matchesR1178AverageSubmitterCurrentLoopSurfacing(r1178),
     r1182: matchesSafeResponseHandoff(r1182),
+    r1184: matchesSafeResponseChainStatus(r1184),
   };
   const rowOwnerActionRouteStatus = evidence.r1178
     ? readStringAt(r1178, ["summary", "rowOwnerActionRoute", "rowOwnerActionRouteStatus"])
@@ -555,6 +621,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       readValueAt(r1178, ["summary", "safeResponseSmokeProof"]),
     );
   const safeResponseHandoffVisible = evidence.r1182;
+  const safeResponseChainStatusVisible = evidence.r1184;
   const rowOwnerActionRouteVisible = minimumPairVisible
     && rowOwnerActionRouteStatus !== null
     && rowOwnerActionRouteStatus !== "waiting_on_current_loop_or_priority_packet"
@@ -584,6 +651,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     r1174,
     r1176,
     r1182,
+    r1184,
   ]);
   const requirementStatuses = buildRequirementStatuses({
     evidence,
@@ -597,6 +665,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     rowOwnerActionRouteVisible,
     rowOwnerSafeAssertionConfirmed,
     safeResponseHandoffVisible,
+    safeResponseChainStatusVisible,
     safeResponseSmokeProofVisible,
     safeCurrentLoopCommandVisible,
   });
@@ -631,6 +700,10 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     r1182,
     visible: safeResponseHandoffVisible,
   });
+  const safeResponseChainStatus = safeResponseChainStatusFromR1184({
+    r1184,
+    visible: safeResponseChainStatusVisible,
+  });
   const summary: R1179AverageSubmitterObjectiveGapAuditOutput["summary"] = {
     averageSubmitterSubmissionPriority,
     blockedRequirementIds,
@@ -654,6 +727,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     rowParsingPerformedByR1179: false,
     rowOwnerSafeConfirmationAsk,
     safeResponseHandoff,
+    safeResponseChainStatus,
     safeResponseSmokeProof,
     safeCurrentLoopCommandVisible,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
@@ -700,6 +774,12 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
         expectedSchemaVersion: R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_SCHEMA_VERSION,
         value: r1182,
       }),
+      r1184SafeResponseChainStatus: summarizeArtifact({
+        artifact: R1184_ARTIFACT,
+        expectedPacketId: R1184_PACKET_ID,
+        expectedSchemaVersion: R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_SCHEMA_VERSION,
+        value: r1184,
+      }),
     },
     objectiveGapAudit: {
       allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
@@ -728,6 +808,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       rowParsingPerformedByR1179: false,
       rowOwnerSafeConfirmationAsk,
       safeResponseHandoff: summary.safeResponseHandoff,
+      safeResponseChainStatus: summary.safeResponseChainStatus,
       safeResponseSmokeProof: summary.safeResponseSmokeProof,
       safeCurrentLoopCommandVisible,
       safeCompletionChecklistItemIds: summary.safeCompletionChecklistItemIds,
@@ -751,7 +832,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
 
 function buildRequirementStatuses(params: {
   averageSubmitterSubmissionPriorityVisible: boolean;
-  evidence: Record<"r1145" | "r1173" | "r1174" | "r1176" | "r1178" | "r1182", boolean>;
+  evidence: EvidenceReadyMap;
   featureOnlyResearchHandoffReady: boolean;
   minimumPairVisible: boolean;
   prioritySelected: boolean;
@@ -761,6 +842,7 @@ function buildRequirementStatuses(params: {
   rowOwnerActionRouteVisible: boolean;
   rowOwnerSafeAssertionConfirmed: boolean;
   safeResponseHandoffVisible: boolean;
+  safeResponseChainStatusVisible: boolean;
   safeResponseSmokeProofVisible: boolean;
   safeCurrentLoopCommandVisible: boolean;
 }): ObjectiveRequirementStatusEntry[] {
@@ -796,6 +878,12 @@ function buildRequirementStatuses(params: {
       satisfied: params.safeResponseHandoffVisible,
     }),
     statusEntry({
+      evidenceArtifactIds: params.evidence.r1184 ? [R1184_PACKET_ID] : [],
+      nextAction: "refresh_r1184_safe_response_chain_status",
+      requirementId: "safe_response_chain_status_visible",
+      satisfied: params.safeResponseChainStatusVisible,
+    }),
+    statusEntry({
       evidenceArtifactIds: params.evidence.r1178 ? [R1178_PACKET_ID] : [],
       nextAction: "refresh_r1178_current_loop_surfacing",
       requirementId: "row_owner_action_route_visible",
@@ -829,6 +917,7 @@ function buildRequirementStatuses(params: {
       evidenceArtifactIds: evidenceIdsForReady([
         [params.evidence.r1178, R1178_PACKET_ID],
         [params.evidence.r1182, R1182_PACKET_ID],
+        [params.evidence.r1184, R1184_PACKET_ID],
         [params.evidence.r1176, R1176_PACKET_ID],
       ]),
       nextAction:
@@ -1182,6 +1271,210 @@ function buildSafeConfirmationResponseTemplate(): SafeConfirmationResponseTempla
   };
 }
 
+function safeResponseChainStatusFromR1184(params: {
+  r1184: unknown | null;
+  visible: boolean;
+}): SafeResponseChainStatusSummary {
+  if (!params.visible) {
+    return {
+      artifact: R1184_ARTIFACT,
+      command: null,
+      conclusion: null,
+      confirmedResponseArtifactPresent: null,
+      confirmedResponseArtifactReadyForR1180: null,
+      explicitRowOwnerSafeConfirmationProvided: null,
+      featureOnlyExecutionContractReady: null,
+      featureOnlySafeConfirmationReady: null,
+      fillableResponseArtifactPresent: null,
+      handoffReadyForResearchPlanningOnly: null,
+      materializerReadyForRowOwnerConfirmation: null,
+      minimumFeaturePairRequired: [],
+      modelEvidencePromotionAllowed: false,
+      nextAction: null,
+      nextActionCommand: null,
+      nextActionRequiresExplicitRowOwnerAssertion: null,
+      prioritizedInputKindIds: [],
+      productDisplayAuthorized: false,
+      recognized: false,
+      requiredResponseFieldIds: [],
+      reviewGptRequiredNow: false,
+      rowLevelDataAcceptedByR1184: null,
+      rowOwnerConfirmationInferredByR1184: null,
+      rowOwnerPrivateValuesStored: null,
+      rowOwnerSafeResponseAssertionStillRequired: null,
+      rowParsingPerformedByR1184: null,
+      sourcePriority: TARGET_INPUT_PRIORITY,
+      staleConfirmedResponseArtifactDetected: null,
+      targetAgeBand: TARGET_AGE_BAND,
+    };
+  }
+
+  const nextAction = parseAllowedString(
+    readStringAt(params.r1184, ["summary", "nextAction"]),
+    R1184_NEXT_ACTIONS,
+  );
+  return {
+    artifact: R1184_ARTIFACT,
+    command: R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_COMMAND,
+    conclusion: parseAllowedString(
+      readStringAt(params.r1184, ["summary", "conclusion"]),
+      R1184_CONCLUSIONS,
+    ),
+    confirmedResponseArtifactPresent: readBooleanAt(params.r1184, [
+      "summary",
+      "confirmedResponseArtifactPresent",
+    ]),
+    confirmedResponseArtifactReadyForR1180: readBooleanAt(params.r1184, [
+      "summary",
+      "confirmedResponseArtifactReadyForR1180",
+    ]),
+    explicitRowOwnerSafeConfirmationProvided: readBooleanAt(params.r1184, [
+      "summary",
+      "explicitRowOwnerSafeConfirmationProvided",
+    ]),
+    featureOnlyExecutionContractReady: readBooleanAt(params.r1184, [
+      "summary",
+      "featureOnlyExecutionContractReady",
+    ]),
+    featureOnlySafeConfirmationReady: readBooleanAt(params.r1184, [
+      "summary",
+      "featureOnlySafeConfirmationReady",
+    ]),
+    fillableResponseArtifactPresent: readBooleanAt(params.r1184, [
+      "summary",
+      "fillableResponseArtifactPresent",
+    ]),
+    handoffReadyForResearchPlanningOnly: readBooleanAt(params.r1184, [
+      "summary",
+      "handoffReadyForResearchPlanningOnly",
+    ]),
+    materializerReadyForRowOwnerConfirmation: readBooleanAt(params.r1184, [
+      "summary",
+      "materializerReadyForRowOwnerConfirmation",
+    ]),
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    modelEvidencePromotionAllowed: false,
+    nextAction,
+    nextActionCommand: commandForR1184NextAction(nextAction),
+    nextActionRequiresExplicitRowOwnerAssertion: readBooleanAt(params.r1184, [
+      "summary",
+      "nextActionRequiresExplicitRowOwnerAssertion",
+    ]),
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    productDisplayAuthorized: false,
+    recognized: true,
+    requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELD_IDS],
+    reviewGptRequiredNow: false,
+    rowLevelDataAcceptedByR1184: readBooleanAt(params.r1184, [
+      "summary",
+      "rowLevelDataAcceptedByR1184",
+    ]),
+    rowOwnerConfirmationInferredByR1184: readBooleanAt(params.r1184, [
+      "summary",
+      "rowOwnerConfirmationInferredByR1184",
+    ]),
+    rowOwnerPrivateValuesStored: readBooleanAt(params.r1184, [
+      "summary",
+      "rowOwnerPrivateValuesStored",
+    ]),
+    rowOwnerSafeResponseAssertionStillRequired: readBooleanAt(params.r1184, [
+      "summary",
+      "rowOwnerSafeResponseAssertionStillRequired",
+    ]),
+    rowParsingPerformedByR1184: readBooleanAt(params.r1184, [
+      "summary",
+      "rowParsingPerformedByR1184",
+    ]),
+    sourcePriority: TARGET_INPUT_PRIORITY,
+    staleConfirmedResponseArtifactDetected: readBooleanAt(params.r1184, [
+      "summary",
+      "staleConfirmedResponseArtifactDetected",
+    ]),
+    targetAgeBand: TARGET_AGE_BAND,
+  };
+}
+
+function matchesSafeResponseChainStatus(value: unknown | null): boolean {
+  const nextAction = parseAllowedString(
+    readStringAt(value, ["summary", "nextAction"]),
+    R1184_NEXT_ACTIONS,
+  );
+  const safeExecutionFeatureSlotIds = readValueAt(value, [
+    "summary",
+    "safeExecutionFeatureSlotIds",
+  ]);
+  const safeExecutionFeatureSlotIdsValid = safeExecutionFeatureSlotIds === null
+    || exactStringSet(
+      readStringArrayAt(value, ["summary", "safeExecutionFeatureSlotIds"]),
+      SAFE_RESPONSE_EXECUTION_FEATURE_SLOT_IDS,
+    );
+
+  return matchesArtifact(
+    value,
+    R1184_PACKET_ID,
+    R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_SCHEMA_VERSION,
+  )
+    && parseAllowedString(
+      readStringAt(value, ["summary", "conclusion"]),
+      R1184_CONCLUSIONS,
+    ) !== null
+    && nextAction !== null
+    && readStringAt(value, ["summary", "nextActionCommand"]) === commandForR1184NextAction(nextAction)
+    && readStringAt(value, ["summary", "sourcePriority"]) === TARGET_INPUT_PRIORITY
+    && readStringAt(value, ["summary", "targetAgeBand"]) === TARGET_AGE_BAND
+    && exactStringSet(
+      readStringArrayAt(value, ["summary", "minimumFeaturePairRequired"]),
+      MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["summary", "prioritizedInputKindIds"]),
+      REQUIRED_INPUT_KIND_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["summary", "requiredResponseFieldIds"]),
+      REQUIRED_SAFE_RESPONSE_FIELD_IDS,
+    )
+    && readBooleanAt(value, ["summary", "confirmedResponseArtifactPresent"]) !== null
+    && readBooleanAt(value, ["summary", "confirmedResponseArtifactReadyForR1180"]) !== null
+    && readBooleanAt(value, ["summary", "fillableResponseArtifactPresent"]) !== null
+    && readBooleanAt(value, ["summary", "modelEvidencePromotionAllowed"]) === false
+    && readBooleanAt(value, ["summary", "nextActionRequiresExplicitRowOwnerAssertion"]) !== null
+    && readBooleanAt(value, ["summary", "productDisplayAuthorized"]) === false
+    && readBooleanAt(value, ["summary", "reviewGptRequiredNow"]) === false
+    && readBooleanAt(value, ["summary", "rowLevelDataAcceptedByR1184"]) === false
+    && readBooleanAt(value, ["summary", "rowOwnerConfirmationInferredByR1184"]) === false
+    && readBooleanAt(value, ["summary", "rowOwnerPrivateValuesStored"]) === false
+    && readBooleanAt(value, ["summary", "rowOwnerSafeResponseValuesStoredInR1184Packet"]) === false
+    && readBooleanAt(value, ["summary", "rowParsingPerformedByR1184"]) === false
+    && safeExecutionFeatureSlotIdsValid
+    && readBooleanAt(value, ["summary", "staleConfirmedResponseArtifactDetected"]) !== null;
+}
+
+function commandForR1184NextAction(nextAction: R1184NextAction | null): string | null {
+  if (nextAction === "fill_r1180_safe_confirmation_response_template") {
+    return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+  }
+  if (
+    nextAction === "refresh_r1181_feature_only_execution_contract"
+    || nextAction === "run_r1181_feature_only_execution_contract"
+  ) {
+    return R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND;
+  }
+  if (nextAction === "refresh_r1182_safe_response_handoff") {
+    return R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND;
+  }
+  if (
+    nextAction === "refresh_r1183_safe_response_materializer"
+    || nextAction === "rerun_r1183_with_row_owner_safe_response_assertion"
+  ) {
+    return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
+  }
+  if (nextAction === "run_r1180_with_r1183_confirmed_safe_response_artifact") {
+    return R1184_R1180_CONFIRMED_RESPONSE_INTAKE_COMMAND;
+  }
+  return null;
+}
+
 function commandForR1182NextAction(nextAction: R1182NextAction | null): string | null {
   if (nextAction === "fill_r1180_safe_confirmation_response_template") {
     return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
@@ -1515,6 +1808,7 @@ function isRowOwnerAssertionBlocker(value: ObjectiveRequirementId | null): boole
     || value === "safe_assertion_answer_sheet_available"
     || value === "safe_next_step_packet_available"
     || value === "safe_response_handoff_visible"
+    || value === "safe_response_chain_status_visible"
     || value === "r1176_live_chain_available";
 }
 
@@ -1537,6 +1831,9 @@ function commandForNextAction(nextAction: R1179NextActionId): string | null {
   if (nextAction === "refresh_r1182_safe_response_handoff") {
     return R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND;
   }
+  if (nextAction === "refresh_r1184_safe_response_chain_status") {
+    return R1184_AVERAGE_SUBMITTER_SAFE_RESPONSE_CHAIN_STATUS_COMMAND;
+  }
   if (nextAction === "fill_r1180_safe_confirmation_response_template") {
     return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
   }
@@ -1552,12 +1849,11 @@ function commandForNextAction(nextAction: R1179NextActionId): string | null {
   return null;
 }
 
-function evidenceArtifactIds(
-  evidence: Record<"r1145" | "r1173" | "r1174" | "r1176" | "r1178" | "r1182", boolean>,
-): EvidenceArtifactId[] {
+function evidenceArtifactIds(evidence: EvidenceReadyMap): EvidenceArtifactId[] {
   return evidenceIdsForReady([
     [evidence.r1178, R1178_PACKET_ID],
     [evidence.r1182, R1182_PACKET_ID],
+    [evidence.r1184, R1184_PACKET_ID],
     [evidence.r1145, R1145_PACKET_ID],
     [evidence.r1173, R1173_PACKET_ID],
     [evidence.r1174, R1174_PACKET_ID],
@@ -1761,6 +2057,7 @@ async function main(): Promise<void> {
       r1176Path: process.env.MURPH_AGE_R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_PATH,
       r1178Path: process.env.MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH,
       r1182Path: process.env.MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH,
+      r1184Path: process.env.MURPH_AGE_R1184_SAFE_RESPONSE_CHAIN_STATUS_PATH,
     });
     process.stdout.write(`${JSON.stringify({
       averageSubmitterSubmissionPriorityOrderIds:
@@ -1784,6 +2081,16 @@ async function main(): Promise<void> {
       rowOwnerActionRouteStatus: output.summary.rowOwnerActionRouteStatus,
       rowOwnerSafeConfirmationAskId: output.summary.rowOwnerSafeConfirmationAsk.askId,
       rowOwnerSafeConfirmationAskVisible: true,
+      safeResponseChainStatusConclusion:
+        output.summary.safeResponseChainStatus.conclusion,
+      safeResponseChainStatusFillableResponseArtifactPresent:
+        output.summary.safeResponseChainStatus.fillableResponseArtifactPresent,
+      safeResponseChainStatusNextAction:
+        output.summary.safeResponseChainStatus.nextAction,
+      safeResponseChainStatusNextActionCommand:
+        output.summary.safeResponseChainStatus.nextActionCommand,
+      safeResponseChainStatusRecognized:
+        output.summary.safeResponseChainStatus.recognized,
       safeResponseHandoffConclusion:
         output.summary.safeResponseHandoff.conclusion,
       safeResponseHandoffNextAction:
@@ -1821,7 +2128,7 @@ function safeCliErrorMessage(error: unknown, fallback: string): string {
     error.message === "R1179 input JSON parse failed."
     || error.message === "R1179 output included an output path."
     || error.message === "R1179 rejected invalid createdAt timestamp."
-    || /^R1179 rejected unsafe (?:r1178 current-loop surfacing|r1145 completion audit|r1173 safe assertion answer sheet|r1174 safe next-step packet|r1176 row-owner safe assertion chain|r1182 safe response handoff|r1179 average submitter objective gap audit): \d+ findings?$/u
+    || /^R1179 rejected unsafe (?:r1178 current-loop surfacing|r1145 completion audit|r1173 safe assertion answer sheet|r1174 safe next-step packet|r1176 row-owner safe assertion chain|r1182 safe response handoff|r1184 safe response chain status|r1179 average submitter objective gap audit): \d+ findings?$/u
       .test(error.message)
   ) {
     return error.message;
