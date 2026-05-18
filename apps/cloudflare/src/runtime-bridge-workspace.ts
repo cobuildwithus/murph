@@ -1101,7 +1101,7 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       redactedJson.errorCode = diagnostics.errorCode;
     }
     if (typeof diagnostics.errorMessage === "string") {
-      redactedJson.errorMessage = diagnostics.errorMessage;
+      redactedJson.safeErrorMessage = diagnostics.errorMessage;
     }
     if (typeof diagnostics.errorName === "string") {
       redactedJson.errorName = diagnostics.errorName;
@@ -1136,7 +1136,7 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
     return;
   }
   const diagnostics = input.error.codexHomeSnapshotDiagnostics;
-  const errorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
+  const safeErrorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
   const errorName = input.error.name;
   const snapshotMode = input.snapshotMode ?? "full";
 
@@ -1150,8 +1150,8 @@ async function writeHostedCodexHomeSnapshotFailureLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
-    errorMessage,
     errorName,
+    safeErrorMessage,
     snapshotMode,
   };
   if (input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError) {
