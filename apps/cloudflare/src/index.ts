@@ -344,8 +344,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   }
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    // Legacy deploy-skew compatibility only: generic nudge only, not a
-    // browser-vault scheduler. Delete after 2026-05-25.
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 

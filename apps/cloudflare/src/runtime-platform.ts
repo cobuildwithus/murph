@@ -853,6 +853,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
       : {}),
     async write(writeInput: {
       replica: unknown;
+      signal?: AbortSignal | null;
     }) {
       const payload = await fetchHostedJson({
         body: {
@@ -864,6 +865,7 @@ function createCloudflareBrowserVaultReplicaPort(input: {
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
         }),
         method: "POST",
+        signal: writeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         url: new URL(
           "/replicas",
@@ -1822,6 +1824,7 @@ async function fetchHostedJson(input: {
   fetchImpl: typeof fetch;
   headers?: Headers;
   method: "DELETE" | "GET" | "POST" | "PUT";
+  signal?: AbortSignal | null;
   timeoutMs: number;
   url: URL;
 }): Promise<unknown> {
@@ -1840,6 +1843,7 @@ async function fetchHostedJson(input: {
         : {}),
       method: input.method,
     },
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: input.url,
   });

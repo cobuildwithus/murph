@@ -4885,6 +4885,15 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.equal(timedParsed.request.reason, "nudge");
     assert.equal(timedParsed.request.deadlineAt, "2026-04-20T08:10:00.000Z");
     assert.equal(timedParsed.request.idleCheckpointDelayMs, 180_000);
+
+    const browserVaultRefreshParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+      request: {
+        ...createWorkspaceRunRequest(),
+        reason: "browser_vault_refresh",
+      },
+    });
+    assert.equal(browserVaultRefreshParsed.request.reason, "browser_vault_refresh");
+
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
         request: {

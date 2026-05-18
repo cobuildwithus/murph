@@ -29,7 +29,7 @@ beforeEach(() => {
 describe("hosted browser-vault replica refresh preparation", () => {
   it("summarizes restored canonical source separately from default metric selection rows", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
-    const { listCanonicalSourceManifest } = await import("@murphai/query");
+    const { hashCanonicalQuerySources, listCanonicalSourceManifest } = await import("@murphai/query");
     const {
       createHostedBrowserVaultReplicaRefreshFromWorkspace,
     } = await import("../src/hosted-runtime/browser-vault-replica.ts");
@@ -51,18 +51,19 @@ describe("hosted browser-vault replica refresh preparation", () => {
       ].join("\n"));
 
       const directManifest = await listCanonicalSourceManifest(vaultRoot);
+      const directSourceHash = await hashCanonicalQuerySources(vaultRoot);
       expect(directManifest.map((entry) => entry.relativePath)).toEqual([experimentPath]);
 
       const prepared = await createHostedBrowserVaultReplicaRefreshFromWorkspace({
         generatedAt: "2026-05-10T00:00:00.000Z",
         platform: createPlatform(),
-        sourceStateHash: "a".repeat(64),
         vaultRoot,
         workspace: null,
       });
 
       expect(prepared.source.fileCount).toBe(1);
       expect(prepared.source.totalBytes).toBeGreaterThan(0);
+      expect(prepared.replica.source.sourceBundleHash).toBe(directSourceHash.hash);
       expect(prepared.content.entities).toBe(1);
       expect(prepared.content.searchRows).toBe(1);
       expect(prepared.content.metricSelectionRows).toBeGreaterThan(0);
@@ -112,6 +113,67 @@ describe("hosted browser-vault replica refresh preparation", () => {
           fileCount: 0,
           totalBytes: 0,
         },
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("force refreshes a metadata-current replica when web reported it unreadable", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const { hashCanonicalQuerySources } = await import("@murphai/query");
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn(async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+      published: true,
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: input.replicaRef,
+      }),
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) =>
+      createReplicaRefFromReplica(input.replica)
+    );
+
+    try {
+      await writeVaultFile(
+        vaultRoot,
+        path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md"),
+        "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Trial\n",
+      );
+      const sourceHash = await hashCanonicalQuerySources(vaultRoot);
+      const workspace = createWorkspaceState({
+        browserVaultReplicaRef: {
+          byteLength: 128,
+          dataVersion: "browser-data-v1",
+          generatedAt: "2026-05-10T00:01:00.000Z",
+          keyId: "browser-vault-replica:key",
+          objectKey: "users/browser-vault-replicas/member_123/missing.json",
+          replicaSchema: "murph.browser-vault-replica",
+          runtimeRootKeyId: "udrk:runtime:test-root",
+          schema: "murph.hosted-browser-vault-replica-ref.v1",
+          sourceBundleHash: sourceHash.hash,
+        },
+      });
+
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:30.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toMatchObject({
+        status: "published",
       });
       expect(write).toHaveBeenCalledOnce();
       expect(publishRef).toHaveBeenCalledOnce();

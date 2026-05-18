@@ -157,6 +157,20 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async markBrowserVaultRefreshRequested(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.browser_vault_refresh_requested_at = new Date().toISOString();
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearBrowserVaultRefreshRequested(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    meta.browser_vault_refresh_requested_at = null;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
   async readDueWork(nowMs: number): Promise<RunnerDueWork> {
     let meta = this.requireMetaRowSync();
     const expired = this.clearExpiredActiveRunSync(meta, nowMs);
@@ -669,6 +683,7 @@ export class RunnerStateStore {
         active_expires_at,
         active_workspace_version,
         backoff_until,
+        browser_vault_refresh_requested_at,
         failure_count,
         last_error_at,
         last_error_code,
@@ -697,11 +712,12 @@ export class RunnerStateStore {
         active_expires_at,
         active_workspace_version,
         backoff_until,
+        browser_vault_refresh_requested_at,
         failure_count,
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.wake_at,
@@ -712,6 +728,7 @@ export class RunnerStateStore {
       meta.active_expires_at,
       meta.active_workspace_version,
       meta.backoff_until,
+      meta.browser_vault_refresh_requested_at,
       normalizeNonNegativeInteger(meta.failure_count),
       meta.last_error_at,
       meta.last_error_code,

@@ -694,8 +694,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
+      const refreshTimeoutMs = resolveHostedBrowserVaultRefreshTimeoutMs(
+        input.request.deadlineAt ?? null,
+      );
       emitPhaseLog({
         details: {
+          browserVaultRefreshTimeoutMs: refreshTimeoutMs,
           workspacePresent: maintenanceInput.workspace !== null,
           workspaceVersion: maintenanceInput.workspace?.version ?? null,
         },
@@ -704,11 +708,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "browser_vault.refresh",
         status: "start",
       });
+      if (refreshTimeoutMs !== null && refreshTimeoutMs <= 0) {
+        const refresh: HostedBrowserVaultReplicaRefreshResult = {
+          source: {
+            fileCount: 0,
+            totalBytes: 0,
+          },
+          status: "deferred_timeout",
+        };
+        emitPhaseLog({
+          details: buildHostedBrowserVaultRefreshLogDetails(refresh),
+          input,
+          requestId,
+          stage: "browser_vault.refresh",
+          status: "done",
+        });
+        return refresh;
+      }
       const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: input.request.reason === "browser_vault_refresh",
         generatedAt: new Date().toISOString(),
         platform: guardedRuntime.platform,
         runtimeWakeSignal: options.runtimeWakeSignal ?? null,
         signal: runtimeAbortController.signal,
+        timeoutMs: refreshTimeoutMs,
         vaultRoot: restored.vaultRoot,
         workspace: maintenanceInput.workspace,
       });
@@ -1260,6 +1283,21 @@ function resolveHostedRuntimeCheckpointStartByMs(input: {
   }
 
   return deadlineMs - input.commitTimeoutMs - HOSTED_RUNTIME_DEADLINE_MARGIN_MS;
+}
+
+function resolveHostedBrowserVaultRefreshTimeoutMs(
+  deadlineAt?: string | null,
+): number | null {
+  if (!deadlineAt) {
+    return null;
+  }
+
+  const deadlineMs = Date.parse(deadlineAt);
+  if (!Number.isFinite(deadlineMs)) {
+    return null;
+  }
+
+  return Math.max(0, deadlineMs - Date.now() - HOSTED_RUNTIME_DEADLINE_MARGIN_MS);
 }
 
 function earliestHostedRuntimeFiniteMs(...values: (number | null)[]): number | null {

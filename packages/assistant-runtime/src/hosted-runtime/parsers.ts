@@ -437,6 +437,7 @@ function parseHostedWorkspaceInvocationReason(
 
   switch (reason) {
     case "alarm":
+    case "browser_vault_refresh":
     case "manual":
     case "nudge":
     case "retry":
