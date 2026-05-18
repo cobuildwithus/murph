@@ -17,6 +17,7 @@ import {
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
+  assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
   buildMurphAgeIncrementEvaluationCard,
@@ -2868,7 +2869,47 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
       assert.equal(builtCard.outputBoundary.coefficientsExportAllowed, false);
       assert.equal(builtCard.outputBoundary.modelParametersExportAllowed, false);
       assert.equal(validateMurphAgeIncrementEvaluationCard(builtCard).status, "valid");
+      const ordinaryEvidenceAssessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(builtCard);
+      assert.equal(ordinaryEvidenceAssessment.status, "ready");
+      assert.deepEqual(ordinaryEvidenceAssessment.blockers, []);
     }
+  }
+  const readyOrdinaryCard = buildMurphAgeIncrementEvaluationCard({
+    aggregateMetricDeltas: { aucDelta: 0.001 },
+    aggregateSample: {
+      evaluatedRowCount: 240,
+      eventCount: 24,
+      minimumCellCount: 24,
+    },
+    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+    candidateBatchId: "ordinary-lab-wearable-aggregate-v1",
+    candidateId: "cardia-biomarker-activity-biomarker-increment",
+    evidenceTier: "external-validation",
+    layer: "biomarker-increment",
+    riskEffect: "aggregate-estimated",
+    sourceRouteId: "cardia-biomarker-activity",
+  });
+  const blockedOrdinaryAssessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard({
+    ...readyOrdinaryCard,
+    evaluation: {
+      ...readyOrdinaryCard.evaluation,
+      aggregateMetricDeltas: {},
+      aggregateSample: {
+        evaluatedRowCount: 12,
+        minimumCellCount: 12,
+      },
+    },
+    riskEffect: "not-estimated",
+    sourceRouteId: "midus-biomarker-mortality",
+  });
+  assert.equal(blockedOrdinaryAssessment.status, "blocked");
+  for (const expectedBlocker of [
+    "source_route_not_ordinary_lab_wearable",
+    "risk_effect_not_aggregate_estimated",
+    "aggregate_metric_delta_missing",
+    "event_count_missing",
+  ]) {
+    assert.equal(blockedOrdinaryAssessment.blockers.includes(expectedBlocker), true, expectedBlocker);
   }
 
   const notEstimatedValidation = validateMurphAgeIncrementEvaluationCard({

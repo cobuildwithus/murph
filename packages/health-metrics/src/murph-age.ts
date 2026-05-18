@@ -937,6 +937,16 @@ export interface MurphAgeIncrementEvaluationCardBuildInput {
   sourceRouteId: MurphAgeSourceRouteId;
 }
 
+export type MurphAgeOrdinaryLabWearableAggregateEvidenceStatus = "blocked" | "ready";
+
+export interface MurphAgeOrdinaryLabWearableAggregateEvidenceAssessment {
+  blockers: string[];
+  routeId: string | null;
+  status: MurphAgeOrdinaryLabWearableAggregateEvidenceStatus;
+  validation: MurphAgeModelValidationResult;
+  warnings: MurphAgeWarning[];
+}
+
 type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
   MurphAgeWearableShadowIncrementPolicy,
   "allowedMetricKeys"
@@ -2151,6 +2161,92 @@ export function buildMurphAgeIncrementEvaluationCard(
     scoreBearing: false,
     scoreContributionAuthorized: false,
     sourceRouteId: input.sourceRouteId,
+  };
+}
+
+export function assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(
+  candidate: unknown,
+): MurphAgeOrdinaryLabWearableAggregateEvidenceAssessment {
+  const validation = validateMurphAgeIncrementEvaluationCard(candidate);
+  const warnings = [...validation.warnings];
+  const blockers: string[] = [];
+  const routeId = isPlainRecord(candidate) && typeof candidate.sourceRouteId === "string"
+    ? candidate.sourceRouteId
+    : null;
+
+  if (validation.status !== "valid") {
+    appendOrdinaryLabWearableAggregateEvidenceBlocker({
+      blockers,
+      message: "Ordinary lab/wearable aggregate evidence requires a valid increment evaluation card.",
+      reason: "increment_evaluation_card_invalid",
+      warnings,
+    });
+  }
+  const ordinaryRouteIds = new Set(listMurphAgeOrdinaryLabWearableSourceRoutes().map((route) => route.routeId));
+  if (!routeId || !ordinaryRouteIds.has(routeId as MurphAgeSourceRouteId)) {
+    appendOrdinaryLabWearableAggregateEvidenceBlocker({
+      blockers,
+      message: "Ordinary lab/wearable aggregate evidence must reference a ranked ordinary lab/wearable source route.",
+      reason: "source_route_not_ordinary_lab_wearable",
+      warnings,
+    });
+  }
+  if (!isPlainRecord(candidate)) {
+    return {
+      blockers,
+      routeId,
+      status: "blocked",
+      validation,
+      warnings,
+    };
+  }
+
+  const riskEffect = candidate.riskEffect;
+  if (riskEffect !== "aggregate-estimated") {
+    appendOrdinaryLabWearableAggregateEvidenceBlocker({
+      blockers,
+      message: "Ordinary lab/wearable aggregate evidence must be aggregate-estimated before it can advance model evidence.",
+      reason: "risk_effect_not_aggregate_estimated",
+      warnings,
+    });
+  }
+
+  const evaluation = isPlainRecord(candidate.evaluation) ? candidate.evaluation : null;
+  const aggregateMetricDeltas = evaluation && isPlainRecord(evaluation.aggregateMetricDeltas)
+    ? evaluation.aggregateMetricDeltas
+    : null;
+  const aggregateSample = evaluation && isPlainRecord(evaluation.aggregateSample)
+    ? evaluation.aggregateSample
+    : null;
+  if (!aggregateMetricDeltas || !hasFiniteIncrementEvaluationMetricDelta(aggregateMetricDeltas)) {
+    appendOrdinaryLabWearableAggregateEvidenceBlocker({
+      blockers,
+      message: "Ordinary lab/wearable aggregate evidence requires at least one finite aggregate metric delta.",
+      reason: "aggregate_metric_delta_missing",
+      warnings,
+    });
+  }
+  for (const [key, reason] of [
+    ["evaluatedRowCount", "evaluated_row_count_missing"],
+    ["eventCount", "event_count_missing"],
+    ["minimumCellCount", "minimum_cell_count_missing"],
+  ] as const) {
+    if (!aggregateSample || !isPositiveIntegerValue(aggregateSample[key])) {
+      appendOrdinaryLabWearableAggregateEvidenceBlocker({
+        blockers,
+        message: `Ordinary lab/wearable aggregate evidence requires a positive integer ${key}.`,
+        reason,
+        warnings,
+      });
+    }
+  }
+
+  return {
+    blockers,
+    routeId,
+    status: blockers.length === 0 ? "ready" : "blocked",
+    validation,
+    warnings,
   };
 }
 
@@ -4036,6 +4132,23 @@ function hasFiniteIncrementEvaluationMetricDelta(
     deltas.cIndexDelta,
     deltas.logLossDelta,
   ].some((value) => value !== undefined && Number.isFinite(value));
+}
+
+function appendOrdinaryLabWearableAggregateEvidenceBlocker(input: {
+  blockers: string[];
+  message: string;
+  reason: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  input.blockers.push(input.reason);
+  input.warnings.push({
+    code: "MODEL_CARD_POLICY_VIOLATION",
+    message: input.message,
+  });
+}
+
+function isPositiveIntegerValue(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0;
 }
 
 function isMurphAgeIncrementEvaluationLayer(value: string): value is MurphAgeIncrementEvaluationLayer {
