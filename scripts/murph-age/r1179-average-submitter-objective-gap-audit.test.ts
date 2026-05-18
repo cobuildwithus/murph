@@ -35,6 +35,26 @@ const REQUIRED_ASSERTION_CHECKLIST = [
   "assert_daily_wearable_activity_export_available",
   "assert_no_private_values_identifiers_paths_headers_or_rows",
 ] as const;
+const BLOCKED_CONTENT_IDS = [
+  "private_paths",
+  "header_names",
+  "file_names",
+  "row_values",
+  "participant_identifiers",
+  "private_ref_values",
+  "source_variable_names",
+  "predictions",
+  "coefficients",
+  "model_parameters",
+  "source_text",
+  "small_cells",
+] as const;
+const ROW_OWNER_SAFE_CONFIRMATION_ASK_ID =
+  "confirm_feature_only_lab_wearable_availability_without_private_values";
+const ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KINDS = [
+  "explicit_yes_all_required_assertions_confirmed",
+  "not_confirmed_or_unsure",
+] as const;
 const BLOCKED_REQUIREMENTS = [
   "row_owner_availability_assertions_confirmed",
   "confirmed_recipe_route_requirements_available",
@@ -90,6 +110,31 @@ describe("R1179 average submitter objective gap audit", () => {
         sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
         targetAgeBand: "roughly_16_50",
       });
+      expect(output.summary.rowOwnerSafeConfirmationAsk).toMatchObject({
+        acceptableResponseKindIds: [...ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KINDS],
+        allowedValueKindIds: ["booleans_only", "fixed_enumerated_ids_only"],
+        askId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
+        audience: "ordinary_submitter_roughly_16_50_row_owner",
+        blockedContentIds: [...BLOCKED_CONTENT_IDS],
+        minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+        modelEvidencePromotionAllowed: false,
+        prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+        privateDetailsStored: false,
+        productDisplayAuthorized: false,
+        requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST],
+        rowLevelDataAcceptedByR1179: false,
+        rowOwnerConfirmationInferredByR1179: false,
+        rowOwnerOnly: true,
+        rowOwnerPrivateValuesStored: false,
+        rowOwnerProvidedValuesStored: false,
+        rowParsingPerformedByR1179: false,
+        safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST],
+      });
+      expect(output.summary.rowOwnerSafeConfirmationAsk.askText).toContain("glycemia bloodwork/lab export");
+      expect(output.summary.rowOwnerSafeConfirmationAsk.askText).toContain("daily phone/watch/wearable activity export");
+      expect(output.objectiveGapAudit.rowOwnerSafeConfirmationAsk).toEqual(
+        output.summary.rowOwnerSafeConfirmationAsk,
+      );
       expect(output.summary.currentEvidenceArtifactIds).toEqual([
         "r1178-average-submitter-current-loop-surfacing",
         "r1145-ordinary-consumer-current-chain-completion-audit",
@@ -372,6 +417,12 @@ describe("R1179 average submitter objective gap audit", () => {
         nextAction: "refresh_r1178_current_loop_surfacing",
         rowOwnerActionRouteStatus: null,
       });
+      expect(output.summary.rowOwnerSafeConfirmationAsk).toMatchObject({
+        askId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
+        blockedContentIds: [...BLOCKED_CONTENT_IDS],
+        minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+        prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+      });
       expect(output.inputArtifacts.r1178AverageSubmitterCurrentLoopSurfacing).toMatchObject({
         packetId: null,
         schemaVersion: null,
@@ -498,6 +549,10 @@ describe("R1179 average submitter objective gap audit", () => {
         conclusion?: unknown;
         nextAction?: unknown;
         packetId?: unknown;
+        rowOwnerSafeConfirmationAsk?: unknown;
+        rowOwnerSafeConfirmationAskText?: unknown;
+        rowOwnerSafeConfirmationAskId?: unknown;
+        rowOwnerSafeConfirmationAskVisible?: unknown;
         safeCurrentLoopCommandVisible?: unknown;
         topBlockedRequirementId?: unknown;
       };
@@ -506,9 +561,16 @@ describe("R1179 average submitter objective gap audit", () => {
         nextAction:
           "review_r1173_safe_assertion_answer_sheet_then_rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
         packetId: "r1179-average-submitter-objective-gap-audit",
+        rowOwnerSafeConfirmationAskId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
+        rowOwnerSafeConfirmationAskVisible: true,
         safeCurrentLoopCommandVisible: true,
         topBlockedRequirementId: "row_owner_safe_assertion_confirmed",
       });
+      expect(cli.rowOwnerSafeConfirmationAsk).toBeUndefined();
+      expect(cli.rowOwnerSafeConfirmationAskText).toBeUndefined();
+      expect(result.stdout).not.toContain("glycemia bloodwork/lab export");
+      expect(result.stdout).not.toContain("daily phone/watch/wearable activity export");
+      expect(result.stdout).not.toContain("blockedContentIds");
       await expect(stat(path.join(outDir, "r1179-average-submitter-objective-gap-audit.latest.json"))).resolves.toBeTruthy();
     } finally {
       await rm(tmp, { force: true, recursive: true });
