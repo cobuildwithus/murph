@@ -98,6 +98,7 @@ export async function runHostedMailboxLagSweeper(input: {
       highWater: {
         lane: highWater.lane,
         maxSeq: highWater._max.laneSeq.toString(),
+        maxUpdatedAt: highWater._max.updatedAt?.toISOString() ?? null,
       },
       redactedStatusJson,
     });

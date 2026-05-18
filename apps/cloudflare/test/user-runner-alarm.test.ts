@@ -64,6 +64,11 @@ vi.mock("../src/web-control-plane.ts", async () => {
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const RETRY_AT = "2026-04-27T00:00:05.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
+const RETRY_CAP_RECOVERY_PROBE_DELAY_MS = 30 * 60_000;
+
+function addMs(isoDate: string, ms: number): string {
+  return new Date(Date.parse(isoDate) + ms).toISOString();
+}
 
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -140,6 +145,79 @@ describe("HostedUserRunner wake scheduling", () => {
       wake_at: null,
     });
     expect(alarms).toEqual(["deleted"]);
+  });
+
+  it("arms a future web-owned workspace wake when mailbox is caught up and Cloudflare wake_at is empty", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+      }),
+    });
+    await runner.bindUser("member_123");
+
+    const nudge = await runner.nudgeHostedRunner();
+
+    expect(nudge).toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "caught-up",
+      nextAlarmAt: WORKSPACE_NEXT_WAKE_AT,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: WORKSPACE_NEXT_WAKE_AT,
+    });
+    expect(alarms.at(-1)).toBe(WORKSPACE_NEXT_WAKE_AT);
+  });
+
+  it("preserves an earlier Cloudflare wake when mailbox is caught up before a web workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const cloudflareWakeAt = "2026-04-27T00:01:00.000Z";
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+      }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_at = ?
+       WHERE singleton = 1`,
+      cloudflareWakeAt,
+    );
+
+    const nudge = await runner.nudgeHostedRunner();
+
+    expect(nudge).toMatchObject({
+      accepted: true,
+      immediateDriveStarted: false,
+      inFlight: false,
+      kind: "caught-up",
+      nextAlarmAt: cloudflareWakeAt,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: cloudflareWakeAt,
+    });
+    expect(alarms.at(-1)).toBe(cloudflareWakeAt);
   });
 
   it("does not report caught-up when mailbox checkpoints are caught up behind an active write fence", async () => {
@@ -294,17 +372,12 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
-  it("drops stale runtime-result assistant wakes after mailbox catch-up", async () => {
+  it("schedules a short recheck when runtime completion requests immediate follow-up work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const staleWakeAt = "2026-04-26T23:59:59.000Z";
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
-      invocationResults: [{ nextWakeAt: staleWakeAt, status: "scheduled" }],
-      workspace: createWorkspaceState({
-        nextWakeAt: staleWakeAt,
-        nextWakeReason: "assistant",
-        version: "5",
-      }),
+      invocationResults: [{ nextWakeAt: FIXED_NOW, status: "scheduled" }],
+      workspace: createWorkspaceState({ version: "5" }),
     });
     await runner.bindUser("member_123");
     sql.exec(
@@ -324,9 +397,9 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke).toHaveBeenCalledOnce();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      wake_at: null,
+      wake_at: "2026-04-27T00:00:01.000Z",
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
   });
 
   it("schedules a short recheck when runtime completion leaves mailbox lag", async () => {
@@ -1264,10 +1337,60 @@ describe("HostedUserRunner wake scheduling", () => {
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
   });
 
-  it("keeps legacy browser-vault refresh scheduling behind retry backoff", async () => {
+  it("reports an earlier Cloudflare wake before active write-fence expiry in runner status", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness();
+    const activeExpiresAt = "2026-04-27T00:01:00.000Z";
+    const backlogRecheckAt = "2026-04-27T00:00:01.000Z";
+    const { runner, sql } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        version: "5",
+      }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?,
+           wake_at = ?
+       WHERE singleton = 1`,
+      "attempt_active",
+      1,
+      "runtime",
+      FIXED_NOW,
+      activeExpiresAt,
+      "5",
+      backlogRecheckAt,
+    );
+
+    await expect(runner.runnerStatus()).resolves.toMatchObject({
+      inFlight: true,
+      nextAlarmAt: backlogRecheckAt,
+      userId: "member_123",
+    });
+  });
+
+  it("keeps browser-vault refresh scheduling behind retry backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+      }),
+    });
     await runner.bindUser("member_123");
     sql.exec(
       `UPDATE runner_meta
@@ -1292,6 +1415,111 @@ describe("HostedUserRunner wake scheduling", () => {
       backoff_until: RETRY_AT,
       failure_count: 1,
       wake_at: FIXED_NOW,
+    });
+  });
+
+  it("starts browser-vault refresh as low-priority runtime work when mailbox is caught up", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+        version: "14",
+      }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      accepted: true,
+      scheduled: true,
+      userId: "member_123",
+    });
+    await flushWaitUntil();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      reason: "browser_vault_refresh",
+      userId: "member_123",
+      workspaceVersion: "14",
+    });
+  });
+
+  it("lets mailbox backlog outrank browser-vault refresh scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, invoke, runner } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+        version: "15",
+      }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      accepted: true,
+      scheduled: true,
+    });
+    await flushWaitUntil();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      reason: "nudge",
+      workspaceVersion: "15",
+    });
+  });
+
+  it("lets due runtime wakes outrank browser-vault refresh scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+        version: "16",
+      }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET wake_at = ?
+       WHERE singleton = 1`,
+      FIXED_NOW,
+    );
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      accepted: true,
+      scheduled: true,
+    });
+    await flushWaitUntil();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      reason: "nudge",
+      workspaceVersion: "16",
     });
   });
 
@@ -1366,10 +1594,11 @@ describe("HostedUserRunner wake scheduling", () => {
     );
   });
 
-  it("parks without another alarm after repeated runtime wake failures reach the cap", async () => {
+  it("schedules a slow recovery probe after repeated runtime wake failures reach the cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const secondRetryAt = "2026-04-27T00:00:15.000Z";
+    const recoveryProbeAt = addMs(secondRetryAt, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [
         new Error("container failed once"),
@@ -1405,18 +1634,20 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke).toHaveBeenCalledTimes(3);
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      backoff_until: null,
+      backoff_until: recoveryProbeAt,
       failure_count: 3,
       last_error_code: "runtime_error",
-      wake_at: null,
+      wake_at: recoveryProbeAt,
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms.at(-1)).toBe(recoveryProbeAt);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
           failureCount: 3,
           maxEventAttempts: 3,
+          retryCapRecoveryProbeAt: recoveryProbeAt,
+          retryCapRecoveryProbeDelayMs: RETRY_CAP_RECOVERY_PROBE_DELAY_MS,
           retryCapReason: "runtime-wake-failure",
         }),
         message: "Hosted runner parked after retry cap.",
@@ -1428,6 +1659,7 @@ describe("HostedUserRunner wake scheduling", () => {
   it("counts stale active write-fence replacement toward the retry cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const recoveryProbeAt = addMs(FIXED_NOW, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
     const wakeRuntime = vi.fn(async () => ({
       kind: "unknown" as const,
       reason: "container-rpc-error" as const,
@@ -1458,30 +1690,35 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alarmScheduled: false,
+      alarmScheduled: true,
       immediateDriveStarted: false,
       inFlight: false,
       kind: "retry-scheduled",
-      nextAlarmAt: null,
+      nextAlarmAt: recoveryProbeAt,
     });
 
     expect(wakeRuntime).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      backoff_until: null,
+      backoff_until: recoveryProbeAt,
       failure_count: 3,
       last_error_at: FIXED_NOW,
       last_error_code: "runtime_error",
-      wake_at: null,
+      wake_at: recoveryProbeAt,
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms.at(-1)).toBe(recoveryProbeAt);
   });
 
-  it("does not let passive mailbox backlog rechecks bypass the retry cap", async () => {
+  it("processes fresh mailbox backlog immediately when stale retry state is capped", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
-    const { alarms, invoke, runner, sql } = createRunnerHarness({
+    const onStatusRead = vi.fn();
+    const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        maxUpdatedAt: FIXED_NOW,
+      })],
+      onStatusRead,
       workspace: createWorkspaceState({ version: "5" }),
     });
     await runner.bindUser("member_123");
@@ -1490,32 +1727,50 @@ describe("HostedUserRunner wake scheduling", () => {
        SET failure_count = ?, last_error_at = ?, last_error_code = ?
        WHERE singleton = 1`,
       3,
-      FIXED_NOW,
+      "2026-04-26T23:59:00.000Z",
       "runtime_error",
     );
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alarmScheduled: false,
-      immediateDriveStarted: false,
-      inFlight: false,
-      kind: "retry-scheduled",
-      nextAlarmAt: null,
+      alarmScheduled: true,
+      immediateDriveStarted: true,
+      inFlight: true,
+      kind: "processing-ensured",
+      nextAlarmAt: "2026-04-27T00:00:01.000Z",
     });
+    await flushWaitUntil();
 
-    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
       backoff_until: null,
-      failure_count: 3,
+      failure_count: 0,
+      last_error_at: null,
+      last_error_code: null,
       wake_at: null,
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          failureCount: 3,
+          lastErrorCode: "runtime_error",
+          retryClearReason: "progress-demand",
+        }),
+        message: "Hosted runner cleared retry state for fresh mailbox demand.",
+        phase: "scheduled",
+      }),
+    );
     expect(alarms.at(-1)).toBe("deleted");
   });
 
-  it("does not let status-read rechecks bypass the retry cap", async () => {
+  it("reads demand immediately at the cap, then parks failed status reads behind a slow recovery probe", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const recoveryProbeAt = addMs(FIXED_NOW, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
+    const nextRecoveryProbeAt = addMs(recoveryProbeAt, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
     const onStatusRead = vi.fn(() => {
       throw new Error("status unavailable");
     });
@@ -1535,20 +1790,131 @@ describe("HostedUserRunner wake scheduling", () => {
 
     await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
       accepted: true,
-      alarmScheduled: false,
+      alarmScheduled: true,
       immediateDriveStarted: false,
       kind: "retry-scheduled",
-      nextAlarmAt: null,
+      nextAlarmAt: recoveryProbeAt,
     });
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(onStatusRead).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: recoveryProbeAt,
+      failure_count: 3,
+      wake_at: recoveryProbeAt,
+    });
+    expect(alarms.at(-1)).toBe(recoveryProbeAt);
+
+    vi.setSystemTime(new Date(recoveryProbeAt));
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledTimes(2);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: nextRecoveryProbeAt,
+      failure_count: 4,
+      wake_at: nextRecoveryProbeAt,
+    });
+    expect(alarms.at(-1)).toBe(nextRecoveryProbeAt);
+  });
+
+  it("clears capped retry state when a slow recovery probe finds no durable demand", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const recoveryProbeAt = addMs(FIXED_NOW, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
+    const onStatusRead = vi.fn();
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "7",
+        lag: "0",
+        maxSeq: "7",
+      })],
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET failure_count = ?, last_error_at = ?, last_error_code = ?
+       WHERE singleton = 1`,
+      3,
+      FIXED_NOW,
+      "runtime_error",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      kind: "retry-scheduled",
+      nextAlarmAt: recoveryProbeAt,
+    });
+    expect(onStatusRead).toHaveBeenCalledOnce();
+
+    vi.setSystemTime(new Date(recoveryProbeAt));
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledTimes(2);
     expect(readRunnerMeta(sql)).toMatchObject({
       backoff_until: null,
-      failure_count: 3,
+      failure_count: 0,
+      last_error_at: null,
+      last_error_code: null,
       wake_at: null,
     });
     expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("preserves a future web-owned workspace wake after a caught-up capped probe", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const recoveryProbeAt = addMs(FIXED_NOW, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
+    const futureWorkspaceWakeAt = addMs(recoveryProbeAt, 5 * 60_000);
+    const onStatusRead = vi.fn();
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "7",
+        lag: "0",
+        maxSeq: "7",
+      })],
+      onStatusRead,
+      workspace: createWorkspaceState({
+        nextWakeAt: futureWorkspaceWakeAt,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET failure_count = ?, last_error_at = ?, last_error_code = ?
+       WHERE singleton = 1`,
+      3,
+      FIXED_NOW,
+      "runtime_error",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      kind: "retry-scheduled",
+      nextAlarmAt: recoveryProbeAt,
+    });
+    expect(onStatusRead).toHaveBeenCalledOnce();
+
+    vi.setSystemTime(new Date(recoveryProbeAt));
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledTimes(2);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: null,
+      failure_count: 0,
+      last_error_at: null,
+      last_error_code: null,
+      wake_at: futureWorkspaceWakeAt,
+    });
+    expect(alarms.at(-1)).toBe(futureWorkspaceWakeAt);
   });
 
   it("reports the active write-fence alarm when status reads fail", async () => {
@@ -1599,6 +1965,59 @@ describe("HostedUserRunner wake scheduling", () => {
       wake_at: null,
     });
     expect(alarms.at(-1)).toBe(activeExpiresAt);
+  });
+
+  it("preserves an earlier backlog recheck alarm when status reads fail behind an active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeExpiresAt = "2026-04-27T00:01:00.000Z";
+    const backlogRecheckAt = "2026-04-27T00:00:01.000Z";
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status unavailable");
+    });
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?,
+           wake_at = ?
+       WHERE singleton = 1`,
+      "attempt_active",
+      1,
+      "runtime",
+      FIXED_NOW,
+      activeExpiresAt,
+      "5",
+      backlogRecheckAt,
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      kind: "retry-scheduled",
+      nextAlarmAt: backlogRecheckAt,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_active",
+      active_expires_at: activeExpiresAt,
+      backoff_until: null,
+      failure_count: 0,
+      wake_at: backlogRecheckAt,
+    });
+    expect(alarms.at(-1)).toBe(backlogRecheckAt);
   });
 
   it("ignores a stale recheck alarm when status reads fail behind an active write fence", async () => {
@@ -1658,6 +2077,7 @@ describe("HostedUserRunner wake scheduling", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const secondRetryAt = "2026-04-27T00:00:15.000Z";
+    const recoveryProbeAt = addMs(secondRetryAt, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
     const onStatusRead = vi.fn(() => {
       throw new Error("status unavailable");
     });
@@ -1698,17 +2118,18 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(onStatusRead).toHaveBeenCalledTimes(3);
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      backoff_until: null,
+      backoff_until: recoveryProbeAt,
       failure_count: 3,
       last_error_code: "runtime_error",
-      wake_at: null,
+      wake_at: recoveryProbeAt,
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms.at(-1)).toBe(recoveryProbeAt);
   });
 
-  it("parks detached local ensure failures after the retry cap", async () => {
+  it("schedules a slow probe after detached local ensure failures reach the retry cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const recoveryProbeAt = addMs(FIXED_NOW, RETRY_CAP_RECOVERY_PROBE_DELAY_MS);
     let statusReadCount = 0;
     const { alarms, flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       onStatusRead: () => {
@@ -1739,18 +2160,20 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      backoff_until: null,
+      backoff_until: recoveryProbeAt,
       failure_count: 3,
       last_error_code: "runtime_error",
-      wake_at: null,
+      wake_at: recoveryProbeAt,
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms.at(-1)).toBe(recoveryProbeAt);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
         details: expect.objectContaining({
           failureCount: 3,
           maxEventAttempts: 3,
+          retryCapRecoveryProbeAt: recoveryProbeAt,
+          retryCapRecoveryProbeDelayMs: RETRY_CAP_RECOVERY_PROBE_DELAY_MS,
           retryCapReason: "detached-ensure-failure",
         }),
         message: "Hosted runner parked after retry cap.",
@@ -2240,6 +2663,24 @@ function createWorkspaceState(
     userId: "member_123",
     version: "0",
     ...overrides,
+  };
+}
+
+function createBrowserVaultReplicaRef(input: {
+  generatedAt?: string;
+  sourceBundleHash?: string;
+} = {}): NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]> {
+  const sourceBundleHash = input.sourceBundleHash ?? "a".repeat(64);
+  return {
+    byteLength: 128,
+    dataVersion: "d".repeat(64),
+    generatedAt: input.generatedAt ?? FIXED_NOW,
+    keyId: "browser-vault-replica:d",
+    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:test-root",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
   };
 }
 

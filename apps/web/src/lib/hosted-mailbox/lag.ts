@@ -20,6 +20,9 @@ export function computeHostedMailboxLaneLag(input: {
     lag: (maxSeq > importedSeq ? maxSeq - importedSeq : 0n).toString(),
     lane: input.highWater.lane,
     maxSeq: maxSeq.toString(),
+    ...(input.highWater.maxUpdatedAt === undefined
+      ? {}
+      : { maxUpdatedAt: input.highWater.maxUpdatedAt }),
   };
 }
 

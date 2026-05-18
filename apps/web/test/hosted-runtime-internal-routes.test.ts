@@ -380,6 +380,7 @@ describe("hosted runtime internal web routes", () => {
       {
         replicaRef,
       },
+      runtimeWriteFenceHeaders(),
     ));
     const payload = parseHostedBrowserVaultReplicaPublishResponse(
       await response.json(),
@@ -395,9 +396,31 @@ describe("hosted runtime internal web routes", () => {
       },
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      expectedWorkspaceVersion: "4",
       replicaRef,
       userId: "member_routes_1",
     });
+  });
+
+  it("rejects browser-vault replica publishes without runtime write-fence headers", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("snapshot_2_hash");
+
+    const response = await browserVaultReplicaRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/browser-vault-replica",
+      {
+        replicaRef,
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.publishLatestBrowserVaultReplicaRef).not.toHaveBeenCalled();
+    expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
+      .not.toHaveBeenCalled();
   });
 
   it("fences legacy source-hash browser-vault publishes behind the compatibility helper", async () => {
@@ -417,12 +440,14 @@ describe("hosted runtime internal web routes", () => {
         expectedSourceStateHash: "snapshot_2_hash",
         replicaRef,
       },
+      runtimeWriteFenceHeaders(),
     ));
 
     expect(response.status).toBe(200);
     expect(mocks.publishLegacySourceHashBrowserVaultReplicaRef)
       .toHaveBeenCalledWith({
         expectedSourceStateHash: "snapshot_2_hash",
+        expectedWorkspaceVersion: "4",
         replicaRef,
         userId: "member_routes_1",
       });
@@ -438,6 +463,7 @@ describe("hosted runtime internal web routes", () => {
         expectedSourceStateHash: "",
         replicaRef,
       },
+      runtimeWriteFenceHeaders(),
     ));
 
     expect(response.status).toBe(400);
@@ -463,6 +489,7 @@ describe("hosted runtime internal web routes", () => {
       {
         replicaRef,
       },
+      runtimeWriteFenceHeaders(),
     ));
     const payload = parseHostedBrowserVaultReplicaPublishResponse(
       await response.json(),
@@ -474,6 +501,7 @@ describe("hosted runtime internal web routes", () => {
       workspace: null,
     });
     expect(mocks.publishLatestBrowserVaultReplicaRef).toHaveBeenCalledWith({
+      expectedWorkspaceVersion: "4",
       replicaRef,
       userId: "member_routes_1",
     });
@@ -744,14 +772,27 @@ describe("hosted runtime internal web routes", () => {
   });
 });
 
-function jsonRequest(path: string, body: Record<string, unknown>): Request {
+function jsonRequest(
+  path: string,
+  body: Record<string, unknown>,
+  headers: HeadersInit = {},
+): Request {
   return new Request(`https://join.example.test${path}`, {
     body: JSON.stringify(body),
     headers: {
       "content-type": "application/json",
+      ...headers,
     },
     method: "POST",
   });
+}
+
+function runtimeWriteFenceHeaders(): Record<string, string> {
+  return {
+    "x-hosted-runtime-attempt-id": "attempt_routes_1",
+    "x-hosted-runtime-lease-generation": "9",
+    "x-hosted-runtime-workspace-version": "4",
+  };
 }
 
 function buildWorkspaceRecord(

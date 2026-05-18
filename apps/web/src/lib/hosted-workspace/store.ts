@@ -304,6 +304,7 @@ export async function checkpointHostedWorkspaceTx(input: {
 }
 
 export async function publishLatestBrowserVaultReplicaRef(input: {
+  expectedWorkspaceVersion?: bigint | number | string | null;
   prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
@@ -318,6 +319,7 @@ export async function publishLatestBrowserVaultReplicaRef(input: {
 }
 
 export async function publishLatestBrowserVaultReplicaRefTx(input: {
+  expectedWorkspaceVersion?: bigint | number | string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
@@ -330,6 +332,7 @@ export async function publishLatestBrowserVaultReplicaRefTx(input: {
 
 export async function publishHostedBrowserVaultReplicaRef(input: {
   expectedSourceStateHash?: string | null;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
@@ -351,6 +354,7 @@ export async function publishHostedBrowserVaultReplicaRef(input: {
 
 export async function publishHostedBrowserVaultReplicaRefTx(input: {
   expectedSourceStateHash?: string | null;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
@@ -372,6 +376,7 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
 
 async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   expectedSourceStateHash: string;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
@@ -388,6 +393,7 @@ async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
 
 async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
   expectedSourceStateHash: string;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
@@ -399,6 +405,7 @@ async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
 }
 
 async function publishBrowserVaultReplicaRefTx(input: {
+  expectedWorkspaceVersion?: bigint | number | string | null;
   legacyExpectedSourceStateHash: string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
@@ -410,6 +417,13 @@ async function publishBrowserVaultReplicaRefTx(input: {
     : requireNonEmptyString(
         input.legacyExpectedSourceStateHash,
         "Legacy hosted browser-vault replica publish expectedSourceStateHash",
+      );
+  const expectedWorkspaceVersion = input.expectedWorkspaceVersion === undefined
+    || input.expectedWorkspaceVersion === null
+    ? null
+    : normalizeBigInt(
+        input.expectedWorkspaceVersion,
+        "Hosted browser-vault replica publish expectedWorkspaceVersion",
       );
   const replicaRef = parseHostedBrowserVaultReplicaRef(
     input.replicaRef,
@@ -442,6 +456,7 @@ async function publishBrowserVaultReplicaRefTx(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const publish = await publishBrowserVaultReplicaRefAgainstCurrentWorkspace({
       current,
+      expectedWorkspaceVersion,
       legacyExpectedSourceStateHash,
       replicaRef,
       tx: input.tx,
@@ -484,6 +499,7 @@ async function publishBrowserVaultReplicaRefTx(input: {
 
 async function publishBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
   current: HostedWorkspaceRow;
+  expectedWorkspaceVersion: bigint | null;
   legacyExpectedSourceStateHash: string | null;
   replicaRef: HostedBrowserVaultReplicaRef;
   tx: HostedWorkspaceMutationTx;
@@ -491,6 +507,15 @@ async function publishBrowserVaultReplicaRefAgainstCurrentWorkspace(input: {
 }): Promise<
   { status: "conflict" | "published" }
 > {
+  if (
+    input.expectedWorkspaceVersion !== null
+    && input.current.version !== input.expectedWorkspaceVersion
+  ) {
+    return {
+      status: "conflict",
+    };
+  }
+
   if (
     input.legacyExpectedSourceStateHash
     && readHostedWorkspaceBrowserVaultSourceStateHash(input.current.snapshotRef) !== input.legacyExpectedSourceStateHash

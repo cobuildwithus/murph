@@ -1,4 +1,10 @@
-export const HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES = 50 * 1024 * 1024;
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+} from "@murphai/hosted-execution/browser-vault";
+
+export {
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+};
 
 const utf8Encoder = new TextEncoder();
 

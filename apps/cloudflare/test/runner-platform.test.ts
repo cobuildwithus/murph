@@ -581,6 +581,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       workspace: null,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "browser-vault publish");
+    expect(request.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(request.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Hosted runtime control-plane response returned non-OK.",
@@ -2052,6 +2056,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       platform.browserVaultReplicaPort!.write({ replica }),
     ).rejects.toThrow(
       "Browser-vault replica write requires an active hosted runtime write fence.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-vault replica publishes when the workspace bridge has no active lease", async () => {
+    const replicaRef = createBrowserVaultReplicaRef("e".repeat(64));
+    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => null,
+      },
+    });
+
+    await expect(
+      platform.browserVaultReplicaPort!.publishRef!({ replicaRef }),
+    ).rejects.toThrow(
+      "Browser-vault replica publish requires an active hosted runtime write fence.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -36,6 +36,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   body?: string;
   boundUserId: string;
   fetchImpl?: typeof fetch;
+  headers?: Headers;
   method: "GET" | "POST";
   path: string;
   allowHttpHosts?: readonly string[];
@@ -56,7 +57,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
     targetUrl.search = input.search;
   }
 
-  const headers = new Headers();
+  const headers = new Headers(input.headers);
   headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
 
   if (input.body !== undefined) {

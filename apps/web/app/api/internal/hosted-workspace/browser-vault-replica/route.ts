@@ -16,19 +16,26 @@ import {
   publishLatestBrowserVaultReplicaRef,
 } from "@/src/lib/hosted-workspace/store";
 
+const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
+const HOSTED_RUNTIME_LEASE_GENERATION_HEADER = "x-hosted-runtime-lease-generation";
+const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER = "x-hosted-runtime-workspace-version";
+
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
+  const writeFence = readHostedRuntimeWriteFenceHeaders(request);
   const rawBody = await readOptionalJsonObject(request);
   const body = parseHostedBrowserVaultReplicaPublishRequest(rawBody);
   const legacyExpectedSourceStateHash =
     readLegacyExpectedSourceStateHash(rawBody);
   const result = legacyExpectedSourceStateHash === null
     ? await publishLatestBrowserVaultReplicaRef({
+        expectedWorkspaceVersion: writeFence.workspaceVersion,
         replicaRef: body.replicaRef,
         userId,
       })
     : await publishLegacySourceHashBrowserVaultReplicaRef({
         expectedSourceStateHash: legacyExpectedSourceStateHash,
+        expectedWorkspaceVersion: writeFence.workspaceVersion,
         replicaRef: body.replicaRef,
         userId,
       });
@@ -56,3 +63,23 @@ export const POST = withJsonError(async (request: Request) => {
     },
   }));
 });
+
+function readHostedRuntimeWriteFenceHeaders(request: Request): {
+  attemptId: string;
+  leaseGeneration: string;
+  workspaceVersion: string;
+} {
+  const attemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+  const leaseGeneration = request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+  const workspaceVersion = request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+
+  if (!attemptId || !leaseGeneration || !workspaceVersion) {
+    throw new TypeError("Hosted browser-vault replica publish requires runtime write-fence headers.");
+  }
+
+  return {
+    attemptId,
+    leaseGeneration,
+    workspaceVersion,
+  };
+}

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 
 import { afterEach, test } from "vitest";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 
-import { listCanonicalSourceManifest } from "../src/vault-source.ts";
+import {
+  hashCanonicalQuerySources,
+  isCanonicalQuerySourcePath,
+  listCanonicalSourceManifest,
+} from "../src/vault-source.ts";
 
 const tempRoots: string[] = [];
 
@@ -112,4 +116,58 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     relativePaths.includes(path.posix.join(VAULT_LAYOUT.rawInboxDirectory, "email", "capture", "envelope.json")),
     false,
   );
+});
+
+test("hashCanonicalQuerySources is stable across mtimes and ignores non-query files", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
+  const automationPath = path.posix.join(VAULT_LAYOUT.automationsDirectory, "daily.md");
+  await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, '{"formatVersion":1}\n');
+  await writeVaultFile(vaultRoot, experimentPath, "---\ntitle: Trial\n---\n# Trial\n");
+
+  const initial = await hashCanonicalQuerySources(vaultRoot);
+  await utimes(
+    path.join(vaultRoot, experimentPath),
+    new Date("2026-05-01T00:00:00.000Z"),
+    new Date("2026-05-01T00:00:00.000Z"),
+  );
+  await writeVaultFile(vaultRoot, automationPath, "---\ntitle: Daily\n---\nPrompt\n");
+  const touched = await hashCanonicalQuerySources(vaultRoot);
+
+  assert.deepEqual(touched, initial);
+  await writeVaultFile(vaultRoot, experimentPath, "---\ntitle: Trial Changed\n---\n# Trial\n");
+  const changed = await hashCanonicalQuerySources(vaultRoot);
+  assert.notEqual(changed.hash, initial.hash);
+});
+
+test("hashCanonicalQuerySources changes when query-visible files are deleted", async () => {
+  const vaultRoot = await createTempVaultRoot();
+  const experimentPath = path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md");
+  await writeVaultFile(vaultRoot, experimentPath, "---\ntitle: Trial\n---\n# Trial\n");
+
+  const populated = await hashCanonicalQuerySources(vaultRoot);
+  await rm(path.join(vaultRoot, experimentPath));
+  const empty = await hashCanonicalQuerySources(vaultRoot);
+
+  assert.equal(populated.fileCount, 1);
+  assert.equal(empty.fileCount, 0);
+  assert.notEqual(empty.hash, populated.hash);
+});
+
+test("isCanonicalQuerySourcePath matches the shared source families", () => {
+  assert.equal(isCanonicalQuerySourcePath(VAULT_LAYOUT.metadata), true);
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.experimentsDirectory, "trial.md")),
+    true,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "events.jsonl")),
+    true,
+  );
+  assert.equal(
+    isCanonicalQuerySourcePath(path.posix.join(VAULT_LAYOUT.automationsDirectory, "daily.md")),
+    false,
+  );
+  assert.equal(isCanonicalQuerySourcePath("../vault.json"), false);
+  assert.equal(isCanonicalQuerySourcePath("experiments\\trial.md"), false);
 });

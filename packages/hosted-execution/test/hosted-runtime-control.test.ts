@@ -129,6 +129,7 @@ describe("hosted runtime control contracts", () => {
       "alarm",
       "retry",
       "manual",
+      "browser_vault_refresh",
     ]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",

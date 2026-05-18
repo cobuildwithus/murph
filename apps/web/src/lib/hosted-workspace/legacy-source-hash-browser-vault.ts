@@ -14,12 +14,14 @@ import {
 // `expectedSourceStateHash` and use latest-ref publishing.
 export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
   expectedSourceStateHash: string;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   prisma?: HostedWorkspaceTransactionRunner;
   replicaRef: unknown;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
   return await publishHostedBrowserVaultReplicaRef({
     expectedSourceStateHash: input.expectedSourceStateHash,
+    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
     prisma: input.prisma,
     replicaRef: input.replicaRef,
     userId: input.userId,
@@ -28,12 +30,14 @@ export async function publishLegacySourceHashBrowserVaultReplicaRef(input: {
 
 export async function publishLegacySourceHashBrowserVaultReplicaRefTx(input: {
   expectedSourceStateHash: string;
+  expectedWorkspaceVersion?: bigint | number | string | null;
   replicaRef: unknown;
   tx: HostedWorkspaceMutationTx;
   userId: string;
 }): Promise<HostedBrowserVaultReplicaPublishResult> {
   return publishHostedBrowserVaultReplicaRefTx({
     expectedSourceStateHash: input.expectedSourceStateHash,
+    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
     replicaRef: input.replicaRef,
     tx: input.tx,
     userId: input.userId,

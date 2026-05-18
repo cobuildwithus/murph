@@ -61,6 +61,10 @@ import {
   writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
+  refreshHostedBrowserVaultReplicaFromRuntime,
+  type HostedBrowserVaultReplicaRefreshResult,
+} from "./hosted-runtime/browser-vault-replica.ts";
+import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
@@ -105,11 +109,13 @@ export {
   createHostedBrowserVaultReplicaForSourceState,
   clearHostedBrowserVaultWarmSourceStateHash,
   readHostedBrowserVaultWarmSourceStateHash,
+  refreshHostedBrowserVaultReplicaFromRuntime,
   summarizeHostedBrowserVaultReplicaContent,
   writeHostedBrowserVaultWarmSourceStateHashBestEffort,
 } from "./hosted-runtime/browser-vault-replica.ts";
 export type {
   HostedBrowserVaultReplicaContentSummary,
+  HostedBrowserVaultReplicaRefreshResult,
   HostedBrowserVaultReplicaRefreshPreparation,
   HostedBrowserVaultReplicaRestoreSummary,
   HostedBrowserVaultReplicaSourceSummary,
@@ -685,6 +691,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         throw error;
       }
     };
+    const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
+      workspace: HostedWorkspaceState | null;
+    }): Promise<HostedBrowserVaultReplicaRefreshResult> => {
+      emitPhaseLog({
+        details: {
+          workspacePresent: maintenanceInput.workspace !== null,
+          workspaceVersion: maintenanceInput.workspace?.version ?? null,
+        },
+        input,
+        requestId,
+        stage: "browser_vault.refresh",
+        status: "start",
+      });
+      const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+        generatedAt: new Date().toISOString(),
+        platform: guardedRuntime.platform,
+        runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        signal: runtimeAbortController.signal,
+        vaultRoot: restored.vaultRoot,
+        workspace: maintenanceInput.workspace,
+      });
+      emitPhaseLog({
+        details: buildHostedBrowserVaultRefreshLogDetails(refresh),
+        input,
+        requestId,
+        stage: "browser_vault.refresh",
+        status: "done",
+      });
+      return refresh;
+    };
     const idleCheckpointDelayMs = resolveHostedRuntimeIdleCheckpointDelayMs(
       input.request.idleCheckpointDelayMs,
     );
@@ -809,15 +845,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeStateDirty = result.runtimeStateDirty;
           continue;
         }
+        const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
+          workspace: checkpoint.workspace,
+        });
+        const refreshRequestedImmediateWake =
+          browserVaultRefresh.status === "deferred_runtime_wake";
         const invocationResult = {
-          ...(checkpoint.workspace.nextWakeAt === undefined
+          ...(refreshRequestedImmediateWake
+            ? { nextWakeAt: new Date().toISOString() }
+            : checkpoint.workspace.nextWakeAt === undefined
             ? {}
             : { nextWakeAt: checkpoint.workspace.nextWakeAt ?? null }),
           redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
-          status: resolveHostedWorkspaceInvocationStatus({
-            mailboxBudgetExhausted: mailboxBudgetExhausted(),
-            nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
-          }),
+          status: refreshRequestedImmediateWake
+            ? "scheduled" as const
+            : resolveHostedWorkspaceInvocationStatus({
+                mailboxBudgetExhausted: mailboxBudgetExhausted(),
+                nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+              }),
         };
         emitPhaseLog({
           details: {
@@ -860,10 +905,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         projection.committedWorkspace?.snapshotRef ?? null,
       );
     }
+    const noProgressBrowserVaultRefresh =
+      input.request.reason === "browser_vault_refresh"
+        ? await runBrowserVaultRefreshMaintenance({
+            workspace: projection.committedWorkspace ?? workspaceRead.workspace,
+          })
+        : null;
+    const refreshRequestedImmediateWake =
+      noProgressBrowserVaultRefresh?.status === "deferred_runtime_wake";
     const invocationResult = {
-      ...(projection.nextWakeAt === undefined ? {} : { nextWakeAt: projection.nextWakeAt }),
+      nextWakeAt: refreshRequestedImmediateWake
+        ? new Date().toISOString()
+        : projection.nextWakeAt,
       redactedStatus: projection.redactedStatus,
-      status: projection.status,
+      status: refreshRequestedImmediateWake ? "scheduled" as const : projection.status,
     };
     emitPhaseLog({
       details: {
@@ -897,6 +952,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 type HostedRuntimePhaseLogStatus = "done" | "fail" | "start";
 
 const HOSTED_RUNTIME_PHASE_NAMES = [
+  "browser_vault.refresh",
   "cli.bridge",
   "cli.bridge.stop",
   "codex.prepare",
@@ -1004,6 +1060,33 @@ function buildHostedRuntimePhaseFailureMetadata(
       : {}),
     failureMessagePresent: error instanceof Error && error.message.trim().length > 0,
     failureName: readHostedExecutionSafeErrorName(error) ?? null,
+  };
+}
+
+function buildHostedBrowserVaultRefreshLogDetails(
+  refresh: HostedBrowserVaultReplicaRefreshResult,
+): HostedExecutionStructuredLogDetails {
+  return {
+    ...("byteLength" in refresh
+      ? { browserVaultReplicaByteLength: refresh.byteLength }
+      : {}),
+    ...("freshness" in refresh
+      ? {
+          browserVaultReplicaFreshness: refresh.freshness.freshness,
+          browserVaultReplicaFreshnessReason: refresh.freshness.reason,
+          browserVaultReplicaRefreshPending: refresh.freshness.shouldRefresh,
+        }
+      : {}),
+    ...("maxBytes" in refresh
+      ? { browserVaultReplicaMaxBytes: refresh.maxBytes }
+      : {}),
+    ...("source" in refresh
+      ? {
+          browserVaultReplicaSourceFileCount: refresh.source.fileCount,
+          browserVaultReplicaSourceTotalBytes: refresh.source.totalBytes,
+        }
+      : {}),
+    browserVaultRefreshStatus: refresh.status,
   };
 }
 

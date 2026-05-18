@@ -1132,6 +1132,14 @@ function parseHostedMailboxLaneHighWater(
   return {
     lane: parseHostedMailboxLane(record.lane),
     maxSeq: requireNonNegativeBigIntString(record.maxSeq, `${label}.maxSeq`),
+    ...(record.maxUpdatedAt === undefined
+      ? {}
+      : {
+          maxUpdatedAt: readNullableString(
+            record.maxUpdatedAt,
+            `${label}.maxUpdatedAt`,
+          ),
+        }),
   };
 }
 
@@ -1143,6 +1151,14 @@ function parseHostedMailboxLaneLag(value: unknown, label: string): HostedMailbox
     lag: requireNonNegativeBigIntString(record.lag, `${label}.lag`),
     lane: parseHostedMailboxLane(record.lane),
     maxSeq: requireNonNegativeBigIntString(record.maxSeq, `${label}.maxSeq`),
+    ...(record.maxUpdatedAt === undefined
+      ? {}
+      : {
+          maxUpdatedAt: readNullableString(
+            record.maxUpdatedAt,
+            `${label}.maxUpdatedAt`,
+          ),
+        }),
   };
 }
 

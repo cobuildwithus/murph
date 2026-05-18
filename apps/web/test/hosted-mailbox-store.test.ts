@@ -777,6 +777,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       {
         lane: "conversation",
         maxSeq: "2",
+        maxUpdatedAt: FIXED_NOW.toISOString(),
       },
     ]);
   });

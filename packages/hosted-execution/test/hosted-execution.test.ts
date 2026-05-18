@@ -27,6 +27,7 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
+  assessBrowserVaultReplicaFreshness,
   getBrowserVaultReplicaFreshness,
   shouldScheduleBrowserVaultRefresh,
 } from "../src/browser-vault.ts";
@@ -221,19 +222,60 @@ describe("hosted execution coverage gaps", () => {
 
     expect(readHostedBrowserVaultSourceStateHash(working)).toBe(delta.hash);
     expect(readHostedBrowserVaultSourceStateHash(base)).toBe(base.hash);
+    expect(assessBrowserVaultReplicaFreshness({
+      currentSourceHash: delta.hash,
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: freshReplica,
+    })).toMatchObject({
+      freshness: "fresh",
+      reason: "current",
+      shouldRefresh: false,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      currentSourceHash: base.hash,
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: freshReplica,
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "source_mismatch",
+      shouldRefresh: true,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      checkpointedAt: "2026-05-04T00:04:00.000Z",
+      now: "2026-05-04T00:04:30.000Z",
+      replicaRef: freshReplica,
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "checkpoint_newer",
+      shouldRefresh: true,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-06T00:03:30.000Z",
+      replicaRef: freshReplica,
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "max_age_exceeded",
+      shouldRefresh: true,
+    });
     expect(getBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
       replicaRef: freshReplica,
     })).toBe("fresh");
     expect(getBrowserVaultReplicaFreshness({
+      currentSourceHash: delta.hash,
+      now: "2026-05-04T00:03:30.000Z",
       replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
-    })).toBe("fresh");
+    })).toBe("stale");
     expect(shouldScheduleBrowserVaultRefresh({
       currentReplicaRef: null,
     })).toEqual({
+      reason: "missing",
       refresh: true,
     });
     expect(shouldScheduleBrowserVaultRefresh({
       currentReplicaRef: freshReplica,
+      currentSourceHash: delta.hash,
+      now: "2026-05-04T00:03:30.000Z",
     })).toBeNull();
   });
 
@@ -439,6 +481,7 @@ describe("hosted execution coverage gaps", () => {
       "alarm",
       "retry",
       "manual",
+      "browser_vault_refresh",
     ]);
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",

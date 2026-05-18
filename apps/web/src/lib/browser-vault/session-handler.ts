@@ -1,6 +1,9 @@
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  assessBrowserVaultReplicaFreshness,
+} from "@murphai/hosted-execution";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -56,12 +59,28 @@ export function createBrowserVaultSessionRoute(input: {
       "Hosted browser vault session workspace replica ref",
     );
     const workspaceVersion = workspace?.version ?? null;
-    const freshness = replicaRef ? "fresh" as const : "stale" as const;
-
-    if (!replicaRef) {
+    const freshnessAssessment = assessBrowserVaultReplicaFreshness({
+      checkpointedAt: workspace?.checkpointedAt ?? null,
+      now: new Date().toISOString(),
+      replicaRef,
+    });
+    const freshness = freshnessAssessment.freshness;
+    let refreshScheduled = false;
+    const scheduleRefreshAfterResponse = () => {
+      if (refreshScheduled) {
+        return;
+      }
+      refreshScheduled = true;
       scheduleAfterResponseOrFireAndForget(() =>
         scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
       );
+    };
+
+    if (freshnessAssessment.shouldRefresh) {
+      scheduleRefreshAfterResponse();
+    }
+
+    if (!replicaRef) {
       return emptyBrowserVaultSession({
         refreshPending: true,
         workspaceVersion,
@@ -75,7 +94,7 @@ export function createBrowserVaultSessionRoute(input: {
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
-        refreshPending: freshness === "stale",
+        refreshPending: freshnessAssessment.shouldRefresh,
         state: "not_modified",
         workspaceVersion,
       });
@@ -100,15 +119,13 @@ export function createBrowserVaultSessionRoute(input: {
             userId: auth.member.id,
           })),
           freshness,
-          refreshPending: false,
+          refreshPending: freshnessAssessment.shouldRefresh,
           workspaceVersion,
         },
       );
     } catch (error) {
       if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-        scheduleAfterResponseOrFireAndForget(() =>
-          scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
-        );
+        scheduleRefreshAfterResponse();
         return emptyBrowserVaultSession({
           refreshPending: true,
           workspaceVersion,
