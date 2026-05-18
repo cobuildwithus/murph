@@ -1543,6 +1543,109 @@ test("Junction polling skips optional unavailable resource collections", async (
   );
 });
 
+test("Junction timeseries optional later chunk preserves earlier chunk records", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  let timeseriesRequests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              steps: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/steps/grouped")) {
+      timeseriesRequests += 1;
+      if (timeseriesRequests === 1) {
+        return createJsonResponse({
+          groups: {
+            oura: [{
+              data: [{ timestamp: "2026-04-01T12:00:00Z", unit: "count", value: 1200 }],
+              source: { provider: "oura", type: "ring" },
+            }],
+          },
+        });
+      }
+
+      return createJsonResponse({ error: "unsupported" }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["steps"],
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(),
+    now: "2026-04-03T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+    upsertConnectionSource: () => ({
+      id: "src-1",
+      connectionId: "acct-junction-1",
+      sourceInstanceKey: "src-key",
+      sourceProviderSlug: "oura",
+      displayName: null,
+      status: "connected",
+      resourceAvailabilitySummary: {},
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      createdAt: "2026-04-03T00:00:00.000Z",
+      updatedAt: "2026-04-03T00:00:00.000Z",
+    }),
+    refreshAccountTokens: async () => createAccount(),
+    logger: {
+      warn(_message, context) {
+        warnings.push(context ?? {});
+      },
+    },
+  };
+
+  await executeJunctionJob(
+    provider,
+    context,
+    createJob("resource", {
+      eventType: "daily.data.steps.created",
+      objectId: "steps-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "steps",
+      sourceProviderSlug: "oura",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(timeseriesRequests, 2);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(snapshot.timeseries?.steps?.length, 1);
+  assert.deepEqual(warnings.map((warning) => ({
+    resource: warning.resource,
+    resourceCategory: warning.resourceCategory,
+    responseStatus: warning.responseStatus,
+  })), [
+    {
+      resource: "steps",
+      resourceCategory: "timeseries",
+      responseStatus: 422,
+    },
+  ]);
+});
+
 test("Junction resource jobs fetch only the hinted resource window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {

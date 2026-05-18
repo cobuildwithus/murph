@@ -1025,7 +1025,10 @@ function isBloodOxygenUnitAlias(unit: string | undefined): boolean {
     || unit === "sp_o2"
     || unit === "sp-o2"
     || unit === "blood_oxygen"
-    || unit === "oxygen_saturation";
+    || unit === "oxygen_saturation"
+    || unit === "percent"
+    || unit === "percentage"
+    || unit === "spo2_percent";
 }
 
 function shouldEmitQueryableSample(

@@ -1178,6 +1178,124 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("device-sync dirty payload jobs keep manifest payload without semantic defaults", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-payload",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_payload",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const dirtyState: HostedExecutionDeviceSyncDirtyStateResponse = {
+        connectionId: "hosted_conn_dirty_payload",
+        dirtyRevision: "43",
+        dirtyResources: [
+          {
+            count: 1,
+            jobKind: "delete",
+            payload: {
+              objectId: "session-42",
+              occurredAt: "2026-04-04T09:00:00.000Z",
+              sourceEventType: "session.deleted",
+            },
+            resource: null,
+            resourceCategory: null,
+            sourceProviderSlug: null,
+            windowEnd: null,
+            windowStart: null,
+          },
+        ],
+        eventCount: "1",
+        latestDirtyAt: "2026-04-04T10:00:00.000Z",
+        processedRevision: "0",
+        provider: "demo",
+        resourceCategoryCounts: {},
+        sourceProviderCounts: {},
+        userId: "member_123",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_dirty_payload",
+          eventId: "evt_device_sync_dirty_payload",
+          hint: {
+            reason: "dirty",
+          },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_payload",
+        localAccountId: connected.account.id,
+        nextWakeAt: null,
+        processedRevision: "43",
+      });
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null;
+      assert.deepEqual(payload, {
+        objectId: "session-42",
+        occurredAt: "2026-04-04T09:00:00.000Z",
+        sourceEventType: "session.deleted",
+      });
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "resource"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "resourceCategory"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "sourceProviderSlug"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "windowStart"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "windowEnd"), false);
+      assert.equal(jobs[0]?.kind, "delete");
+      assert.equal(jobs[0]?.priority, 60);
+      assert.equal(jobs[0]?.status, "queued");
+      assert.equal(
+        jobs[0]?.dedupeKey?.startsWith("hosted-dirty:demo:delete:provider:category:resource:"),
+        true,
+      );
+      assert.equal(jobs[0]?.dedupeKey?.endsWith("::"), true);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("runtime timer wakes pull pending dirty state without a mailbox wake", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

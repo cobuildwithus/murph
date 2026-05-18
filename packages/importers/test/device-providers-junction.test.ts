@@ -684,7 +684,12 @@ test("Junction normalizer maps blood oxygen unit aliases to the canonical sample
     undefined,
     "spo2",
     "sp_o2",
+    "sp-o2",
+    "blood_oxygen",
     "oxygen_saturation",
+    "percent",
+    "percentage",
+    "spo2_percent",
   ] as const;
 
   for (const unit of bloodOxygenUnits) {

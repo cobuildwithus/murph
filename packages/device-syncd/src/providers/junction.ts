@@ -438,29 +438,36 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string,
     windowEnd: string,
   ): Promise<unknown[]> {
-    return fetchOptionalJunctionResourceRecords(
-      context,
-      "timeseries",
-      resource,
-      async () => {
-        const records: unknown[] = [];
-        let chunkStart = Date.parse(windowStart);
-        const end = Date.parse(windowEnd);
+    const records: unknown[] = [];
+    let chunkStart = Date.parse(windowStart);
+    const end = Date.parse(windowEnd);
+    let optionalFailureLogged = false;
 
-        while (chunkStart < end) {
-          const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
-          records.push(...await client.listTimeseries({
-            resource,
-            userId: context.account.externalAccountId,
-            windowStart: new Date(chunkStart).toISOString(),
-            windowEnd: new Date(chunkEnd).toISOString(),
-          }));
-          chunkStart = chunkEnd;
+    while (chunkStart < end) {
+      const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
+      try {
+        records.push(...await client.listTimeseries({
+          resource,
+          userId: context.account.externalAccountId,
+          windowStart: new Date(chunkStart).toISOString(),
+          windowEnd: new Date(chunkEnd).toISOString(),
+        }));
+      } catch (error) {
+        const status = readOptionalJunctionResourceFailureStatus(error);
+        if (status === null) {
+          throw error;
         }
 
-        return dedupeJunctionTimeseriesRecords(resource, records);
-      },
-    );
+        if (!optionalFailureLogged) {
+          logSkippedOptionalJunctionResource(context, "timeseries", resource, status);
+          optionalFailureLogged = true;
+        }
+        break;
+      }
+      chunkStart = chunkEnd;
+    }
+
+    return dedupeJunctionTimeseriesRecords(resource, records);
   }
 
   async function fetchOptionalJunctionResourceRecords(
@@ -477,15 +484,24 @@ export function createJunctionDeviceSyncProvider(
         throw error;
       }
 
-      context.logger.warn?.("Skipping unavailable Junction resource response.", {
-        errorCode: "JUNCTION_API_REQUEST_FAILED",
-        provider: "junction",
-        resource,
-        resourceCategory,
-        responseStatus: status,
-      });
+      logSkippedOptionalJunctionResource(context, resourceCategory, resource, status);
       return [];
     }
+  }
+
+  function logSkippedOptionalJunctionResource(
+    context: ProviderJobContext,
+    resourceCategory: "summary" | "timeseries",
+    resource: string,
+    responseStatus: number,
+  ): void {
+    context.logger.warn?.("Skipping unavailable Junction resource response.", {
+      errorCode: "JUNCTION_API_REQUEST_FAILED",
+      provider: "junction",
+      resource,
+      resourceCategory,
+      responseStatus,
+    });
   }
 
   function buildInitialJobs(now: string): DeviceSyncJobInput[] {
@@ -1470,7 +1486,6 @@ async function projectJunctionSources(
   if (!context.upsertConnectionSource) {
     context.logger.warn?.("Junction source projection skipped because the job context does not expose source storage.", {
       provider: "junction",
-      accountId: context.account.id,
     });
     return;
   }
