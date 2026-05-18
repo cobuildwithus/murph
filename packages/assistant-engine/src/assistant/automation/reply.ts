@@ -57,6 +57,7 @@ import {
   computeAssistantAutoReplyRetryAt,
   isAssistantAutoReplyRepairableConfigError,
   isAssistantProviderCapacityError,
+  isAssistantProviderUsageLimitError,
 } from './auto-reply-retry.js'
 import {
   describeAssistantAutoReplyFailure,
@@ -93,6 +94,8 @@ import {
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
+const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
+  'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 
 type AssistantAutoReplyReceiptRecord =
   Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
@@ -2140,6 +2143,18 @@ function classifyAssistantAutoReplyFailure(input: {
       reason: `${detail} Will retry this input after the provider reconnects.`,
       stopScanning: true,
     })
+  }
+
+  if (isAssistantProviderUsageLimitError(input.error)) {
+    return {
+      ...createSkippedGroupOutcome({
+        inputCount: input.inputCount,
+        reason: ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON,
+        stopScanning: true,
+        terminalSuppression: true,
+      }),
+      checkpointRequired: true,
+    }
   }
 
   if (isAssistantProviderCapacityError(input.error)) {

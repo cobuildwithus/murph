@@ -2756,6 +2756,59 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.writeAssistantChatErrorArtifacts).toHaveBeenCalledOnce()
   })
 
+  it('suppresses Codex usage-limit failures as terminal auto-reply evidence', async () => {
+    const usageLimitError = Object.assign(
+      new Error('Codex app-server turn failed. status failed.'),
+      {
+        code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+        context: {
+          providerUsageLimit: true,
+        },
+      },
+    )
+    replyMocks.sendAssistantMessage.mockRejectedValue(usageLimitError)
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        captureIds: ['capture-1'],
+        inputIds: context.inputIds,
+        reason: 'assistant provider usage limit reached; auto-reply suppressed until usage is restored.',
+      }))
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+  })
+
   it('emits provider failure diagnostics for hosted runtime logs', async () => {
     const codexError = Object.assign(
       new Error('Codex app-server turn failed. status failed.'),
@@ -2828,7 +2881,7 @@ describe('assistant auto-reply runtime', () => {
     }))
   })
 
-  it('keeps raw upstream quota failures on the current cursor for retry', async () => {
+  it('suppresses raw upstream billing exhaustion without storing provider text', async () => {
     replyMocks.sendAssistantMessage.mockRejectedValue(
       new Error(
         'You exceeded your current quota, please check your plan and billing details.',
@@ -2859,13 +2912,105 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: false,
-      failed: 1,
-      nextWakeAt: expect.any(String),
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
       replied: 0,
-      skipped: 0,
+      skipped: 1,
       stopScanning: true,
     })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'assistant provider usage limit reached; auto-reply suppressed until usage is restored.',
+      }))
+    expect(
+      evidenceMocks.writeAssistantAutoReplySuppressionEvidence.mock.calls[0]?.[0].reason,
+    ).not.toContain('quota')
+  })
+
+  it('writes usage-limit suppression evidence by input id for captureless hosted mailbox input', async () => {
+    replyMocks.sendAssistantMessage.mockRejectedValue(
+      Object.assign(new Error('provider usage limit reached'), {
+        code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+      }),
+    )
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      inputId: 'ain_hosted_usage_limit',
+      occurredAt: '2026-04-08T00:00:00.000Z',
+      text: 'hosted input',
+    })
+    const inboxServices = createInboxServices()
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: ['ain_hosted_usage_limit'],
+        reason: 'assistant provider usage limit reached; auto-reply suppressed until usage is restored.',
+      }))
+  })
+
+  it('does not finish usage-limit suppression when terminal evidence cannot be written', async () => {
+    replyMocks.sendAssistantMessage.mockRejectedValue(
+      Object.assign(new Error('provider usage limit reached'), {
+        code: 'ASSISTANT_CODEX_USAGE_LIMIT',
+      }),
+    )
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence.mockRejectedValue(
+      new Error('evidence write failed'),
+    )
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    await expect(reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })).rejects.toThrow('evidence write failed')
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
   })
 
   it('keeps hosted assistant configuration failures on the current cursor for retry after repair', async () => {

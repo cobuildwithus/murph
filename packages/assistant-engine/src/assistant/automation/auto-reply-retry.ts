@@ -32,6 +32,10 @@ export function computeAssistantAutoReplyRetryAt(
     )
   }
 
+  if (isAssistantProviderUsageLimitError(error)) {
+    return null
+  }
+
   if (isAssistantProviderCapacityError(error)) {
     return computeAssistantAutomationRetryAt(
       ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS,
@@ -108,13 +112,7 @@ export function readAssistantAutoReplyReceiptMetadata(
 
 export function isAssistantProviderCapacityError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase()
-  const code =
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code.toUpperCase()
-      : ''
+  const code = readAssistantProviderErrorCode(error)
   const hasCapacitySignal =
     code.includes('RATE') ||
     code.includes('LIMIT') ||
@@ -152,18 +150,60 @@ export function isAssistantProviderCapacityError(error: unknown): boolean {
   )
 }
 
+export function isAssistantProviderUsageLimitError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase()
+  const code = readAssistantProviderErrorCode(error)
+  const context = readAssistantProviderErrorContext(error)
+
+  if (code === 'ASSISTANT_CODEX_USAGE_LIMIT') {
+    return true
+  }
+
+  if (context?.providerUsageLimit === true) {
+    return true
+  }
+
+  return (
+    message.includes('usage limit') ||
+    message.includes('purchase more credits') ||
+    message.includes('out of credits') ||
+    message.includes('credit balance') ||
+    message.includes('plan and billing details')
+  )
+}
+
 export function isAssistantAutoReplyRepairableConfigError(
   error: unknown,
 ): boolean {
-  const code =
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code
-      : null
+  const code = readAssistantProviderErrorCode(error)
 
   return code === 'ASSISTANT_CODEX_NOT_FOUND' ||
     code === 'HOSTED_ASSISTANT_CONFIG_INVALID' ||
     code === 'HOSTED_ASSISTANT_CONFIG_REQUIRED'
+}
+
+function readAssistantProviderErrorCode(error: unknown): string {
+  return error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code.toUpperCase()
+    : ''
+}
+
+function readAssistantProviderErrorContext(
+  error: unknown,
+): Record<string, unknown> | null {
+  if (
+    !error ||
+    typeof error !== 'object' ||
+    !('context' in error) ||
+    typeof (error as { context?: unknown }).context !== 'object' ||
+    (error as { context?: unknown }).context === null ||
+    Array.isArray((error as { context?: unknown }).context)
+  ) {
+    return null
+  }
+
+  return (error as { context: Record<string, unknown> }).context
 }
