@@ -143,7 +143,7 @@ export function ProblemSlide() {
       </div>
 
       <p className="mt-7 max-w-[44ch] font-serif text-[clamp(1.3rem,2.4vw,1.8rem)] italic leading-[1.3] text-[#2d3436]">
-        Ideas are instant. Running the challenge is hard work.
+        Ideas are instant. Getting healthy is hard work.
       </p>
     </Slide>
   );
@@ -954,7 +954,7 @@ export function MoatSlide() {
 /* ━━━ 09 · TEAM / ROADMAP ━━━ */
 const TEAM_STATS = [
   { label: "products to product-market fit", value: "5" },
-  { label: "monthly active users", value: "30K+" },
+  { label: "monthly active users", value: "50K+" },
   { label: "allocated to builders", value: "$200K+" },
   { label: "grassroots fundraising", value: "$100K+" },
 ] as const;
