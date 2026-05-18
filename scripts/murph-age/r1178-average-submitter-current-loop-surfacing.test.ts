@@ -72,11 +72,27 @@ const R1174_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1174-ordinary-consumer-safe-next-step-packet.ts";
 const R1164_COMMAND =
   "MURPH_AGE_R1163_FEATURE_ONLY_SAFE_CONFIRMATION_TO_RESEARCH_RUNNER_PATH=<r1163-runner.json> pnpm exec tsx scripts/murph-age/r1164-ordinary-consumer-feature-only-research-handoff.ts";
+const R1183_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
+const R1185_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1185-average-submitter-safe-response-smoke-proof.ts";
 const REQUIRED_ASSERTION_CHECKLIST = [
   "assert_target_age_band_roughly_16_50",
   "assert_glycemia_bloodwork_export_available",
   "assert_daily_wearable_activity_export_available",
   "assert_no_private_values_identifiers_paths_headers_or_rows",
+] as const;
+const REQUIRED_SAFE_RESPONSE_FIELDS = [
+  "confirm_target_age_band_roughly_16_50",
+  "confirm_glycemia_bloodwork_export_available",
+  "confirm_daily_wearable_activity_export_available",
+  "confirm_no_private_values_in_confirmation",
+] as const;
+const SAFE_RESPONSE_EXECUTION_FEATURE_SLOTS = [
+  "glycemia_lab_presence",
+  "glycemia_measurement_date_presence",
+  "daily_activity_presence",
+  "daily_wear_coverage_presence",
 ] as const;
 
 describe("R1178 average-submitter current-loop surfacing", () => {
@@ -89,6 +105,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(path.basename(outputPath)).toBe("r1178-average-submitter-current-loop-surfacing.latest.json");
@@ -152,6 +169,38 @@ describe("R1178 average-submitter current-loop surfacing", () => {
           sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
           targetAgeBand: "roughly_16_50",
         },
+        safeResponseSmokeProof: {
+          artifact: "r1185-average-submitter-safe-response-smoke-proof.latest.json",
+          command: R1185_COMMAND,
+          conclusion: "average_submitter_safe_response_smoke_passed_non_evidence",
+          liveArtifactsMutatedByR1185: false,
+          liveR1184Conclusion:
+            "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
+          liveR1184ReadyForSyntheticSmoke: true,
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          modelEvidencePromotionAllowed: false,
+          nextRealAction:
+            "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
+          nextRealActionCommand: R1183_COMMAND,
+          nextRealActionRequiresExplicitRowOwnerAssertion: true,
+          prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+          productDisplayAuthorized: false,
+          recognized: true,
+          requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
+          reviewGptRequiredNow: false,
+          rowLevelDataAcceptedByR1185: false,
+          rowOwnerConfirmationInferredByR1185: false,
+          rowOwnerPrivateValuesStored: false,
+          rowParsingPerformedByR1185: false,
+          safeExecutionFeatureSlotIds: [
+            ...SAFE_RESPONSE_EXECUTION_FEATURE_SLOTS,
+          ],
+          sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+          syntheticNonEvidence: true,
+          syntheticPathAdvancedToFeatureOnlyResearchPlanning: true,
+          syntheticSmokeRan: true,
+          targetAgeBand: "roughly_16_50",
+        },
         safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST],
         sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
         targetAgeBand: "roughly_16_50",
@@ -175,6 +224,12 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         rowOwnerActionRoute: {
           firstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
           rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
+        },
+        safeResponseSmokeProof: {
+          nextRealAction:
+            "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
+          recognized: true,
+          syntheticNonEvidence: true,
         },
       });
       expect(output.summary.rowOwnerActionRoute.rowOwnerOnlyActions).toEqual([
@@ -228,6 +283,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -263,6 +319,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -303,6 +360,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -357,6 +415,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       const serialized = JSON.stringify(output);
@@ -406,6 +465,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       const serialized = JSON.stringify(output);
@@ -444,6 +504,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -473,6 +534,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -502,6 +564,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -533,6 +596,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         outputDir: path.join(tmp, "out"),
         r1076Path: paths.r1076Path,
         r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
       });
 
       expect(output.summary).toMatchObject({
@@ -540,6 +604,47 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         nextAction: "refresh_r1177_average_submitter_priority_packet",
         priorityVisibleInCurrentLoop: false,
         r1177PriorityPacketRecognized: false,
+      });
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
+  it("does not copy stale R1185 private-looking smoke proof strings", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1178-stale-r1185-"));
+    try {
+      const paths = await writeInputs(tmp, { priorityReady: false });
+      const r1185 = await readJsonObject(paths.r1185Path);
+      r1185.packetId = "private_r1185_packet_id";
+      const summary = recordAt(r1185, "summary");
+      summary.conclusion = "private_r1185_conclusion";
+      summary.nextRealAction = "private_r1185_next_action";
+      await writeFile(paths.r1185Path, `${JSON.stringify(r1185)}\n`);
+
+      const { output } = await runR1178AverageSubmitterCurrentLoopSurfacing({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        r1076Path: paths.r1076Path,
+        r1177Path: paths.r1177Path,
+        r1185Path: paths.r1185Path,
+      });
+
+      const serialized = JSON.stringify(output);
+      expect(serialized).not.toContain("private_r1185_packet_id");
+      expect(serialized).not.toContain("private_r1185_conclusion");
+      expect(serialized).not.toContain("private_r1185_next_action");
+      expect(output.summary.safeResponseSmokeProof).toMatchObject({
+        command: null,
+        conclusion: null,
+        nextRealAction: null,
+        recognized: false,
+        syntheticNonEvidence: false,
+      });
+      expect(output.inputArtifacts.r1185AverageSubmitterSafeResponseSmokeProof).toMatchObject({
+        packetId: null,
+        schemaVersion: "murph-age-r1185-average-submitter-safe-response-smoke-proof.v1",
+        status: "available",
       });
       expect(findForbiddenAggregateEgress(output)).toEqual([]);
     } finally {
@@ -560,6 +665,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         ...process.env,
         MURPH_AGE_R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_PATH: paths.r1076Path,
         MURPH_AGE_R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_PATH: paths.r1177Path,
+        MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH: paths.r1185Path,
         MURPH_AGE_R1178_CREATED_AT: CREATED_AT,
         MURPH_AGE_R1178_OUTPUT_DIR: outDir,
       });
@@ -577,6 +683,11 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         prioritizedInputKindIds?: unknown;
         rowOwnerActionRouteStatus?: unknown;
         rowOwnerFirstRunnableActionId?: unknown;
+        safeResponseSmokeProofConclusion?: unknown;
+        safeResponseSmokeProofNextRealAction?: unknown;
+        safeResponseSmokeProofNextRealActionCommand?: unknown;
+        safeResponseSmokeProofRecognized?: unknown;
+        safeResponseSmokeProofSyntheticNonEvidence?: unknown;
       };
       expect(cli).toMatchObject({
         averageSubmitterSubmissionPriorityOrderIds: [
@@ -593,6 +704,13 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
         rowOwnerFirstRunnableActionId: "review_r1173_safe_assertion_answer_sheet",
+        safeResponseSmokeProofConclusion:
+          "average_submitter_safe_response_smoke_passed_non_evidence",
+        safeResponseSmokeProofNextRealAction:
+          "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
+        safeResponseSmokeProofNextRealActionCommand: R1183_COMMAND,
+        safeResponseSmokeProofRecognized: true,
+        safeResponseSmokeProofSyntheticNonEvidence: true,
       });
       expect(result.stdout).not.toContain(
         "MURPH_AGE_R1176_ROW_OWNER_FEATURE_ONLY_SAFE_ASSERTIONS_CONFIRMED=true",
@@ -618,6 +736,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         ...process.env,
         MURPH_AGE_R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_PATH: paths.r1076Path,
         MURPH_AGE_R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_PATH: paths.r1177Path,
+        MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH: paths.r1185Path,
         MURPH_AGE_R1178_OUTPUT_DIR: outputDir,
       }, false);
 
@@ -642,6 +761,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         ...process.env,
         MURPH_AGE_R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_PATH: paths.r1076Path,
         MURPH_AGE_R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_PATH: paths.r1177Path,
+        MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH: paths.r1185Path,
         MURPH_AGE_R1178_CREATED_AT: `${tmp}/private-created-at`,
         MURPH_AGE_R1178_OUTPUT_DIR: path.join(tmp, "out"),
       }, false);
@@ -670,6 +790,7 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         ...process.env,
         MURPH_AGE_R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_PATH: paths.r1076Path,
         MURPH_AGE_R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_PATH: paths.r1177Path,
+        MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH: paths.r1185Path,
         MURPH_AGE_R1178_OUTPUT_DIR: path.join(tmp, "out"),
       }, false);
 
@@ -689,15 +810,17 @@ async function writeInputs(
   options: {
     priorityReady: boolean;
   },
-): Promise<{ r1076Path: string; r1177Path: string }> {
+): Promise<{ r1076Path: string; r1177Path: string; r1185Path: string }> {
   await mkdir(root, { recursive: true });
   const r1076Path = path.join(root, "r1076.json");
   const r1177Path = path.join(root, "r1177.json");
+  const r1185Path = path.join(root, "r1185.json");
   await Promise.all([
     writeFile(r1076Path, `${JSON.stringify(r1076Fixture())}\n`),
     writeFile(r1177Path, `${JSON.stringify(r1177Fixture(options.priorityReady))}\n`),
+    writeFile(r1185Path, `${JSON.stringify(r1185Fixture())}\n`),
   ]);
-  return { r1076Path, r1177Path };
+  return { r1076Path, r1177Path, r1185Path };
 }
 
 function r1076Fixture(): Record<string, unknown> {
@@ -769,6 +892,69 @@ function r1177Fixture(priorityReady: boolean): Record<string, unknown> {
       rowParsingPerformedByR1177: false,
       targetAgeBand: "roughly_16_50",
       targetInputPriority: "consumer_bloodwork_labs_wearables_16_50_first",
+    },
+  };
+}
+
+function r1185Fixture(): Record<string, unknown> {
+  return {
+    artifactBoundary: {
+      aggregateOnly: true,
+      confirmedResponseLocalPathStored: false,
+      fillableResponseLocalPathStored: false,
+      liveArtifactsMutatedByR1185: false,
+      localPathsStored: false,
+      modelEvidencePromotedByR1185: false,
+      privateDetailsStored: false,
+      productDisplayAuthorized: false,
+      rowLevelDataAcceptedByR1185: false,
+      rowOwnerConfirmationInferredByR1185: false,
+      rowOwnerPrivateValuesStored: false,
+      rowOwnerSafeResponseValuesStoredInR1185Packet: false,
+      rowParsingPerformedByR1185: false,
+      safeBooleanValuesStoredInR1185Packet: false,
+      syntheticFixtureRowsStored: false,
+    },
+    packetId: "r1185-average-submitter-safe-response-smoke-proof",
+    productDisplayAuthorized: false,
+    schemaVersion: "murph-age-r1185-average-submitter-safe-response-smoke-proof.v1",
+    smokeProof: {
+      evidenceClass: "synthetic_non_evidence_smoke_proof",
+      liveArtifactsMutatedByR1185: false,
+      liveRowOwnerConfirmationProvided: false,
+      minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+      modelEvidencePromotionAllowed: false,
+      nextRealAction:
+        "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
+      nextRealActionCommand: R1183_COMMAND,
+      nextRealActionRequiresExplicitRowOwnerAssertion: true,
+      prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+      productDisplayAuthorized: false,
+      requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELDS],
+      reviewGptRequiredNow: false,
+      rowLevelDataAcceptedByR1185: false,
+      rowOwnerConfirmationInferredByR1185: false,
+      rowOwnerPrivateValuesStored: false,
+      rowOwnerSafeResponseValuesStoredInR1185Packet: false,
+      rowParsingPerformedByR1185: false,
+      safeExecutionFeatureSlotIds: [...SAFE_RESPONSE_EXECUTION_FEATURE_SLOTS],
+      sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+      syntheticSmokeRan: true,
+      targetAgeBand: "roughly_16_50",
+    },
+    status: "research-local-aggregate-only",
+    summary: {
+      conclusion: "average_submitter_safe_response_smoke_passed_non_evidence",
+      liveR1184Conclusion:
+        "average_submitter_safe_response_chain_waiting_on_row_owner_confirmation",
+      liveR1184ReadyForSyntheticSmoke: true,
+      nextRealAction:
+        "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
+      nextRealActionCommand: R1183_COMMAND,
+      nextRealActionRequiresExplicitRowOwnerAssertion: true,
+      productDisplayAuthorized: false,
+      syntheticPathAdvancedToFeatureOnlyResearchPlanning: true,
+      syntheticSmokeRan: true,
     },
   };
 }
