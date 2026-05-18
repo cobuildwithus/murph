@@ -7,6 +7,7 @@ export type MurphAgeSourceRouteId =
   | "all-of-us-fitbit-labs-ehr"
   | "creles-transport-stress"
   | "haalsi-transport-stress"
+  | "hchs-sol-biomarker-activity"
   | "mhas-harmonized-aging"
   | "midus-biomarker-mortality"
   | "nhanes-activity-shadow-lmf"
@@ -195,6 +196,30 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 20,
     routeId: "nhanes-activity-shadow-lmf",
     sourceFamily: "NHANES linked mortality",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "adult lab and activity aggregate receipt design",
+      "lab/body plus activity transport feasibility",
+      "consumer-submitter feature-family coverage stress",
+    ],
+    blockedCurrentUses: [
+      "row parsing before activation",
+      "treating cohort activity as consumer wearable validation",
+      "score-bearing product use",
+    ],
+    displayName: "HCHS/SOL biomarker and activity route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "biomarker-increment", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Fill activation labels and aggregate receipt requirements for adult lab, vitals, activity, and follow-up overlap before any benchmark card.",
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 22,
+    routeId: "hchs-sol-biomarker-activity",
+    sourceFamily: "HCHS/SOL BioLINCC",
   },
   {
     accessMode: "partner-run",
