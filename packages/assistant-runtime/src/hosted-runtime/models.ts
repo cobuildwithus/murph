@@ -125,6 +125,7 @@ export interface HostedAssistantDeliveryOutcome {
 export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
@@ -169,6 +170,7 @@ export interface HostedMaintenanceMetrics {
   deviceSyncProcessed: number;
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;
+  nextWakeReason?: string | null;
   parserProcessed: number;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
   readinessElapsedMs?: number | null;

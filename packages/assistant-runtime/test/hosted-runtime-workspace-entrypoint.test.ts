@@ -41,6 +41,9 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  buildHostedExecutionDeviceSyncWake,
+} from "@murphai/hosted-execution";
+import {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
   readHostedExecutionSnapshotBaseRef,
@@ -110,6 +113,9 @@ import {
   readHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import {
+  enqueueHostedSystemMailboxItem,
+} from "../src/hosted-runtime/system-mailbox.ts";
 import type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeMailboxPort,
@@ -117,6 +123,10 @@ import type {
   RuntimeLivenessPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
+import type {
+  HostedAssistantRuntimeResolvedConfig,
+  HostedAssistantWorkspaceRuntimeJobInput,
+} from "../src/hosted-runtime/models.ts";
 
 const TEST_NOW = "2026-04-27T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_entrypoint";
@@ -4626,6 +4636,151 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("e2e preserves device-sync follow-up wake and runs the scheduled alarm lane", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const connectionId = "device_sync_connection_synthetic";
+    const firstNextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const firstWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "evt_device_sync_entrypoint_connected",
+      hint: {
+        jobs: [],
+        nextReconcileAt: firstNextWakeAt,
+        occurredAt: TEST_NOW,
+      },
+      occurredAt: TEST_NOW,
+      provider: "whoop",
+      reason: "connected",
+      userId: TEST_USER_ID,
+    });
+    const firstDeviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId,
+      nextReconcileAt: firstNextWakeAt,
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const firstResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_device_sync_first",
+            reason: "nudge",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:first:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/device-sync-first.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            assert.equal(item.route.action, "run-device-sync-wake");
+            return await enqueueHostedSystemMailboxItem({
+              item,
+              vaultRoot,
+              wake: firstWake,
+            });
+          },
+          platform: createPlatform({
+            deviceSyncPort: firstDeviceSyncPort,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_device_sync_first",
+                  kind: "device-sync.wake",
+                  lane: "system",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: firstCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      const firstCheckpoint = firstCheckpointRequests.at(-1);
+      assert.ok(firstCheckpoint);
+      assert.equal(firstDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(firstResult.status, "scheduled");
+      assert.equal(firstResult.nextWakeAt, firstNextWakeAt);
+      assert.equal(firstCheckpoint.nextWakeAt, firstNextWakeAt);
+      assert.equal(firstCheckpoint.nextWakeReason, "device-sync.reconcile");
+
+      const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+      const secondNextWakeAt = new Date(Date.now() + 120_000).toISOString();
+      const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const secondDeviceSyncPort = createSnapshotDeviceSyncPort({
+        connectionId,
+        nextReconcileAt: secondNextWakeAt,
+      });
+      const secondResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_device_sync_follow_up",
+            reason: "alarm",
+            workspaceVersion: "1",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:second:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/device-sync-follow-up.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("No mailbox items should be imported for the follow-up alarm.");
+          },
+          platform: createPlatform({
+            deviceSyncPort: secondDeviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: secondCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "1",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      const secondCheckpoint = secondCheckpointRequests.at(-1);
+      assert.ok(secondCheckpoint);
+      assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(secondResult.status, "scheduled");
+      assert.equal(secondResult.nextWakeAt, secondNextWakeAt);
+      assert.equal(secondCheckpoint.nextWakeAt, secondNextWakeAt);
+      assert.equal(secondCheckpoint.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("parses additive workspace-invocation inputs and rejects legacy run-drain fields", () => {
     const parsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: createWorkspaceRunRequest(),
@@ -4976,8 +5131,9 @@ function createWorkspaceRunRequest(
 
 function createWorkspaceRuntimeJobInput(input: {
   forwardedEnv?: Readonly<Record<string, string>>;
+  resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   request?: Partial<HostedWorkspaceInvocationRequest>;
-} = {}) {
+} = {}): HostedAssistantWorkspaceRuntimeJobInput {
   return {
     request: createWorkspaceRunRequest(input.request),
     runtime: {
@@ -4985,6 +5141,7 @@ function createWorkspaceRuntimeJobInput(input: {
         ...TEST_HOSTED_CODEX_FORWARDED_ENV,
         ...(input.forwardedEnv ?? {}),
       },
+      ...(input.resolvedConfig === undefined ? {} : { resolvedConfig: input.resolvedConfig }),
     },
   };
 }
@@ -5001,6 +5158,103 @@ function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): Ho
     userId: TEST_USER_ID,
     version: "0",
     ...overrides,
+  };
+}
+
+function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig {
+  return {
+    channelCapabilities: {
+      emailSendReady: false,
+      telegramBotConfigured: false,
+      whatsappCloudApiConfigured: false,
+    },
+    deviceSync: {
+      providerConfigs: {
+        whoop: {
+          baseUrl: "https://whoop.example.test",
+          clientId: "synthetic-whoop-client",
+          clientSecret: "synthetic-whoop-secret",
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "synthetic-device-sync-secret",
+    },
+  };
+}
+
+function createSnapshotDeviceSyncPort(input: {
+  connectionId: string;
+  nextReconcileAt: string;
+}): HostedRuntimeDeviceSyncPort & { readonly fetchSnapshotCalls: number } {
+  let fetchSnapshotCalls = 0;
+  return {
+    async ackDirtyStateProcessed() {
+      throw new Error("Device sync dirty ack should not run in this e2e.");
+    },
+    async applyUpdates(request) {
+      return {
+        appliedAt: request.occurredAt ?? new Date().toISOString(),
+        updates: [],
+        userId: TEST_USER_ID,
+      };
+    },
+    async createConnectLink() {
+      throw new Error("Device sync connect link should not run in this e2e.");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: TEST_USER_ID,
+      };
+    },
+    async fetchSnapshot() {
+      fetchSnapshotCalls += 1;
+      return {
+        connections: [
+          {
+            connection: {
+              accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+              connectedAt: TEST_NOW,
+              createdAt: TEST_NOW,
+              displayName: "Synthetic WHOOP",
+              externalAccountId: "synthetic-whoop-account",
+              id: input.connectionId,
+              metadata: {},
+              provider: "whoop",
+              scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
+              status: "active",
+              updatedAt: TEST_NOW,
+            },
+            credential: {
+              kind: "oauth_tokens",
+              tokenBundle: {
+                accessToken: "synthetic-access-token",
+                accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+                keyVersion: "synthetic-key-version",
+                refreshToken: "synthetic-refresh-token",
+                tokenVersion: 1,
+              },
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: input.nextReconcileAt,
+            },
+          },
+        ],
+        generatedAt: TEST_NOW,
+        userId: TEST_USER_ID,
+      };
+    },
+    get fetchSnapshotCalls() {
+      return fetchSnapshotCalls;
+    },
   };
 }
 

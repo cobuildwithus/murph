@@ -202,6 +202,21 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
+  const deviceSyncNextWakeAt = earliestHostedMaintenanceWakeAt(
+    deviceSyncResult.nextWakeAt,
+    deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
+  );
+  const nextWake = selectEarliestHostedMaintenanceWake([
+    {
+      at: assistantResult.nextWakeAt,
+      reason: null,
+    },
+    {
+      at: deviceSyncNextWakeAt,
+      reason: "device-sync.reconcile",
+    },
+  ]);
+
   return {
     activeTurnInputIngested:
       assistantResult.timings?.activeTurnInputIngested ?? false,
@@ -222,13 +237,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     deviceSyncElapsedMs,
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: earliestHostedMaintenanceWakeAt(
-      assistantResult.nextWakeAt,
-      earliestHostedMaintenanceWakeAt(
-        deviceSyncResult.nextWakeAt,
-        deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
-      ),
-    ),
+    nextWakeAt: nextWake.at,
+    ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
     readinessElapsedMs,
@@ -892,6 +902,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
       deviceSyncResult.nextWakeAt,
       deviceSyncResult.postCheckpointRecord?.nextWakeAt ?? null,
     ),
+    ...(deviceSyncResult.nextWakeAt || deviceSyncResult.postCheckpointRecord?.nextWakeAt
+      ? { nextWakeReason: "device-sync.reconcile" }
+      : {}),
     parserProcessed: 0,
     postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
   };
@@ -932,6 +945,28 @@ function earliestHostedMaintenanceWakeAt(left: string | null, right: string | nu
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function selectEarliestHostedMaintenanceWake(
+  candidates: readonly { at: string | null; reason: string | null }[],
+): { at: string | null; reason: string | null } {
+  let selected: { at: string; reason: string | null } | null = null;
+  for (const candidate of candidates) {
+    if (!candidate.at) {
+      continue;
+    }
+    if (!selected || Date.parse(candidate.at) < Date.parse(selected.at)) {
+      selected = {
+        at: candidate.at,
+        reason: candidate.reason,
+      };
+    }
+  }
+
+  return {
+    at: selected?.at ?? null,
+    reason: selected?.reason ?? null,
+  };
 }
 
 function reportHostedDeviceSyncControlPlaneFailure(
