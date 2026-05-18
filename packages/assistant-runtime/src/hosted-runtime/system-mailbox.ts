@@ -36,6 +36,11 @@ import type {
   HostedSystemMailboxPostCheckpointRecord,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import {
+  HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+  createHostedRuntimeWakeCandidate,
+  selectHostedRuntimeWakeCandidate,
+} from "./wake-candidates.ts";
 
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
@@ -258,6 +263,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
 }): Promise<{
   failed: number;
   nextWakeAt: string | null;
+  nextWakeReason?: string | null;
   recorded: number;
 }> {
   if (!input.item.postCheckpointRecord) {
@@ -277,13 +283,22 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       itemId: input.item.itemId,
       vaultRoot: input.vaultRoot,
     });
-    const nextWakeAt = earliestHostedSystemMailboxWakeAt(
-      await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
-      recordResult.nextWakeAt,
-    );
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      createHostedRuntimeWakeCandidate(
+        await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+        "assistant",
+      ),
+      createHostedRuntimeWakeCandidate(
+        recordResult.nextWakeAt,
+        HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+      ),
+    ]);
     return {
       failed: 0,
-      nextWakeAt,
+      nextWakeAt: nextWake.at,
+      ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+        ? { nextWakeReason: nextWake.reason }
+        : {}),
       recorded: recordResult.recorded ? 1 : 0,
     };
   } catch (error) {
@@ -604,17 +619,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         stillDirty: response.stillDirty,
       };
   }
-}
-
-function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  return Date.parse(left) <= Date.parse(right) ? left : right;
 }
 
 function readNullableIsoTimestamp(value: unknown, label: string): string | null {

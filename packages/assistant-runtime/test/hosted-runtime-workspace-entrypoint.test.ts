@@ -4467,6 +4467,79 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps device-sync ownership when invocation projections tie on wake time", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const tiedWakeAt = "2099-04-27T00:05:00.000Z";
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createBundleRef({
+              hash: "d".repeat(64),
+              key: "users/bundles/member-synthetic/device-sync-tied-projection.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            events,
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_entrypoint_wake_tie",
+                laneSeq: "1",
+              }),
+            ],
+          }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            checkpointWorkspace(request) {
+              return createWorkspaceState({
+                nextWakeAt: request.nextWakeAt ?? null,
+                nextWakeReason: request.nextWakeReason ?? null,
+                redactedStatus: request.redactedStatus ?? null,
+                snapshotRef: request.snapshotRef,
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              });
+            },
+            events,
+            workspace: createWorkspaceState({
+              nextWakeAt: tiedWakeAt,
+              nextWakeReason: "assistant",
+              version: "0",
+            }),
+          }),
+        }),
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "assistant_runtime_commit",
+            nextWakeAt: tiedWakeAt,
+            nextWakeReason: "device-sync.reconcile",
+            progressed: true,
+            redactedStatus: {
+              hostedAssistantNextWakeAt: tiedWakeAt,
+              hostedAssistantProgressed: true,
+            },
+          };
+        },
+        vaultRoot,
+      });
+
+      assert.equal(result.nextWakeAt, tiedWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, tiedWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("returns scheduled when no mailbox import runs and the workspace has a future wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -4641,7 +4714,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const connectionId = "device_sync_connection_synthetic";
-    const firstNextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const firstNow = "2026-04-27T00:00:00.000Z";
+    const firstNextWakeAt = "2026-04-27T00:01:00.000Z";
+    const secondNow = "2026-04-27T00:01:01.000Z";
+    const secondNextWakeAt = "2026-04-27T00:02:00.000Z";
     const firstWake = buildHostedExecutionDeviceSyncWake({
       connectionId,
       eventId: "evt_device_sync_entrypoint_connected",
@@ -4660,7 +4736,9 @@ describe("hosted workspace runtime entrypoint", () => {
       nextReconcileAt: firstNextWakeAt,
     });
 
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
+      vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const firstResult = await runHostedWorkspaceRuntimeJobInProcess(
@@ -4722,8 +4800,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(firstCheckpoint.nextWakeAt, firstNextWakeAt);
       assert.equal(firstCheckpoint.nextWakeReason, "device-sync.reconcile");
 
-      const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
-      const secondNextWakeAt = new Date(Date.now() + 120_000).toISOString();
+      vi.setSystemTime(new Date(secondNow));
       const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const secondDeviceSyncPort = createSnapshotDeviceSyncPort({
         connectionId,
@@ -4759,7 +4836,7 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests: secondCheckpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
+                nextWakeAt: firstCheckpoint.nextWakeAt,
                 nextWakeReason: "device-sync.reconcile",
                 version: "1",
               }),
@@ -4777,6 +4854,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(secondCheckpoint.nextWakeAt, secondNextWakeAt);
       assert.equal(secondCheckpoint.nextWakeReason, "device-sync.reconcile");
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
