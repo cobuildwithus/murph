@@ -33,6 +33,7 @@ import {
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
   listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgePrioritySourceRoutes,
   listMurphAgeSourceRoutes,
@@ -2948,6 +2949,54 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
   assert.equal(emptyEvidenceSummary.readyCardCount, 0);
   assert.equal(emptyEvidenceSummary.readySourceRouteIds.length, 0);
   assert.equal(emptyEvidenceSummary.missingSourceRouteIds[0], "cardia-biomarker-activity");
+
+  const templates = listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates();
+  assert.deepEqual(templates.slice(0, 4).map((template) => template.candidateId), [
+    "cardia-biomarker-activity-biomarker-increment",
+    "cardia-biomarker-activity-wearable-shadow-increment",
+    "hchs-sol-biomarker-activity-biomarker-increment",
+    "hchs-sol-biomarker-activity-wearable-shadow-increment",
+  ]);
+  const firstTemplate = templates[0];
+  assert.ok(firstTemplate);
+  assert.equal(firstTemplate.riskEffect, "aggregate-estimated");
+  assert.equal(firstTemplate.productAuthorized, false);
+  assert.equal(firstTemplate.scoreBearing, false);
+  assert.equal(firstTemplate.scoreContributionAuthorized, false);
+  assert.deepEqual(firstTemplate.requiredAggregateSampleFields, [
+    "evaluatedRowCount",
+    "eventCount",
+    "minimumCellCount",
+  ]);
+  assert.equal(firstTemplate.acceptedAggregateMetricDeltaFields.includes("aucDelta"), true);
+  assert.equal(firstTemplate.acceptedAggregateMetricDeltaFields.includes("logLossDelta"), true);
+  assert.deepEqual(firstTemplate.outputBoundary, {
+    aggregateOnly: true,
+    coefficientsExportAllowed: false,
+    localArtifactPathExportAllowed: false,
+    modelParametersExportAllowed: false,
+    participantIdentifiersExportAllowed: false,
+    participantLevelExportAllowed: false,
+    predictionsExportAllowed: false,
+    productDisplayExportAllowed: false,
+    rowValuesExportAllowed: false,
+    sourceTextExportAllowed: false,
+    splitMembershipExportAllowed: false,
+  });
+  const filteredTemplates = listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates({
+    layers: ["wearable-shadow-increment"],
+    sourceRouteIds: ["cardia-biomarker-activity"],
+  });
+  assert.deepEqual(filteredTemplates.map((template) => template.candidateId), [
+    "cardia-biomarker-activity-wearable-shadow-increment",
+  ]);
+  assert.throws(
+    () =>
+      listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates({
+        candidateBatchId: "/private/source/run-1.csv",
+      }),
+    /candidate batch id must be a non-empty simple key/u,
+  );
 
   const notEstimatedValidation = validateMurphAgeIncrementEvaluationCard({
     ...evidenceCard,
