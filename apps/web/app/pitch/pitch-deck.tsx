@@ -89,7 +89,7 @@ export function PitchDeck() {
   const dark = TONES[active] === "dark";
 
   return (
-    <main className="h-svh snap-y snap-proximity overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#f5f0e8]">
+    <main className="h-svh snap-y snap-mandatory overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#f5f0e8]">
       <DeckChrome active={active} dark={dark} onJump={goTo} />
 
       <TitleSlide goTo={goTo} />
