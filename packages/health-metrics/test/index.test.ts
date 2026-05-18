@@ -542,6 +542,13 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(summary.productPromotionAuthorized, false);
   assert.equal(summary.riskToAgeDisplayAuthorized, false);
   assert.equal(summary.sourceRouteIdsByPriority[0], "nhis-r399-outcome-anchor");
+  assert.deepEqual(summary.ordinaryLabWearableSourceRouteIdsByPriority, [
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
+    "nhanes-activity-shadow-lmf",
+    "uk-biobank-integrated",
+  ]);
 
   const layersById = new Map(summary.layers.map((layer) => [layer.layerId, layer]));
   const outcomeAnchor = layersById.get("outcome-anchor");
