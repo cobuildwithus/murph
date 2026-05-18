@@ -189,6 +189,7 @@ export function useHostedPhoneAuthController({
       ? "Keep this tab open. We are verifying your number and linking it to your account."
       : "Keep this tab open. We are verifying your number and preparing your account.";
   const authSession: HostedPrivyClientSessionInput = {
+    authMethod: "phone",
     createWallet,
     refreshUser,
     user,

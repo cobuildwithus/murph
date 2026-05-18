@@ -172,6 +172,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
     code: "654321",
   });
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "email",
     createWallet: mocks.createWallet,
     refreshUser: expect.any(Function),
     user: null,
@@ -231,6 +232,7 @@ test("HomepageEmailAuthButton passes Privy's completed user into shared completi
   });
 
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+    authMethod: "email",
     completedUser,
     createWallet: mocks.createWallet,
     refreshUser: expect.any(Function),

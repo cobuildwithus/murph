@@ -2620,18 +2620,28 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("omits legacy auth intent from hosted Privy completion requests", async () => {
+  it("includes the selected auth intent in hosted Privy completion requests", async () => {
     const { buildHostedPrivyCompletionRequestPayload } = await import("@/src/components/hosted-onboarding/hosted-privy-auth-support");
 
     assert.deepEqual(
-      buildHostedPrivyCompletionRequestPayload({}),
-      {},
+      buildHostedPrivyCompletionRequestPayload({
+        authMethod: "phone",
+      }),
+      {
+        authIntent: {
+          method: "phone",
+        },
+      },
     );
     assert.deepEqual(
       buildHostedPrivyCompletionRequestPayload({
+        authMethod: "telegram",
         inviteCode: "invite-code",
       }),
       {
+        authIntent: {
+          method: "telegram",
+        },
         inviteCode: "invite-code",
       },
     );
@@ -2652,8 +2662,13 @@ describe("HostedPhoneAuth", () => {
 
     try {
       assert.deepEqual(
-        buildHostedPrivyCompletionRequestPayload({}),
+        buildHostedPrivyCompletionRequestPayload({
+          authMethod: "email",
+        }),
         {
+          authIntent: {
+            method: "email",
+          },
           timeZone: "America/Los_Angeles",
         },
       );
@@ -2712,7 +2727,11 @@ describe("HostedPhoneAuth", () => {
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2770,7 +2789,11 @@ describe("HostedPhoneAuth", () => {
       linkedAccounts: [{ type: "phone" }],
     });
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/home");
   });
@@ -2837,8 +2860,16 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2903,8 +2934,16 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      authIntent: {
+        method: "phone",
+      },
+    });
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });

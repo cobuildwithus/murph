@@ -4,7 +4,10 @@ import {
   readHostedPrivyClientSessionState,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type {
+  HostedPrivyAuthMethod,
+  HostedPrivyCompletionPayload,
+} from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
 
@@ -13,10 +16,10 @@ export interface HostedAuthCompletionUser {
 }
 
 export interface HostedPrivyClientSessionInput {
+  authMethod: HostedPrivyAuthMethod;
   completedUser?: HostedAuthCompletionUser | null;
   createWallet: () => Promise<unknown>;
   refreshUser?: () => Promise<HostedAuthCompletionUser | null>;
-  requirePhone?: boolean;
   user: HostedAuthCompletionUser | null;
 }
 
@@ -38,11 +41,11 @@ export async function completeHostedPrivyAuth(
   const currentUser = selectHostedAuthCompletionUser({
     completedUser: input.completedUser ?? null,
     refreshedUser,
-    requirePhone: input.requirePhone === true,
+    requirePhone: input.authMethod === "phone",
     user: input.user,
   });
 
-  if (input.requirePhone) {
+  if (input.authMethod === "phone") {
     await ensureHostedPrivyPhoneReady({
       createWallet: input.createWallet,
       user: currentUser,
@@ -55,6 +58,7 @@ export async function completeHostedPrivyAuth(
   }
 
   const payload = await requestHostedPrivyCompletionWithRetry({
+    authMethod: input.authMethod,
     inviteCode: input.inviteCode,
   });
   await input.refreshUser?.().catch(() => null);

@@ -9,6 +9,7 @@ import {
   type HostedMemberRoutingLookupMatch,
 } from "./hosted-member-routing-store";
 import { type HostedPrivyIdentity } from "./privy";
+import type { HostedPrivyAuthMethod } from "./types";
 import { normalizeHostedWalletAddress } from "./wallet-address";
 import {
   lookupHostedMemberIdentityByPhoneNumber,
@@ -130,6 +131,60 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
   return matches.values().next().value ?? null;
 }
 
+export async function lookupHostedMemberForPrivyPrincipal(input: {
+  identity: Pick<HostedPrivyIdentity, "userId">;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPrivyIdentityLookup | null> {
+  const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
+    privyUserId: input.identity.userId,
+    prisma: input.prisma,
+  });
+
+  if (!memberByPrivyUserId) {
+    return null;
+  }
+
+  return {
+    core: memberByPrivyUserId.core,
+    identity: memberByPrivyUserId.identity,
+    matchedBy: [memberByPrivyUserId.matchedBy],
+  };
+}
+
+export async function lookupHostedMemberForPrivyAuthAttempt(input: {
+  authMethod: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPrivyIdentityLookup | null> {
+  const matches = new Map<string, HostedMemberPrivyIdentityLookup>();
+
+  const [memberByPrivyUserId, memberByAssertedCredential] = await Promise.all([
+    lookupHostedMemberIdentityByPrivyUserId({
+      privyUserId: input.identity.userId,
+      prisma: input.prisma,
+    }),
+    lookupHostedMemberForPrivyAssertedCredential({
+      authMethod: input.authMethod,
+      identity: input.identity,
+      prisma: input.prisma,
+    }),
+  ]);
+
+  if (memberByPrivyUserId) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
+  }
+
+  if (memberByAssertedCredential) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByAssertedCredential);
+  }
+
+  if (matches.size > 1) {
+    throw createHostedPrivyIdentityConflictError();
+  }
+
+  return matches.values().next().value ?? null;
+}
+
 export function createHostedPrivyIdentityConflictError() {
   return hostedOnboardingError({
     code: "PRIVY_IDENTITY_CONFLICT",
@@ -137,6 +192,63 @@ export function createHostedPrivyIdentityConflictError() {
       "This verified session conflicts with an existing Murph account. Contact support so we can merge it safely.",
     httpStatus: 409,
   });
+}
+
+async function lookupHostedMemberForPrivyAssertedCredential(input: {
+  authMethod: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
+  prisma: HostedOnboardingReadClient;
+}): Promise<
+  | HostedMemberIdentityLookup
+  | {
+      core: HostedMemberCoreState;
+      matchedBy: HostedMemberPrivyIdentityLookupMatch;
+    }
+  | null
+> {
+  switch (input.authMethod) {
+    case "phone":
+      if (!input.identity.phone) {
+        throw hostedOnboardingError({
+          code: "PRIVY_PHONE_REQUIRED",
+          message: "Finish phone verification before continuing.",
+          httpStatus: 400,
+        });
+      }
+
+      return lookupHostedMemberIdentityByPhoneNumber({
+        phoneNumber: input.identity.phone.number,
+        prisma: input.prisma,
+      });
+    case "email":
+      if (!input.identity.email?.verifiedAt) {
+        throw hostedOnboardingError({
+          code: "PRIVY_EMAIL_REQUIRED",
+          message: "Finish email verification before continuing.",
+          httpStatus: 400,
+        });
+      }
+
+      return lookupHostedMemberByVerifiedEmailAddress({
+        address: input.identity.email.address,
+        prisma: input.prisma,
+      });
+    case "telegram":
+      if (!input.identity.telegram?.telegramUserId) {
+        throw hostedOnboardingError({
+          code: "PRIVY_TELEGRAM_REQUIRED",
+          message: "Finish Telegram verification before continuing.",
+          httpStatus: 400,
+        });
+      }
+
+      return lookupHostedMemberRoutingByTelegramUserId({
+        prisma: input.prisma,
+        telegramUserId: input.identity.telegram.telegramUserId,
+      });
+  }
+
+  throw new TypeError("Unsupported hosted Privy auth method.");
 }
 
 function addHostedMemberPrivyIdentityMatch(

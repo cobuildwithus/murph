@@ -45,6 +45,7 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "email",
       createWallet: vi.fn(),
       refreshUser,
       user: null,
@@ -76,6 +77,7 @@ test("completeHostedPrivyAuth sends checkout users back to the invite join flow"
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "email",
       createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: {
@@ -101,6 +103,7 @@ test("completeHostedPrivyAuth sends activating members to home", async () => {
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "email",
       createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
@@ -124,6 +127,7 @@ test("completeHostedPrivyAuth falls back to the invite join flow for blocked use
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "email",
       createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
@@ -139,6 +143,7 @@ test("completeHostedPrivyAuth falls back to the current user when refreshUser fa
   );
 
   await completeHostedPrivyAuth({
+    authMethod: "telegram",
     createWallet: vi.fn(),
     refreshUser: vi.fn().mockRejectedValue(new Error("stale user")),
     user: {
@@ -169,12 +174,12 @@ test("completeHostedPrivyAuth prefers the completed user when refresh is stale f
   };
 
   await completeHostedPrivyAuth({
+    authMethod: "phone",
     completedUser,
     createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue({
       linkedAccounts: [],
     }),
-    requirePhone: true,
     user: null,
   });
 
@@ -199,6 +204,7 @@ test("completeHostedPrivyAuth prefers the completed user when non-phone refresh 
   };
 
   await completeHostedPrivyAuth({
+    authMethod: "email",
     completedUser,
     createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue({
@@ -234,12 +240,12 @@ test("completeHostedPrivyAuth falls back to the current user when completed user
   };
 
   await completeHostedPrivyAuth({
+    authMethod: "phone",
     completedUser: {
       linkedAccounts: [],
     },
     createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue(null),
-    requirePhone: true,
     user: currentUser,
   });
 
@@ -263,6 +269,7 @@ test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-s
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "email",
       createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
@@ -279,8 +286,8 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
 
   await expect(
     completeHostedPrivyAuth({
+      authMethod: "phone",
       createWallet: vi.fn(),
-      requirePhone: true,
       user: {
         linkedAccounts: [{ type: "phone" }],
       },

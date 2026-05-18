@@ -222,6 +222,16 @@ export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
     });
   }
 
+  if (error.code === "PRIVY_TELEGRAM_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_TELEGRAM_NOT_READY",
+      message:
+        "Your verified Telegram account has not reached the server-side Privy session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
   if (error.code === "PRIVY_WALLET_REQUIRED") {
     return hostedOnboardingError({
       code: "PRIVY_WALLET_NOT_READY",

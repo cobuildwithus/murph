@@ -43,6 +43,7 @@ export function HostedTelegramAuthButton({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [redirectPending, setRedirectPending] = useState(false);
   const authSession: HostedPrivyClientSessionInput = {
+    authMethod: "telegram",
     createWallet,
     refreshUser,
     user,

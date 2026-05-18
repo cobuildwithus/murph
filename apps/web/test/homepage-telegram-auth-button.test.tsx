@@ -94,6 +94,7 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
 
   expect(mocks.login).toHaveBeenCalledTimes(1);
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
+    authMethod: "telegram",
     createWallet: mocks.createWallet,
     refreshUser: expect.any(Function),
     user: null,
@@ -127,6 +128,7 @@ test("HomepageTelegramAuthButton passes Privy's completed user into shared compl
   });
 
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(expect.objectContaining({
+    authMethod: "telegram",
     completedUser,
     createWallet: mocks.createWallet,
     refreshUser: expect.any(Function),
