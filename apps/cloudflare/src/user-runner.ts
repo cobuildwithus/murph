@@ -137,6 +137,7 @@ type EnsureRunnerProgressResult =
       deferredFreshWriteFenceReplacement?: boolean;
       demand: RunnerProgressDemand | null;
       kind: "retry-scheduled";
+      nextAlarmAt?: string | null;
       record: RunnerStateRecord;
       statusReadFailed?: boolean;
       containerResult:
@@ -514,24 +515,38 @@ export class HostedUserRunner {
       return progress;
     };
 
+    const initialRecord = await this.stateStore.readState();
+    const parkedBeforeDemandRead = await this.parkIfRunnerRetryCapReached({
+      record: initialRecord,
+      reason: "progress-demand",
+    });
+    if (parkedBeforeDemandRead) {
+      return finish({
+        containerResult: null,
+        demand: null,
+        kind: "retry-scheduled",
+        record: parkedBeforeDemandRead,
+      });
+    }
+
     const demandReadStartedAt = Date.now();
     let demand: RunnerProgressDemand | null;
     try {
       demand = await this.readRunnerProgressDemand();
     } catch (error) {
       demandReadDurationMs = Date.now() - demandReadStartedAt;
-      const recheck = await this.scheduleShortProgressRecheck({
-        respectBackoff: true,
-      });
+      const recheck = await this.scheduleRetryAfterProgressDemandReadFailure(error);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          failureCount: recheck.record.failureCount,
+          maxEventAttempts: this.env.maxEventAttempts,
           progressReason: input.reason,
           scheduledWakeAt: recheck.nextAlarmAt,
         },
         level: "warn",
-        message: "Hosted runner progress demand read failed; scheduled recheck.",
+        message: "Hosted runner progress demand read failed; scheduled retry.",
         phase: "scheduled",
         userId: null,
       });
@@ -539,6 +554,7 @@ export class HostedUserRunner {
         containerResult: null,
         demand: null,
         kind: "retry-scheduled",
+        nextAlarmAt: recheck.nextAlarmAt,
         record: recheck.record,
         statusReadFailed: true,
       });
@@ -893,6 +909,58 @@ export class HostedUserRunner {
       : preferredWakeAt;
     await this.syncAlarmAt(nextAlarmAt);
     return { nextAlarmAt, record };
+  }
+
+  private async scheduleRetryAfterProgressDemandReadFailure(
+    error: unknown,
+  ): Promise<{
+    nextAlarmAt: string | null;
+    record: RunnerStateRecord;
+  }> {
+    const currentRecord = await this.stateStore.readState();
+    const parkedBeforeRetry = await this.parkIfRunnerRetryCapReached({
+      error,
+      reason: "progress-demand-read-failure",
+      record: currentRecord,
+    });
+    if (parkedBeforeRetry) {
+      return {
+        nextAlarmAt: readRunnerStateAlarmAt(parkedBeforeRetry),
+        record: parkedBeforeRetry,
+      };
+    }
+
+    if (currentRecord.writeFence) {
+      await this.syncAlarm(currentRecord);
+      return {
+        nextAlarmAt: readRunnerStateAlarmAt(currentRecord),
+        record: currentRecord,
+      };
+    }
+
+    const retryDelayMs = this.resolveRetryDelayMs(currentRecord.failureCount + 1);
+    const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
+    const record = await this.stateStore.scheduleRetry({
+      error,
+      retryAt,
+    });
+    const parkedAfterRetry = await this.parkIfRunnerRetryCapReached({
+      error,
+      reason: "progress-demand-read-failure",
+      record,
+    });
+    if (parkedAfterRetry) {
+      return {
+        nextAlarmAt: readRunnerStateAlarmAt(parkedAfterRetry),
+        record: parkedAfterRetry,
+      };
+    }
+
+    await this.syncAlarm(record);
+    return {
+      nextAlarmAt: readRunnerStateAlarmAt(record),
+      record,
+    };
   }
 
   async runUntilIdleForTest(input: {
@@ -1579,9 +1647,7 @@ export class HostedUserRunner {
     reason: string;
     record: RunnerStateRecord;
   }): Promise<RunnerStateRecord> {
-    const parked = input.record.writeFence
-      ? input.record
-      : await this.stateStore.parkAfterRetryCap();
+    const parked = await this.stateStore.parkAfterRetryCap();
     await this.syncAlarm(parked);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
@@ -2234,6 +2300,9 @@ function readEnsureRunnerProgressNextAlarmAt(
   progress: EnsureRunnerProgressResult,
 ): string | null {
   if (progress.kind === "retry-scheduled") {
+    if (progress.nextAlarmAt !== undefined) {
+      return progress.nextAlarmAt;
+    }
     return readRunnerRuntimeDueAt(progress.record);
   }
   if (

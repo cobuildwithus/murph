@@ -395,7 +395,7 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
   });
 
-  it("schedules a short recheck when initial mailbox status cannot be read", async () => {
+  it("schedules a bounded retry when initial mailbox status cannot be read", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const { alarms, invoke, runner, sql } = createRunnerHarness({
@@ -411,20 +411,24 @@ describe("HostedUserRunner wake scheduling", () => {
       alarmScheduled: true,
       immediateDriveStarted: false,
       kind: "retry-scheduled",
-      nextAlarmAt: "2026-04-27T00:00:01.000Z",
+      nextAlarmAt: RETRY_AT,
     });
 
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      wake_at: "2026-04-27T00:00:01.000Z",
+      backoff_until: RETRY_AT,
+      failure_count: 1,
+      last_error_code: "runtime_error",
+      wake_at: FIXED_NOW,
     });
-    expect(alarms.at(-1)).toBe("2026-04-27T00:00:01.000Z");
+    expect(alarms.at(-1)).toBe(RETRY_AT);
   });
 
   it("keeps initial mailbox status read failures behind retry backoff", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const secondRetryAt = "2026-04-27T00:00:10.000Z";
     const { alarms, invoke, runner, sql } = createRunnerHarness({
       onStatusRead: () => {
         throw new Error("status unavailable");
@@ -445,17 +449,18 @@ describe("HostedUserRunner wake scheduling", () => {
       alarmScheduled: true,
       immediateDriveStarted: false,
       kind: "retry-scheduled",
-      nextAlarmAt: RETRY_AT,
+      nextAlarmAt: secondRetryAt,
     });
 
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: null,
-      backoff_until: RETRY_AT,
-      failure_count: 1,
-      wake_at: "2026-04-27T00:00:01.000Z",
+      backoff_until: secondRetryAt,
+      failure_count: 2,
+      last_error_code: "runtime_error",
+      wake_at: FIXED_NOW,
     });
-    expect(alarms.at(-1)).toBe(RETRY_AT);
+    expect(alarms.at(-1)).toBe(secondRetryAt);
   });
 
   it("wakes a foreground runtime behind an active write fence without forcing a second local run", async () => {
@@ -1507,10 +1512,11 @@ describe("HostedUserRunner wake scheduling", () => {
   it("does not let status-read rechecks bypass the retry cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status unavailable");
+    });
     const { alarms, invoke, runner, sql } = createRunnerHarness({
-      onStatusRead: () => {
-        throw new Error("status unavailable");
-      },
+      onStatusRead,
       workspace: createWorkspaceState({ version: "5" }),
     });
     await runner.bindUser("member_123");
@@ -1532,9 +1538,112 @@ describe("HostedUserRunner wake scheduling", () => {
     });
 
     expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       backoff_until: null,
       failure_count: 3,
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("reports the active write-fence alarm when status reads fail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const activeExpiresAt = "2026-04-27T00:01:00.000Z";
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status unavailable");
+    });
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+       SET active_attempt_id = ?,
+           active_generation = ?,
+           active_kind = ?,
+           active_started_at = ?,
+           active_expires_at = ?,
+           active_workspace_version = ?
+       WHERE singleton = 1`,
+      "attempt_active",
+      1,
+      "runtime",
+      FIXED_NOW,
+      activeExpiresAt,
+      "5",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      immediateDriveStarted: false,
+      inFlight: true,
+      kind: "retry-scheduled",
+      nextAlarmAt: activeExpiresAt,
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: "attempt_active",
+      active_expires_at: activeExpiresAt,
+      backoff_until: null,
+      failure_count: 0,
+      wake_at: null,
+    });
+    expect(alarms.at(-1)).toBe(activeExpiresAt);
+  });
+
+  it("counts repeated status-read failures toward the retry cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const secondRetryAt = "2026-04-27T00:00:15.000Z";
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status unavailable");
+    });
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alarmScheduled: true,
+      immediateDriveStarted: false,
+      kind: "retry-scheduled",
+      nextAlarmAt: RETRY_AT,
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: RETRY_AT,
+      failure_count: 1,
+      last_error_code: "runtime_error",
+      wake_at: FIXED_NOW,
+    });
+    expect(alarms.at(-1)).toBe(RETRY_AT);
+
+    vi.setSystemTime(new Date(RETRY_AT));
+    await runner.alarm();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      backoff_until: secondRetryAt,
+      failure_count: 2,
+      wake_at: FIXED_NOW,
+    });
+    expect(alarms.at(-1)).toBe(secondRetryAt);
+
+    vi.setSystemTime(new Date(secondRetryAt));
+    await runner.alarm();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).toHaveBeenCalledTimes(3);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      backoff_until: null,
+      failure_count: 3,
+      last_error_code: "runtime_error",
       wake_at: null,
     });
     expect(alarms.at(-1)).toBe("deleted");

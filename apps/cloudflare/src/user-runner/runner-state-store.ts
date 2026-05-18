@@ -512,8 +512,9 @@ export class RunnerStateStore {
 
   async parkAfterRetryCap(): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
-    if (meta.active_attempt_id) {
-      return this.readStateFromMetaSync(meta);
+    const record = this.readStateFromMetaSync(meta);
+    if (record.writeFence) {
+      return record;
     }
 
     meta.backoff_until = null;

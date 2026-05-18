@@ -2929,6 +2929,90 @@ describe('assistant auto-reply runtime', () => {
     ).not.toContain('quota')
   })
 
+  it('suppresses raw upstream quota exhaustion without requiring billing-detail wording', async () => {
+    replyMocks.sendAssistantMessage.mockRejectedValue(
+      new Error('Quota exceeded. Purchase more credits to continue.'),
+    )
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      nextWakeAt: null,
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'assistant provider usage limit reached; auto-reply suppressed until usage is restored.',
+      }))
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+  })
+
+  it('keeps raw transient provider throttling on the retry path', async () => {
+    replyMocks.sendAssistantMessage.mockRejectedValue(
+      new Error('HTTP 429 too many requests; retry-after: 60'),
+    )
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 1,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 0,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+    expect(replyMocks.writeAssistantChatErrorArtifacts).toHaveBeenCalledOnce()
+  })
+
   it('writes usage-limit suppression evidence by input id for captureless hosted mailbox input', async () => {
     replyMocks.sendAssistantMessage.mockRejectedValue(
       Object.assign(new Error('provider usage limit reached'), {
@@ -7185,7 +7269,7 @@ describe('assistant auto-reply runtime', () => {
       delivery: null,
       deliveryDeferred: false,
       deliveryError: {
-        message: 'delivery rejected',
+        message: 'delivery channel is out of credits',
       },
       deliveryIntentId: 'intent-2',
       response: 'response text',
@@ -7225,6 +7309,51 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
       stopScanning: true,
     })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+  })
+
+  it('keeps rejected delivery quota failures out of provider usage-limit suppression', async () => {
+    const deliveryError = Object.assign(
+      new Error('delivery channel is out of credits'),
+      {
+        code: 'ASSISTANT_DELIVERY_FAILED',
+        outboxIntentId: 'intent-2',
+      },
+    )
+    replyMocks.sendAssistantMessage.mockRejectedValue(deliveryError)
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 1,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 0,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('treats direct auto-reply receipt ids as already handled work', async () => {
