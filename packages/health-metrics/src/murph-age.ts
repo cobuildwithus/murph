@@ -1,5 +1,6 @@
 import { resolveMetricDefinition, resolveMetricInputKey, uniqueStrings } from "./catalog.ts";
 import {
+  listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgePrioritySourceRoutes,
   resolveMurphAgeSourceRoute,
   type MurphAgeSourceRouteArtifactBoundary,
@@ -268,6 +269,7 @@ export interface MurphAgeArchitectureLayerSummary {
 export interface MurphAgeArchitectureSummary {
   layerOrder: MurphAgeArchitectureLayerId[];
   layers: MurphAgeArchitectureLayerSummary[];
+  ordinaryLabWearableSourceRouteIdsByPriority: MurphAgeSourceRouteId[];
   productDisplayAuthorized: false;
   productPromotionAuthorized: false;
   riskToAgeDisplayAuthorized: false;
@@ -1831,6 +1833,9 @@ export function listMurphAgeInputBundleMetricKeys(): string[] {
 }
 
 export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
+  const ordinaryLabWearableSourceRouteIdsByPriority = listMurphAgeOrdinaryLabWearableSourceRoutes().map(
+    (route) => route.routeId,
+  );
   const sourceRouteIdsByPriority = listMurphAgePrioritySourceRoutes().map((route) => route.routeId);
   const layers: MurphAgeArchitectureLayerSummary[] = [
     architectureLayerFromPolicies({
@@ -1935,6 +1940,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
   return {
     layerOrder: [...MURPH_AGE_ARCHITECTURE_LAYER_ORDER],
     layers,
+    ordinaryLabWearableSourceRouteIdsByPriority,
     productDisplayAuthorized: false,
     productPromotionAuthorized: false,
     riskToAgeDisplayAuthorized: false,
