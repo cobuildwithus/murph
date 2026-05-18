@@ -228,6 +228,7 @@ const R1180_SHARED_INTAKE_KEYS = [
   "prioritizedInputKindIds",
   "productDisplayAuthorized",
   "requiredAssertionChecklistIds",
+  "requiredResponseFieldIds",
   "responseKind",
   "responseStatus",
   "reviewGptRequiredNow",
@@ -658,6 +659,7 @@ function validateR1180SharedIntakeShape(section: Record<string, unknown>): void 
   assertStringOrNull(section.nextActionCommand);
   assertExactStringArray(section.prioritizedInputKindIds, PRIORITIZED_INPUT_KIND_IDS);
   assertExactStringArray(section.requiredAssertionChecklistIds, R1180_REQUIRED_ASSERTION_CHECKLIST_IDS);
+  assertExactStringArray(section.requiredResponseFieldIds, REQUIRED_R1180_SAFE_RESPONSE_FIELD_IDS);
   assertStringInSetOrNull(section.responseKind, R1180_RESPONSE_KIND_IDS);
   assertStringInSet(section.responseStatus, R1180_RESPONSE_STATUS_IDS);
   assertExactStringArray(section.safeCompletionChecklistItemIds, R1180_SAFE_COMPLETION_CHECKLIST_ITEM_IDS);
