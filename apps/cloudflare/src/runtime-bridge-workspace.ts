@@ -10,6 +10,9 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+} from "@murphai/hosted-execution";
+import {
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
@@ -25,6 +28,7 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedRuntimeLogEventCode,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceInvocationRequest,
@@ -81,6 +85,11 @@ import {
 import {
   redactHostedRuntimeDiagnosticText,
 } from "./hosted-runtime-redaction.ts";
+import {
+  HostedBundleArchiveValidationError,
+  isHostedBundleArchiveValidationFailure,
+  readHostedBundleArchiveValidationErrorDetails,
+} from "./hosted-bundle-validation.ts";
 type HostedWorkspaceRuntimeBridgeImportItem =
   HostedWorkspaceRuntimeJobOptions["importItem"];
 type HostedWorkspaceRuntimeBridgeImportItemInput =
@@ -272,6 +281,17 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
         snapshotRef: currentRefs.snapshotRef,
       })
     : null;
+  await writeHostedCheckpointSnapshotLifecycleLog({
+    details: {
+      baseSnapshotRefPresent: currentRefs.baseSnapshotRef !== null,
+      preservedStatePresent: preservedState !== null,
+      snapshotRefPresent: currentRefs.snapshotRef !== null,
+    },
+    eventCode: "checkpoint.snapshot_plan",
+    level: "info",
+    platform: input.platform,
+    request,
+  });
   return currentRefs.baseSnapshotRef
     ? await createFullCompactionSnapshot({
         ...input,
@@ -374,80 +394,153 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
         }),
       ]
     : undefined;
-  const snapshotRef = requireHostedWorkspaceDirectBundleSnapshotRef(
-    await snapshotHostedRuntimeBridgeWorkspaceBundle({
-      readCurrentLease: async () => {
-        leaseCheckCount += 1;
-        return await input.readCurrentLease();
-      },
-      request: input.request,
-      snapshotWorkspace: async () => {
-        let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
-        try {
-          snapshot = await snapshotHostedExecutionContext({
-            artifactRefProvider: input.preservedState?.artifactRefProvider,
-            artifactSink: async (artifact) => {
-              pendingArtifactPuts.push(artifact);
-            },
-            codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
-            materializedArtifactPaths: await readHostedMaterializedArtifactPaths({
+  await writeHostedCheckpointSnapshotLifecycleLog({
+    commitKind: input.commitKind,
+    details: {
+      checkpointPolicy: "full",
+      checkpointReason: input.request.reason,
+      nextWakeAtPresent: input.request.nextWakeAt !== null,
+      nextWakeReasonPresent: input.request.nextWakeReason !== null,
+      preservedArtifactCount: preservedArtifacts?.length ?? 0,
+      preservedStatePresent: input.preservedState !== null && input.preservedState !== undefined,
+      redactedStatusPresent: input.request.redactedStatus !== null,
+      skippedInlineFileCount: skippedInlineFiles.length,
+      snapshotMode: "full",
+    },
+    eventCode: "checkpoint.snapshot_started",
+    level: "info",
+    platform: input.platform,
+    request: input.request,
+  });
+
+  let snapshotRef: HostedExecutionBundleRef;
+  try {
+    snapshotRef = requireHostedWorkspaceDirectBundleSnapshotRef(
+      await snapshotHostedRuntimeBridgeWorkspaceBundle({
+        readCurrentLease: async () => {
+          leaseCheckCount += 1;
+          return await input.readCurrentLease();
+        },
+        request: input.request,
+        snapshotWorkspace: async () => {
+          let snapshot: Awaited<ReturnType<typeof snapshotHostedExecutionContext>>;
+          try {
+            snapshot = await snapshotHostedExecutionContext({
+              artifactRefProvider: input.preservedState?.artifactRefProvider,
+              artifactSink: async (artifact) => {
+                pendingArtifactPuts.push(artifact);
+              },
+              codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
+              materializedArtifactPaths: await readHostedMaterializedArtifactPaths({
+                vaultRoot: input.vaultRoot,
+              }),
+              operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+              preservedArtifacts,
               vaultRoot: input.vaultRoot,
-            }),
-            operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-            preservedArtifacts,
-            vaultRoot: input.vaultRoot,
-            workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
-              workspaceSnapshotSizeDiagnostics = diagnostics;
-              await writeHostedCheckpointSnapshotSizeDiagnosticLog({
-                checkpointPolicy: "full",
-                diagnostics,
-                platform: input.platform,
-                request: input.request,
-                snapshotMode: "full",
-              });
-            },
-          });
-        } catch (error) {
-          await writeHostedCodexHomeSnapshotFailureLog({
-            error,
+              workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
+                workspaceSnapshotSizeDiagnostics = diagnostics;
+                await writeHostedCheckpointSnapshotSizeDiagnosticLog({
+                  checkpointPolicy: "full",
+                  diagnostics,
+                  platform: input.platform,
+                  request: input.request,
+                  snapshotMode: "full",
+                });
+              },
+            });
+          } catch (error) {
+            await writeHostedCodexHomeSnapshotFailureLog({
+              error,
+              platform: input.platform,
+              request: input.request,
+            });
+            throw error;
+          }
+          await writeHostedCodexHomeSnapshotDiagnosticLog({
+            diagnostics: snapshot.codexHomeSnapshotDiagnostics,
             platform: input.platform,
             request: input.request,
           });
-          throw error;
-        }
-        await writeHostedCodexHomeSnapshotDiagnosticLog({
-          diagnostics: snapshot.codexHomeSnapshotDiagnostics,
-          platform: input.platform,
-          request: input.request,
-        });
-        workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
+          workspaceSnapshotSizeDiagnostics = snapshot.workspaceSnapshotSizeDiagnostics;
 
-        return snapshot.bundle;
-      },
-      userId: input.userId,
-      writeBundle: async ({ bundle }) => {
-        const hash = sha256HostedBundleHex(bundle);
-        bundlePutBytes = bundle.byteLength;
-        const artifactPutMetrics = await putHostedWorkspaceArtifacts({
-          artifactStore: input.platform.artifactStore,
-          artifacts: pendingArtifactPuts,
-        });
-        externalArtifactPutBytes = artifactPutMetrics.putBytes;
-        externalArtifactPutCount = artifactPutMetrics.putCount;
-        await input.platform.artifactStore.put({
-          bytes: bundle,
-          sha256: hash,
-        });
+          return snapshot.bundle;
+        },
+        userId: input.userId,
+        writeBundle: async ({ bundle }) => {
+          const hash = sha256HostedBundleHex(bundle);
+          bundlePutBytes = bundle.byteLength;
+          await writeHostedCheckpointSnapshotLifecycleLog({
+            commitKind: input.commitKind,
+            details: {
+              bundlePutBytes,
+              checkpointPolicy: "full",
+              pendingArtifactPutCount: pendingArtifactPuts.length,
+              snapshotMode: "full",
+            },
+            eventCode: "checkpoint.bundle_write_started",
+            level: "info",
+            platform: input.platform,
+            request: input.request,
+          });
+          const artifactPutMetrics = await putHostedWorkspaceArtifacts({
+            artifactStore: input.platform.artifactStore,
+            artifacts: pendingArtifactPuts,
+          });
+          externalArtifactPutBytes = artifactPutMetrics.putBytes;
+          externalArtifactPutCount = artifactPutMetrics.putCount;
+          await input.platform.artifactStore.put({
+            bytes: bundle,
+            sha256: hash,
+          });
+          await writeHostedCheckpointSnapshotLifecycleLog({
+            commitKind: input.commitKind,
+            details: {
+              bundlePutBytes,
+              bundlePutCount: 1,
+              checkpointPolicy: "full",
+              externalArtifactPutBytes,
+              externalArtifactPutCount,
+              snapshotMode: "full",
+            },
+            eventCode: "checkpoint.bundle_write_finished",
+            level: "info",
+            platform: input.platform,
+            request: input.request,
+          });
 
-        return {
-          hash,
-          key: `cloudflare-workspace-snapshots/${hash}.bundle`,
-          size: bundle.byteLength,
-          updatedAt: new Date().toISOString(),
-        };
+          return {
+            hash,
+            key: `cloudflare-workspace-snapshots/${hash}.bundle`,
+            size: bundle.byteLength,
+            updatedAt: new Date().toISOString(),
+          };
+        },
+      }),
+    );
+  } catch (error) {
+    const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
+    await writeHostedCheckpointSnapshotLifecycleLog({
+      commitKind: input.commitKind,
+      details: {
+        bundlePutBytes,
+        checkpointPolicy: "full",
+        externalArtifactPutBytes,
+        externalArtifactPutCount,
+        leaseCheckCount,
+        pendingArtifactPutCount: pendingArtifactPuts.length,
+        snapshotElapsedMs: Date.now() - startedAt,
+        snapshotMode: "full",
+        workspaceSnapshotSizeDiagnosticsPresent: workspaceSnapshotSizeDiagnostics !== null,
       },
-    }),
-  );
+      error: classifiedError,
+      eventCode: "checkpoint.snapshot_failed",
+      level: "error",
+      platform: input.platform,
+      request: input.request,
+      workspaceSnapshotSizeDiagnostics,
+    });
+    throw classifiedError;
+  }
 
   await writeHostedCheckpointSnapshotMetricLog({
     bundlePutBytes,
@@ -925,6 +1018,112 @@ async function readHostedWorkspaceCurrentCheckpointRefs(input: {
     baseSnapshotRef: readHostedExecutionSnapshotBaseRef(currentWorkspace.workspace?.snapshotRef ?? null),
     snapshotRef: currentWorkspace.workspace?.snapshotRef ?? null,
   };
+}
+
+function classifyHostedWorkspaceSnapshotFailure(error: unknown): unknown {
+  if (
+    readHostedBundleArchiveValidationErrorDetails(error) !== null
+    || !isHostedBundleArchiveValidationFailure(error)
+  ) {
+    return error;
+  }
+
+  return new HostedBundleArchiveValidationError({
+    cause: error,
+    operation: "runner-output",
+    ref: null,
+  });
+}
+
+async function writeHostedCheckpointSnapshotLifecycleLog(input: {
+  commitKind?: HostedWorkspaceCheckpointCommitKind;
+  details?: HostedRuntimeRedactedJson;
+  error?: unknown;
+  eventCode: HostedRuntimeLogEventCode;
+  level: "error" | "info" | "warn";
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  request: HostedWorkspaceIdleCheckpointRequest;
+  workspaceSnapshotSizeDiagnostics?: HostedWorkspaceSnapshotSizeDiagnostics | null;
+}): Promise<void> {
+  if (!input.platform.logPort) {
+    return;
+  }
+  const eventCode = input.eventCode;
+
+  const redactedJson: HostedRuntimeRedactedJson = {
+    checkpointReason: input.request.reason,
+    ...(input.commitKind ? { commitKind: input.commitKind } : {}),
+    ...(input.details ?? {}),
+  };
+  appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
+  if (input.workspaceSnapshotSizeDiagnostics) {
+    appendHostedWorkspaceSnapshotSizeDiagnostics(
+      redactedJson,
+      input.workspaceSnapshotSizeDiagnostics,
+    );
+  }
+
+  try {
+    await input.platform.logPort.write({
+      entries: [
+        {
+          at: new Date().toISOString(),
+          attemptId: input.request.attemptId,
+          component: "workspace",
+          eventCode,
+          leaseGeneration: input.request.leaseGeneration,
+          level: input.level,
+          phase: "checkpoint",
+          redactedJson,
+          workspaceVersion: input.request.expectedWorkspaceVersion,
+        },
+      ],
+    });
+  } catch (error) {
+    console.warn("Hosted checkpoint snapshot lifecycle log write failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+      eventCode,
+    });
+  }
+}
+
+function appendHostedCheckpointSnapshotFailureDiagnostics(
+  redactedJson: HostedRuntimeRedactedJson,
+  error: unknown,
+): void {
+  if (error === undefined) {
+    return;
+  }
+
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  if (diagnostics) {
+    if (typeof diagnostics.errorCode === "string") {
+      redactedJson.errorCode = diagnostics.errorCode;
+    }
+    if (typeof diagnostics.errorMessage === "string") {
+      redactedJson.errorMessage = diagnostics.errorMessage;
+    }
+    if (typeof diagnostics.errorName === "string") {
+      redactedJson.errorName = diagnostics.errorName;
+    }
+    if (typeof diagnostics.errorStatus === "number") {
+      redactedJson.errorStatus = diagnostics.errorStatus;
+    }
+    redactedJson.errorDetailPresent = typeof diagnostics.errorDetail === "string";
+    redactedJson.errorCausePresent = typeof diagnostics.errorCause === "string";
+  }
+
+  const bundleValidation = readHostedBundleArchiveValidationErrorDetails(error);
+  if (bundleValidation) {
+    redactedJson.bundleArchiveOperation = bundleValidation.operation;
+    redactedJson.bundleRefKeyPresent = bundleValidation.refKeyPresent;
+    redactedJson.bundleRefPresent = bundleValidation.refHash !== null
+      || bundleValidation.refKeyPresent
+      || bundleValidation.refSize !== null;
+    if (bundleValidation.refSize !== null) {
+      redactedJson.bundleRefSize = bundleValidation.refSize;
+    }
+  }
 }
 
 async function writeHostedCodexHomeSnapshotFailureLog(input: {

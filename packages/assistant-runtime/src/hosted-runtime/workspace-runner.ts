@@ -652,6 +652,8 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   const singleLane = lanes.length === 1 ? lanes[0] : null;
   const blocked = input.result.importResult.blocked;
   const retryableBlockedCount = blocked.filter((item) => item.retryable).length;
+  const assistantInputCount = input.result.importResult.assistantInputIds?.length ?? 0;
+  const conversationImportedCount = input.result.importResult.conversationImportedCount ?? 0;
   if (
     input.checkpointReason === "active_turn_input"
     && !shouldRecordHostedForegroundMailboxImportResult(input.result)
@@ -673,10 +675,13 @@ async function writeHostedMailboxImportRuntimeLog(input: {
       level: blocked.length > 0 ? "warn" : "info",
       phase: input.checkpointReason === "active_turn_input" ? "active_turn_input" : "import",
       redactedJson: {
+        assistantInputCount,
+        assistantInputPresent: assistantInputCount > 0,
         blockCodes: compactHostedRuntimeLogCodes(blocked.map((item) => item.reasonCode)),
         blockedCount: blocked.length,
         checkpointDeferred: input.result.checkpointDeferred,
         checkpointed: input.result.checkpoint?.checkpointed ?? false,
+        conversationImportedCount,
         conversationSeqEnd: input.result.state.watermarks.conversation,
         conversationSeqStart: input.result.previousState.watermarks.conversation,
         fetchedCount: input.result.importResult.fetchedCount,

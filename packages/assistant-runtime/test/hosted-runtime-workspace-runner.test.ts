@@ -251,10 +251,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               level: "info",
               phase: "import",
               redactedJson: {
+                assistantInputCount: 0,
+                assistantInputPresent: false,
                 blockCodes: [],
                 blockedCount: 0,
                 checkpointDeferred: true,
                 checkpointed: false,
+                conversationImportedCount: 1,
                 conversationSeqEnd: "1",
                 conversationSeqStart: "0",
                 fetchedCount: 1,
@@ -1279,10 +1282,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(logRequests[0]?.entries[0]?.eventCode, "mailbox.imported");
       assert.equal(logRequests[0]?.entries[0]?.level, "warn");
       assert.deepEqual(logRequests[0]?.entries[0]?.redactedJson, {
+        assistantInputCount: 0,
+        assistantInputPresent: false,
         blockCodes: ["lane.gap"],
         blockedCount: 1,
         checkpointDeferred: false,
         checkpointed: false,
+        conversationImportedCount: 0,
         conversationSeqEnd: "0",
         conversationSeqStart: "0",
         fetchedCount: 1,
@@ -1565,10 +1571,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         mailboxSeqStart: "1",
         phase: "active_turn_input",
         redactedJson: {
+          assistantInputCount: 2,
+          assistantInputPresent: true,
           blockCodes: [],
           blockedCount: 0,
           checkpointDeferred: true,
           checkpointed: false,
+          conversationImportedCount: 2,
           conversationSeqEnd: "3",
           conversationSeqStart: "1",
           fetchedCount: 2,
@@ -1708,10 +1717,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
       ]);
       assert.deepEqual(logRequests[1]?.entries[0]?.redactedJson, {
+        assistantInputCount: 1,
+        assistantInputPresent: true,
         blockCodes: ["synthetic.retryable-block"],
         blockedCount: 1,
         checkpointDeferred: true,
         checkpointed: false,
+        conversationImportedCount: 1,
         conversationSeqEnd: "2",
         conversationSeqStart: "1",
         fetchedCount: 2,

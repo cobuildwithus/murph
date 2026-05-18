@@ -34,14 +34,13 @@ export function createHostedAssistantInputSource(input: {
           query,
           vaultRoot: input.vaultRoot,
         });
-        if (preferred.length === 0) {
-          return base;
-        }
-        return mergePreferredAssistantInputCandidates({
-          base,
-          preferred,
-          query,
-        });
+        return preferred.length === 0
+          ? base
+          : mergePreferredAssistantInputCandidates({
+            base,
+            preferred,
+            query,
+          });
       },
     };
   }
@@ -63,15 +62,14 @@ export function createHostedAssistantInputSource(input: {
         query,
         vaultRoot: input.vaultRoot,
       });
-      if (replay.length === 0) {
-        return base;
-      }
-      return buildForegroundReplayCandidateBatch({
-        base,
-        foregroundReplayPromptInputIds,
-        query,
-        replay,
-      });
+      return replay.length === 0
+        ? base
+        : buildForegroundReplayCandidateBatch({
+          base,
+          foregroundReplayPromptInputIds,
+          query,
+          replay,
+        });
     },
   };
 }

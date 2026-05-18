@@ -646,19 +646,33 @@ export class RunnerContainer extends Container {
         void stoppedContainer.catch(() => undefined);
       }
       this.noteRunnerActivity("runner-response-received");
+
+      if (!response.ok) {
+        const runnerError = await classifyHostedRunnerContainerErrorResponse(response);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            responseOk: false,
+            responseStatus: response.status,
+            ...buildRunnerContainerMetadataOnlyErrorDetails(runnerError),
+          },
+          message: "Hosted execution container received runner response.",
+          phase: "container.ready",
+          userId: routeUserId,
+        });
+        throw runnerError;
+      }
+
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
+          responseOk: true,
           responseStatus: response.status,
         },
         message: "Hosted execution container received runner response.",
         phase: "container.ready",
         userId: routeUserId,
       });
-
-      if (!response.ok) {
-        throw await classifyHostedRunnerContainerErrorResponse(response);
-      }
 
       const responsePayload = await response.json();
       const result = assertHostedExecutionRunnerJobResult(responsePayload, input.job);
@@ -2078,6 +2092,10 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
   const result: HostedExecutionStructuredLogDetails = {};
 
   const runtimeFields = {
+    childRuntimeBundleArchiveOperation: "runnerChildRuntimeBundleArchiveOperation",
+    childRuntimeBundleRefKeyPresent: "runnerChildRuntimeBundleRefKeyPresent",
+    childRuntimeBundleRefPresent: "runnerChildRuntimeBundleRefPresent",
+    childRuntimeBundleRefSize: "runnerChildRuntimeBundleRefSize",
     childRuntimeErrorCode: "runnerChildRuntimeErrorCode",
     childRuntimeErrorName: "runnerChildRuntimeErrorName",
     childRuntimeErrorStatus: "runnerChildRuntimeErrorStatus",

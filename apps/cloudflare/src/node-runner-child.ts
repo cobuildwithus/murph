@@ -29,6 +29,9 @@ import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "./runtime-bridge-workspace.js";
 import {
+  readHostedBundleArchiveValidationErrorDetails,
+} from "./hosted-bundle-validation.js";
+import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.js";
 import {
@@ -449,12 +452,29 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
     : null;
   const childRuntimeHttpOperation =
     readHostedExecutionChildRuntimeHttpOperation(error);
+  const childRuntimeErrorCode = deriveHostedExecutionErrorCode(error);
+  const bundleValidation = readHostedBundleArchiveValidationErrorDetails(error);
   return {
-    childRuntimeErrorCode: deriveHostedExecutionErrorCode(error),
+    childRuntimeErrorCode,
     ...(childRuntimeErrorName ? { childRuntimeErrorName } : {}),
-    childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error),
+    childRuntimeFailureKind: classifyHostedExecutionChildRuntimeFailure(error, {
+      bundleValidationPresent: bundleValidation !== null,
+      childRuntimeErrorCode,
+    }),
     ...(childRuntimeHttpOperation ? { childRuntimeHttpOperation } : {}),
     childRuntimeStage: input.runtimeStage,
+    ...(bundleValidation
+      ? {
+          childRuntimeBundleArchiveOperation: bundleValidation.operation,
+          childRuntimeBundleRefKeyPresent: bundleValidation.refKeyPresent,
+          childRuntimeBundleRefPresent: bundleValidation.refHash !== null
+            || bundleValidation.refKeyPresent
+            || bundleValidation.refSize !== null,
+          ...(bundleValidation.refSize !== null
+            ? { childRuntimeBundleRefSize: bundleValidation.refSize }
+            : {}),
+        }
+      : {}),
     ...readHostedExecutionChildRuntimeFetchFailureMetadata(error),
     ...readHostedExecutionChildRuntimeStatus(error),
   };
@@ -506,7 +526,17 @@ function readHostedExecutionChildRuntimeLegacyFetchFailureMetadata(
 
 function classifyHostedExecutionChildRuntimeFailure(
   error: unknown,
+  input?: {
+    bundleValidationPresent?: boolean;
+    childRuntimeErrorCode?: string | null;
+  },
 ): HostedExecutionChildRuntimeFailureKind {
+  if (
+    input?.bundleValidationPresent === true
+    || input?.childRuntimeErrorCode === "bundle_archive_validation_error"
+  ) {
+    return "bundle_archive_validation";
+  }
   if (error instanceof HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError) {
     return "workspace_version_mismatch";
   }

@@ -1527,6 +1527,10 @@ async function writeHostedAssistantPassRuntimeLog(input: {
           input.assistantMetrics.assistantAutomationProgressed ?? null,
         assistantAutomationTotalElapsedMs:
           input.assistantMetrics.assistantAutomationTotalElapsedMs ?? null,
+        assistantInputCandidateListed:
+          input.assistantMetrics.assistantInputCandidateListed ?? null,
+        assistantInputCandidateQueryCount:
+          input.assistantMetrics.assistantInputCandidateQueryCount ?? null,
         deliveryEffectCount: input.deliveryEffectCount,
         deviceSyncElapsedMs: input.assistantMetrics.deviceSyncElapsedMs ?? null,
         deviceSyncProcessed: input.assistantMetrics.deviceSyncProcessed,
@@ -1798,14 +1802,59 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
       redactedJson: {
         ...summarizeHostedRuntimeStatusCounts(statuses),
         attempted: input.outcomes.length,
+        deliveryChannelSummary: summarizeHostedOutboxDeliveryCodes(
+          input.outcomes.map((outcome) => outcome.deliveryChannel),
+        ),
+        deliveryErrorCodeSummary: summarizeHostedOutboxDeliveryErrorCodes(
+          input.outcomes.map((outcome) => outcome.deliveryErrorCode),
+        ),
         failed,
+        journalStatusSummary: summarizeHostedOutboxDeliveryCodes(
+          input.outcomes.map((outcome) => outcome.journalStatus),
+        ),
         nextWakeAtPresent: input.postNextWakeAt !== null,
+        providerMessageIdPresentCount: input.outcomes.filter((outcome) =>
+          outcome.providerMessageId !== null
+        ).length,
+        providerThreadIdPresentCount: input.outcomes.filter((outcome) =>
+          outcome.providerThreadId !== null
+        ).length,
         retryable,
         sent,
+        targetKindSummary: summarizeHostedOutboxDeliveryCodes(
+          input.outcomes.map((outcome) => outcome.targetKind),
+        ),
       },
     },
     platform: input.input.platform,
   });
+}
+
+function summarizeHostedOutboxDeliveryCodes(values: readonly (string | null)[]): string {
+  const summary = summarizeHostedRuntimeStatusCounts(
+    values.map((value) => toHostedRuntimeLogCode(value ?? "none")),
+  ).statusSummary;
+  return typeof summary === "string" ? summary : "";
+}
+
+function summarizeHostedOutboxDeliveryErrorCodes(values: readonly (string | null)[]): string {
+  const summary = summarizeHostedRuntimeStatusCounts(
+    values.map(normalizeHostedOutboxDeliveryErrorCode),
+  ).statusSummary;
+  return typeof summary === "string" ? summary : "";
+}
+
+function normalizeHostedOutboxDeliveryErrorCode(value: string | null): string {
+  if (!value) {
+    return "none";
+  }
+  const code = toHostedRuntimeLogCode(value);
+  if (code === "unclassified") {
+    return code;
+  }
+  return /^ASSISTANT_[A-Z0-9_]*DELIVERY[A-Z0-9_]*$/u.test(code)
+    ? code
+    : "external_code";
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {

@@ -310,6 +310,9 @@ describe("runHostedAssistantAutomation", () => {
           threadId: "thread_1",
           threadIsDirect: true,
         },
+        knownInputIds: ["input_previous_should_not_log"],
+        knownProjectionCaptureIds: ["cap_previous_should_not_log"],
+        limit: 2,
       });
       return {
         nextWakeAt: null,
@@ -317,26 +320,26 @@ describe("runHostedAssistantAutomation", () => {
       };
     });
 
-    await expect(
-      runHostedAssistantAutomation(
-        "/tmp/vault-root",
-        "req_turn_input",
-        {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_turn_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
         },
-        {
-          eventId: "evt_automation_turn_input",
-          kind: "runtime.timer",
+      },
+      {
+        eventId: "evt_automation_turn_input",
+        kind: "runtime.timer",
         occurredAt: "2026-04-23T00:00:00.000Z",
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-    ),
-    ).resolves.toEqual(expect.objectContaining({
+    );
+
+    expect(result).toEqual(expect.objectContaining({
       nextWakeAt: null,
       progressed: true,
       redactedLogEntries: expect.any(Array),
@@ -344,6 +347,31 @@ describe("runHostedAssistantAutomation", () => {
         activeTurnInputIngested: true,
       }),
     }));
+    expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "Hosted assistant new conversation input query finished.",
+        redacted: expect.objectContaining({
+          candidateCount: 1,
+          conversationActorIsSelf: false,
+          conversationDirect: true,
+          conversationSource: "linq",
+          knownInputIdCount: 1,
+          knownProjectionCaptureIdCount: 1,
+          limit: 2,
+          nextCursorPresent: false,
+          type: "assistant.new_conversation_inputs.listed",
+        }),
+      }),
+    ]));
+    const conversationLog = result.redactedLogEntries.find((entry) =>
+      entry.message === "Hosted assistant new conversation input query finished."
+    );
+    expect(conversationLog?.redacted).not.toHaveProperty("requestId");
+    expect(JSON.stringify(conversationLog?.redacted)).not.toContain("request-1");
+    expect(JSON.stringify(conversationLog?.redacted))
+      .not.toContain("input_previous_should_not_log");
+    expect(JSON.stringify(conversationLog?.redacted))
+      .not.toContain("cap_previous_should_not_log");
 
     expect(listNewConversationInputs).toHaveBeenCalledTimes(1);
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
@@ -352,6 +380,141 @@ describe("runHostedAssistantAutomation", () => {
       }),
     );
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("records metadata-only candidate query diagnostics for scanner misses", async () => {
+    const candidate = {
+      acceptedInput: {
+        id: "input_candidate",
+        source: "assistant-input",
+      },
+      event: {
+        attachmentCount: 0,
+        attachmentDescriptors: [],
+        attachmentEvidence: {
+          attachments: [],
+          optionalInboxCaptureId: null,
+          reasonCode: null,
+          source: null,
+          status: "not_attempted",
+          updatedAt: null,
+        },
+        conversation: {
+          accountId: "acct_1",
+          actorId: "actor_1",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "thread_1",
+          threadIsDirect: true,
+        },
+        cursor: {
+          createdAt: "2026-05-18T15:10:38.000Z",
+          inputId: "input_candidate",
+          occurredAt: "2026-05-18T15:10:38.000Z",
+          sourceKind: "hosted-mailbox",
+          sourcePosition: "conversation:00000000000000000042:input_candidate",
+        },
+        inputId: "input_candidate",
+        occurredAt: "2026-05-18T15:10:38.000Z",
+        receivedAt: "2026-05-18T15:10:39.000Z",
+        replyTarget: {
+          channel: "linq",
+          messageId: "msg_candidate",
+          threadId: "thread_1",
+        },
+        source: "linq",
+        sourceMetadata: null,
+        sourceRef: {
+          kind: "hosted-mailbox",
+          lane: "conversation",
+          laneSeq: "42",
+          source: "hosted-mailbox",
+        },
+        text: "hello",
+        transcriptText: "hello",
+        userMessageContent: [
+          {
+            text: "hello",
+            type: "text",
+          },
+        ],
+      },
+      projection: {
+        captureId: null,
+        reasonCode: null,
+        status: "not_attempted",
+      },
+    };
+    mocks.createStoreBackedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [candidate],
+        nextCursor: candidate.event.cursor,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      })),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.listInputCandidates({
+        limit: 1,
+        sourceId: "linq",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_candidate_query",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_candidate_query",
+        kind: "runtime.timer",
+        occurredAt: "2026-05-18T15:10:38.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.timings).toEqual(expect.objectContaining({
+      inputCandidateListed: true,
+      inputCandidateQueryCount: 1,
+    }));
+    expect(result.redactedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "Hosted assistant input candidate query finished.",
+        redacted: expect.objectContaining({
+          candidateConversationCount: 1,
+          candidateCount: 1,
+          candidateProjectionStatusSummary: "not_attempted:1",
+          candidateReplyTargetPresentCount: 1,
+          candidateSelfAuthoredCount: 0,
+          candidateSourceSummary: "linq:1",
+          knownInputIdCount: 0,
+          nextCursorPresent: true,
+          sourceId: "linq",
+          sourceIdPresent: true,
+          type: "assistant.input_candidates.listed",
+        }),
+      }),
+    ]));
+    const candidateLog = result.redactedLogEntries.find((entry) =>
+      entry.message === "Hosted assistant input candidate query finished."
+    );
+    expect(candidateLog?.redacted).not.toHaveProperty("requestId");
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {
@@ -626,7 +789,7 @@ describe("runHostedAssistantAutomation", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           autoReplyChannels: "telegram",
-          autoReplyEligibleAfterSummary: "telegram:ain_00000000000000000000000000000122",
+          autoReplyEligibleAfterSummary: "telegram:present",
         }),
         message: "Hosted assistant automation pass starting.",
       }),
@@ -644,6 +807,12 @@ describe("runHostedAssistantAutomation", () => {
     expect(
       JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
     ).not.toContain("real_thread_id");
+    expect(
+      JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
+    ).not.toContain("ain_00000000000000000000000000000122");
+    expect(
+      JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
+    ).not.toContain("ain_00000000000000000000000000000123");
   });
 
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
