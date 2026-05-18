@@ -14,7 +14,7 @@ import {
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
-  lookupHostedMemberForPrivyIdentity,
+  lookupHostedMemberForPrivyPrincipal,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-service";
 import {
@@ -57,9 +57,8 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   memberLookup: HostedMemberPrivyIdentityLookup | null;
 }> {
   const [memberLookup, sessionMember] = await Promise.all([
-    lookupHostedMemberForPrivyIdentity({
+    lookupHostedMemberForPrivyPrincipal({
       identity: input.identity,
-      parallelizeReads: true,
       prisma: input.prisma,
     }),
     input.memberId

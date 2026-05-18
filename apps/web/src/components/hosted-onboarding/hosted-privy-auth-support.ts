@@ -8,7 +8,10 @@ import {
   type HostedPrivyClientPendingAction,
   type HostedPrivyFinalizationState,
 } from "@/src/lib/hosted-onboarding/privy-client";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type {
+  HostedPrivyAuthMethod,
+  HostedPrivyCompletionPayload,
+} from "@/src/lib/hosted-onboarding/types";
 
 import { waitForRetryDelay } from "./hosted-retry-support";
 
@@ -48,17 +51,22 @@ export async function runHostedPrivyFinalizationAttempt({
 }
 
 export function buildHostedPrivyCompletionRequestPayload(input: {
+  authMethod: HostedPrivyAuthMethod;
   inviteCode?: string | null;
-}): Record<string, string> {
+}): Record<string, unknown> {
   const timeZone = resolveHostedBrowserTimeZone();
 
   return {
+    authIntent: {
+      method: input.authMethod,
+    },
     ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
     ...(timeZone ? { timeZone } : {}),
   };
 }
 
 export async function requestHostedPrivyCompletionWithRetry(input: {
+  authMethod: HostedPrivyAuthMethod;
   inviteCode?: string | null;
 }): Promise<HostedPrivyCompletionPayload> {
   let lastError: unknown = null;
@@ -100,6 +108,7 @@ function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
     error.retryable &&
     (error.code === "PRIVY_ACCOUNT_NOT_READY" ||
       error.code === "PRIVY_EMAIL_NOT_READY" ||
+      error.code === "PRIVY_TELEGRAM_NOT_READY" ||
       error.code === "PRIVY_PHONE_NOT_READY" ||
       error.code === "PRIVY_WALLET_NOT_READY")
   );

@@ -9,6 +9,8 @@ import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
+import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
+import type { HostedPrivyAuthMethod } from "./types";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   generateHostedMemberId,
@@ -45,14 +47,18 @@ import {
 import {
   createHostedPrivyIdentityConflictError,
   hasHostedMemberPrivyIdentity,
+  lookupHostedMemberForPrivyAuthAttempt,
   lookupHostedMemberForPrivyIdentity,
+  lookupHostedMemberForPrivyPrincipal,
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-lookup";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 
 export {
   hasHostedMemberPrivyIdentity,
+  lookupHostedMemberForPrivyAuthAttempt,
   lookupHostedMemberForPrivyIdentity,
+  lookupHostedMemberForPrivyPrincipal,
 };
 export type { HostedMemberPrivyIdentityLookup };
 
@@ -270,6 +276,7 @@ async function refreshHostedMemberForPhoneTx(input: {
 }
 
 export async function ensureHostedMemberForPrivyIdentity(input: {
+  authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   now: Date;
   prisma?: PrismaClient;
@@ -277,6 +284,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
+    authMethod: input.authMethod,
     identity: input.identity,
     now: input.now,
     prisma: tx,
@@ -284,6 +292,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
+  authMethod?: HostedPrivyAuthMethod;
   expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
@@ -295,6 +304,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
+    authMethod: input.authMethod,
     expectedPhoneHint: input.expectedPhoneHint,
     expectedPhoneLookupKey: input.expectedPhoneLookupKey,
     expectedEmailLookupKey: input.expectedEmailLookupKey,
@@ -306,11 +316,17 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 }
 
 export async function ensureHostedMemberForPrivyIdentityTx(input: {
+  authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
-  const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
+  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
+    authMethod: input.authMethod,
+    identity: input.identity,
+  });
+  const existingMemberLookup = await lookupHostedMemberForPrivyAuthAttempt({
+    authMethod,
     identity: input.identity,
     prisma: input.prisma,
   });
@@ -325,7 +341,11 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
     });
     const phoneIdentity = buildHostedPersistedPhoneIdentityFields({
       now: input.now,
-      phone: input.identity.phone,
+      phone: shouldPersistHostedPrivyPhoneIdentity({
+        authMethod,
+      })
+        ? input.identity.phone
+        : null,
     });
     await upsertHostedMemberIdentity({
       ...phoneIdentity,
@@ -345,6 +365,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
   }
 
   return reconcileHostedPrivyIdentityOnMemberTx({
+    authMethod,
     identity: input.identity,
     member: existingMemberLookup.core,
     now: input.now,
@@ -353,6 +374,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
+  authMethod?: HostedPrivyAuthMethod;
   expectedEmailLookupKey?: string;
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
@@ -391,6 +413,11 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     identity: input.identity,
   });
 
+  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
+    authMethod: input.authMethod,
+    identity: input.identity,
+  });
+
   if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
     throw hostedOnboardingError({
       code: "PRIVY_USER_MISMATCH",
@@ -418,7 +445,12 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
     currentIdentity,
     now: input.now,
-    phone: input.identity.phone,
+    phone: shouldPersistHostedPrivyPhoneIdentity({
+      authMethod,
+      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+    })
+      ? input.identity.phone
+      : null,
   });
 
   try {
@@ -448,4 +480,11 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
 
     throw error;
   }
+}
+
+function shouldPersistHostedPrivyPhoneIdentity(input: {
+  authMethod: HostedPrivyAuthMethod;
+  expectedPhoneLookupKey?: string;
+}): boolean {
+  return input.authMethod === "phone" || Boolean(input.expectedPhoneLookupKey);
 }

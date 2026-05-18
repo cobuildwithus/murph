@@ -1,15 +1,22 @@
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
+import {
+  isHostedPrivyAuthMethod,
+  type HostedPrivyAuthMethod,
+} from "@/src/lib/hosted-onboarding/types";
+import { resolveHostedPrivyAuthMethodFromIdentity } from "@/src/lib/hosted-onboarding/privy-auth-method";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { issueHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
+import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
@@ -18,11 +25,16 @@ export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const auth = await requirePrivyCompletionSession(request);
     const body = await readOptionalJsonObject(request);
+    const authMethod = resolveHostedPrivyCompletionAuthMethod({
+      body,
+      identity: auth.identity,
+    });
     const timeZone = resolveHostedSignupTimeZone({
       clientTimeZone: body.timeZone,
       headers: request.headers,
     });
     const result = await completeHostedPrivyVerification({
+      authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       ...(timeZone ? { timeZone } : {}),
@@ -59,3 +71,31 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+function resolveHostedPrivyCompletionAuthMethod(input: {
+  body: Record<string, unknown>;
+  identity: HostedPrivyIdentity;
+}): HostedPrivyAuthMethod {
+  if ("authIntent" in input.body) {
+    const authIntent = input.body.authIntent;
+    const method = isRecord(authIntent) ? authIntent.method : undefined;
+
+    if (isHostedPrivyAuthMethod(method)) {
+      return method;
+    }
+
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTH_INTENT_INVALID",
+      message: "Choose phone, email, or Telegram before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  return resolveHostedPrivyAuthMethodFromIdentity({
+    identity: input.identity,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}

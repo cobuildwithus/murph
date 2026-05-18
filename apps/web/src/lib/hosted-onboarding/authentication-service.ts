@@ -32,6 +32,8 @@ import {
   type HostedPrivyIdentity,
   type HostedPrivyUser,
 } from "./privy";
+import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
+import type { HostedPrivyAuthMethod } from "./types";
 import { normalizeHostedSignupTimeZone } from "./time-zone-hint";
 import {
   buildHostedInviteUrl,
@@ -46,6 +48,7 @@ import {
 import type { HostedPostVerificationStage } from "./stage";
 
 export async function completeHostedPrivyVerification(input: {
+  authMethod?: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   inviteCode?: string | null;
   now?: Date;
@@ -72,6 +75,10 @@ export async function completeHostedPrivyVerification(input: {
       ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
       : null;
     usedInvite = invite !== null;
+    const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
+      authMethod: input.authMethod,
+      identity: input.identity,
+    });
 
     if (invite) {
       assertHostedMemberNotSuspended(invite.member);
@@ -88,6 +95,7 @@ export async function completeHostedPrivyVerification(input: {
               ? inviteRouting.pendingLinqParticipantContact
               : null;
           return reconcileHostedPrivyIdentityOnMember({
+            authMethod,
             expectedEmailLookupKey: pendingEmailContact?.lookupKey,
             expectedPhoneHint: pendingEmailContact
               ? undefined
@@ -102,6 +110,7 @@ export async function completeHostedPrivyVerification(input: {
           });
         })()
       : await ensureHostedMemberForPrivyIdentity({
+          authMethod,
           identity: input.identity,
           prisma,
           now,
@@ -110,6 +119,7 @@ export async function completeHostedPrivyVerification(input: {
     assertHostedMemberNotSuspended(member);
 
     await syncHostedPrivyBindings({
+      authMethod,
       identity: input.identity,
       memberId: member.id,
       prisma,
@@ -192,30 +202,47 @@ async function syncHostedMemberPendingActivationTimeZone(input: {
 }
 
 async function syncHostedPrivyBindings(input: {
+  authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
   memberId: string;
   prisma: PrismaClient;
   verifiedPrivyUser: HostedPrivyUser | null;
 }): Promise<void> {
   if (input.identity.email?.verifiedAt) {
-    const replyAlias = await createHostedMemberReplyAliasRoute({
-      memberId: input.memberId,
-    });
-    await syncHostedMemberVerifiedEmailAuthorization({
-      address: input.identity.email.address,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
-      verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
-    });
+    const email = input.identity.email;
+    const syncEmailBinding = async () => {
+      const replyAlias = await createHostedMemberReplyAliasRoute({
+        memberId: input.memberId,
+      });
+      await syncHostedMemberVerifiedEmailAuthorization({
+        address: email.address,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
+        verifiedAt: new Date(email.verifiedAt! * 1000),
+      });
+    };
+
+    if (input.authMethod === "email") {
+      await syncEmailBinding();
+    } else {
+      await syncHostedPrivySecondaryBindingBestEffort("email", syncEmailBinding);
+    }
   }
 
   if (input.identity.telegram?.telegramUserId) {
-    await syncHostedMemberTelegramRoutingBinding({
+    const telegramUserId = input.identity.telegram.telegramUserId;
+    const syncTelegramBinding = () => syncHostedMemberTelegramRoutingBinding({
       memberId: input.memberId,
       prisma: input.prisma,
-      telegramUserId: input.identity.telegram.telegramUserId,
+      telegramUserId,
     });
+
+    if (input.authMethod === "telegram") {
+      await syncTelegramBinding();
+    } else {
+      await syncHostedPrivySecondaryBindingBestEffort("telegram", syncTelegramBinding);
+    }
   }
 
   await syncHostedPrivyMemberIdMetadataBestEffort({
@@ -223,6 +250,17 @@ async function syncHostedPrivyBindings(input: {
     privyUserId: input.identity.userId,
     verifiedPrivyUser: input.verifiedPrivyUser,
   });
+}
+
+async function syncHostedPrivySecondaryBindingBestEffort(
+  binding: "email" | "telegram",
+  syncBinding: () => Promise<void>,
+): Promise<void> {
+  try {
+    await syncBinding();
+  } catch {
+    console.warn(`Hosted Privy secondary ${binding} binding sync failed.`);
+  }
 }
 
 async function syncHostedPrivyMemberIdMetadataBestEffort(input: {

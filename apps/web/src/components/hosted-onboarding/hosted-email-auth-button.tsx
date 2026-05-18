@@ -73,6 +73,7 @@ export function HostedEmailAuthButton({
   const disabled = !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
   const authSession: HostedPrivyClientSessionInput = {
+    authMethod: "email",
     createWallet,
     refreshUser,
     user,

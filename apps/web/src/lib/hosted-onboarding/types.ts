@@ -7,6 +7,14 @@ import type {
   HostedBillingPlanPresentation,
 } from "./billing-plans";
 
+export const HOSTED_PRIVY_AUTH_METHODS = ["phone", "email", "telegram"] as const;
+
+export type HostedPrivyAuthMethod = (typeof HOSTED_PRIVY_AUTH_METHODS)[number];
+
+export function isHostedPrivyAuthMethod(value: unknown): value is HostedPrivyAuthMethod {
+  return HOSTED_PRIVY_AUTH_METHODS.includes(value as HostedPrivyAuthMethod);
+}
+
 export interface HostedInviteStatusPayload {
   billing: {
     defaultPlanCode: HostedBillingPlanCode | null;

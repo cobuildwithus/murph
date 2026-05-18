@@ -97,6 +97,7 @@ describe("hosted onboarding Privy completion route", () => {
       status: createInviteStatus("checkout"),
     });
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      authMethod: "phone",
       identity: {
         phone: {
           number: "+15550000000",
@@ -169,6 +170,26 @@ describe("hosted onboarding Privy completion route", () => {
     }));
   });
 
+  it("passes the selected auth method to completion", async () => {
+    await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "telegram",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      authMethod: "telegram",
+    }));
+  });
+
   it("passes a validated browser timezone to the completion service", async () => {
     await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
@@ -184,6 +205,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      authMethod: "phone",
       timeZone: "America/Los_Angeles",
     }));
   });
@@ -203,6 +225,7 @@ describe("hosted onboarding Privy completion route", () => {
     );
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      authMethod: "phone",
       timeZone: "America/New_York",
     }));
   });

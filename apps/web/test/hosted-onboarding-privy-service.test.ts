@@ -1180,7 +1180,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
-  it("rejects a verified phone that conflicts across two existing hosted members", async () => {
+  it("resolves phone auth by the asserted phone even when a linked wallet points elsewhere", async () => {
     const phoneMember = makeMember({ id: "member_phone" });
     const walletMember = makeMember({
       id: "member_wallet",
@@ -1188,10 +1188,16 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: SECONDARY_PHONE_LOOKUP_KEY,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
     });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_existing",
+      inviteCode: "invite-phone-existing",
+      memberId: phoneMember.id,
+    });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn(),
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
       hostedMember: {
@@ -1224,17 +1230,86 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
+        authMethod: "phone",
         identity: makeIdentity(),
         now: NOW,
         prisma,
       }),
-    ).rejects.toMatchObject({
-      code: "PRIVY_IDENTITY_CONFLICT",
-      httpStatus: 409,
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-existing",
+      memberId: phoneMember.id,
+      stage: "checkout",
     });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        memberId: phoneMember.id,
+      }),
+    }));
+  });
+
+  it("does not block phone auth when a linked Telegram route belongs to another member", async () => {
+    const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_telegram",
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+    });
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            memberId: "member_secondary_telegram_owner",
+          },
+        ]),
+        upsert: vi.fn(),
+      },
+    });
+
+    try {
+      await expect(
+        completeHostedPrivyVerification({
+          authMethod: "phone",
+          identity: makeIdentity({
+            telegram: {
+              firstName: "Alice",
+              lastName: null,
+              photoUrl: null,
+              telegramUserId: "456",
+              username: "alice",
+            },
+          }),
+          now: NOW,
+          prisma,
+        }),
+      ).resolves.toMatchObject({
+        inviteCode: "invite-phone-secondary-telegram",
+        memberId: phoneMember.id,
+        stage: "checkout",
+      });
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted Privy secondary telegram binding sync failed.",
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {

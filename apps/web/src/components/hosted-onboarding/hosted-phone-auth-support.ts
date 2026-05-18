@@ -129,17 +129,17 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
   return typeof value === "string" ? value : null;
 }
 
-export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSessionInput & {
+export async function finalizeHostedPrivyVerification(input: Omit<HostedPrivyClientSessionInput, "authMethod"> & {
   inviteCode?: string | null;
   onAuthCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
+    authMethod: "phone",
     completedUser: input.completedUser,
     createWallet: input.createWallet,
     inviteCode: input.inviteCode,
     refreshUser: input.refreshUser,
-    requirePhone: true,
     user: input.user,
   });
 

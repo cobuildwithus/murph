@@ -239,6 +239,7 @@ describe("hosted onboarding routes", () => {
       "murph-session=session-token; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
     );
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      authMethod: "phone",
       identity: {
         phone: {
           number: "+15551234567",
@@ -290,6 +291,7 @@ describe("hosted onboarding routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      authMethod: "phone",
       identity: {
         phone: {
           number: "+15551234567",
@@ -328,6 +330,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      authMethod: "phone",
       identity: {
         phone: {
           number: "+15551234567",
