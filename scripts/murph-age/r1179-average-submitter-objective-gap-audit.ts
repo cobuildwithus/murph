@@ -1371,7 +1371,8 @@ function routeAppropriateR1178CurrentLoopCommandVisible(
   if (summaryCommand === null || surfacingCommand !== summaryCommand) return false;
   if (summaryCommand === R1176_ROW_OWNER_SAFE_ASSERTION_CHAIN_RUNNER_COMMAND) return false;
   if (rowOwnerActionRouteStatus === "waiting_on_row_owner_feature_only_assertion") {
-    return summaryCommand === R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND;
+    return summaryCommand === R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND
+      || summaryCommand === R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
   }
   if (rowOwnerActionRouteStatus === "feature_only_research_handoff_ready") {
     return summaryCommand === R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND;

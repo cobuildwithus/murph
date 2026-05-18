@@ -1034,7 +1034,7 @@ async function writeInputs(
 }
 
 function r1178Fixture(confirmed: boolean): Record<string, unknown> {
-  const currentLoopCommand = confirmed ? R1164_COMMAND : R1173_COMMAND;
+  const currentLoopCommand = confirmed ? R1164_COMMAND : R1180_COMMAND;
   return {
     artifactBoundary: {
       aggregateOnly: true,

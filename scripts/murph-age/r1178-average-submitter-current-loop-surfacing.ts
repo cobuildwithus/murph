@@ -3,6 +3,17 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
+import {
+  R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND,
+  R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION,
+} from "./r1180-average-submitter-safe-confirmation-response-intake.ts";
+import {
+  R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND,
+} from "./r1181-average-submitter-feature-only-execution-contract.ts";
+import {
+  R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND,
+  R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_SCHEMA_VERSION,
+} from "./r1182-average-submitter-safe-response-handoff.ts";
 
 export const R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION =
   "murph-age-r1178-average-submitter-current-loop-surfacing.v1" as const;
@@ -28,6 +39,8 @@ const R1177_ARTIFACT =
   "r1177-ordinary-consumer-average-submitter-priority-packet.latest.json" as const;
 const R1185_ARTIFACT =
   "r1185-average-submitter-safe-response-smoke-proof.latest.json" as const;
+const R1182_ARTIFACT =
+  "r1182-average-submitter-safe-response-handoff.latest.json" as const;
 const R1076_PACKET_ID = "r1076-current-autoresearch-loop-executor" as const;
 const R1076_SCHEMA_VERSION =
   "murph-age-r1076-current-autoresearch-loop-executor.v1" as const;
@@ -37,6 +50,7 @@ const R1185_PACKET_ID =
   "r1185-average-submitter-safe-response-smoke-proof" as const;
 const R1185_SCHEMA_VERSION =
   "murph-age-r1185-average-submitter-safe-response-smoke-proof.v1" as const;
+const R1182_PACKET_ID = "r1182-average-submitter-safe-response-handoff" as const;
 const TARGET_INPUT_PRIORITY =
   "consumer_bloodwork_labs_wearables_16_50_first" as const;
 const TARGET_AGE_BAND = "roughly_16_50" as const;
@@ -73,6 +87,15 @@ const REQUIRED_SAFE_RESPONSE_FIELD_IDS = [
   "confirm_glycemia_bloodwork_export_available",
   "confirm_daily_wearable_activity_export_available",
   "confirm_no_private_values_in_confirmation",
+] as const;
+const REQUIRED_SAFE_RESPONSE_TEMPLATE_KEYS = [
+  "askId",
+  "confirmDailyWearableActivityExportAvailable",
+  "confirmGlycemiaBloodworkExportAvailable",
+  "confirmNoPrivateValuesIncluded",
+  "confirmTargetAgeBandRoughly16To50",
+  "responseKind",
+  "schemaVersion",
 ] as const;
 const SAFE_RESPONSE_EXECUTION_FEATURE_SLOT_IDS = [
   "glycemia_lab_presence",
@@ -179,6 +202,7 @@ const REQUIRED_ASSERTION_CHECKLIST_IDS = [
   "assert_no_private_values_identifiers_paths_headers_or_rows",
 ] as const;
 const ROW_OWNER_ACTION_IDS = [
+  "fill_r1180_safe_confirmation_response_template",
   "review_r1173_safe_assertion_answer_sheet",
   "review_r1174_safe_next_step_packet",
   "explicitly_run_r1176_live_chain_if_all_safe_assertions_are_true",
@@ -201,6 +225,19 @@ const R1185_NEXT_REAL_ACTIONS = [
   "obtain_real_row_owner_safe_confirmation_then_rerun_r1183",
   "refresh_r1184_safe_response_chain_status",
 ] as const;
+const R1182_CONCLUSIONS = [
+  "average_submitter_safe_response_handoff_ready_for_research_planning_only",
+  "average_submitter_safe_response_handoff_waiting_on_row_owner_confirmation",
+  "average_submitter_safe_response_handoff_waiting_on_r1181_refresh",
+  "average_submitter_safe_response_handoff_rejected_r1180_response_shape",
+] as const;
+const R1182_NEXT_ACTIONS = [
+  "fill_r1180_safe_confirmation_response_template",
+  "refresh_r1181_feature_only_execution_contract",
+  "rerun_r1180_with_valid_safe_confirmation_response",
+  "use_r1181_feature_only_execution_contract_for_research_planning_only",
+  "none",
+] as const;
 
 type MinimumFeaturePairSourceFamilyId =
   (typeof MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS)[number];
@@ -213,6 +250,8 @@ type FirstPassSubmissionPriorityOrderId =
   (typeof FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS)[number];
 type RequiredSafeResponseFieldId =
   (typeof REQUIRED_SAFE_RESPONSE_FIELD_IDS)[number];
+type RequiredSafeResponseTemplateKey =
+  (typeof REQUIRED_SAFE_RESPONSE_TEMPLATE_KEYS)[number];
 type SafeResponseExecutionFeatureSlotId =
   (typeof SAFE_RESPONSE_EXECUTION_FEATURE_SLOT_IDS)[number];
 type FirstSubmitterAskId = (typeof FIRST_SUBMITTER_ASK_IDS)[number];
@@ -232,6 +271,8 @@ type RowOwnerActionId = (typeof ROW_OWNER_ACTION_IDS)[number];
 type R1184Conclusion = (typeof R1184_CONCLUSIONS)[number];
 type R1185Conclusion = (typeof R1185_CONCLUSIONS)[number];
 type R1185NextRealAction = (typeof R1185_NEXT_REAL_ACTIONS)[number];
+type R1182Conclusion = (typeof R1182_CONCLUSIONS)[number];
+type R1182NextAction = (typeof R1182_NEXT_ACTIONS)[number];
 type RowOwnerActionRouteStatus =
   | "feature_only_research_handoff_ready"
   | "waiting_on_current_loop_or_priority_packet"
@@ -375,11 +416,49 @@ interface SafeResponseSmokeProofSummary {
   targetAgeBand: typeof TARGET_AGE_BAND;
 }
 
+interface SafeConfirmationResponseTemplate {
+  askId: "confirm_feature_only_lab_wearable_availability_without_private_values";
+  confirmDailyWearableActivityExportAvailable: false;
+  confirmGlycemiaBloodworkExportAvailable: false;
+  confirmNoPrivateValuesIncluded: false;
+  confirmTargetAgeBandRoughly16To50: false;
+  responseKind: "explicit_yes_all_required_assertions_confirmed";
+  schemaVersion: typeof R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION;
+}
+
+interface SafeResponseHandoffSummary {
+  allowedValueKindIds: AllowedValueKindId[];
+  artifact: typeof R1182_ARTIFACT;
+  blockedContentIds: BlockedContentId[];
+  command: typeof R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND | null;
+  conclusion: R1182Conclusion | null;
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  modelEvidencePromotionAllowed: false;
+  nextAction: R1182NextAction | null;
+  nextActionCommand: string | null;
+  prioritizedInputKindIds: RequiredInputKindId[];
+  productDisplayAuthorized: false;
+  recognized: boolean;
+  requiredAssertionChecklistIds: RequiredAssertionChecklistId[];
+  requiredResponseFieldIds: RequiredSafeResponseFieldId[];
+  responseTemplate: SafeConfirmationResponseTemplate | null;
+  responseTemplateKeyOrder: RequiredSafeResponseTemplateKey[];
+  reviewGptRequiredNow: false;
+  rowLevelDataAcceptedByR1182: boolean | null;
+  rowOwnerConfirmationInferredByR1182: boolean | null;
+  rowOwnerPrivateValuesStored: boolean | null;
+  rowParsingPerformedByR1182: boolean | null;
+  safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
+  sourcePriority: typeof TARGET_INPUT_PRIORITY;
+  targetAgeBand: typeof TARGET_AGE_BAND;
+}
+
 export interface R1178AverageSubmitterCurrentLoopSurfacingOptions {
   createdAt?: string;
   outputDir?: string;
   r1076Path?: string;
   r1177Path?: string;
+  r1182Path?: string;
   r1185Path?: string;
 }
 
@@ -447,6 +526,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1178: false;
     rowOwnerActionRoute: RowOwnerActionRoute;
+    safeResponseHandoff: SafeResponseHandoffSummary;
     safeResponseSmokeProof: SafeResponseSmokeProofSummary;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
@@ -458,6 +538,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
   inputArtifacts: {
     r1076CurrentLoopExecutor: ArtifactSummary;
     r1177AverageSubmitterPriorityPacket: ArtifactSummary;
+    r1182AverageSubmitterSafeResponseHandoff: ArtifactSummary;
     r1185AverageSubmitterSafeResponseSmokeProof: ArtifactSummary;
   };
   packetId: "r1178-average-submitter-current-loop-surfacing";
@@ -493,6 +574,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
     rowOwnerPrivateValuesStored: false;
     rowParsingPerformedByR1178: false;
     rowOwnerActionRoute: RowOwnerActionRoute;
+    safeResponseHandoff: SafeResponseHandoffSummary;
     safeResponseSmokeProof: SafeResponseSmokeProofSummary;
     safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
     sourcePriority: typeof TARGET_INPUT_PRIORITY;
@@ -514,13 +596,17 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     options.r1076Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1076_ARTIFACT);
   const r1177Path =
     options.r1177Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1177_ARTIFACT);
+  const r1182Path =
+    options.r1182Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1182_ARTIFACT);
   const r1185Path =
     options.r1185Path ?? path.join(DEFAULT_MODEL_RUNS_DIR, R1185_ARTIFACT);
   const r1076 = await readJsonIfPresent(r1076Path);
   const r1177 = await readJsonIfPresent(r1177Path);
+  const r1182 = await readJsonIfPresent(r1182Path);
   const r1185 = await readJsonIfPresent(r1185Path);
   validateAggregateSafe("r1076 current loop executor", r1076);
   validateAggregateSafe("r1177 average-submitter priority packet", r1177);
+  validateAggregateSafe("r1182 safe response handoff", r1182);
   validateAggregateSafe("r1185 safe response smoke proof", r1185);
 
   const r1076Ready = matchesR1076CurrentLoop(r1076);
@@ -575,8 +661,12 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
   });
   const averageSubmitterSubmissionPriority =
     buildAverageSubmitterSubmissionPriority();
+  const safeResponseHandoff = safeResponseHandoffFor(r1182);
   const safeResponseSmokeProof = safeResponseSmokeProofFor(r1185);
-  const currentLoopCommand = currentLoopCommandFor(rowOwnerActionRoute);
+  const currentLoopCommand = currentLoopCommandFor(
+    rowOwnerActionRoute,
+    safeResponseHandoff
+  );
   const createdAt = createdAtFor(options.createdAt);
 
   const summary: R1178AverageSubmitterCurrentLoopSurfacingOutput["summary"] = {
@@ -613,6 +703,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     rowOwnerPrivateValuesStored: false,
     rowParsingPerformedByR1178: false,
     rowOwnerActionRoute,
+    safeResponseHandoff,
     safeResponseSmokeProof,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
     sourcePriority: TARGET_INPUT_PRIORITY,
@@ -659,6 +750,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
       rowOwnerPrivateValuesStored: false,
       rowParsingPerformedByR1178: false,
       rowOwnerActionRoute: summary.rowOwnerActionRoute,
+      safeResponseHandoff: summary.safeResponseHandoff,
       safeResponseSmokeProof: summary.safeResponseSmokeProof,
       safeCompletionChecklistItemIds: summary.safeCompletionChecklistItemIds,
       sourcePriority: summary.sourcePriority,
@@ -680,6 +772,13 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
         expectedSchemaVersion:
           R1177_ORDINARY_CONSUMER_AVERAGE_SUBMITTER_PRIORITY_PACKET_SCHEMA_VERSION,
         value: r1177,
+      }),
+      r1182AverageSubmitterSafeResponseHandoff: summarizeArtifact({
+        artifact: R1182_ARTIFACT,
+        expectedPacketId: R1182_PACKET_ID,
+        expectedSchemaVersion:
+          R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_SCHEMA_VERSION,
+        value: r1182,
       }),
       r1185AverageSubmitterSafeResponseSmokeProof: summarizeArtifact({
         artifact: R1185_ARTIFACT,
@@ -991,12 +1090,22 @@ function commandForNextAction(nextAction: SurfacingNextAction): string {
 }
 
 function currentLoopCommandFor(
-  rowOwnerActionRoute: RowOwnerActionRoute
+  rowOwnerActionRoute: RowOwnerActionRoute,
+  safeResponseHandoff: SafeResponseHandoffSummary
 ): string {
   if (
     rowOwnerActionRoute.rowOwnerActionRouteStatus ===
     "waiting_on_row_owner_feature_only_assertion"
   ) {
+    if (
+      safeResponseHandoff.recognized &&
+      safeResponseHandoff.nextAction ===
+        "fill_r1180_safe_confirmation_response_template" &&
+      safeResponseHandoff.nextActionCommand ===
+        R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND
+    ) {
+      return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+    }
     return R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND;
   }
   if (
@@ -1059,6 +1168,245 @@ function buildAverageSubmitterSubmissionPriority(): AverageSubmitterSubmissionPr
     sourcePriority: TARGET_INPUT_PRIORITY,
     targetAgeBand: TARGET_AGE_BAND,
   };
+}
+
+function safeResponseHandoffFor(
+  value: unknown | null
+): SafeResponseHandoffSummary {
+  if (!matchesR1182SafeResponseHandoff(value)) {
+    return {
+      allowedValueKindIds: [],
+      artifact: R1182_ARTIFACT,
+      blockedContentIds: [],
+      command: null,
+      conclusion: null,
+      minimumFeaturePairRequired: [],
+      modelEvidencePromotionAllowed: false,
+      nextAction: null,
+      nextActionCommand: null,
+      prioritizedInputKindIds: [],
+      productDisplayAuthorized: false,
+      recognized: false,
+      requiredAssertionChecklistIds: [],
+      requiredResponseFieldIds: [],
+      responseTemplate: null,
+      responseTemplateKeyOrder: [],
+      reviewGptRequiredNow: false,
+      rowLevelDataAcceptedByR1182: null,
+      rowOwnerConfirmationInferredByR1182: null,
+      rowOwnerPrivateValuesStored: null,
+      rowParsingPerformedByR1182: null,
+      safeCompletionChecklistItemIds: [],
+      sourcePriority: TARGET_INPUT_PRIORITY,
+      targetAgeBand: TARGET_AGE_BAND,
+    };
+  }
+
+  const nextAction = parseAllowedString(
+    readStringAt(value, ["summary", "nextAction"]),
+    R1182_NEXT_ACTIONS
+  );
+  return {
+    allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
+    artifact: R1182_ARTIFACT,
+    blockedContentIds: [...BLOCKED_CONTENT_IDS],
+    command: R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_COMMAND,
+    conclusion: parseAllowedString(
+      readStringAt(value, ["summary", "conclusion"]),
+      R1182_CONCLUSIONS
+    ),
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    modelEvidencePromotionAllowed: false,
+    nextAction,
+    nextActionCommand: commandForR1182NextAction(nextAction),
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    productDisplayAuthorized: false,
+    recognized: true,
+    requiredAssertionChecklistIds: [...REQUIRED_ASSERTION_CHECKLIST_IDS],
+    requiredResponseFieldIds: [...REQUIRED_SAFE_RESPONSE_FIELD_IDS],
+    responseTemplate: buildSafeConfirmationResponseTemplate(),
+    responseTemplateKeyOrder: [...REQUIRED_SAFE_RESPONSE_TEMPLATE_KEYS],
+    reviewGptRequiredNow: false,
+    rowLevelDataAcceptedByR1182: readBooleanAt(value, [
+      "summary",
+      "rowLevelDataAcceptedByR1182",
+    ]),
+    rowOwnerConfirmationInferredByR1182: readBooleanAt(value, [
+      "summary",
+      "rowOwnerConfirmationInferredByR1182",
+    ]),
+    rowOwnerPrivateValuesStored: readBooleanAt(value, [
+      "summary",
+      "rowOwnerPrivateValuesStored",
+    ]),
+    rowParsingPerformedByR1182: readBooleanAt(value, [
+      "summary",
+      "rowParsingPerformedByR1182",
+    ]),
+    safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
+    sourcePriority: TARGET_INPUT_PRIORITY,
+    targetAgeBand: TARGET_AGE_BAND,
+  };
+}
+
+function matchesR1182SafeResponseHandoff(value: unknown | null): boolean {
+  const nextAction = parseAllowedString(
+    readStringAt(value, ["summary", "nextAction"]),
+    R1182_NEXT_ACTIONS
+  );
+  return (
+    readStringAt(value, ["packetId"]) === R1182_PACKET_ID &&
+    readStringAt(value, ["schemaVersion"]) ===
+      R1182_AVERAGE_SUBMITTER_SAFE_RESPONSE_HANDOFF_SCHEMA_VERSION &&
+    readStringAt(value, ["status"]) === "research-local-aggregate-only" &&
+    readBooleanAt(value, ["artifactBoundary", "aggregateOnly"]) === true &&
+    noTrueArtifactBoundaryFlags(value) &&
+    readBooleanAt(value, ["artifactBoundary", "productDisplayAuthorized"]) ===
+      false &&
+    parseAllowedString(
+      readStringAt(value, ["summary", "conclusion"]),
+      R1182_CONCLUSIONS
+    ) !== null &&
+    nextAction !== null &&
+    readStringAt(value, ["summary", "nextActionCommand"]) ===
+      commandForR1182NextAction(nextAction) &&
+    readStringAt(value, ["summary", "sourcePriority"]) ===
+      TARGET_INPUT_PRIORITY &&
+    readStringAt(value, ["summary", "targetAgeBand"]) === TARGET_AGE_BAND &&
+    exactStringSet(
+      readStringArrayAt(value, ["summary", "minimumFeaturePairRequired"]),
+      MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, ["summary", "requiredResponseFieldIds"]),
+      REQUIRED_SAFE_RESPONSE_FIELD_IDS
+    ) &&
+    readStringAt(value, ["summary", "responseTemplateSchemaVersion"]) ===
+      R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION &&
+    readBooleanAt(value, ["summary", "modelEvidencePromotionAllowed"]) ===
+      false &&
+    readBooleanAt(value, ["summary", "productDisplayAuthorized"]) === false &&
+    readBooleanAt(value, ["summary", "reviewGptRequiredNow"]) === false &&
+    readBooleanAt(value, ["summary", "rowLevelDataAcceptedByR1182"]) ===
+      false &&
+    readBooleanAt(value, [
+      "summary",
+      "rowOwnerConfirmationInferredByR1182",
+    ]) === false &&
+    readBooleanAt(value, ["summary", "rowOwnerPrivateValuesStored"]) === false &&
+    readBooleanAt(value, ["summary", "rowParsingPerformedByR1182"]) ===
+      false &&
+    exactStringSet(
+      readStringArrayAt(value, ["safeResponseHandoff", "allowedValueKindIds"]),
+      ALLOWED_VALUE_KIND_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, ["safeResponseHandoff", "blockedContentIds"]),
+      BLOCKED_CONTENT_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, [
+        "safeResponseHandoff",
+        "minimumFeaturePairRequired",
+      ]),
+      MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, ["safeResponseHandoff", "prioritizedInputKindIds"]),
+      REQUIRED_INPUT_KIND_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, [
+        "safeResponseHandoff",
+        "requiredAssertionChecklistIds",
+      ]),
+      REQUIRED_ASSERTION_CHECKLIST_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, ["safeResponseHandoff", "requiredResponseFieldIds"]),
+      REQUIRED_SAFE_RESPONSE_FIELD_IDS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, ["safeResponseHandoff", "responseTemplateKeyOrder"]),
+      REQUIRED_SAFE_RESPONSE_TEMPLATE_KEYS
+    ) &&
+    exactStringSet(
+      readStringArrayAt(value, [
+        "safeResponseHandoff",
+        "safeCompletionChecklistItemIds",
+      ]),
+      SAFE_COMPLETION_CHECKLIST_ITEM_IDS
+    ) &&
+    readBooleanAt(value, [
+      "safeResponseHandoff",
+      "modelEvidencePromotionAllowed",
+    ]) === false &&
+    readBooleanAt(value, ["safeResponseHandoff", "productDisplayAuthorized"]) ===
+      false &&
+    readBooleanAt(value, ["safeResponseHandoff", "reviewGptRequiredNow"]) ===
+      false &&
+    readBooleanAt(value, [
+      "safeResponseHandoff",
+      "rowLevelDataAcceptedByR1182",
+    ]) === false &&
+    readBooleanAt(value, [
+      "safeResponseHandoff",
+      "rowOwnerConfirmationInferredByR1182",
+    ]) === false &&
+    readBooleanAt(value, [
+      "safeResponseHandoff",
+      "rowOwnerPrivateValuesStored",
+    ]) === false &&
+    readBooleanAt(value, [
+      "safeResponseHandoff",
+      "rowParsingPerformedByR1182",
+    ]) === false &&
+    matchesSafeConfirmationResponseTemplate(
+      readAt(value, ["safeResponseHandoff", "responseTemplate"])
+    )
+  );
+}
+
+function matchesSafeConfirmationResponseTemplate(value: unknown): boolean {
+  return (
+    readStringAt(value, ["askId"]) ===
+      "confirm_feature_only_lab_wearable_availability_without_private_values" &&
+    readBooleanAt(value, ["confirmDailyWearableActivityExportAvailable"]) ===
+      false &&
+    readBooleanAt(value, ["confirmGlycemiaBloodworkExportAvailable"]) ===
+      false &&
+    readBooleanAt(value, ["confirmNoPrivateValuesIncluded"]) === false &&
+    readBooleanAt(value, ["confirmTargetAgeBandRoughly16To50"]) === false &&
+    readStringAt(value, ["responseKind"]) ===
+      "explicit_yes_all_required_assertions_confirmed" &&
+    readStringAt(value, ["schemaVersion"]) ===
+      R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION
+  );
+}
+
+function buildSafeConfirmationResponseTemplate(): SafeConfirmationResponseTemplate {
+  return {
+    askId: "confirm_feature_only_lab_wearable_availability_without_private_values",
+    confirmDailyWearableActivityExportAvailable: false,
+    confirmGlycemiaBloodworkExportAvailable: false,
+    confirmNoPrivateValuesIncluded: false,
+    confirmTargetAgeBandRoughly16To50: false,
+    responseKind: "explicit_yes_all_required_assertions_confirmed",
+    schemaVersion: R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION,
+  };
+}
+
+function commandForR1182NextAction(nextAction: R1182NextAction | null): string | null {
+  if (
+    nextAction === "fill_r1180_safe_confirmation_response_template" ||
+    nextAction === "rerun_r1180_with_valid_safe_confirmation_response"
+  ) {
+    return R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND;
+  }
+  if (nextAction === "refresh_r1181_feature_only_execution_contract") {
+    return R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND;
+  }
+  return null;
 }
 
 function safeResponseSmokeProofFor(
@@ -1320,11 +1668,17 @@ function firstRunnableRowOwnerActionIdFor(
   if (status === "feature_only_research_handoff_ready") {
     return "run_r1164_feature_only_research_handoff_after_minimum_pair_confirmed";
   }
-  return "review_r1173_safe_assertion_answer_sheet";
+  return "fill_r1180_safe_confirmation_response_template";
 }
 
 function rowOwnerOnlyActionsFor(): RowOwnerOnlyAction[] {
   return [
+    {
+      actionId: "fill_r1180_safe_confirmation_response_template",
+      command: R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND,
+      rowOwnerOnly: true,
+      storesPrivateDetailsInPacket: false,
+    },
     {
       actionId: "review_r1173_safe_assertion_answer_sheet",
       command: R1173_SAFE_ASSERTION_ANSWER_SHEET_COMMAND,
@@ -1564,6 +1918,14 @@ function cliSummary(
       output.summary.rowOwnerActionRoute.firstRunnableActionId,
     rowOwnerPrivateValuesStored: output.summary.rowOwnerPrivateValuesStored,
     rowParsingPerformedByR1178: output.summary.rowParsingPerformedByR1178,
+    safeResponseHandoffConclusion:
+      output.summary.safeResponseHandoff.conclusion,
+    safeResponseHandoffNextAction:
+      output.summary.safeResponseHandoff.nextAction,
+    safeResponseHandoffNextActionCommand:
+      output.summary.safeResponseHandoff.nextActionCommand,
+    safeResponseHandoffRecognized:
+      output.summary.safeResponseHandoff.recognized,
     safeResponseSmokeProofConclusion:
       output.summary.safeResponseSmokeProof.conclusion,
     safeResponseSmokeProofNextRealAction:
@@ -1591,6 +1953,8 @@ async function main(): Promise<void> {
       process.env.MURPH_AGE_R1076_CURRENT_AUTORESEARCH_LOOP_EXECUTOR_PATH,
     r1177Path:
       process.env.MURPH_AGE_R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_PATH,
+    r1182Path:
+      process.env.MURPH_AGE_R1182_SAFE_RESPONSE_HANDOFF_PATH,
     r1185Path:
       process.env.MURPH_AGE_R1185_AVERAGE_SUBMITTER_SAFE_RESPONSE_SMOKE_PROOF_PATH,
   });
@@ -1625,6 +1989,6 @@ function isAllowlistedR1178ErrorMessage(message: string): boolean {
   return [
     /^R1178 rejected invalid createdAt timestamp\.$/u,
     /^R1178 rejected current-loop surfacing packet with output path leakage\.$/u,
-    /^R1178 rejected unsafe (?:r1076 current loop executor|r1177 average-submitter priority packet|r1185 safe response smoke proof|r1178 average submitter current-loop surfacing): \d+ findings?$/u,
+    /^R1178 rejected unsafe (?:r1076 current loop executor|r1177 average-submitter priority packet|r1182 safe response handoff|r1185 safe response smoke proof|r1178 average submitter current-loop surfacing): \d+ findings?$/u,
   ].some((pattern) => pattern.test(message));
 }
