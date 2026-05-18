@@ -344,6 +344,15 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(midus?.featureFamilies.includes("labs"), true);
   assert.equal(resolveMurphAgeSourceRoute("unknown-route"), null);
 
+  const cardia = resolveMurphAgeSourceRoute("cardia-biomarker-activity");
+  assert.equal(cardia?.activationStatus, "terms-activation-required");
+  assert.equal(cardia?.layers.includes("biomarker-increment"), true);
+  assert.equal(cardia?.layers.includes("wearable-shadow-increment"), true);
+  assert.equal(cardia?.layers.includes("transport-validation"), true);
+  assert.equal(cardia?.featureFamilies.includes("activity"), true);
+  assert.equal(cardia?.featureFamilies.includes("labs"), true);
+  assert.equal(cardia?.productAuthorized, false);
+
   const hchsSol = resolveMurphAgeSourceRoute("hchs-sol-biomarker-activity");
   assert.equal(hchsSol?.activationStatus, "terms-activation-required");
   assert.equal(hchsSol?.layers.includes("biomarker-increment"), true);
@@ -364,6 +373,7 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
 
   const wearableRoutes = listMurphAgeSourceRoutesByLayer("wearable-shadow-increment");
   assert.equal(wearableRoutes.some((route) => route.routeId === "nhanes-activity-shadow-lmf"), true);
+  assert.equal(wearableRoutes.some((route) => route.routeId === "cardia-biomarker-activity"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "hchs-sol-biomarker-activity"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "all-of-us-fitbit-labs-ehr"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-shhs-sleep-heart-health"), true);
@@ -383,7 +393,12 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(priorityRoutes.some((route) => route.activationStatus === "historical-reference"), false);
   assert.equal(priorityRoutes[0]?.routeId, "nhis-r399-outcome-anchor");
   assert.equal(priorityRoutes[1]?.routeId, "nhanes-activity-shadow-lmf");
-  assert.equal(priorityRoutes[2]?.routeId, "hchs-sol-biomarker-activity");
+  assert.equal(priorityRoutes[2]?.routeId, "cardia-biomarker-activity");
+  assert.equal(priorityRoutes[3]?.routeId, "hchs-sol-biomarker-activity");
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "hchs-sol-biomarker-activity")
+      > priorityRoutes.findIndex((route) => route.routeId === "cardia-biomarker-activity"),
+  );
   assert.ok(
     priorityRoutes.findIndex((route) => route.routeId === "all-of-us-fitbit-labs-ehr")
       > priorityRoutes.findIndex((route) => route.routeId === "hchs-sol-biomarker-activity"),
@@ -493,6 +508,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(clinical?.modelCardIds.includes("lab5_bp_bmi_transport_research"), true);
   assert.equal(clinical?.sourceRouteIds.includes("midus-biomarker-mortality"), true);
   assert.equal(clinical?.sourceRouteIds.includes("creles-transport-stress"), true);
+  assert.equal(clinical?.sourceRouteIds.includes("cardia-biomarker-activity"), true);
   assert.equal(clinical?.sourceRouteIds.includes("hchs-sol-biomarker-activity"), true);
   assert.equal(clinical?.candidateMetricKeys.includes("hba1c"), true);
   assert.equal(clinical?.candidateMetricKeys.includes("egfr"), true);
@@ -511,6 +527,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(wearable?.scoreBearing, false);
   assert.equal(wearable?.scoreContributionAuthorized, false);
   assert.equal(wearable?.sourceRouteIds.includes("nhanes-activity-shadow-lmf"), true);
+  assert.equal(wearable?.sourceRouteIds.includes("cardia-biomarker-activity"), true);
   assert.equal(wearable?.sourceRouteIds.includes("hchs-sol-biomarker-activity"), true);
   assert.equal(wearable?.sourceRouteIds.includes("nsrr-shhs-sleep-heart-health"), true);
   assert.equal(wearable?.sourceRouteIds.includes("nsrr-hchs-sol-sleep-actigraphy"), true);
@@ -525,6 +542,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(validation?.mode, "validation-only");
   assert.equal(validation?.scoreBearing, false);
   assert.equal(validation?.sourceRouteIds.includes("partner-aggregate-evaluator"), true);
+  assert.equal(validation?.sourceRouteIds.includes("cardia-biomarker-activity"), true);
   assert.equal(validation?.sourceRouteIds.includes("hchs-sol-biomarker-activity"), true);
   assert.equal(validation?.sourceRouteIds.includes("nsrr-shhs-sleep-heart-health"), true);
   assert.equal(validation?.sourceRouteIds.includes("nsrr-hchs-sol-sleep-actigraphy"), true);

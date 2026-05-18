@@ -5,6 +5,7 @@ export const MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION =
 
 export type MurphAgeSourceRouteId =
   | "all-of-us-fitbit-labs-ehr"
+  | "cardia-biomarker-activity"
   | "creles-transport-stress"
   | "haalsi-transport-stress"
   | "hchs-sol-biomarker-activity"
@@ -196,6 +197,30 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 20,
     routeId: "nhanes-activity-shadow-lmf",
     sourceFamily: "NHANES linked mortality",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "young-adult-to-midlife lab and activity aggregate receipt design",
+      "lab/body plus activity age-band calibration stress",
+      "consumer-submitter feature-family coverage stress",
+    ],
+    blockedCurrentUses: [
+      "row parsing before activation",
+      "treating questionnaire activity as consumer wearable validation",
+      "score-bearing product use",
+    ],
+    displayName: "CARDIA biomarker and activity route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "biomarker-increment", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Fill activation labels and aggregate receipt requirements for young-adult-to-midlife lab, vitals, activity, and follow-up overlap before any benchmark card.",
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 21,
+    routeId: "cardia-biomarker-activity",
+    sourceFamily: "CARDIA BioLINCC",
   },
   {
     accessMode: "free-registered",
