@@ -770,6 +770,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       status: 401,
       statusCode: 401,
     });
+    expect(rejectedError).toBeInstanceOf(Error);
+    expect((rejectedError as Error).message).toContain(
+      "Hosted raw email read failed with HTTP 401.",
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -2122,6 +2126,68 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ),
     );
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it("reports artifact upload authority rejection with artifact operation metadata", async () => {
+    const artifactSha = "a".repeat(64);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: "Unauthorized",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 401,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    let rejectedError: unknown;
+    try {
+      await platform.artifactStore.put({
+        bytes: new Uint8Array([1, 2, 3]),
+        sha256: artifactSha,
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
+
+    expect(rejectedError).toMatchObject({
+      code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+      reason: "internal_authority_rejected",
+      status: 401,
+    });
+    expect(rejectedError).toBeInstanceOf(Error);
+    expect((rejectedError as Error).message).toContain(
+      "Hosted artifact upload failed with HTTP 401.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requireFetchRequest(fetchMock.mock.calls[0], "artifact upload").url).toBe(
+      `http://artifacts.worker/objects/${artifactSha}`,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        details: expect.objectContaining({
+          hostKind: "artifact_store",
+          method: "PUT",
+          operation: "artifact_upload",
+          path: "/objects/REDACTED",
+          responseStatus: 401,
+        }),
+        level: "warn",
+        message: "Hosted runtime internal authority rejected invocation.",
+      }),
+    );
   });
 
   it("shares concurrent same-SHA artifact uploads with the in-flight request", async () => {

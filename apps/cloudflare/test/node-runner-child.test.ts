@@ -30,6 +30,9 @@ import {
 import {
   runHostedExecutionChild,
 } from "../src/node-runner-child.ts";
+import {
+  HostedRuntimeInternalAuthorityRejectedError,
+} from "../src/runtime-platform.ts";
 import type {
   HostedExecutionRunnerChildResult,
 } from "../src/runner-job-transport.ts";
@@ -693,6 +696,51 @@ describe("runHostedExecutionChild", () => {
       childRuntimeErrorStatus: 404,
       childRuntimeFailureKind: "control_plane_http",
       childRuntimeHttpOperation: "artifact_fetch",
+      childRuntimeStage: "runtime.in-process",
+    });
+  });
+
+  it("classifies stale artifact upload authority failures by fixed operation", async () => {
+    const sendResult = vi.fn();
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw new HostedRuntimeInternalAuthorityRejectedError({
+        description: "Hosted artifact upload",
+        status: 401,
+      });
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_artifact_upload_stale",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      sendResult,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(sendResult.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toMatchObject({
+      childRuntimeErrorCode: "authorization_error",
+      childRuntimeErrorName: "HostedRuntimeInternalAuthorityRejectedError",
+      childRuntimeErrorStatus: 401,
+      childRuntimeFailureKind: "stale_invocation_authority",
+      childRuntimeHttpOperation: "artifact_upload",
       childRuntimeStage: "runtime.in-process",
     });
   });

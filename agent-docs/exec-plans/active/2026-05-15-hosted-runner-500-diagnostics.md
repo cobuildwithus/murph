@@ -106,6 +106,9 @@ runtime phase boundaries.
 - `pnpm --dir apps/cloudflare test:node test/runner-platform.test.ts test/runner-outbound.test.ts test/user-runner-alarm.test.ts` passed after coverage-write and review updates.
 - `pnpm --dir apps/cloudflare typecheck` passed after coverage-write and review updates.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/src/runtime-platform.ts apps/cloudflare/src/runner-outbound.ts apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/runner-outbound.test.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-runner-500-diagnostics.md` passed after coverage-write and review updates.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runner-platform.test.ts apps/cloudflare/test/node-runner-child.test.ts apps/cloudflare/test/user-runner-alarm.test.ts apps/cloudflare/test/runner-outbound.test.ts` passed after the internal authority 401 operation-classification fix.
+- `pnpm --dir apps/cloudflare typecheck` passed after the internal authority 401 operation-classification fix.
+- `pnpm typecheck` passed after the internal authority 401 operation-classification fix.
 
 ## State
 
@@ -234,3 +237,13 @@ runtime phase boundaries.
   artifact GET/PUT paths. PUT handling also logs write-fence validation, request
   body read, and artifact write boundaries with duration and byte-count metadata
   only.
+- Production evidence from the 2026-05-18 18:28 UTC Linq incident showed the
+  primary checkpoint failure was an artifact PUT write-fence 401. Later retry
+  attempts produced workspace-read 404s, which made the root failure look like a
+  404 when reading only the latest child-runtime summary.
+- Internal authority 401/403 errors now preserve fixed operation descriptions,
+  so artifact PUT authorization failures classify as `artifact_upload` plus
+  `stale_invocation_authority` instead of a generic internal request.
+- Runtime write-fence validation rejection logs now add fixed reject-reason and
+  match booleans so the next artifact 401 can identify the stale-fence component
+  without logging attempt ids, user ids, workspace versions, paths, or bodies.

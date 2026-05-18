@@ -49,6 +49,11 @@ import {
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import {
+  readHostedRunnerDiagnosticMethod,
+  readHostedRunnerInternalHostKind,
+  readHostedRunnerInternalOperation,
+} from "./runner-outbound/diagnostics.ts";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -182,8 +187,8 @@ export class HostedRuntimeInternalAuthorityRejectedError extends Error {
     status: number;
   }) {
     super(
-      `Hosted invocation is stale: ${HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON}. `
-      + `${input.description} returned HTTP ${input.status}.`,
+      `${input.description} failed with HTTP ${input.status}. `
+      + `Hosted invocation is stale: ${HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON}.`,
     );
     this.name = "HostedRuntimeInternalAuthorityRejectedError";
     this.responseStatus = input.status;
@@ -943,12 +948,20 @@ function createCloudflareHostedInternalFetch(
     }
     const internalRequest = createHostedInternalRequest(request, headers);
     const shouldLogInternalRequest = true;
+    const operation = readHostedRunnerInternalOperation({
+      hostname: url.hostname,
+      method: internalRequest.method,
+      pathname: url.pathname,
+    });
+    const safePath = readHostedRuntimeInternalRequestLogPath(url);
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
       host: url.hostname,
-      method: internalRequest.method,
-      path: url.pathname,
-      userId: boundUserId,
+      hostKind: readHostedRunnerInternalHostKind(url.hostname),
+      method: readHostedRunnerDiagnosticMethod(internalRequest.method),
+      operation,
+      path: safePath,
+      userIdPresent: boundUserId.length > 0,
     };
 
     if (shouldLogInternalRequest) {
@@ -978,7 +991,12 @@ function createCloudflareHostedInternalFetch(
       }
       if (isInternalAuthorityRejectedStatus(response.status)) {
         const error = new HostedRuntimeInternalAuthorityRejectedError({
-          description: `Hosted runtime internal request to ${url.hostname}${url.pathname}`,
+          description: readHostedRuntimeInternalRequestDescription({
+            hostname: url.hostname,
+            method: internalRequest.method,
+            operation,
+            pathname: url.pathname,
+          }),
           status: response.status,
         });
         emitHostedExecutionStructuredLog({
@@ -1047,6 +1065,86 @@ export function createCloudflareHostedProviderFetch(
 
 function isInternalAuthorityRejectedStatus(status: number): boolean {
   return status === 401 || status === 403;
+}
+
+const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
+  artifact_fetch: "Hosted artifact fetch",
+  artifact_upload: "Hosted artifact upload",
+  assistant_runtime_issue_export: "Hosted assistant runtime issue export",
+  browser_vault_replica_publish: "Hosted browser-vault replica publish",
+  browser_vault_replica_write: "Hosted browser-vault replica write",
+  device_sync_connect_link: "Hosted device-sync connect link",
+  device_sync_dirty_ack: "Hosted device-sync dirty ack",
+  device_sync_pending_dirty_state: "Hosted device-sync pending dirty state",
+  device_sync_runtime_apply: "Hosted device-sync runtime apply",
+  device_sync_runtime_snapshot: "Hosted device-sync runtime snapshot",
+  mailbox_fetch: "Hosted mailbox fetch",
+  mailbox_payload_decode: "Hosted mailbox payload decode",
+  mailbox_payload_fetch: "Hosted mailbox payload fetch",
+  runtime_log_write: "Hosted runtime log write",
+  usage_recording: "Hosted usage recording",
+  workspace_checkpoint: "Hosted workspace checkpoint",
+  workspace_read: "Hosted workspace read",
+};
+
+function readHostedRuntimeInternalRequestDescription(input: {
+  hostname: string;
+  method: string;
+  operation: string;
+  pathname: string;
+}): string {
+  const fixedDescription =
+    HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS[input.operation];
+  if (fixedDescription) {
+    return fixedDescription;
+  }
+
+  if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    if (
+      input.method === "POST"
+      && input.pathname === HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH
+    ) {
+      return "Hosted email send";
+    }
+
+    if (input.method === "GET" && /^\/messages\/[^/]+$/u.test(input.pathname)) {
+      return "Hosted raw email read";
+    }
+
+    if (
+      input.method === "POST"
+      && input.pathname === HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH
+    ) {
+      return "Hosted Telegram file download";
+    }
+
+    if (
+      input.method === "POST"
+      && input.pathname === HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH
+    ) {
+      return "Hosted Telegram file lookup";
+    }
+  }
+
+  return `Hosted runtime internal request to ${input.hostname}${input.pathname}`;
+}
+
+function readHostedRuntimeInternalRequestLogPath(url: URL): string {
+  if (
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore
+    && /^\/objects\/[a-f0-9]{64}$/u.test(url.pathname)
+  ) {
+    return "/objects/REDACTED";
+  }
+
+  if (
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort
+    && /^\/messages\/[^/]+$/u.test(url.pathname)
+  ) {
+    return "/messages/REDACTED";
+  }
+
+  return url.pathname;
 }
 
 function createHostedInternalRequest(

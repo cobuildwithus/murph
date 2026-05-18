@@ -380,7 +380,24 @@ export class HostedUserRunner {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean> {
-    return (await this.stateStore.validateWriteFenceToken(input)).owns;
+    const validation = await this.stateStore.validateWriteFenceToken(input);
+    if (!validation.owns) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildRunnerWriteFenceValidationRejectedDetails({
+          attemptId: input.attemptId,
+          generation: input.generation,
+          record: validation.record,
+          userId: input.userId,
+          workspaceVersion: input.workspaceVersion,
+        }),
+        level: "warn",
+        message: "Hosted runner runtime write fence validation rejected.",
+        phase: "wake.running",
+        userId: input.userId,
+      });
+    }
+    return validation.owns;
   }
 
   async beginRuntimeWriteFenceForSmoke(input: {
@@ -2324,6 +2341,72 @@ function buildRunnerRecordTimingLogDetails(
     runtimeDuePresent: runtimeDueAt !== null,
     wakePending: record.wakePending,
   };
+}
+
+function buildRunnerWriteFenceValidationRejectedDetails(input: {
+  attemptId: string;
+  generation: string;
+  record: RunnerStateRecord;
+  userId: string;
+  workspaceVersion?: string | null;
+}): HostedExecutionStructuredLogDetails {
+  const writeFence = input.record.writeFence;
+  const requestWorkspaceVersionPresent =
+    input.workspaceVersion !== undefined && input.workspaceVersion !== null;
+  const writeFenceAttemptMatches = writeFence !== null
+    && writeFence.attemptId === input.attemptId;
+  const writeFenceGenerationMatches = writeFence !== null
+    && String(writeFence.generation) === input.generation;
+  const writeFenceUserMatches = input.record.userId === input.userId;
+  const writeFenceWorkspaceVersionMatches =
+    !requestWorkspaceVersionPresent
+    || (
+      writeFence !== null
+      && writeFence.workspaceVersion === input.workspaceVersion
+    );
+
+  return {
+    activeWriteFencePresent: writeFence !== null,
+    activeWriteFenceWorkspaceVersionPresent: writeFence?.workspaceVersion !== null
+      && writeFence?.workspaceVersion !== undefined,
+    requestWorkspaceVersionPresent,
+    writeFenceAttemptMatches,
+    writeFenceGenerationMatches,
+    writeFenceUserMatches,
+    writeFenceValidationRejectReason: readRunnerWriteFenceValidationRejectReason({
+      writeFenceAttemptMatches,
+      writeFenceGenerationMatches,
+      writeFencePresent: writeFence !== null,
+      writeFenceUserMatches,
+      writeFenceWorkspaceVersionMatches,
+    }),
+    writeFenceWorkspaceVersionMatches,
+  };
+}
+
+function readRunnerWriteFenceValidationRejectReason(input: {
+  writeFenceAttemptMatches: boolean;
+  writeFenceGenerationMatches: boolean;
+  writeFencePresent: boolean;
+  writeFenceUserMatches: boolean;
+  writeFenceWorkspaceVersionMatches: boolean;
+}): string {
+  if (!input.writeFencePresent) {
+    return "no_active_write_fence";
+  }
+  if (!input.writeFenceAttemptMatches) {
+    return "attempt_mismatch";
+  }
+  if (!input.writeFenceGenerationMatches) {
+    return "generation_mismatch";
+  }
+  if (!input.writeFenceUserMatches) {
+    return "user_mismatch";
+  }
+  if (!input.writeFenceWorkspaceVersionMatches) {
+    return "workspace_version_mismatch";
+  }
+  return "unknown";
 }
 
 function readEnsureRunnerProgressContainerResult(

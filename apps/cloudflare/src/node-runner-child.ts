@@ -609,7 +609,10 @@ function readHostedExecutionRuntimeHttpDescription(message: string): string | nu
 }
 
 function readHostedExecutionRuntimeHttpStatusDescription(message: string): string | null {
-  const match = /^(.+?) failed with HTTP \d{3}\./u.exec(message);
+  const match =
+    /^(.+?) failed with HTTP \d{3}\./u.exec(message)
+    ?? /^Hosted invocation is stale: [^.]+\. (.+?) returned HTTP \d{3}\./u.exec(message)
+    ?? /^(.+?) returned HTTP \d{3}\./u.exec(message);
   return match?.[1] ?? null;
 }
 
