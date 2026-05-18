@@ -3,15 +3,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { findForbiddenAggregateEgress } from "./midus2-local-benchmark.ts";
-import {
-  R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_COMMAND,
-  R1177_ORDINARY_CONSUMER_AVERAGE_SUBMITTER_PRIORITY_PACKET_SCHEMA_VERSION,
-} from "./r1177-ordinary-consumer-average-submitter-priority-packet.ts";
-
 export const R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION =
   "murph-age-r1178-average-submitter-current-loop-surfacing.v1" as const;
 export const R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1178-average-submitter-current-loop-surfacing.ts" as const;
+const R1177_ORDINARY_CONSUMER_AVERAGE_SUBMITTER_PRIORITY_PACKET_SCHEMA_VERSION =
+  "murph-age-r1177-ordinary-consumer-average-submitter-priority-packet.v1" as const;
+const R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1177-ordinary-consumer-average-submitter-priority-packet.ts" as const;
 
 const DEFAULT_MODEL_RUNS_DIR = path.join(
   ".runtime",
