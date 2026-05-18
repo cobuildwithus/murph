@@ -10,7 +10,6 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  assessBrowserVaultReplicaFreshness,
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   type HostedExecutionStructuredLogDetails,
@@ -92,7 +91,7 @@ type RunnerProgressSnapshot = {
         kind: "mailbox-backlog";
         mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"];
       }
-    | { kind: "assistant-wake"; wakeAt: string }
+    | { kind: "assistant-wake"; source: "runner" | "workspace"; wakeAt: string }
     | { kind: "browser-vault-refresh" }
     | { kind: "idle"; nextWakeAt: string | null };
   record: RunnerStateRecord;
@@ -358,6 +357,7 @@ export class HostedUserRunner {
 
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     await this.stateStore.bindUser(input.userId);
+    await this.stateStore.markBrowserVaultRefreshRequested();
     const progress = await this.ensureRunnerProgress({
       reason: "browser_vault_refresh",
     });
@@ -575,6 +575,7 @@ export class HostedUserRunner {
     snapshot = { ...snapshot, record };
     if (
       demand?.kind === "assistant-wake"
+      && demand.source === "runner"
       && isRunnerRetryCapRecoveryProbeDue(record, this.env.maxEventAttempts)
     ) {
       const caughtUp = await this.clearRetryCapProbeAndSyncIdleAlarm(snapshot);
@@ -749,11 +750,13 @@ export class HostedUserRunner {
     await this.syncAlarmAt(initialAlarmAt);
     const localEnsureInFlight = this.kickLocalEnsure({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      reason: resolveRunnerProgressReason({
-        demand,
-        record,
-        requestedReason: input.reason,
-      }),
+      reason: input.reason === "browser_vault_refresh"
+        ? "browser_vault_refresh"
+        : resolveRunnerProgressReason({
+            demand,
+            record,
+            requestedReason: input.reason,
+          }),
     });
     return finish({
       containerResult: null,
@@ -766,9 +769,11 @@ export class HostedUserRunner {
   }
 
   private async readProgressSnapshot(input: {
+    ignoredWorkspaceWakeAt?: string | null;
     includeBrowserVaultRefresh?: boolean;
   } = {}): Promise<RunnerProgressSnapshot> {
-    const due = await this.stateStore.readDueWork(Date.now());
+    const nowMs = Date.now();
+    const due = await this.stateStore.readDueWork(nowMs);
     const webStatus = await this.readMailboxBacklogStatus(due.record);
 
     if (hasMailboxBacklog(webStatus.mailboxLag)) {
@@ -782,10 +787,34 @@ export class HostedUserRunner {
       };
     }
 
+    const workspaceWakeAt = readDueWorkspaceWakeAt(
+      webStatus.workspace?.nextWakeAt ?? null,
+      nowMs,
+    );
+    if (
+      workspaceWakeAt
+      && workspaceWakeAt !== input.ignoredWorkspaceWakeAt
+      && (
+        due.kind !== "runtime"
+        || isRunnerRetryCapRecoveryProbeDue(due.record, this.env.maxEventAttempts)
+      )
+    ) {
+      return {
+        durableDemand: {
+          kind: "assistant-wake",
+          source: "workspace",
+          wakeAt: workspaceWakeAt,
+        },
+        record: due.record,
+        webStatus,
+      };
+    }
+
     if (due.kind === "runtime") {
       return {
         durableDemand: {
           kind: "assistant-wake",
+          source: "runner",
           wakeAt: readRunnerRuntimeDueAt(due.record)
             ?? due.record.wakeAt
             ?? new Date().toISOString(),
@@ -796,8 +825,11 @@ export class HostedUserRunner {
     }
 
     if (
-      input.includeBrowserVaultRefresh === true
-      && shouldRefreshBrowserVaultFromWebStatus(webStatus)
+      webStatus.workspace
+      && (
+        input.includeBrowserVaultRefresh === true
+        || due.record.browserVaultRefreshRequestedAt !== null
+      )
     ) {
       return {
         durableDemand: { kind: "browser-vault-refresh" },
@@ -1138,11 +1170,13 @@ export class HostedUserRunner {
       nextWakeAt: null,
       status: "idle",
     };
+    let ignoredWorkspaceWakeAt: string | null = null;
 
     while (true) {
       loopIteration += 1;
       const demandReadStartedAt = Date.now();
       const snapshot = await this.readProgressSnapshot({
+        ignoredWorkspaceWakeAt,
         includeBrowserVaultRefresh: input.reason === "browser_vault_refresh",
       });
       const demand = readRunnerProgressDemand(snapshot);
@@ -1168,6 +1202,7 @@ export class HostedUserRunner {
 
       if (
         demand?.kind === "assistant-wake"
+        && demand.source === "runner"
         && isRunnerRetryCapRecoveryProbeDue(record, this.env.maxEventAttempts)
       ) {
         const caughtUp = await this.clearRetryCapProbeAndSyncIdleAlarm(snapshot);
@@ -1330,7 +1365,23 @@ export class HostedUserRunner {
         phase: "checkpoint",
         userId: null,
       });
+      if (demand.kind === "assistant-wake") {
+        if (demand.source === "workspace") {
+          ignoredWorkspaceWakeAt = demand.wakeAt;
+        } else {
+          ignoredWorkspaceWakeAt = readDueWorkspaceWakeAt(
+            snapshot.webStatus.workspace?.nextWakeAt ?? null,
+            demandReadStartedAt,
+          );
+        }
+      } else {
+        ignoredWorkspaceWakeAt = readDueWorkspaceWakeAt(
+          snapshot.webStatus.workspace?.nextWakeAt ?? null,
+          demandReadStartedAt,
+        );
+      }
       if (runtimeReason === "browser_vault_refresh") {
+        await this.stateStore.clearBrowserVaultRefreshRequested();
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
           details: {
@@ -2310,17 +2361,15 @@ function hasMailboxBacklog(
   return false;
 }
 
-function shouldRefreshBrowserVaultFromWebStatus(
-  webStatus: HostedRuntimeWebStatusResponse,
-): boolean {
-  if (!webStatus.workspace) {
-    return false;
+function readDueWorkspaceWakeAt(value: string | null, nowMs: number): string | null {
+  if (!value) {
+    return null;
   }
-  return assessBrowserVaultReplicaFreshness({
-    checkpointedAt: webStatus.workspace.checkpointedAt ?? null,
-    now: new Date().toISOString(),
-    replicaRef: webStatus.workspace.browserVaultReplicaRef ?? null,
-  }).shouldRefresh;
+  const parsedMs = Date.parse(value);
+  if (!Number.isFinite(parsedMs) || parsedMs > nowMs) {
+    return null;
+  }
+  return new Date(parsedMs).toISOString();
 }
 
 function readRunnerProgressDemand(

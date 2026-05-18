@@ -1,6 +1,6 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 9;
+const RUNNER_STATE_SCHEMA_VERSION = 10;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -21,6 +21,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       active_expires_at TEXT,
       active_workspace_version TEXT,
       backoff_until TEXT,
+      browser_vault_refresh_requested_at TEXT,
       failure_count INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
@@ -38,6 +39,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     active_expires_at: "TEXT",
     active_workspace_version: "TEXT",
     backoff_until: "TEXT",
+    browser_vault_refresh_requested_at: "TEXT",
     failure_count: "INTEGER NOT NULL DEFAULT 0",
     last_error_at: "TEXT",
     last_error_code: "TEXT",
@@ -61,6 +63,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "active_expires_at",
       "active_workspace_version",
       "backoff_until",
+      "browser_vault_refresh_requested_at",
       "failure_count",
       "last_error_at",
       "last_error_code",

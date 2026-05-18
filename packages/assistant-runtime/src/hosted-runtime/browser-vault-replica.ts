@@ -133,7 +133,6 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
 export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input: {
   generatedAt: string;
   platform: HostedRuntimePlatform;
-  sourceStateHash: string;
   vaultRoot: string;
   workspace: HostedWorkspaceState | null;
 }): Promise<HostedBrowserVaultReplicaRefreshPreparation> {
@@ -151,7 +150,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
   const sourceHash = await hashCanonicalQuerySources(restored.vaultRoot);
   const replica = await createHostedBrowserVaultReplicaForSourceState({
     generatedAt: input.generatedAt,
-    sourceStateHash: input.sourceStateHash,
+    sourceStateHash: sourceHash.hash,
     vaultRoot: restored.vaultRoot,
   });
 
@@ -168,6 +167,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
 
 export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   generatedAt?: string | null;
+  force?: boolean | null;
   maxAgeMs?: number | null;
   platform: HostedRuntimePlatform;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
@@ -204,7 +204,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       replicaRef: input.workspace.browserVaultReplicaRef ?? null,
     });
 
-    if (!freshness.shouldRefresh) {
+    if (!freshness.shouldRefresh && input.force !== true) {
       return {
         freshness,
         source,
@@ -243,7 +243,10 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
 
     cancellation.throwIfCancelled();
     const replicaRef = await cancellation.race(
-      port.write({ replica }),
+      port.write({
+        replica,
+        signal: cancellation.signal,
+      }),
     );
     assertHostedBrowserVaultReplicaWriteMatchesRefresh({
       byteLength,

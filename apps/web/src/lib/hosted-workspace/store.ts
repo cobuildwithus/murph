@@ -346,6 +346,7 @@ export async function publishHostedBrowserVaultReplicaRef(input: {
 
   return await publishLegacySourceHashBrowserVaultReplicaRef({
     expectedSourceStateHash: input.expectedSourceStateHash,
+    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
     prisma: input.prisma,
     replicaRef: input.replicaRef,
     userId: input.userId,
@@ -368,6 +369,7 @@ export async function publishHostedBrowserVaultReplicaRefTx(input: {
 
   return publishLegacySourceHashBrowserVaultReplicaRefTx({
     expectedSourceStateHash: input.expectedSourceStateHash,
+    expectedWorkspaceVersion: input.expectedWorkspaceVersion,
     replicaRef: input.replicaRef,
     tx: input.tx,
     userId: input.userId,

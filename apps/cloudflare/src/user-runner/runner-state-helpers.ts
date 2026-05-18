@@ -18,6 +18,7 @@ export interface RunnerMetaRow {
   active_started_at: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
+  browser_vault_refresh_requested_at: string | null;
   failure_count: number;
   last_error_at: string | null;
   last_error_code: string | null;
@@ -35,6 +36,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_started_at: null,
     active_workspace_version: null,
     backoff_until: null,
+    browser_vault_refresh_requested_at: null,
     failure_count: 0,
     last_error_at: null,
     last_error_code: null,
@@ -90,6 +92,9 @@ export function projectRunnerStateRecord(input: {
     lastErrorAt: input.meta.last_error_at,
     lastErrorCode: input.meta.last_error_code,
     lastInvocationAt: input.meta.last_invocation_at,
+    browserVaultRefreshRequestedAt: normalizeIsoDateOrNull(
+      input.meta.browser_vault_refresh_requested_at,
+    ),
     leaseGeneration: writeFenceGeneration,
     failureCount,
     nextWakeAt: wakeAt,

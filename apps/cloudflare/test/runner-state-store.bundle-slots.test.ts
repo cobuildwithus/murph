@@ -21,6 +21,7 @@ const CURRENT_RUNNER_META_COLUMNS = [
   "active_expires_at",
   "active_workspace_version",
   "backoff_until",
+  "browser_vault_refresh_requested_at",
   "failure_count",
   "last_error_at",
   "last_error_code",
@@ -200,7 +201,7 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaColumns(db)).not.toContain("active_invocation_id");
     expect(readRunnerMetaColumns(db)).not.toContain("pending_nudge");
     expect(readRunnerMetaColumns(db)).not.toContain("alarm_kind");
-    expect(readRunnerStateSchemaVersion(db)).toBe(9);
+    expect(readRunnerStateSchemaVersion(db)).toBe(10);
     await expect(store.readState()).resolves.toMatchObject({
       schema: "murph.hosted-runner.v3",
       userId: "user-current",
@@ -268,7 +269,7 @@ describe("RunnerStateStore schema guard", () => {
     const { db, store } = createRunnerStateStoreHarness(setupLegacyRunnerSchema);
 
     expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerStateSchemaVersion(db)).toBe(9);
+    expect(readRunnerStateSchemaVersion(db)).toBe(10);
     await expect(store.readState()).resolves.toMatchObject({
       active: {
         attemptId: "workspace-invocation-1",

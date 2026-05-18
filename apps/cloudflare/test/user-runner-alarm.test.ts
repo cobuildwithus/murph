@@ -1523,6 +1523,88 @@ describe("HostedUserRunner wake scheduling", () => {
     });
   });
 
+  it("lets due web-owned runtime wakes outrank browser-vault refresh scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { flushWaitUntil, invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: "assistant",
+        version: "17",
+      }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      accepted: true,
+      scheduled: true,
+    });
+    await flushWaitUntil();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      reason: "nudge",
+      workspaceVersion: "17",
+    });
+  });
+
+  it("preserves browser-vault refresh intent across generic retry alarms", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let statusFailuresRemaining = 1;
+    const { alarms, invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({
+        importedSeq: "1",
+        lag: "0",
+        maxSeq: "1",
+      })],
+      onStatusRead() {
+        if (statusFailuresRemaining > 0) {
+          statusFailuresRemaining -= 1;
+          throw new Error("status temporarily unavailable");
+        }
+      },
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          generatedAt: "2026-05-10T00:00:00.000Z",
+        }),
+        checkpointedAt: "2026-05-10T00:00:00.000Z",
+        version: "18",
+      }),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.scheduleBrowserVaultRefreshForUser({
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      accepted: true,
+      scheduled: true,
+    });
+    expect(alarms.at(-1)).toBe(RETRY_AT);
+
+    vi.setSystemTime(new Date(RETRY_AT));
+    await runner.alarm();
+
+    expect(invoke.mock.calls.map((call) => call[0].job.request.reason)).toContain(
+      "browser_vault_refresh",
+    );
+    expect(invoke.mock.calls.at(-1)?.[0].job.request).toMatchObject({
+      reason: "browser_vault_refresh",
+      workspaceVersion: "18",
+    });
+  });
+
   it("arms test-only run-until-idle work before draining", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
