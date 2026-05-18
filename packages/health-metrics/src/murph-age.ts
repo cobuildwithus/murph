@@ -1853,6 +1853,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
         "midus-biomarker-mortality",
         "creles-transport-stress",
         "nhanes-activity-shadow-lmf",
+        "hchs-sol-biomarker-activity",
         "nhanes-iii-lmf-sanity",
         "nhanes-bench0-lab-body",
       ],
