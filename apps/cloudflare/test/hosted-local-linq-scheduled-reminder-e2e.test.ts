@@ -10,9 +10,6 @@ import type {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedWorkspaceInvocationResult,
-} from "@murphai/hosted-execution/runtime-control";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -39,7 +36,7 @@ const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
-const scheduledReminderTimes = resolveScheduledReminderTimes();
+const scheduledReminderLeadMs = 90_000;
 const productionLikeAssistantModel = "gpt-5.5";
 const hostedLocalWorkerRestartBody = "Your worker restarted mid-request.";
 const hostedLocalWorkerRestartMaxRetries = 4;
@@ -70,18 +67,19 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     await startScenario();
   }, 600_000);
 
-  it("sends a due canonical midnight reminder with missing runtime state", async () => {
+  it("wakes from the scheduled alarm and sends a due canonical notification reminder", async () => {
+    const scheduledReminderTimes = resolveScheduledReminderTimes();
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    const snapshot = await createScheduledReminderSnapshot();
+    const snapshot = await createScheduledReminderSnapshot(scheduledReminderTimes);
     const checkpoint = await seedHostedWorkspaceCheckpointForTest({
       browserVaultReplicaRef: createBrowserVaultReplicaRef(snapshot.hash),
       environment: requireScenario().runtimeEnv,
-      nextWakeAt: scheduledReminderTimes.dueAtIso,
-      nextWakeReason: "assistant",
+      nextWakeAt: null,
+      nextWakeReason: null,
       redactedStatusJson: {
         seeded: true,
       },
@@ -94,32 +92,49 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(checkpoint.status).toBe("updated");
     await uploadHostedSnapshotArtifact(snapshot);
 
+    const unscheduledStatus = await requireScenario().harness.readUserStatus(userId);
+    expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
+    expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
+
+    const schedulingResult = await requireScenario().harness.runHostedManualInvocationForTest(userId);
+    expect(schedulingResult.status).toBe("scheduled");
+    expect(schedulingResult.nextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
+
+    const scheduledStatus = await requireScenario().harness.readUserStatus(userId);
+    expect(scheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
+    expect(scheduledStatus.nextAlarmAt).toBe(scheduledReminderTimes.dueAtIso);
+
+    await sleepUntil(scheduledReminderTimes.dueAtIso);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver sleep reminder",
         text: reminderText,
       }),
     ]);
-    const workerStartedAt = new Date();
-    await runHostedWorkerUntilIdle();
-    const workerCompletedAt = new Date();
-
+    await runHostedScheduledAlarm();
+    const sendRequest = await requireLinqStub().waitForSend({
+      expectedPath: `/chats/${encodeURIComponent(scheduledChatId)}/messages`,
+      scenario: requireScenario(),
+      userId,
+    });
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     const finalNextWakeAt = finalStatus.workspace?.nextWakeAt;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalNextWakeAt).toBeDefined();
-    expect(resolvePossibleNextKualaLumpurMidnightsForWindow({
-      end: workerCompletedAt,
-      start: workerStartedAt,
-    })).toContain(finalNextWakeAt);
-    expect(finalNextWakeAt).toSatisfy(isKualaLumpurMidnight);
+    expect(finalNextWakeAt ?? null).toBeNull();
     expect(finalStatus.recentLogs ?? []).toEqual(expect.arrayContaining([
       expect.objectContaining({
         eventCode: "assistant.automation_detail",
         redactedJson: expect.objectContaining({
           safeDetails: "cron_job_enqueue_succeeded",
           type: "cron.job.completed",
+        }),
+      }),
+      expect.objectContaining({
+        eventCode: "outbox.delivery_finished",
+        redactedJson: expect.objectContaining({
+          failed: 0,
+          sent: 1,
         }),
       }),
       expect.objectContaining({
@@ -133,11 +148,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       }),
     ]));
 
-    const sendRequest = await requireLinqStub().waitForSend({
-      expectedPath: `/chats/${encodeURIComponent(scheduledChatId)}/messages`,
-      scenario: requireScenario(),
-      userId,
-    });
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
   }, 300_000);
@@ -166,14 +176,17 @@ async function startScenario(): Promise<void> {
   });
 }
 
-async function createScheduledReminderSnapshot(): Promise<{
+async function createScheduledReminderSnapshot(scheduledReminderTimes: {
+  createdAtIso: string;
+  dueAtIso: string;
+}): Promise<{
   bytes: Uint8Array;
   hash: string;
 }> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-scheduled-reminder-"));
   const operatorHomeRoot = `${vaultRoot}-operator-home`;
   cleanupPaths.push(vaultRoot, operatorHomeRoot);
-  await writeSyntheticVaultMetadata(vaultRoot);
+  await writeSyntheticVaultMetadata(vaultRoot, scheduledReminderTimes);
   await upsertAutomation({
     automationId: "automation_01JX8VBQY2M5ZBV64ZP4N1DRBB",
     continuityPolicy: "preserve",
@@ -187,14 +200,14 @@ async function createScheduledReminderSnapshot(): Promise<{
       threadId: scheduledChatId,
     },
     schedule: {
-      kind: "dailyLocal",
-      localTime: "00:00",
+      kind: "at",
+      at: scheduledReminderTimes.dueAtIso,
     },
-    slug: "midnight-sleep-reminder",
+    slug: "one-shot-sleep-reminder",
     status: "active",
-    summary: "Daily sleep reminder at midnight in the vault timezone.",
+    summary: "One-shot sleep reminder.",
     tags: ["assistant", "scheduled"],
-    title: "Midnight sleep reminder",
+    title: "Sleep reminder",
     vaultRoot,
   });
 
@@ -225,18 +238,11 @@ async function uploadHostedSnapshotArtifact(input: {
   );
 }
 
-async function runHostedWorkerUntilIdle(): Promise<HostedWorkspaceInvocationResult> {
+async function runHostedScheduledAlarm(): Promise<void> {
   for (let attempt = 0; attempt <= hostedLocalWorkerRestartMaxRetries; attempt += 1) {
     try {
-      return await requireScenario().harness.requestJson<HostedWorkspaceInvocationResult>(
-        `/__test/users/${encodeURIComponent(userId)}/run-until-idle`,
-        {
-          headers: {
-            [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-          },
-          method: "POST",
-        },
-      );
+      await requireScenario().harness.runHostedAlarmForTest(userId);
+      return;
     } catch (error) {
       if (!isHostedLocalWorkerRestartError(error) || attempt >= hostedLocalWorkerRestartMaxRetries) {
         throw error;
@@ -253,49 +259,28 @@ function isHostedLocalWorkerRestartError(error: unknown): boolean {
   return error instanceof Error && error.message.includes(hostedLocalWorkerRestartBody);
 }
 
-function isKualaLumpurMidnight(value: unknown): boolean {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const nextWake = new Date(value);
-  if (Number.isNaN(nextWake.getTime())) {
-    return false;
-  }
-
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "Asia/Kuala_Lumpur",
-  }).format(nextWake) === "00:00:00";
-}
-
-function resolvePossibleNextKualaLumpurMidnightsForWindow(input: {
-  end: Date;
-  start: Date;
-}): string[] {
-  return Array.from(new Set([
-    resolveNextKualaLumpurMidnightAfter(input.start),
-    resolveNextKualaLumpurMidnightAfter(input.end),
-  ]));
-}
-
-function resolveNextKualaLumpurMidnightAfter(now: Date): string {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const kualaLumpurOffsetMs = 8 * 60 * 60 * 1000;
-  const currentKualaLumpurMidnightUtcMs =
-    Math.floor((now.getTime() + kualaLumpurOffsetMs) / dayMs) * dayMs
-    - kualaLumpurOffsetMs;
-  return new Date(currentKualaLumpurMidnightUtcMs + dayMs).toISOString();
-}
-
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function writeSyntheticVaultMetadata(vaultRoot: string): Promise<void> {
+async function sleepUntil(dueAtIso: string): Promise<void> {
+  const dueAtMs = Date.parse(dueAtIso);
+  if (!Number.isFinite(dueAtMs)) {
+    throw new Error(`Invalid scheduled reminder due timestamp: ${dueAtIso}`);
+  }
+
+  const delayMs = dueAtMs - Date.now() + 750;
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+}
+
+async function writeSyntheticVaultMetadata(
+  vaultRoot: string,
+  scheduledReminderTimes: {
+    createdAtIso: string;
+  },
+): Promise<void> {
   await mkdir(vaultRoot, { recursive: true });
   await writeFile(
     path.join(vaultRoot, "vault.json"),
@@ -314,16 +299,9 @@ function resolveScheduledReminderTimes(now = new Date()): {
   createdAtIso: string;
   dueAtIso: string;
 } {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const kualaLumpurOffsetMs = 8 * 60 * 60 * 1000;
-  const currentKualaLumpurMidnightUtcMs =
-    Math.floor((now.getTime() + kualaLumpurOffsetMs) / dayMs) * dayMs
-    - kualaLumpurOffsetMs;
-  const dueAtMs = currentKualaLumpurMidnightUtcMs < now.getTime()
-    ? currentKualaLumpurMidnightUtcMs
-    : currentKualaLumpurMidnightUtcMs - dayMs;
+  const dueAtMs = now.getTime() + scheduledReminderLeadMs;
   return {
-    createdAtIso: new Date(dueAtMs - 2 * 60 * 60 * 1000).toISOString(),
+    createdAtIso: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
     dueAtIso: new Date(dueAtMs).toISOString(),
   };
 }

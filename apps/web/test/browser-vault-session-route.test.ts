@@ -741,6 +741,59 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("returns stale not_modified and schedules refresh without waiting for stale known refs", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef({
+      generatedAt: "2026-05-08T00:00:00.000Z",
+    });
+    let releaseSchedule: () => void = () => {};
+    const createBrowserVaultSession = vi.fn();
+    const scheduleBrowserVaultRefresh = vi.fn(() =>
+      new Promise<void>((resolve) => {
+        releaseSchedule = resolve;
+      }));
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      checkpointedAt: "2026-05-10T00:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-05-10T00:00:00.000Z",
+      userId: "member_123",
+      version: "4",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      scheduleBrowserVaultRefresh,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    releaseSchedule();
+    await expect(response.json()).resolves.toEqual({
+      encryptedReplica: null,
+      freshness: "stale",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef,
+      refreshPending: true,
+      state: "not_modified",
+      workspaceVersion: "4",
+    });
+  });
+
   it("serves the latest replica when a layered snapshot base has a different hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
@@ -1031,11 +1084,13 @@ describe("browser vault session route", () => {
   });
 });
 
-function createReplicaRef() {
+function createReplicaRef(input: {
+  generatedAt?: string;
+} = {}) {
   return {
     byteLength: 128,
     dataVersion: "d".repeat(64),
-    generatedAt: "2026-04-20T08:00:00.000Z",
+    generatedAt: input.generatedAt ?? "2999-04-20T08:00:00.000Z",
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica" as const,

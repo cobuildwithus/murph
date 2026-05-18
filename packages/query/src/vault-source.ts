@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -45,6 +46,12 @@ export interface QuerySourceManifestEntry {
   relativePath: string;
   sizeBytes: number;
   mtimeMs: number;
+}
+
+export interface CanonicalQuerySourceHash {
+  fileCount: number;
+  hash: string;
+  totalBytes: number;
 }
 
 const CANONICAL_MARKDOWN_ROOTS = VAULT_QUERY_SOURCE.markdownRoots;
@@ -154,6 +161,58 @@ export async function listCanonicalSourceManifest(
   return manifest;
 }
 
+export function isCanonicalQuerySourcePath(relativePath: string): boolean {
+  const normalized = normalizeCanonicalRelativePath(relativePath);
+  if (!normalized) {
+    return false;
+  }
+
+  if (CANONICAL_OPTIONAL_FILES.includes(normalized)) {
+    return true;
+  }
+
+  for (const root of CANONICAL_MARKDOWN_ROOTS) {
+    if (isCanonicalPathUnderRoot(normalized, root, ".md")) {
+      return true;
+    }
+  }
+
+  for (const root of CANONICAL_JSONL_ROOTS) {
+    if (isCanonicalPathUnderRoot(normalized, root, ".jsonl")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function hashCanonicalQuerySources(
+  vaultRoot: string,
+): Promise<CanonicalQuerySourceHash> {
+  const manifest = await listCanonicalSourceManifest(vaultRoot);
+  const digest = createHash("sha256");
+  let totalBytes = 0;
+
+  digest.update("murph.query-source.v1\0");
+  for (const entry of manifest) {
+    const bytes = await readFile(path.join(vaultRoot, entry.relativePath));
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    totalBytes += bytes.byteLength;
+    digest.update(entry.relativePath);
+    digest.update("\0");
+    digest.update(String(bytes.byteLength));
+    digest.update("\0");
+    digest.update(contentHash);
+    digest.update("\0");
+  }
+
+  return {
+    fileCount: manifest.length,
+    hash: digest.digest("hex"),
+    totalBytes,
+  };
+}
+
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await stat(targetPath);
@@ -165,6 +224,40 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
     throw error;
   }
+}
+
+function normalizeCanonicalRelativePath(relativePath: string): string | null {
+  if (
+    typeof relativePath !== "string"
+    || relativePath.length === 0
+    || relativePath.includes("\\")
+    || path.posix.isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+
+  const normalized = path.posix.normalize(relativePath);
+  if (
+    normalized === "."
+    || normalized === ".."
+    || normalized.startsWith("../")
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function isCanonicalPathUnderRoot(
+  relativePath: string,
+  root: string,
+  extension: string,
+): boolean {
+  const normalizedRoot = normalizeCanonicalRelativePath(root);
+  if (!normalizedRoot) {
+    return false;
+  }
+  return relativePath.startsWith(`${normalizedRoot}/`)
+    && relativePath.endsWith(extension);
 }
 
 async function readOptionalVaultMetadata(filePath: string): Promise<QueryRecordData | null> {

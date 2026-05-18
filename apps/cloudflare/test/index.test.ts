@@ -32,9 +32,6 @@ import type {
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
-  RUNNER_BROWSER_VAULT_REFRESH_LEASE_GENERATION,
-} from "../src/runner-outbound/browser-vault-refresh-authority.ts";
-import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {

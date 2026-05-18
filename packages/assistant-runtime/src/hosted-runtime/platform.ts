@@ -50,6 +50,7 @@ export interface HostedRuntimeArtifactStore {
 export interface HostedRuntimeBrowserVaultReplicaPort {
   publishRef?(input: {
     replicaRef: HostedBrowserVaultReplicaRef;
+    signal?: AbortSignal | null;
   }): Promise<HostedBrowserVaultReplicaPublishResponse>;
   write(input: {
     replica: unknown;

@@ -22,9 +22,12 @@ export {
   readVaultTolerant,
 } from "./vault-reader.ts";
 export {
+  hashCanonicalQuerySources,
+  isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
 } from "./vault-source.ts";
 export type {
+  CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
 } from "./vault-source.ts";
 export type {

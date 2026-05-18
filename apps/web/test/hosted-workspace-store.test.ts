@@ -606,6 +606,51 @@ describe("hosted workspace store", () => {
     });
   });
 
+  it("does not retry browser-vault ref publishes across an expected runtime workspace version", async () => {
+    const snapshotRef = createWorkingSnapshotRef({
+      base: createBundleRef("snapshot_2"),
+      delta: createBundleRef("delta_2"),
+    });
+    const replicaRef = createBrowserVaultReplicaRef("delta_2_hash");
+    const firstRead = buildHostedWorkspaceRow({
+      snapshotRef,
+      version: 6n,
+    });
+    const racedRead = buildHostedWorkspaceRow({
+      nextWakeReason: "checkpoint-race",
+      snapshotRef,
+      version: 7n,
+    });
+    const findUniqueRows = [firstRead, racedRead];
+    const findUnique = vi.fn<HostedWorkspaceFindUnique>(async () => findUniqueRows.shift() ?? racedRead);
+    const updateMany = vi.fn<HostedWorkspaceUpdateMany>()
+      .mockResolvedValueOnce({ count: 0 });
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique,
+      updateMany,
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    const result = await publishLatestBrowserVaultReplicaRefTx({
+      expectedWorkspaceVersion: "6",
+      replicaRef,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      status: "conflict",
+      workspace: {
+        browserVaultReplicaRef: null,
+        nextWakeReason: "checkpoint-race",
+        version: "7",
+      },
+    });
+  });
+
   it("rejects older browser-vault refs that race with a newer publish at the same workspace version", async () => {
     const olderRef = createBrowserVaultReplicaRef("live_old_hash", {
       generatedAt: "2026-04-26T00:01:00.000Z",

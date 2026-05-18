@@ -510,17 +510,51 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async parkAfterRetryCap(): Promise<RunnerStateRecord> {
+  async parkAfterRetryCap(input: {
+    retryAt: string;
+  }): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     const record = this.readStateFromMetaSync(meta);
     if (record.writeFence) {
       return record;
     }
 
+    const runtimeDueAt = readRuntimeDueAt(record);
+    const runtimeDueAtMs = runtimeDueAt ? Date.parse(runtimeDueAt) : NaN;
+    if (
+      record.backoffUntil
+      && record.wakeAt
+      && record.backoffUntil === record.wakeAt
+      && Number.isFinite(runtimeDueAtMs)
+      && runtimeDueAtMs > Date.now()
+    ) {
+      return record;
+    }
+
+    const retryAt = normalizeIsoDate(input.retryAt);
+    meta.backoff_until = retryAt;
+    meta.wake_at = retryAt;
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
+  }
+
+  async clearRetryStateForFreshDemand(): Promise<RunnerStateRecord> {
+    const meta = this.requireMetaRowSync();
+    if (this.readWriteFenceTokenSync(meta)) {
+      return this.readStateFromMetaSync(meta);
+    }
+
     meta.backoff_until = null;
+    meta.failure_count = 0;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
     meta.wake_at = null;
     this.writeMetaRowSync(meta);
     return this.readStateFromMetaSync(meta);
+  }
+
+  async clearRetryCapRecoveryProbe(): Promise<RunnerStateRecord> {
+    return await this.clearRetryStateForFreshDemand();
   }
 
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {

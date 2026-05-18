@@ -520,6 +520,7 @@ export interface HostedMailboxFetchRequest {
 export interface HostedMailboxLaneHighWater {
   lane: HostedMailboxLane;
   maxSeq: string;
+  maxUpdatedAt?: string | null;
 }
 
 export interface HostedMailboxFetchResponse {
@@ -766,6 +767,7 @@ export interface HostedMailboxLaneLag {
   lag: string;
   lane: HostedMailboxLane;
   maxSeq: string;
+  maxUpdatedAt?: string | null;
 }
 
 export interface HostedRunnerNudgeResult {
@@ -802,6 +804,7 @@ export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
   "alarm",
   "retry",
   "manual",
+  "browser_vault_refresh",
 ] as const;
 
 export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];

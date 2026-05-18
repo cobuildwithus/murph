@@ -828,13 +828,20 @@ function createCloudflareBrowserVaultReplicaPort(input: {
       ? {
           async publishRef(publishInput: {
             replicaRef: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>;
+            signal?: AbortSignal | null;
           }) {
             const payload = await fetchHostedWebControlPlaneJson({
-              body: publishInput,
+              body: {
+                replicaRef: publishInput.replicaRef,
+              },
               boundUserId: input.boundUserId,
               description: "Hosted browser-vault replica publish",
               fetchImpl: input.fetchImpl,
+              headers: await createHostedBrowserVaultReplicaPublishHeaders({
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+              }),
               path: HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+              signal: publishInput.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: input.transport!,
               acceptedStatuses: [404, 409],
@@ -888,6 +895,18 @@ export async function createHostedBrowserVaultReplicaWriteHeaders(input: {
   return await requireHostedRuntimeWriteFenceHeaders(
     input.workspaceCheckpointBridge,
     "Browser-vault replica write",
+  );
+}
+
+async function createHostedBrowserVaultReplicaPublishHeaders(input: {
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
+}): Promise<Headers> {
+  if (!input.workspaceCheckpointBridge) {
+    throw new Error("Hosted browser-vault replica publish requires a runtime write fence.");
+  }
+  return await requireHostedRuntimeWriteFenceHeaders(
+    input.workspaceCheckpointBridge,
+    "Browser-vault replica publish",
   );
 }
 
@@ -1454,6 +1473,7 @@ async function fetchHostedWebControlPlaneJson(input: {
   headers?: Headers;
   method?: "GET" | "POST";
   path: string;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
@@ -1483,9 +1503,12 @@ async function fetchHostedWebControlPlaneJson(input: {
   });
 
   let response: Response;
-  const directTimeoutSignal =
-    input.transport.mode === "direct" ? AbortSignal.timeout(input.timeoutMs) : null;
-  const directRequestSignal = directTimeoutSignal;
+  const directTimeoutSignal = input.transport.mode === "direct"
+    ? AbortSignal.timeout(input.timeoutMs)
+    : null;
+  const directRequestSignal = directTimeoutSignal
+    ? combineAbortSignals(input.signal ?? null, directTimeoutSignal)
+    : null;
   try {
     response = input.transport.mode === "direct"
       ? await fetchHostedExecutionWebControlPlaneResponse({
@@ -1494,6 +1517,7 @@ async function fetchHostedWebControlPlaneJson(input: {
         boundUserId: input.boundUserId,
         callbackSigning: input.transport.callbackSigning,
         fetchImpl: input.fetchImpl,
+        headers: input.headers,
         method,
         path: route.pathAndSearch,
         signal: directRequestSignal,
@@ -1512,6 +1536,7 @@ async function fetchHostedWebControlPlaneJson(input: {
         },
         logFailures: false,
         logPath: createHostedWebControlLogPath(route.pathname),
+        signal: input.signal ?? null,
         timeoutMs: input.timeoutMs,
         url: createHostedWebControlProxyUrl(route.pathAndSearch),
       });

@@ -219,7 +219,14 @@ startup window schedules a short retry only; it is not an `already running`
 result. Unknown wake results schedule a short retry and keep the fence until
 the retry or hard timeout resolves ambiguity. Local Durable Object promises are
 allowed to coalesce work, but they are not liveness authority. The hosted
-runtime owns the
+runner retry cap stops the fast loop only: capped failures keep a slow
+30-minute Durable Object alarm so a due probe can read web-owned durable demand
+again instead of permanently deleting the alarm. New mailbox backlog is allowed
+to outrank stale retry state only when the web-owned lane high-water timestamp
+is newer than the runner's last failure; that freshness proof clears the retry
+counter and starts normal processing immediately. Existing backlog that already
+failed stays behind retry/backoff, and a due capped probe that finds no durable
+demand clears the capped retry state and stays idle. The hosted runtime owns the
 foreground
 conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
@@ -338,11 +345,29 @@ restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
-state. Foreground work may schedule refresh as ordinary runtime work, but idle/full
-checkpoints write only the workspace snapshot ref; they do not publish browser-vault
-replicas. Browser-vault replica writes require the active runtime write fence and
-publish the latest replica ref separately, without changing the workspace checkpoint
+state. `apps/web` assesses freshness from the latest replica ref, checkpoint
+evidence, source identity when known, and a bounded max-age policy; ref
+presence alone is never freshness. Stale session reads may still serve a usable
+replica, but they must mark it stale and request refresh after the HTTP response.
+Cloudflare treats that request as a low-priority `browser_vault_refresh` runtime
+demand only when explicitly asked by web; normal nudges do not become browser-vault
+refresh sweeps just because a workspace has no replica yet. Foreground work may
+schedule refresh as ordinary runtime work, but idle/full checkpoints write only
+the workspace snapshot ref; they do not publish browser-vault replicas.
+Browser-vault replica writes require the active runtime write fence and publish
+the latest replica ref separately, without changing the workspace checkpoint
 version.
+
+The assistant runtime owns the refresh build. It computes a stable canonical
+query-source hash from sorted source-relative paths, byte sizes, and content
+hashes; mtimes, generatedAt, user ids, and runtime cache paths are excluded.
+Refresh builds from the restored `vaultRoot`, recomputes the source hash before
+publish, and discards the attempt if source content changed. Empty current
+query-visible content is publishable so deletions can clear stale dashboard
+state. Runtime-side refresh runs only after foreground work and checkpoint
+correctness are settled, is capped by the browser-vault replica byte limit, and
+races the existing runtime wake signal; if a wake arrives before publish, refresh
+returns scheduled/deferred work instead of publishing partial state.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint

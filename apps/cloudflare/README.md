@@ -27,11 +27,12 @@ Public routes:
 Internal control routes:
 
 - `POST /internal/users/:userId/nudge` persists a runner nudge for a user, starts an idle Durable Object runner drive immediately, and returns the runner nudge result
-- `POST /internal/users/:userId/browser-vault/session`
+- `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
+- `POST /internal/users/:userId/browser-vault/refresh` accepts web's after-response stale-replica hint and schedules low-priority `browser_vault_refresh` runtime work; it is not a separate browser-vault worker or queue
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
-The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, and the public banner and health checks.
+The supported worker HTTP surface stops at those narrow control routes, the deploy smoke callback, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends child-runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
 The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Mapbox, Linq, Telegram, and WhatsApp credentials stay in Worker env, while the child container receives sentinel placeholder values for those keys. The Worker fails closed for known provider hosts unless the request matches the sentinel credential contract, validates the runtime write fence before mutating provider-effect secret injection, constrains Mapbox to read-only GET allowlisted path families, injects the real provider credential only into the upstream request, and strips runtime authority headers before that upstream request leaves Cloudflare. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata.
@@ -102,11 +103,15 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
-invocations for a Durable Object. When the cap is reached, ordinary retry alarms
-are cleared until fresh nudge/manual input arrives. Pending user-visible nudges
-stay recoverable, but move to the longer capped retry backoff after the fast
-attempts are exhausted. Successful invocations and fresh nudges reset the
-counter.
+invocations for a Durable Object. When the cap is reached, the runner stops the
+fast retry loop and schedules a slow recovery probe instead of deleting the
+alarm. The capped probe runs on a 30-minute cadence. Earlier nudges keep the
+existing capped probe unless web-owned mailbox high-water metadata proves a
+newer mailbox row arrived after the last runner failure; that fresh demand
+clears stale retry state and starts normal processing immediately. A due probe
+may read web-owned mailbox/workspace status before deciding whether durable work
+still exists. Successful invocations, fresh mailbox demand, and caught-up capped
+probes reset the counter.
 
 Optional execution vars and secrets:
 

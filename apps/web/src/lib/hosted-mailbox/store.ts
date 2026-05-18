@@ -474,6 +474,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
     result.push({
       lane,
       maxSeq: row?.laneSeq.toString() ?? "0",
+      maxUpdatedAt: row?.updatedAt.toISOString() ?? null,
     });
   }
 

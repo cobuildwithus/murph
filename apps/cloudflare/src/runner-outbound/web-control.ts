@@ -15,6 +15,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -28,6 +29,7 @@ import {
   requireRunnerRuntimeWriteFenceWrite,
   requireRunnerRuntimeWriteFenceWriteHeaders,
   RunnerRuntimeWriteFenceError,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./write-fence.ts";
 import {
   handleRunnerMailboxPayloadDecodeRequest,
@@ -109,9 +111,12 @@ export async function handleRunnerWebControlRequest(input: {
 
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
+  const isBrowserVaultReplicaPublishRequest =
+    input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
+    && input.request.method === "POST";
   let checkpointHeaders: ReturnType<typeof requireRunnerRuntimeWriteFenceWriteHeaders> | null =
     null;
-  if (isCheckpointRequest) {
+  if (isCheckpointRequest || isBrowserVaultReplicaPublishRequest) {
     try {
       checkpointHeaders = await requireRunnerRuntimeWriteFenceWrite({
         env: input.env,
@@ -184,6 +189,9 @@ export async function handleRunnerWebControlRequest(input: {
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
+    headers: checkpointHeaders
+      ? createRunnerRuntimeWriteFenceForwardHeaders(checkpointHeaders)
+      : undefined,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
   const responseBodyMetadata = response.ok
@@ -214,6 +222,18 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   return response;
+}
+
+function createRunnerRuntimeWriteFenceForwardHeaders(
+  checkpointHeaders: ReturnType<typeof requireRunnerRuntimeWriteFenceWriteHeaders>,
+): Headers {
+  const headers = new Headers();
+  writeRunnerRuntimeWriteFenceHeaders(headers, {
+    attemptId: checkpointHeaders.attemptId,
+    generation: checkpointHeaders.generation,
+    workspaceVersion: checkpointHeaders.workspaceVersion,
+  });
+  return headers;
 }
 
 function readHostedWebBaseUrlLogDetails(value: string): {

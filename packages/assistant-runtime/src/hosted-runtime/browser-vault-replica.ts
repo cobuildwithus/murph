@@ -7,16 +7,24 @@ import {
 import path from "node:path";
 
 import {
-  listCanonicalSourceManifest,
+  hashCanonicalQuerySources,
   readVault,
 } from "@murphai/query";
 import type {
-  QuerySourceManifestEntry,
+  CanonicalQuerySourceHash,
 } from "@murphai/query";
 import {
   createBrowserVaultReplica,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
+import {
+  assessBrowserVaultReplicaFreshness,
+  HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+  type BrowserVaultReplicaFreshnessAssessment,
+} from "@murphai/hosted-execution";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -24,6 +32,9 @@ import type {
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
+import type {
+  RuntimeWakeSignal,
+} from "./runtime-wake.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
   type HostedWorkspaceRuntimeRestoreMode,
@@ -71,6 +82,42 @@ export interface HostedBrowserVaultReplicaRefreshPreparation {
   source: HostedBrowserVaultReplicaSourceSummary;
 }
 
+export type HostedBrowserVaultReplicaRefreshResult =
+  | {
+      byteLength: number;
+      content: HostedBrowserVaultReplicaContentSummary;
+      freshness: BrowserVaultReplicaFreshnessAssessment;
+      replicaRef: HostedBrowserVaultReplicaRef;
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "published";
+    }
+  | {
+      freshness: BrowserVaultReplicaFreshnessAssessment;
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "skipped_current";
+    }
+  | {
+      byteLength: number;
+      content: HostedBrowserVaultReplicaContentSummary;
+      maxBytes: number;
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "refresh_failed_too_large";
+    }
+  | {
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "deferred_runtime_wake" | "deferred_timeout" | "deferred_aborted";
+    }
+  | {
+      source: HostedBrowserVaultReplicaSourceSummary;
+      status: "deferred_source_changed";
+    }
+  | {
+      status: "publish_conflict" | "skipped_no_port" | "workspace_missing" | "refresh_failed";
+    };
+
+const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 10_000;
+const utf8Encoder = new TextEncoder();
+
 export async function createHostedBrowserVaultReplicaForSourceState(input: {
   generatedAt?: string;
   sourceStateHash: string;
@@ -101,7 +148,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
         restoreWasCold: false,
         vaultRoot: path.resolve(input.vaultRoot),
       };
-  const sourceManifest = await listCanonicalSourceManifest(restored.vaultRoot);
+  const sourceHash = await hashCanonicalQuerySources(restored.vaultRoot);
   const replica = await createHostedBrowserVaultReplicaForSourceState({
     generatedAt: input.generatedAt,
     sourceStateHash: input.sourceStateHash,
@@ -115,8 +162,133 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
       mode: restored.mode,
       restoreWasCold: restored.restoreWasCold,
     },
-    source: summarizeHostedBrowserVaultReplicaSource(sourceManifest),
+    source: summarizeHostedBrowserVaultReplicaSource(sourceHash),
   };
+}
+
+export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
+  generatedAt?: string | null;
+  maxAgeMs?: number | null;
+  platform: HostedRuntimePlatform;
+  runtimeWakeSignal?: RuntimeWakeSignal | null;
+  signal?: AbortSignal | null;
+  timeoutMs?: number | null;
+  vaultRoot: string;
+  workspace: HostedWorkspaceState | null;
+}): Promise<HostedBrowserVaultReplicaRefreshResult> {
+  const port = input.platform.browserVaultReplicaPort ?? null;
+  if (!port?.write || !port.publishRef) {
+    return { status: "skipped_no_port" };
+  }
+  if (!input.workspace) {
+    return { status: "workspace_missing" };
+  }
+
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const cancellation = createBrowserVaultRefreshCancellation({
+    runtimeWakeSignal: input.runtimeWakeSignal ?? null,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs ?? DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS,
+  });
+
+  try {
+    const sourceBefore = await cancellation.race(
+      hashCanonicalQuerySources(input.vaultRoot),
+    );
+    const source = summarizeHostedBrowserVaultReplicaSource(sourceBefore);
+    const freshness = assessBrowserVaultReplicaFreshness({
+      checkpointedAt: input.workspace.checkpointedAt ?? null,
+      currentSourceHash: sourceBefore.hash,
+      maxAgeMs: input.maxAgeMs,
+      now: generatedAt,
+      replicaRef: input.workspace.browserVaultReplicaRef ?? null,
+    });
+
+    if (!freshness.shouldRefresh) {
+      return {
+        freshness,
+        source,
+        status: "skipped_current",
+      };
+    }
+
+    const replica = await cancellation.race(
+      createHostedBrowserVaultReplicaForSourceState({
+        generatedAt,
+        sourceStateHash: sourceBefore.hash,
+        vaultRoot: input.vaultRoot,
+      }),
+    );
+    const content = summarizeHostedBrowserVaultReplicaContent(replica);
+    const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
+    if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
+      return {
+        byteLength,
+        content,
+        maxBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+        source,
+        status: "refresh_failed_too_large",
+      };
+    }
+
+    const sourceAfter = await cancellation.race(
+      hashCanonicalQuerySources(input.vaultRoot),
+    );
+    if (sourceAfter.hash !== sourceBefore.hash) {
+      return {
+        source,
+        status: "deferred_source_changed",
+      };
+    }
+
+    cancellation.throwIfCancelled();
+    const replicaRef = await cancellation.race(
+      port.write({ replica }),
+    );
+    assertHostedBrowserVaultReplicaWriteMatchesRefresh({
+      byteLength,
+      replicaRef,
+      sourceHash: sourceBefore.hash,
+    });
+
+    cancellation.throwIfCancelled();
+    const publish = await cancellation.race(
+      port.publishRef({
+        replicaRef,
+        signal: cancellation.signal,
+      }),
+    );
+    if (!publish.published) {
+      return {
+        status: "publish_conflict",
+      };
+    }
+
+    return {
+      byteLength: replicaRef.byteLength,
+      content,
+      freshness,
+      replicaRef,
+      source,
+      status: "published",
+    };
+  } catch (error) {
+    if (error instanceof HostedBrowserVaultRefreshDeferredError) {
+      return {
+        source: error.source ?? {
+          fileCount: 0,
+          totalBytes: 0,
+        },
+        status: error.status,
+      };
+    }
+
+    return {
+      status: "refresh_failed",
+    };
+  } finally {
+    cancellation.cleanup();
+  }
 }
 
 export function summarizeHostedBrowserVaultReplicaContent(
@@ -210,10 +382,112 @@ function resolveHostedBrowserVaultWarmSourceStatePath(vaultRoot: string): string
 }
 
 function summarizeHostedBrowserVaultReplicaSource(
-  manifest: readonly QuerySourceManifestEntry[],
+  source: CanonicalQuerySourceHash,
 ): HostedBrowserVaultReplicaSourceSummary {
   return {
-    fileCount: manifest.length,
-    totalBytes: manifest.reduce((total, entry) => total + entry.sizeBytes, 0),
+    fileCount: source.fileCount,
+    totalBytes: source.totalBytes,
+  };
+}
+
+function measureHostedBrowserVaultReplicaBytes(replica: unknown): number {
+  return utf8Encoder.encode(JSON.stringify(replica)).byteLength;
+}
+
+function assertHostedBrowserVaultReplicaWriteMatchesRefresh(input: {
+  byteLength: number;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  sourceHash: string;
+}): void {
+  if (input.replicaRef.sourceBundleHash !== input.sourceHash) {
+    throw new Error("Hosted browser-vault refresh wrote a mismatched source hash.");
+  }
+  if (
+    input.replicaRef.byteLength !== input.byteLength
+    || input.replicaRef.byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES
+  ) {
+    throw new Error("Hosted browser-vault refresh wrote invalid byte metadata.");
+  }
+}
+
+class HostedBrowserVaultRefreshDeferredError extends Error {
+  readonly source: HostedBrowserVaultReplicaSourceSummary | null;
+  readonly status: Extract<
+    HostedBrowserVaultReplicaRefreshResult["status"],
+    "deferred_aborted" | "deferred_runtime_wake" | "deferred_timeout"
+  >;
+
+  constructor(input: {
+    source?: HostedBrowserVaultReplicaSourceSummary | null;
+    status: HostedBrowserVaultRefreshDeferredError["status"];
+  }) {
+    super(`Hosted browser-vault refresh ${input.status}.`);
+    this.name = "HostedBrowserVaultRefreshDeferredError";
+    this.source = input.source ?? null;
+    this.status = input.status;
+  }
+}
+
+function createBrowserVaultRefreshCancellation(input: {
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+  signal: AbortSignal | null;
+  timeoutMs: number;
+}): {
+  cleanup(): void;
+  race<T>(promise: Promise<T>): Promise<T>;
+  signal: AbortSignal;
+  throwIfCancelled(): void;
+} {
+  let deferred: HostedBrowserVaultRefreshDeferredError | null = null;
+  let rejectDeferred: (error: HostedBrowserVaultRefreshDeferredError) => void = () => {};
+  const waiterAbortController = new AbortController();
+  const deferredPromise = new Promise<never>((_resolve, reject) => {
+    rejectDeferred = reject;
+  });
+  void deferredPromise.catch(() => undefined);
+  const defer = (status: HostedBrowserVaultRefreshDeferredError["status"]) => {
+    if (deferred) {
+      return;
+    }
+    deferred = new HostedBrowserVaultRefreshDeferredError({ status });
+    if (!waiterAbortController.signal.aborted) {
+      waiterAbortController.abort(deferred);
+    }
+    rejectDeferred(deferred);
+  };
+  const externalAbort = () => defer("deferred_aborted");
+  const timeout = setTimeout(() => defer("deferred_timeout"), Math.max(0, input.timeoutMs));
+
+  input.signal?.addEventListener("abort", externalAbort, { once: true });
+  if (input.signal?.aborted) {
+    externalAbort();
+  }
+  input.runtimeWakeSignal?.wait(waiterAbortController.signal).then(
+    () => defer("deferred_runtime_wake"),
+    () => undefined,
+  );
+
+  return {
+    cleanup() {
+      clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", externalAbort);
+      if (!waiterAbortController.signal.aborted) {
+        waiterAbortController.abort(
+          new DOMException("Hosted browser-vault refresh finished.", "AbortError"),
+        );
+      }
+    },
+    async race<T>(promise: Promise<T>): Promise<T> {
+      if (deferred) {
+        throw deferred;
+      }
+      return await Promise.race([promise, deferredPromise]);
+    },
+    signal: waiterAbortController.signal,
+    throwIfCancelled() {
+      if (deferred) {
+        throw deferred;
+      }
+    },
   };
 }
