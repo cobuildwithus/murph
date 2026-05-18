@@ -31,6 +31,7 @@ import {
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgePrioritySourceRoutes,
   listMurphAgeSourceRoutes,
   listMurphAgeSourceRoutesByLayer,
@@ -334,6 +335,15 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
     assert.equal(route.artifactBoundary.rowMaterializationAuthorized, false);
     assert.equal(route.artifactBoundary.rowValueExportAllowed, false);
     assert.equal(route.artifactBoundary.sourceTextStorageAllowed, false);
+    assert.ok(
+      ["not-ordinary-consumer", "older-adult-skewed", "partial-16-50", "primary-16-50"].includes(
+        route.ordinarySubmitterFit.ageBandFit,
+      ),
+    );
+    if (route.ordinarySubmitterFit.rank !== null) {
+      assert.equal(Number.isInteger(route.ordinarySubmitterFit.rank), true);
+      assert.ok(route.ordinarySubmitterFit.rank > 0);
+    }
     assert.ok(route.allowedResearchUses.length >= 1);
     assert.ok(route.blockedCurrentUses.length >= 1);
   }
@@ -351,6 +361,10 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(cardia?.layers.includes("transport-validation"), true);
   assert.equal(cardia?.featureFamilies.includes("activity"), true);
   assert.equal(cardia?.featureFamilies.includes("labs"), true);
+  assert.equal(cardia?.ordinarySubmitterFit.ageBandFit, "primary-16-50");
+  assert.equal(cardia?.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs"), true);
+  assert.equal(cardia?.ordinarySubmitterFit.inputFamilies.includes("daily-activity"), true);
+  assert.equal(cardia?.ordinarySubmitterFit.rank, 1);
   assert.equal(cardia?.productAuthorized, false);
 
   const hchsSol = resolveMurphAgeSourceRoute("hchs-sol-biomarker-activity");
@@ -360,6 +374,10 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(hchsSol?.layers.includes("transport-validation"), true);
   assert.equal(hchsSol?.featureFamilies.includes("activity"), true);
   assert.equal(hchsSol?.featureFamilies.includes("labs"), true);
+  assert.equal(hchsSol?.ordinarySubmitterFit.ageBandFit, "primary-16-50");
+  assert.equal(hchsSol?.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs"), true);
+  assert.equal(hchsSol?.ordinarySubmitterFit.inputFamilies.includes("daily-activity"), true);
+  assert.equal(hchsSol?.ordinarySubmitterFit.rank, 2);
   assert.equal(hchsSol?.productAuthorized, false);
 
   const mhas = resolveMurphAgeSourceRoute("mhas-harmonized-aging");
@@ -426,6 +444,34 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   );
   assert.equal(priorityRoutes.some((route) => route.routeId === "partner-aggregate-evaluator"), true);
 
+  const ordinaryLabWearableRoutes = listMurphAgeOrdinaryLabWearableSourceRoutes();
+  assert.deepEqual(ordinaryLabWearableRoutes.map((route) => route.routeId), [
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "all-of-us-fitbit-labs-ehr",
+    "nhanes-activity-shadow-lmf",
+    "uk-biobank-integrated",
+  ]);
+  assert.equal(
+    ordinaryLabWearableRoutes.every((route) =>
+      route.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs")
+      && route.ordinarySubmitterFit.inputFamilies.some((family) =>
+        family === "autonomic" || family === "daily-activity" || family === "sleep"
+      )
+      && route.productAuthorized === false
+    ),
+    true,
+  );
+  assert.equal(
+    ordinaryLabWearableRoutes.some((route) => route.routeId === "partner-aggregate-evaluator"),
+    false,
+  );
+  if (ordinaryLabWearableRoutes[0]) {
+    ordinaryLabWearableRoutes[0].ordinarySubmitterFit.inputFamilies.push("sleep");
+  }
+  const freshCardia = resolveMurphAgeSourceRoute("cardia-biomarker-activity");
+  assert.equal(freshCardia?.ordinarySubmitterFit.inputFamilies.includes("sleep"), false);
+
   if (midus) {
     (midus.layers as string[]).push("outcome-anchor");
     (midus.artifactBoundary as { rowValueExportAllowed: boolean }).rowValueExportAllowed = true;
@@ -460,6 +506,12 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   if (invalidRoutes[6]) {
     (invalidRoutes[6] as { productAuthorized: boolean }).productAuthorized = true;
   }
+  if (invalidRoutes[7]) {
+    invalidRoutes[7].ordinarySubmitterFit = {
+      ...invalidRoutes[7].ordinarySubmitterFit,
+      rank: -1,
+    };
+  }
   if (invalidRoutes[7] && invalidRoutes[8]) {
     invalidRoutes[8].routeId = invalidRoutes[7].routeId;
   }
@@ -470,6 +522,7 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_PRIORITY"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_ROUTE_ID"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_SCHEMA"), true);
+  assert.equal(invalidValidation.issues.some((issue) => issue.code === "INVALID_SUBMITTER_FIT"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "PROHIBITED_TEXT"), true);
   assert.equal(invalidValidation.issues.some((issue) => issue.code === "PRODUCT_AUTHORIZED"), true);
 });

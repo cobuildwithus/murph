@@ -1,7 +1,27 @@
 import { uniqueStrings } from "./catalog.ts";
 
 export const MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION =
-  "murph.age.source-route-registry.v1" as const;
+  "murph.age.source-route-registry.v2" as const;
+
+export const MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_AGE_BAND_FITS = [
+  "not-ordinary-consumer",
+  "older-adult-skewed",
+  "partial-16-50",
+  "primary-16-50",
+] as const;
+
+export const MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_INPUT_FAMILIES = [
+  "age-sex",
+  "autonomic",
+  "blood-pressure",
+  "bloodwork-labs",
+  "body-composition",
+  "clinical-history",
+  "daily-activity",
+  "function",
+  "outcome-followup",
+  "sleep",
+] as const;
 
 export type MurphAgeSourceRouteId =
   | "all-of-us-fitbit-labs-ehr"
@@ -82,6 +102,18 @@ export type MurphAgeSourceRouteFeatureFamily =
   | "sleep"
   | "survey-proxy";
 
+export type MurphAgeSourceRouteOrdinarySubmitterAgeBandFit =
+  typeof MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_AGE_BAND_FITS[number];
+
+export type MurphAgeSourceRouteOrdinarySubmitterInputFamily =
+  typeof MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_INPUT_FAMILIES[number];
+
+export interface MurphAgeSourceRouteOrdinarySubmitterFit {
+  ageBandFit: MurphAgeSourceRouteOrdinarySubmitterAgeBandFit;
+  inputFamilies: MurphAgeSourceRouteOrdinarySubmitterInputFamily[];
+  rank: number | null;
+}
+
 export interface MurphAgeSourceRouteArtifactBoundary {
   aggregateOutputsOnly: true;
   localPathStorageAllowed: false;
@@ -106,6 +138,7 @@ export interface MurphAgeSourceRoute {
   layers: MurphAgeSourceRouteLayer[];
   modelUseStatus: MurphAgeSourceRouteModelUseStatus;
   nextAction: string;
+  ordinarySubmitterFit: MurphAgeSourceRouteOrdinarySubmitterFit;
   outcomeSignal: MurphAgeSourceRouteOutcomeSignal;
   priorityRank: number;
   productAuthorized: false;
@@ -121,6 +154,7 @@ export interface MurphAgeSourceRouteRegistryValidationIssue {
     | "INVALID_PRIORITY"
     | "INVALID_ROUTE_ID"
     | "INVALID_SCHEMA"
+    | "INVALID_SUBMITTER_FIT"
     | "PROHIBITED_TEXT"
     | "PRODUCT_AUTHORIZED";
   message: string;
@@ -134,8 +168,16 @@ export interface MurphAgeSourceRouteRegistryValidationResult {
 
 type MurphAgeSourceRouteDefinition = Omit<
   MurphAgeSourceRoute,
-  "artifactBoundary" | "productAuthorized" | "schemaVersion"
->;
+  "artifactBoundary" | "ordinarySubmitterFit" | "productAuthorized" | "schemaVersion"
+> & {
+  ordinarySubmitterFit?: MurphAgeSourceRouteOrdinarySubmitterFit;
+};
+
+const MURPH_AGE_DEFAULT_ORDINARY_SUBMITTER_FIT = {
+  ageBandFit: "not-ordinary-consumer",
+  inputFamilies: [],
+  rank: null,
+} satisfies MurphAgeSourceRouteOrdinarySubmitterFit;
 
 const MURPH_AGE_SOURCE_ROUTE_ARTIFACT_BOUNDARY = {
   aggregateOutputsOnly: true,
@@ -193,6 +235,18 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     layers: ["biomarker-increment", "wearable-shadow-increment"],
     modelUseStatus: "metadata-only-candidate",
     nextAction: "Create a locked benchmark card before parsing rows or estimating a wearable shadow increment.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 4,
+    },
     outcomeSignal: "linked-mortality",
     priorityRank: 20,
     routeId: "nhanes-activity-shadow-lmf",
@@ -217,6 +271,18 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     layers: ["source-feasibility", "biomarker-increment", "wearable-shadow-increment", "transport-validation"],
     modelUseStatus: "metadata-only-candidate",
     nextAction: "Fill activation labels and aggregate receipt requirements for young-adult-to-midlife lab, vitals, activity, and follow-up overlap before any benchmark card.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 1,
+    },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 21,
     routeId: "cardia-biomarker-activity",
@@ -241,6 +307,18 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     layers: ["source-feasibility", "biomarker-increment", "wearable-shadow-increment", "transport-validation"],
     modelUseStatus: "metadata-only-candidate",
     nextAction: "Fill activation labels and aggregate receipt requirements for adult lab, vitals, activity, and follow-up overlap before any benchmark card.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 2,
+    },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 22,
     routeId: "hchs-sol-biomarker-activity",
@@ -554,6 +632,21 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment"],
     modelUseStatus: "metadata-only-candidate",
     nextAction: "Keep as a workbench/human-admin route; define aggregate evaluator needs before access work.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "autonomic",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+        "sleep",
+      ],
+      rank: 3,
+    },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 70,
     routeId: "all-of-us-fitbit-labs-ehr",
@@ -578,6 +671,21 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     layers: ["source-feasibility", "transport-validation", "wearable-shadow-increment", "biomarker-increment"],
     modelUseStatus: "metadata-only-candidate",
     nextAction: "Keep alive as a human-admin/workbench or partner-aggregate lane.",
+    ordinarySubmitterFit: {
+      ageBandFit: "partial-16-50",
+      inputFamilies: [
+        "age-sex",
+        "autonomic",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+        "sleep",
+      ],
+      rank: 5,
+    },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 75,
     routeId: "uk-biobank-integrated",
@@ -652,6 +760,17 @@ export function listMurphAgeSourceRoutesByLayer(layer: MurphAgeSourceRouteLayer)
     .map(cloneMurphAgeSourceRoute);
 }
 
+export function listMurphAgeOrdinaryLabWearableSourceRoutes(): MurphAgeSourceRoute[] {
+  return MURPH_AGE_SOURCE_ROUTES
+    .filter((route) =>
+      route.ordinarySubmitterFit.rank !== null
+      && route.ordinarySubmitterFit.inputFamilies.includes("bloodwork-labs")
+      && route.ordinarySubmitterFit.inputFamilies.some(isOrdinaryWearableLikeInputFamily)
+    )
+    .sort(compareMurphAgeSourceRouteOrdinarySubmitterFit)
+    .map(cloneMurphAgeSourceRoute);
+}
+
 export function listMurphAgePrioritySourceRoutes(): MurphAgeSourceRoute[] {
   return MURPH_AGE_SOURCE_ROUTES
     .filter((route) =>
@@ -695,6 +814,13 @@ export function validateMurphAgeSourceRouteRegistry(
         routeId: route.routeId,
       });
     }
+    if (!isValidOrdinarySubmitterFit(route.ordinarySubmitterFit)) {
+      issues.push({
+        code: "INVALID_SUBMITTER_FIT",
+        message: "Murph Age source route ordinary submitter fit must use known input families and a positive rank or null.",
+        routeId: route.routeId,
+      });
+    }
     if (route.productAuthorized !== false) {
       issues.push({
         code: "PRODUCT_AUTHORIZED",
@@ -732,13 +858,30 @@ function completeMurphAgeSourceRoute(route: MurphAgeSourceRouteDefinition): Murp
     blockedCurrentUses: uniqueStrings(route.blockedCurrentUses),
     featureFamilies: uniqueLiteralStrings(route.featureFamilies),
     layers: uniqueLiteralStrings(route.layers),
+    ordinarySubmitterFit: completeMurphAgeSourceRouteOrdinarySubmitterFit(route.ordinarySubmitterFit),
     productAuthorized: false,
     schemaVersion: MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
   };
 }
 
+function completeMurphAgeSourceRouteOrdinarySubmitterFit(
+  fit: MurphAgeSourceRouteOrdinarySubmitterFit | undefined,
+): MurphAgeSourceRouteOrdinarySubmitterFit {
+  const resolvedFit = fit ?? MURPH_AGE_DEFAULT_ORDINARY_SUBMITTER_FIT;
+  return {
+    ...resolvedFit,
+    inputFamilies: uniqueLiteralStrings(resolvedFit.inputFamilies),
+  };
+}
+
 function compareMurphAgeSourceRoutePriority(a: MurphAgeSourceRoute, b: MurphAgeSourceRoute): number {
   return a.priorityRank - b.priorityRank || a.routeId.localeCompare(b.routeId);
+}
+
+function compareMurphAgeSourceRouteOrdinarySubmitterFit(a: MurphAgeSourceRoute, b: MurphAgeSourceRoute): number {
+  return (a.ordinarySubmitterFit.rank ?? Number.MAX_SAFE_INTEGER)
+    - (b.ordinarySubmitterFit.rank ?? Number.MAX_SAFE_INTEGER)
+    || compareMurphAgeSourceRoutePriority(a, b);
 }
 
 function cloneMurphAgeSourceRoute(route: MurphAgeSourceRoute): MurphAgeSourceRoute {
@@ -749,6 +892,10 @@ function cloneMurphAgeSourceRoute(route: MurphAgeSourceRoute): MurphAgeSourceRou
     blockedCurrentUses: [...route.blockedCurrentUses],
     featureFamilies: [...route.featureFamilies],
     layers: [...route.layers],
+    ordinarySubmitterFit: {
+      ...route.ordinarySubmitterFit,
+      inputFamilies: [...route.ordinarySubmitterFit.inputFamilies],
+    },
   };
 }
 
@@ -770,6 +917,24 @@ function isMetadataOnlyBoundary(boundary: MurphAgeSourceRouteArtifactBoundary): 
     && boundary.rowMaterializationAuthorized === false
     && boundary.rowValueExportAllowed === false
     && boundary.sourceTextStorageAllowed === false;
+}
+
+function isValidOrdinarySubmitterFit(fit: MurphAgeSourceRouteOrdinarySubmitterFit): boolean {
+  return MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_AGE_BAND_FITS.includes(fit.ageBandFit)
+    && fit.inputFamilies.every(isOrdinarySubmitterInputFamily)
+    && (fit.rank === null || (Number.isInteger(fit.rank) && fit.rank > 0));
+}
+
+function isOrdinarySubmitterInputFamily(
+  value: string,
+): value is MurphAgeSourceRouteOrdinarySubmitterInputFamily {
+  return (MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_INPUT_FAMILIES as readonly string[]).includes(value);
+}
+
+function isOrdinaryWearableLikeInputFamily(
+  value: MurphAgeSourceRouteOrdinarySubmitterInputFamily,
+): boolean {
+  return value === "autonomic" || value === "daily-activity" || value === "sleep";
 }
 
 function getProhibitedTextFields(route: MurphAgeSourceRoute): string[] {
