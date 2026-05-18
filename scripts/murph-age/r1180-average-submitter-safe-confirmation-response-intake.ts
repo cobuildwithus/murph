@@ -15,6 +15,16 @@ export const R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION =
 export const R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND =
   "pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts" as const;
 
+const R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1181-average-submitter-feature-only-execution-contract.ts" as const;
+const R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts" as const;
+const R1183_FILLABLE_RESPONSE_FILE_NAME =
+  "r1183-fillable-average-submitter-safe-confirmation-response.json" as const;
+const R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR =
+  "MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH" as const;
+const R1180_WITH_FILLABLE_RESPONSE_COMMAND =
+  `${R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR}=<${R1183_FILLABLE_RESPONSE_FILE_NAME}> ${R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_COMMAND}` as const;
 const DEFAULT_MODEL_RUNS_DIR = path.join(
   ".runtime",
   "operations",
@@ -82,9 +92,18 @@ const RESPONSE_BOOLEAN_KEYS = RESPONSE_BOOLEAN_FIELD_ENTRIES.map(([key]) => key)
 const REQUIRED_RESPONSE_FIELD_IDS = RESPONSE_BOOLEAN_FIELD_ENTRIES.map(([, fieldId]) => fieldId);
 const RESPONSE_ALLOWED_KEYS = [
   "askId",
-  "schemaVersion",
-  "responseKind",
   ...RESPONSE_BOOLEAN_KEYS,
+  "responseKind",
+  "schemaVersion",
+] as const;
+const RESPONSE_TEMPLATE_KEY_ORDER = [
+  "askId",
+  "confirmDailyWearableActivityExportAvailable",
+  "confirmGlycemiaBloodworkExportAvailable",
+  "confirmNoPrivateValuesIncluded",
+  "confirmTargetAgeBandRoughly16To50",
+  "responseKind",
+  "schemaVersion",
 ] as const;
 const INVALID_RESPONSE_REASON_IDS = [
   "ask_id_mismatch",
@@ -112,6 +131,7 @@ type ResponseKindId = typeof RESPONSE_KIND_IDS[number];
 type RequiredResponseFieldId = typeof REQUIRED_RESPONSE_FIELD_IDS[number];
 type InvalidResponseReasonId = typeof INVALID_RESPONSE_REASON_IDS[number];
 type R1180NextActionId = typeof R1180_NEXT_ACTION_IDS[number];
+type ArrayValue<T extends readonly string[]> = T[number];
 type ResponseStatus = "incomplete" | "invalid" | "missing" | "ready";
 type IntakeConclusion =
   | "safe_confirmation_response_intake_ready_feature_only"
@@ -134,6 +154,20 @@ interface SafeConfirmationResponseTemplate {
   confirmTargetAgeBandRoughly16To50: false;
   responseKind: "explicit_yes_all_required_assertions_confirmed";
   schemaVersion: typeof R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION;
+}
+
+interface SafeResponseTemplateGuidance {
+  allowedValueKindIds: AllowedValueKindId[];
+  blockedContentIds: BlockedContentId[];
+  fillableResponseArtifact: typeof R1183_FILLABLE_RESPONSE_FILE_NAME;
+  materializeFillableResponseCommand: typeof R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
+  modelEvidencePromotionAllowed: false;
+  productDisplayAuthorized: false;
+  responsePathEnvVar: typeof R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR;
+  responseTemplateKeyOrder: ArrayValue<typeof RESPONSE_TEMPLATE_KEY_ORDER>[];
+  rowOwnerOnly: true;
+  runIntakeWithFilledTemplateCommand: typeof R1180_WITH_FILLABLE_RESPONSE_COMMAND;
+  storesPrivateDetailsInPacket: false;
 }
 
 interface ResponseEvaluation {
@@ -182,6 +216,7 @@ export interface R1180AverageSubmitterSafeConfirmationResponseIntakeOutput {
     responseKind: ResponseKindId | null;
     responseStatus: ResponseStatus;
     responseTemplate: SafeConfirmationResponseTemplate;
+    safeResponseTemplateGuidance: SafeResponseTemplateGuidance;
     reviewGptRequiredNow: false;
     rowLevelDataAcceptedByR1180: false;
     rowOwnerConfirmationInferredByR1180: false;
@@ -242,6 +277,7 @@ export async function runR1180AverageSubmitterSafeConfirmationResponseIntake(
     rowOwnerProvidedSafeBooleansStored: false,
     rowParsingPerformedByR1180: false,
     safeCompletionChecklistItemIds: [...SAFE_COMPLETION_CHECKLIST_ITEM_IDS],
+    safeResponseTemplateGuidance: safeResponseTemplateGuidance(),
     sourcePriority: TARGET_INPUT_PRIORITY,
     targetAgeBand: TARGET_AGE_BAND,
   } satisfies R1180AverageSubmitterSafeConfirmationResponseIntakeOutput["summary"];
@@ -410,6 +446,15 @@ function commandForNextAction(nextAction: R1180NextActionId): string | null {
   if (nextAction === "refresh_r1179_safe_confirmation_ask") {
     return R1179_AVERAGE_SUBMITTER_OBJECTIVE_GAP_AUDIT_COMMAND;
   }
+  if (nextAction === "fill_safe_confirmation_response_template") {
+    return R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND;
+  }
+  if (nextAction === "rerun_safe_confirmation_response_with_valid_json_object") {
+    return R1180_WITH_FILLABLE_RESPONSE_COMMAND;
+  }
+  if (nextAction === "carry_safe_confirmation_to_feature_only_chain") {
+    return R1181_AVERAGE_SUBMITTER_FEATURE_ONLY_EXECUTION_CONTRACT_COMMAND;
+  }
   return null;
 }
 
@@ -422,6 +467,22 @@ function responseTemplate(): SafeConfirmationResponseTemplate {
     confirmTargetAgeBandRoughly16To50: false,
     responseKind: "explicit_yes_all_required_assertions_confirmed",
     schemaVersion: R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_SCHEMA_VERSION,
+  };
+}
+
+function safeResponseTemplateGuidance(): SafeResponseTemplateGuidance {
+  return {
+    allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
+    blockedContentIds: [...BLOCKED_CONTENT_IDS],
+    fillableResponseArtifact: R1183_FILLABLE_RESPONSE_FILE_NAME,
+    materializeFillableResponseCommand: R1183_AVERAGE_SUBMITTER_SAFE_RESPONSE_MATERIALIZER_COMMAND,
+    modelEvidencePromotionAllowed: false,
+    productDisplayAuthorized: false,
+    responsePathEnvVar: R1180_SAFE_CONFIRMATION_RESPONSE_PATH_ENV_VAR,
+    responseTemplateKeyOrder: [...RESPONSE_TEMPLATE_KEY_ORDER],
+    rowOwnerOnly: true,
+    runIntakeWithFilledTemplateCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
+    storesPrivateDetailsInPacket: false,
   };
 }
 
@@ -586,9 +647,20 @@ async function main(): Promise<void> {
       invalidResponseReasonIds: output.summary.invalidResponseReasonIds,
       missingRequiredResponseFieldIds: output.summary.missingRequiredResponseFieldIds,
       nextAction: output.summary.nextAction,
+      nextActionCommand: output.summary.nextActionCommand,
       packetId: output.packetId,
       productDisplayAuthorized: output.summary.productDisplayAuthorized,
       responseStatus: output.summary.responseStatus,
+      safeResponseTemplateGuidance: {
+        fillableResponseArtifact:
+          output.summary.safeResponseTemplateGuidance.fillableResponseArtifact,
+        materializeFillableResponseCommand:
+          output.summary.safeResponseTemplateGuidance.materializeFillableResponseCommand,
+        responsePathEnvVar:
+          output.summary.safeResponseTemplateGuidance.responsePathEnvVar,
+        runIntakeWithFilledTemplateCommand:
+          output.summary.safeResponseTemplateGuidance.runIntakeWithFilledTemplateCommand,
+      },
       topMissingResponseFieldId: output.summary.missingRequiredResponseFieldIds[0] ?? null,
     })}\n`);
   } catch (error) {

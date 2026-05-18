@@ -29,6 +29,24 @@ const REQUIRED_RESPONSE_FIELDS = [
   "confirm_daily_wearable_activity_export_available",
   "confirm_no_private_values_in_confirmation",
 ] as const;
+const R1181_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1181-average-submitter-feature-only-execution-contract.ts";
+const R1183_COMMAND =
+  "pnpm exec tsx scripts/murph-age/r1183-average-submitter-safe-response-materializer.ts";
+const R1183_FILLABLE_RESPONSE_FILE_NAME =
+  "r1183-fillable-average-submitter-safe-confirmation-response.json";
+const R1180_RESPONSE_PATH_ENV_VAR = "MURPH_AGE_R1180_SAFE_CONFIRMATION_RESPONSE_PATH";
+const R1180_WITH_FILLABLE_RESPONSE_COMMAND =
+  `${R1180_RESPONSE_PATH_ENV_VAR}=<${R1183_FILLABLE_RESPONSE_FILE_NAME}> pnpm exec tsx scripts/murph-age/r1180-average-submitter-safe-confirmation-response-intake.ts`;
+const RESPONSE_TEMPLATE_KEY_ORDER = [
+  "askId",
+  "confirmDailyWearableActivityExportAvailable",
+  "confirmGlycemiaBloodworkExportAvailable",
+  "confirmNoPrivateValuesIncluded",
+  "confirmTargetAgeBandRoughly16To50",
+  "responseKind",
+  "schemaVersion",
+] as const;
 
 describe("R1181 average submitter feature-only execution contract", () => {
   it("waits on R1180 when the safe response intake is still missing confirmation", async () => {
@@ -377,7 +395,7 @@ describe("R1181 average submitter feature-only execution contract", () => {
         nextActionCommand: "pnpm exec tsx scripts/murph-age/r1179-average-submitter-objective-gap-audit.ts",
       },
       patch: { nextActionCommand: "pnpm exec tsx scripts/murph-age/r1179-average-submitter-objective-gap-audit.ts" },
-      reason: "non-null next action command",
+      reason: "wrong ready next action command",
     },
     {
       expectedState: { invalidResponseReasonsEmpty: false },
@@ -462,6 +480,15 @@ describe("R1181 average submitter feature-only execution contract", () => {
         responseKind: "not_confirmed_or_unsure",
       }),
       reason: "template response kind",
+    },
+    {
+      buildFixture: () => withR1180SharedPatch(r1180Fixture({ responseStatus: "ready" }), {
+        safeResponseTemplateGuidance: {
+          ...r1180SafeResponseTemplateGuidanceFixture(),
+          fillableResponseArtifact: "different-response-artifact.json",
+        },
+      }),
+      reason: "safe response guidance artifact",
     },
   ])("rejects R1180 safe-confirmation identity/template drift: $reason", async ({ buildFixture }) => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1181-template-drift-"));
@@ -557,7 +584,11 @@ function r1180Fixture(options: { responseStatus: "invalid" | "missing" | "ready"
       : invalid
         ? "rerun_safe_confirmation_response_with_valid_json_object"
         : "fill_safe_confirmation_response_template",
-    nextActionCommand: null,
+    nextActionCommand: ready
+      ? R1181_COMMAND
+      : invalid
+        ? R1180_WITH_FILLABLE_RESPONSE_COMMAND
+        : R1183_COMMAND,
     prioritizedInputKindIds: [...INPUT_KINDS],
     productDisplayAuthorized: false,
     requiredAssertionChecklistIds: [
@@ -582,6 +613,7 @@ function r1180Fixture(options: { responseStatus: "invalid" | "missing" | "ready"
       "confirm_daily_wearable_activity_export_available",
       "confirm_no_private_values_in_confirmation",
     ],
+    safeResponseTemplateGuidance: r1180SafeResponseTemplateGuidanceFixture(),
     sourcePriority: TARGET_INPUT_PRIORITY,
     targetAgeBand: TARGET_AGE_BAND,
   };
@@ -619,6 +651,35 @@ function r1180Fixture(options: { responseStatus: "invalid" | "missing" | "ready"
     schemaVersion: R1180_AVERAGE_SUBMITTER_SAFE_CONFIRMATION_RESPONSE_INTAKE_SCHEMA_VERSION,
     status: "research-local-aggregate-only",
     summary: shared,
+  };
+}
+
+function r1180SafeResponseTemplateGuidanceFixture(): Record<string, unknown> {
+  return {
+    allowedValueKindIds: ["booleans_only", "fixed_enumerated_ids_only"],
+    blockedContentIds: [
+      "private_paths",
+      "header_names",
+      "file_names",
+      "row_values",
+      "participant_identifiers",
+      "private_ref_values",
+      "source_variable_names",
+      "predictions",
+      "coefficients",
+      "model_parameters",
+      "source_text",
+      "small_cells",
+    ],
+    fillableResponseArtifact: R1183_FILLABLE_RESPONSE_FILE_NAME,
+    materializeFillableResponseCommand: R1183_COMMAND,
+    modelEvidencePromotionAllowed: false,
+    productDisplayAuthorized: false,
+    responsePathEnvVar: R1180_RESPONSE_PATH_ENV_VAR,
+    responseTemplateKeyOrder: [...RESPONSE_TEMPLATE_KEY_ORDER],
+    rowOwnerOnly: true,
+    runIntakeWithFilledTemplateCommand: R1180_WITH_FILLABLE_RESPONSE_COMMAND,
+    storesPrivateDetailsInPacket: false,
   };
 }
 
