@@ -696,8 +696,9 @@ function buildHostedWebhookDirtyResources(input: {
     resources.push({
       count: 1,
       jobKind: job.kind,
-      resource: readHostedDirtyResourceString(payload.resource) ?? job.kind,
-      resourceCategory: readHostedDirtyResourceString(payload.resourceCategory) ?? job.kind,
+      payload: readHostedDirtyResourcePayload(payload),
+      resource: readHostedDirtyResourceString(payload.resource),
+      resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
       sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
@@ -708,8 +709,8 @@ function buildHostedWebhookDirtyResources(input: {
     resources.push({
       count: 1,
       jobKind: "reconcile",
-      resource: "reconcile",
-      resourceCategory: "reconcile",
+      resource: null,
+      resourceCategory: null,
       sourceProviderSlug: null,
       windowEnd: null,
       windowStart: null,
@@ -721,4 +722,18 @@ function buildHostedWebhookDirtyResources(input: {
 
 function readHostedDirtyResourceString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readHostedDirtyResourcePayload(
+  value: Record<string, unknown>,
+): HostedDeviceSyncDirtyResource["payload"] {
+  const payload: Record<string, boolean | number | string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" || typeof entry === "boolean") {
+      payload[key] = entry;
+    } else if (typeof entry === "number" && Number.isFinite(entry)) {
+      payload[key] = entry;
+    }
+  }
+  return Object.keys(payload).length > 0 ? payload : undefined;
 }

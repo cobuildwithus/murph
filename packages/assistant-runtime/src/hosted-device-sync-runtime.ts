@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
@@ -8,6 +10,7 @@ import {
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDeviceSyncRuntimeCredentialSnapshot as HostedDeviceSyncRuntimeCredentialSnapshot,
@@ -399,6 +402,7 @@ function buildHostedDirtyDeviceSyncJobs(
     : [{
         count: 1,
         jobKind: "reconcile",
+        payload: undefined,
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
@@ -416,17 +420,24 @@ function hostedDirtyResourceToDeviceSyncJobInput(
   dirtyState: HostedExecutionDeviceSyncDirtyStateResponse,
   occurredAt: string,
 ): DeviceSyncJobInput {
+  const hasManifestPayload = Boolean(resource.payload && Object.keys(resource.payload).length > 0);
   const payload: Record<string, unknown> = {
-    windowEnd: resource.windowEnd ?? dirtyState.windowEnd ?? occurredAt,
-    windowStart: resource.windowStart ?? dirtyState.windowStart ?? occurredAt,
+    ...(resource.payload ?? {}),
   };
-  if (resource.resource) {
+  if (shouldApplyHostedDirtyWindowDefaults(resource, payload, hasManifestPayload)) {
+    payload.windowEnd =
+      readHostedDirtyPayloadString(payload.windowEnd) ?? resource.windowEnd ?? dirtyState.windowEnd ?? occurredAt;
+    payload.windowStart =
+      readHostedDirtyPayloadString(payload.windowStart) ?? resource.windowStart ?? dirtyState.windowStart ?? occurredAt;
+  }
+
+  if (!hasManifestPayload && resource.jobKind === "resource" && resource.resource) {
     payload.resource = resource.resource;
   }
-  if (resource.resourceCategory) {
+  if (!hasManifestPayload && resource.jobKind === "resource" && resource.resourceCategory) {
     payload.resourceCategory = resource.resourceCategory;
   }
-  if (resource.sourceProviderSlug) {
+  if (!hasManifestPayload && resource.jobKind === "resource" && resource.sourceProviderSlug) {
     payload.sourceProviderSlug = resource.sourceProviderSlug;
   }
   const dedupeKey = [
@@ -436,6 +447,7 @@ function hostedDirtyResourceToDeviceSyncJobInput(
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
     resource.resource ?? "resource",
+    buildHostedDirtyPayloadDedupeKey(payload),
     payload.windowStart,
     payload.windowEnd,
   ].join(":");
@@ -446,6 +458,28 @@ function hostedDirtyResourceToDeviceSyncJobInput(
     priority: 60,
     dedupeKey,
   };
+}
+
+function readHostedDirtyPayloadString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function shouldApplyHostedDirtyWindowDefaults(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+  payload: Record<string, unknown>,
+  hasManifestPayload: boolean,
+): boolean {
+  if (hasManifestPayload) {
+    return Object.prototype.hasOwnProperty.call(payload, "windowEnd")
+      || Object.prototype.hasOwnProperty.call(payload, "windowStart");
+  }
+
+  return resource.jobKind !== "delete" && resource.jobKind !== "deauthorize";
+}
+
+function buildHostedDirtyPayloadDedupeKey(payload: Record<string, unknown>): string {
+  const identity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(payload);
+  return identity ? createHash("sha256").update(identity).digest("hex").slice(0, 24) : "payload";
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(

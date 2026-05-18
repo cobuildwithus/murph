@@ -1,7 +1,9 @@
 import { Prisma, PrismaClient } from "@prisma/client";
+import { serializeHostedExecutionDeviceSyncDirtyPayloadIdentity } from "@murphai/device-syncd/hosted-runtime";
 
 import {
   normalizeNullableString,
+  sha256Hex,
   toIsoTimestamp,
 } from "../shared";
 import { toNullablePrismaJsonValue } from "./prisma-json";
@@ -19,6 +21,9 @@ type DirtyConnectionPrismaClient = PrismaClient | HostedPrismaTransactionClient;
 
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
 const DIRTY_RESOURCE_KEY_MAX_LENGTH = 256;
+const DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH = 512;
+const DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN =
+  /(?:authorization|authheader|bearer|clientsecret|cookie|credential|password|secret|token|apikey)/iu;
 
 export class PrismaHostedDirtyConnectionStore {
   readonly prisma: PrismaClient;
@@ -298,7 +303,12 @@ export class PrismaHostedDirtyConnectionStore {
         processedRevision: nextProcessedRevision,
         ...(fullyProcessed
           ? {
+              dirtyResourcesJson: toNullablePrismaJsonValue({}),
               firstDirtyAt: existing.latestDirtyAt,
+              resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
+              sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+              windowEnd: null,
+              windowStart: null,
             }
           : {}),
       },
@@ -349,23 +359,33 @@ function mergeDirtyResources(
   existing: Record<string, HostedDeviceSyncDirtyResource>,
   updates: readonly HostedDeviceSyncDirtyResource[],
 ): Record<string, HostedDeviceSyncDirtyResource> {
-  const merged: Record<string, HostedDeviceSyncDirtyResource> = { ...existing };
+  const merged: Record<string, HostedDeviceSyncDirtyResource> = {};
 
+  for (const resource of Object.values(existing)) {
+    mergeDirtyResourceInto(merged, resource);
+  }
   for (const update of updates) {
-    const normalized = normalizeDirtyResource(update);
-    const key = buildDirtyResourceKey(normalized);
-    const previous = merged[key] ?? null;
-    merged[key] = previous
-      ? {
-          ...normalized,
-          count: previous.count + normalized.count,
-          windowStart: minIso(previous.windowStart, normalized.windowStart),
-          windowEnd: maxIso(previous.windowEnd, normalized.windowEnd),
-        }
-      : normalized;
+    mergeDirtyResourceInto(merged, update);
   }
 
   return merged;
+}
+
+function mergeDirtyResourceInto(
+  merged: Record<string, HostedDeviceSyncDirtyResource>,
+  resource: HostedDeviceSyncDirtyResource,
+): void {
+  const normalized = normalizeDirtyResource(resource);
+  const key = buildDirtyResourceKey(normalized);
+  const previous = merged[key] ?? null;
+  merged[key] = withDirtyResourceWindowPayload(previous
+    ? {
+        ...normalized,
+        count: previous.count + normalized.count,
+        windowStart: minIso(previous.windowStart, normalized.windowStart),
+        windowEnd: maxIso(previous.windowEnd, normalized.windowEnd),
+      }
+    : normalized);
 }
 
 function normalizeDirtyResource(
@@ -374,6 +394,7 @@ function normalizeDirtyResource(
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
+    payload: readDirtyResourcePayload(resource.payload),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
@@ -384,6 +405,7 @@ function normalizeDirtyResource(
 
 function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string {
   return [
+    buildDirtyResourcePayloadKey(resource.payload),
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
     resource.resource ?? resource.jobKind,
@@ -423,14 +445,15 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
   }
 
   const next: Record<string, HostedDeviceSyncDirtyResource> = {};
-  for (const [key, entry] of Object.entries(value)) {
+  for (const entry of Object.values(value)) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       continue;
     }
     const record = entry as Record<string, unknown>;
-    next[key.slice(0, DIRTY_RESOURCE_KEY_MAX_LENGTH)] = normalizeDirtyResource({
+    mergeDirtyResourceInto(next, {
       count: typeof record.count === "number" ? record.count : 1,
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
+      payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
@@ -440,6 +463,57 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
   }
 
   return next;
+}
+
+function withDirtyResourceWindowPayload(
+  resource: HostedDeviceSyncDirtyResource,
+): HostedDeviceSyncDirtyResource {
+  const payload = resource.payload;
+  if (!payload) {
+    return resource;
+  }
+
+  return {
+    ...resource,
+    payload: readDirtyResourcePayload({
+      ...payload,
+      ...(resource.windowEnd ? { windowEnd: resource.windowEnd } : {}),
+      ...(resource.windowStart ? { windowStart: resource.windowStart } : {}),
+    }),
+  };
+}
+
+function readDirtyResourcePayload(value: unknown): HostedDeviceSyncDirtyResource["payload"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const payload: Record<string, boolean | number | string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = truncateDirtyKey(normalizeNullableString(key));
+    if (!normalizedKey) {
+      continue;
+    }
+    if (DIRTY_RESOURCE_PAYLOAD_BLOCKED_KEY_PATTERN.test(normalizedKey.replace(/[^a-z0-9]/giu, ""))) {
+      continue;
+    }
+    if (typeof entry === "string") {
+      payload[normalizedKey] = entry.slice(0, DIRTY_RESOURCE_PAYLOAD_STRING_MAX_LENGTH);
+    } else if (typeof entry === "boolean") {
+      payload[normalizedKey] = entry;
+    } else if (typeof entry === "number" && Number.isFinite(entry)) {
+      payload[normalizedKey] = entry;
+    }
+  }
+
+  return Object.keys(payload).length > 0 ? payload : undefined;
+}
+
+function buildDirtyResourcePayloadKey(
+  payload: HostedDeviceSyncDirtyResource["payload"],
+): string {
+  const identity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(payload);
+  return identity ? sha256Hex(identity).slice(0, 24) : "payload";
 }
 
 function readCounterJson(value: Prisma.JsonValue): Record<string, number> {

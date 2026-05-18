@@ -218,11 +218,26 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
 export interface HostedExecutionDeviceSyncDirtyResource {
   count: number;
   jobKind: string;
+  payload?: Record<string, boolean | number | string>;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
   windowEnd: string | null;
   windowStart: string | null;
+}
+
+export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
+  payload: Record<string, unknown> | null | undefined,
+): string | null {
+  const stablePayload = Object.fromEntries(
+    Object.entries(payload ?? {})
+      .filter(([key]) => key !== "windowEnd" && key !== "windowStart")
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  return Object.keys(stablePayload).length > 0
+    ? JSON.stringify(stablePayload)
+    : null;
 }
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
@@ -899,12 +914,38 @@ function parseHostedExecutionDeviceSyncDirtyResource(
   return {
     count: requirePositiveInteger(record.count, `${label}.count`),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
+    payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
     windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
   };
+}
+
+function readHostedExecutionDeviceSyncDirtyPayload(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncDirtyResource["payload"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireObject(value, label);
+  const payload: Record<string, boolean | number | string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === "string" || typeof entry === "boolean") {
+      payload[key] = entry;
+      continue;
+    }
+    if (typeof entry === "number" && Number.isFinite(entry)) {
+      payload[key] = entry;
+      continue;
+    }
+    throw new TypeError(`${label}.${key} must be a string, number, or boolean.`);
+  }
+
+  return Object.keys(payload).length > 0 ? payload : undefined;
 }
 
 function parseHostedExecutionDeviceSyncDirtyCounters(

@@ -1159,7 +1159,7 @@ describe("hosted device-sync runtime", () => {
         },
         {
           dedupeKey:
-            "hosted-dirty:demo:resource:garmin:timeseries:steps:2026-04-02T00:00:00.000Z:2026-04-04T00:00:00.000Z",
+            "hosted-dirty:demo:resource:garmin:timeseries:steps:033d08b7160ff3a70cc8cb5f:2026-04-02T00:00:00.000Z:2026-04-04T00:00:00.000Z",
           kind: "resource",
           payload: {
             resource: "steps",
@@ -1272,8 +1272,84 @@ describe("hosted device-sync runtime", () => {
       assert.equal(jobs.length, 1);
       assert.equal(
         jobs[0]?.dedupeKey,
-        "hosted-dirty:demo:resource:garmin:summary:sleep:2026-04-03T00:00:00.000Z:2026-04-04T00:00:00.000Z",
+        "hosted-dirty:demo:resource:garmin:summary:sleep:7ae8a0d6ecadc9aa74304031:2026-04-03T00:00:00.000Z:2026-04-04T00:00:00.000Z",
       );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("device-sync dirty legacy non-resource rows do not rehydrate resource payload fields", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-reconcile",
+        provider: "demo",
+        state: begin.state,
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_reconcile",
+        dirtyRevision: "11",
+        dirtyResources: [
+          {
+            count: 1,
+            jobKind: "reconcile",
+            resource: "reconcile",
+            resourceCategory: "reconcile",
+            sourceProviderSlug: null,
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_conn_dirty_reconcile",
+              externalAccountId: connected.account.externalAccountId,
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.deepEqual(jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : null, {
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

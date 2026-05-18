@@ -1002,6 +1002,9 @@ function normalizeTimeseriesUnit(resource: string, rawUnit: string | undefined, 
   if (resource === "respiratory_rate" && isRespiratoryRateUnitAlias(normalized)) {
     return fallbackUnit;
   }
+  if (resource === "blood_oxygen" && isBloodOxygenUnitAlias(normalized)) {
+    return fallbackUnit;
+  }
 
   return rawUnit ?? fallbackUnit;
 }
@@ -1014,6 +1017,15 @@ function isRespiratoryRateUnitAlias(unit: string | undefined): boolean {
     || unit === "breaths/minute"
     || unit === "breaths per minute"
     || unit === "breaths_per_minute";
+}
+
+function isBloodOxygenUnitAlias(unit: string | undefined): boolean {
+  return unit === undefined
+    || unit === "spo2"
+    || unit === "sp_o2"
+    || unit === "sp-o2"
+    || unit === "blood_oxygen"
+    || unit === "oxygen_saturation";
 }
 
 function shouldEmitQueryableSample(
