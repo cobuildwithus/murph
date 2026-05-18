@@ -7,7 +7,10 @@ import {
 import { createHostedPhoneLookupKey } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
 import type { HostedPrivyAuthMethod } from "./types";
@@ -32,7 +35,9 @@ import {
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
+  lookupHostedMemberIdentityByWalletAddress,
   readHostedMemberIdentity,
+  type HostedMemberIdentityWriteInput,
   type HostedMemberIdentityLookup,
   tryCreateHostedMemberIdentity,
   upsertHostedMemberIdentity,
@@ -55,6 +60,7 @@ import {
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 
 export {
+  createHostedPrivyIdentityConflictError,
   hasHostedMemberPrivyIdentity,
   lookupHostedMemberForPrivyAuthAttempt,
   lookupHostedMemberForPrivyIdentity,
@@ -347,7 +353,14 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
         ? input.identity.phone
         : null,
     });
-    await upsertHostedMemberIdentity({
+    const wallet = await resolveHostedPrivyWalletForMemberIdentityWriteTx({
+      currentIdentity: null,
+      memberId,
+      prisma: input.prisma,
+      wallet: input.identity.wallet,
+    });
+
+    await upsertHostedMemberIdentityDroppingWalletOnConflict({
       ...phoneIdentity,
       memberId,
       prisma: input.prisma,
@@ -358,7 +371,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
       signupPhoneNumber: null,
       ...buildHostedMemberWalletIdentityFields({
         now: input.now,
-        wallet: input.identity.wallet,
+        wallet,
       }),
     });
     return createdMember;
@@ -426,22 +439,6 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     });
   }
 
-  const normalizedWalletAddress = input.identity.wallet
-    ? normalizeHostedWalletAddress(input.identity.wallet.address)
-    : null;
-
-  if (
-    currentIdentity?.walletAddress
-    && normalizedWalletAddress
-    && normalizeHostedWalletAddress(currentIdentity.walletAddress) !== normalizedWalletAddress
-  ) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_MISMATCH",
-      message: "This phone number is already linked to different verified account details.",
-      httpStatus: 409,
-    });
-  }
-
   const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
     currentIdentity,
     now: input.now,
@@ -452,34 +449,151 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
       ? input.identity.phone
       : null,
   });
+  const wallet = await resolveHostedPrivyWalletForMemberIdentityWriteTx({
+    currentIdentity,
+    memberId: currentMember.id,
+    prisma: input.prisma,
+    wallet: input.identity.wallet,
+  });
 
+  await upsertHostedMemberIdentityDroppingWalletOnConflict({
+    ...nextPhoneIdentity,
+    memberId: currentMember.id,
+    prisma: input.prisma,
+    privyUserId: input.identity.userId,
+    signupPhoneCodeSendAttemptId: null,
+    signupPhoneCodeSendAttemptStartedAt: null,
+    signupPhoneCodeSentAt: null,
+    signupPhoneNumber: null,
+    ...buildHostedMemberWalletIdentityFields({
+      existingWalletAddress: currentIdentity?.walletAddress,
+      existingWalletChainType: currentIdentity?.walletChainType,
+      existingWalletCreatedAt: currentIdentity?.walletCreatedAt,
+      existingWalletProvider: currentIdentity?.walletProvider,
+      now: input.now,
+      wallet,
+    }),
+  }, {
+    ...buildHostedMemberWalletIdentityFields({
+      existingWalletAddress: currentIdentity?.walletAddress,
+      existingWalletChainType: currentIdentity?.walletChainType,
+      existingWalletCreatedAt: currentIdentity?.walletCreatedAt,
+      existingWalletProvider: currentIdentity?.walletProvider,
+      now: input.now,
+      wallet: null,
+    }),
+  });
+  return currentMember;
+}
+
+async function upsertHostedMemberIdentityDroppingWalletOnConflict(
+  input: HostedMemberIdentityWriteInput,
+  fallbackWalletFields: Pick<
+    HostedMemberIdentityWriteInput,
+    "walletAddress" | "walletChainType" | "walletCreatedAt" | "walletProvider"
+  > = {
+    walletAddress: null,
+    walletChainType: null,
+    walletCreatedAt: null,
+    walletProvider: null,
+  },
+): Promise<void> {
   try {
-    await upsertHostedMemberIdentity({
-      ...nextPhoneIdentity,
-      memberId: currentMember.id,
-      prisma: input.prisma,
-      privyUserId: input.identity.userId,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      ...buildHostedMemberWalletIdentityFields({
-        existingWalletAddress: currentIdentity?.walletAddress,
-        existingWalletChainType: currentIdentity?.walletChainType,
-        existingWalletCreatedAt: currentIdentity?.walletCreatedAt,
-        existingWalletProvider: currentIdentity?.walletProvider,
-        now: input.now,
-        wallet: input.identity.wallet,
-      }),
-    });
-    return currentMember;
+    await upsertHostedMemberIdentity(input);
+    return;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw createHostedPrivyIdentityConflictError();
+    if (!input.walletAddress || !isHostedMemberIdentityWalletUniqueConstraintError(error)) {
+      throw mapHostedMemberIdentityUniqueConstraintError(error);
+    }
+  }
+
+  await upsertHostedMemberIdentity({
+    ...input,
+    ...fallbackWalletFields,
+  }).catch((retryError: unknown) => {
+    throw mapHostedMemberIdentityUniqueConstraintError(retryError);
+  });
+}
+
+async function resolveHostedPrivyWalletForMemberIdentityWriteTx(input: {
+  currentIdentity: Pick<HostedMemberIdentityLookup["identity"], "walletAddress"> | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  wallet: HostedPrivyIdentity["wallet"];
+}): Promise<HostedPrivyIdentity["wallet"]> {
+  const normalizedWalletAddress = input.wallet
+    ? normalizeHostedWalletAddress(input.wallet.address)
+    : null;
+
+  if (!input.wallet || !normalizedWalletAddress) {
+    return null;
+  }
+
+  if (input.currentIdentity?.walletAddress) {
+    return normalizeHostedWalletAddress(input.currentIdentity.walletAddress) === normalizedWalletAddress
+      ? input.wallet
+      : null;
+  }
+
+  let walletOwner: HostedMemberIdentityLookup | null;
+  try {
+    walletOwner = await lookupHostedMemberIdentityByWalletAddress({
+      prisma: input.prisma,
+      walletAddress: normalizedWalletAddress,
+    });
+  } catch (error) {
+    if (isHostedMemberIdentityWalletLookupAmbiguousError(error)) {
+      return null;
     }
 
     throw error;
   }
+
+  return !walletOwner || walletOwner.core.id === input.memberId ? input.wallet : null;
+}
+
+function isHostedMemberIdentityUniqueConstraintError(
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function isHostedMemberIdentityWalletUniqueConstraintError(
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError {
+  if (!isHostedMemberIdentityUniqueConstraintError(error)) {
+    return false;
+  }
+
+  const target = error.meta?.target;
+  if (Array.isArray(target)) {
+    return target.some(isHostedMemberIdentityWalletUniqueConstraintTarget);
+  }
+
+  return isHostedMemberIdentityWalletUniqueConstraintTarget(target);
+}
+
+function isHostedMemberIdentityWalletUniqueConstraintTarget(value: unknown): boolean {
+  return typeof value === "string" && (
+    value === "walletAddressLookupKey"
+    || value === "wallet_address_lookup_key"
+    || value.includes("walletAddressLookupKey")
+    || value.includes("wallet_address_lookup_key")
+  );
+}
+
+function isHostedMemberIdentityWalletLookupAmbiguousError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.code === "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS"
+    && error.details?.matchedBy === "walletAddress";
+}
+
+function mapHostedMemberIdentityUniqueConstraintError(error: unknown): unknown {
+  if (isHostedMemberIdentityUniqueConstraintError(error)) {
+    return createHostedPrivyIdentityConflictError();
+  }
+
+  return error;
 }
 
 function shouldPersistHostedPrivyPhoneIdentity(input: {

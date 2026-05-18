@@ -1,4 +1,7 @@
-import { HostedBillingStatus } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  Prisma,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHostedEmailLookupKey,
@@ -53,6 +56,8 @@ const DEFAULT_PHONE_NUMBER = "+15551234567";
 const DEFAULT_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(DEFAULT_PHONE_NUMBER)!;
 const SECONDARY_PHONE_NUMBER = "+15557654321";
 const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
+const SYNTHETIC_TEST_WALLET_ADDRESS = "0x00000000000000000000000000000000000000a1";
+const SYNTHETIC_TEST_WALLET_ADDRESS_ALT = "0x00000000000000000000000000000000000000b2";
 type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
 type BaseHostedPrivyIdentity = HostedPrivyIdentity & {
@@ -144,7 +149,7 @@ function baseIdentity(): BaseHostedPrivyIdentity {
     telegram: null,
     userId: "did:privy:user_123",
     wallet: {
-      address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      address: SYNTHETIC_TEST_WALLET_ADDRESS,
       chainType: "ethereum",
       id: "wallet_123",
       type: "wallet",
@@ -269,7 +274,7 @@ describe("completeHostedPrivyVerification", () => {
     });
   });
 
-  it("binds a verified email identity onto an invite-bound Linq email contact", async () => {
+  it("binds a verified email identity onto an invite-bound Linq email contact despite stale client method", async () => {
     const pendingEmailAddress = "linq-handle@example.com";
     const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
     const privyEmailVerifiedAtSeconds = 1742990400;
@@ -337,6 +342,7 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     const result = await completeHostedPrivyVerification({
+      authMethod: "phone",
       identity: makeIdentity({
         email: {
           address: "Linq-Handle@example.com",
@@ -383,7 +389,107 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("rejects invite verification when the current identity-side wallet conflicts with the verified Privy wallet", async () => {
+  it("maps invite-bound primary email ownership conflicts to a merge-safe account conflict", async () => {
+    const pendingEmailAddress = "linq-conflict@example.com";
+    const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;
+    const privyEmailVerifiedAtSeconds = 1742990400;
+    const inviteMember = makeMember({
+      id: "member_linq_email_conflict_invite",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const inviteMemberWithRouting = {
+      ...inviteMember,
+      identity: {
+        createdAt: NOW,
+        maskedPhoneNumberHint: null,
+        memberId: inviteMember.id,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+        privyUserId: null,
+        updatedAt: NOW,
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      routing: {
+        linqChatIdEncrypted: null,
+        linqRecipientPhoneEncrypted: null,
+        memberId: inviteMember.id,
+        pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-chat-id",
+          memberId: inviteMember.id,
+          value: "linq_chat_email_conflict_123",
+        }),
+        pendingLinqParticipantContactEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-routing.pending-linq-participant-contact",
+          memberId: inviteMember.id,
+          value: pendingEmailAddress,
+        }),
+        pendingLinqParticipantContactKind: "email",
+        pendingLinqParticipantContactLookupKey: pendingEmailLookupKey,
+        pendingLinqParticipantContactObservedAt: NOW,
+        pendingLinqRecipientPhoneEncrypted: null,
+        telegramUserIdEncrypted: null,
+        telegramUserLookupKey: null,
+      },
+    };
+    const invite = makeInvite(inviteMemberWithRouting);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn(),
+        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
+          "duplicate verified email",
+          {
+            clientVersion: "test",
+            code: "P2002",
+            meta: {
+              target: ["verifiedEmailLookupKey"],
+            },
+          },
+        )),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "email",
+        identity: makeIdentity({
+          email: {
+            address: pendingEmailAddress,
+            verifiedAt: privyEmailVerifiedAtSeconds,
+          },
+          phone: null,
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "PRIVY_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
+  });
+
+  it("keeps an existing wallet when invite verification sees a different linked wallet", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
@@ -402,7 +508,7 @@ describe("completeHostedPrivyVerification", () => {
           phoneNumberVerifiedAt: NOW,
           privyUserId: "did:privy:user_123",
           updatedAt: NOW,
-          walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+          walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
           walletChainType: "ethereum",
           walletCreatedAt: NOW,
           walletProvider: "privy",
@@ -414,7 +520,7 @@ describe("completeHostedPrivyVerification", () => {
       completeHostedPrivyVerification({
         identity: makeIdentity({
           wallet: {
-            address: "0x1111111111111111111111111111111111111111",
+            address: SYNTHETIC_TEST_WALLET_ADDRESS_ALT,
             chainType: "ethereum",
             id: "wallet_conflict",
             type: "wallet",
@@ -424,12 +530,23 @@ describe("completeHostedPrivyVerification", () => {
         now: NOW,
         prisma,
       }),
-    ).rejects.toMatchObject({
-      code: "PRIVY_WALLET_MISMATCH",
-      httpStatus: 409,
+    ).resolves.toMatchObject({
+      inviteCode: "invite-code",
+      memberId: inviteMember.id,
+      stage: "checkout",
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: createHostedWalletAddressLookupKey(
+          SYNTHETIC_TEST_WALLET_ADDRESS,
+        ),
+        walletChainType: "ethereum",
+        walletCreatedAt: NOW,
+        walletProvider: "privy",
+      }),
+    }));
   });
 
   it("creates a hosted member and a web invite for a new public phone signup", async () => {
@@ -438,7 +555,7 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
       walletProvider: "privy",
@@ -495,13 +612,124 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.stage).toBe("checkout");
   });
 
+  it("keeps public primary email binding in the member creation transaction", async () => {
+    const createdMember = makeMember({
+      id: "member_public_email_conflict",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    let transactionDepth = 0;
+    const identityWriteTransactionDepths: number[] = [];
+    const emailWriteTransactionDepths: number[] = [];
+    const prismaHolder: {
+      current: NonNullable<CompleteHostedPrivyVerificationPrisma> | null;
+    } = {
+      current: null,
+    };
+    const transaction = vi.fn(async (
+      callback: (tx: NonNullable<CompleteHostedPrivyVerificationPrisma>) => Promise<unknown>,
+    ) => {
+      transactionDepth += 1;
+      try {
+        if (!prismaHolder.current) {
+          throw new Error("Expected transaction prisma fixture to be initialized.");
+        }
+
+        const tx = Object.create(prismaHolder.current) as NonNullable<CompleteHostedPrivyVerificationPrisma>;
+        Object.defineProperty(tx, "$transaction", {
+          configurable: true,
+          value: undefined,
+        });
+        return await callback(tx);
+      } finally {
+        transactionDepth -= 1;
+      }
+    });
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      identityWriteTransactionDepths.push(transactionDepth);
+      return {
+        ...create,
+        ...update,
+      };
+    });
+    const emailUpsert = vi.fn(async () => {
+      emailWriteTransactionDepths.push(transactionDepth);
+      throw new Prisma.PrismaClientKnownRequestError("duplicate verified email", {
+        clientVersion: "test",
+        code: "P2002",
+        meta: {
+          target: ["verifiedEmailLookupKey"],
+        },
+      });
+    });
+
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      $transaction: transaction,
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: emailUpsert,
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: identityUpsert,
+      },
+    });
+    prismaHolder.current = prisma;
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "email",
+        identity: makeIdentity({
+          email: {
+            address: "public-conflict@example.com",
+            verifiedAt: 1743064200,
+          },
+          phone: null,
+          wallet: null,
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "PRIVY_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(identityWriteTransactionDepths).toEqual([1]);
+    expect(emailWriteTransactionDepths).toEqual([1]);
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
   it("persists a valid signup timezone only as pending activation state", async () => {
     const createdMember = makeMember({
       id: "member_timezone",
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aA96045".toLowerCase(),
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
       walletProvider: "privy",
@@ -1026,12 +1254,70 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
+  it("requires Telegram state for invite-bound Telegram auth before mutating identity", async () => {
+    const inviteMember = makeMember({
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+    });
+    const invite = {
+      ...makeInvite(inviteMember),
+      member: {
+        ...inviteMember,
+        identity: {
+          createdAt: NOW,
+          maskedPhoneNumberHint: null,
+          memberId: inviteMember.id,
+          phoneLookupKey: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          updatedAt: NOW,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        },
+      },
+    };
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        update: vi.fn(),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "telegram",
+        identity: makeIdentity({
+          phone: null,
+          telegram: null,
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "PRIVY_TELEGRAM_REQUIRED",
+      httpStatus: 400,
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+  });
+
   it("marks an already-active invite flow as paid and preserves the paid timestamp", async () => {
     const activeMember = makeMember({
       billingStatus: HostedBillingStatus.active,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
       walletProvider: "privy",
@@ -1067,7 +1353,7 @@ describe("completeHostedPrivyVerification", () => {
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
       suspendedAt: new Date("2026-03-21T12:00:00.000Z"),
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
       walletProvider: "privy",
@@ -1123,7 +1409,7 @@ describe("completeHostedPrivyVerification", () => {
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
       suspendedAt: NOW,
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: NOW,
       walletProvider: "privy",
@@ -1186,7 +1472,7 @@ describe("completeHostedPrivyVerification", () => {
       id: "member_wallet",
       maskedPhoneNumberHint: "*** 4321",
       phoneLookupKey: SECONDARY_PHONE_LOOKUP_KEY,
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
     });
     const activeInvite = makeInvite(phoneMember, {
       channel: "web",
@@ -1245,6 +1531,133 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         memberId: phoneMember.id,
+      }),
+    }));
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      }),
+    }));
+  });
+
+  it("skips secondary wallet persistence when wallet lookup is ambiguous during phone auth", async () => {
+    const phoneMember = makeMember({ id: "member_phone_ambiguous_wallet" });
+    const walletMemberA = makeMember({
+      id: "member_wallet_ambiguous_a",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+    });
+    const walletMemberB = makeMember({
+      id: "member_wallet_ambiguous_b",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+    });
+    const phoneIdentity = await readMemberIdentity(phoneMember);
+    const walletIdentityA = await readMemberIdentity(walletMemberA);
+    const walletIdentityB = await readMemberIdentity(walletMemberB);
+
+    if (!phoneIdentity || !walletIdentityA || !walletIdentityB) {
+      throw new Error("Expected hosted identity fixtures to be readable.");
+    }
+
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_ambiguous_wallet",
+      inviteCode: "invite-phone-ambiguous-wallet",
+      memberId: phoneMember.id,
+    });
+    const identityFindMany = vi.fn(async ({
+      include,
+      where,
+    }: {
+      include?: { member?: boolean };
+      where: Record<string, unknown>;
+    }) => {
+      const phoneLookupKeys = Array.isArray(
+        (where.phoneLookupKey as { in?: unknown[] } | undefined)?.in,
+      )
+        ? (where.phoneLookupKey as { in: unknown[] }).in
+        : [];
+      const walletLookupKeys = Array.isArray(
+        (where.walletAddressLookupKey as { in?: unknown[] } | undefined)?.in,
+      )
+        ? (where.walletAddressLookupKey as { in: unknown[] }).in
+        : [];
+
+      if (phoneLookupKeys.includes(DEFAULT_PHONE_LOOKUP_KEY)) {
+        return include?.member
+          ? [{ ...phoneIdentity, member: phoneMember }]
+          : [phoneIdentity];
+      }
+
+      if (walletLookupKeys.length > 0) {
+        return include?.member
+          ? [
+              { ...walletIdentityA, member: walletMemberA },
+              { ...walletIdentityB, member: walletMemberB },
+            ]
+          : [walletIdentityA, walletIdentityB];
+      }
+
+      return [];
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.id === phoneMember.id || where.phoneLookupKey === DEFAULT_PHONE_LOOKUP_KEY) {
+            return phoneMember;
+          }
+
+          return null;
+        }),
+      },
+      hostedMemberIdentity: {
+        findMany: identityFindMany,
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+          where.memberId === phoneMember.id ? phoneIdentity : null),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => ({
+          ...create,
+          ...update,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-ambiguous-wallet",
+      memberId: phoneMember.id,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
       }),
     }));
   });
@@ -1312,6 +1725,125 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
+  it("does not block phone auth when a linked email belongs to another member", async () => {
+    const phoneMember = makeMember({ id: "member_phone_secondary_email" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_email",
+      inviteCode: "invite-phone-secondary-email",
+      memberId: phoneMember.id,
+    });
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn(),
+        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
+          "duplicate verified email",
+          {
+            clientVersion: "test",
+            code: "P2002",
+            meta: {
+              target: ["verifiedEmailLookupKey"],
+            },
+          },
+        )),
+      },
+    });
+
+    try {
+      await expect(
+        completeHostedPrivyVerification({
+          authMethod: "phone",
+          identity: makeIdentity({
+            email: {
+              address: "secondary@example.com",
+              verifiedAt: 1743064200,
+            },
+          }),
+          now: NOW,
+          prisma,
+        }),
+      ).resolves.toMatchObject({
+        inviteCode: "invite-phone-secondary-email",
+        memberId: phoneMember.id,
+        stage: "checkout",
+      });
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted Privy secondary email binding sync failed.",
+      );
+    } finally {
+      consoleWarn.mockRestore();
+    }
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
+  });
+
+  it("does not swallow unexpected secondary email uniqueness failures", async () => {
+    const phoneMember = makeMember({ id: "member_phone_secondary_email_unexpected" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_email_unexpected",
+      inviteCode: "invite-phone-secondary-email-unexpected",
+      memberId: phoneMember.id,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn(),
+        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
+          "duplicate member email authorization",
+          {
+            clientVersion: "test",
+            code: "P2002",
+            meta: {
+              target: ["memberId"],
+            },
+          },
+        )),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity({
+          email: {
+            address: "secondary-unexpected@example.com",
+            verifiedAt: 1743064200,
+          },
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "P2002",
+    });
+
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
@@ -1347,11 +1879,12 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
   });
 
-  it("rejects invite verification when the existing member wallet conflicts with the verified Privy wallet", async () => {
+  it("preserves an existing member wallet when the verified Privy wallet differs", async () => {
+    const existingWalletCreatedAt = new Date("2026-03-20T12:00:00.000Z");
     const inviteMember = makeMember({
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
-      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+      walletCreatedAt: existingWalletCreatedAt,
       walletProvider: "privy",
     });
     const invite = makeInvite(inviteMember);
@@ -1371,7 +1904,7 @@ describe("completeHostedPrivyVerification", () => {
       completeHostedPrivyVerification({
         identity: makeIdentity({
           wallet: {
-            address: "0x1111111111111111111111111111111111111111",
+            address: SYNTHETIC_TEST_WALLET_ADDRESS_ALT,
             chainType: "ethereum",
             id: "wallet_conflict",
             type: "wallet",
@@ -1381,18 +1914,29 @@ describe("completeHostedPrivyVerification", () => {
         now: NOW,
         prisma,
       }),
-    ).rejects.toMatchObject({
-      code: "PRIVY_WALLET_MISMATCH",
-      httpStatus: 409,
+    ).resolves.toMatchObject({
+      inviteCode: "invite-code",
+      memberId: inviteMember.id,
+      stage: "checkout",
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        walletAddressLookupKey: createHostedWalletAddressLookupKey(
+          SYNTHETIC_TEST_WALLET_ADDRESS,
+        ),
+        walletChainType: "ethereum",
+        walletCreatedAt: existingWalletCreatedAt,
+        walletProvider: "privy",
+      }),
+    }));
   });
 
   it("preserves an existing stored wallet when the current Privy session has not produced one yet", async () => {
     const existingWalletCreatedAt = new Date("2026-03-20T12:00:00.000Z");
     const inviteMember = makeMember({
-      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
       walletChainType: "ethereum",
       walletCreatedAt: existingWalletCreatedAt,
       walletProvider: "privy",

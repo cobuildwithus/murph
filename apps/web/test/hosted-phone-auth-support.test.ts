@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
+  waitForRetryDelay: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -18,7 +19,15 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-retry-support", () => ({
+  waitForRetryDelay: mocks.waitForRetryDelay,
+}));
+
 describe("hosted phone auth support", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("clears the pending action after a handled pending-action failure", async () => {
     const { runHostedPhonePendingAction } = await import(
       "@/src/components/hosted-onboarding/hosted-phone-auth-support"
@@ -62,5 +71,54 @@ describe("hosted phone auth support", () => {
       method: "POST",
       url: "/api/settings/phone/sync",
     });
+  });
+
+  it("retries Telegram completion lag with the Telegram auth intent", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    const { requestHostedPrivyCompletionWithRetry } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-support"
+    );
+    const completionPayload = {
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      messagingSetupRequired: false,
+      ok: true,
+      stage: "checkout",
+    };
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new HostedOnboardingApiError({
+        code: "PRIVY_TELEGRAM_NOT_READY",
+        message: "Telegram is still syncing.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce(completionPayload);
+
+    await expect(requestHostedPrivyCompletionWithRetry({
+      authMethod: "telegram",
+      inviteCode: "invite-code",
+    })).resolves.toEqual(completionPayload);
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      payload: {
+        authIntent: {
+          method: "telegram",
+        },
+        inviteCode: "invite-code",
+      },
+      url: "/api/hosted-onboarding/privy/complete",
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      payload: {
+        authIntent: {
+          method: "telegram",
+        },
+        inviteCode: "invite-code",
+      },
+      url: "/api/hosted-onboarding/privy/complete",
+    });
+    expect(mocks.waitForRetryDelay).toHaveBeenCalledWith(500);
   });
 });

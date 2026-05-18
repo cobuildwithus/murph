@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
@@ -41,6 +43,7 @@ describe("hosted onboarding Privy completion route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.completeHostedPrivyVerification.mockResolvedValue({
       activationPending: false,
@@ -170,7 +173,25 @@ describe("hosted onboarding Privy completion route", () => {
     }));
   });
 
-  it("passes the selected auth method to completion", async () => {
+  it("passes the selected Telegram auth method and identity to completion", async () => {
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        userId: "did:privy:user_telegram",
+        wallet: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_telegram",
+      },
+    });
+
     await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -187,7 +208,83 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
       authMethod: "telegram",
+      identity: expect.objectContaining({
+        telegram: expect.objectContaining({
+          telegramUserId: "456",
+        }),
+        userId: "did:privy:user_telegram",
+      }),
     }));
+  });
+
+  it("requires an explicit auth intent when legacy clients present multiple verified methods", async () => {
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        email: {
+          address: "user@example.test",
+          verifiedAt: 1742990400,
+        },
+        phone: {
+          number: "+15550000000",
+          verifiedAt: 1742990400,
+        },
+        userId: "did:privy:user_multi",
+        wallet: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_multi",
+      },
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_AUTH_INTENT_REQUIRED",
+        retryable: false,
+      },
+    });
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
+  it("maps missing Telegram state from completion to a retryable session-lag response", async () => {
+    mocks.completeHostedPrivyVerification.mockRejectedValueOnce(hostedOnboardingError({
+      code: "PRIVY_TELEGRAM_REQUIRED",
+      message: "Finish Telegram verification before continuing.",
+      httpStatus: 400,
+    }));
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "telegram",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_TELEGRAM_NOT_READY",
+        retryable: true,
+      },
+    });
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
   });
 
   it("passes a validated browser timezone to the completion service", async () => {
