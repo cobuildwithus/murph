@@ -54,6 +54,14 @@ const DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS = [
   "wearable_hrv",
   "advanced_biomarkers",
 ] as const;
+const FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS = [
+  "glycemia_bloodwork_labs_first",
+  "daily_activity_phone_watch_wearable_first",
+  "routine_labs_optional_after_minimum_pair",
+  "basic_vitals_context_optional_after_minimum_pair",
+  "sleep_recovery_hrv_after_minimum_pair",
+  "advanced_biomarkers_last",
+] as const;
 const FIRST_SUBMITTER_ASK_IDS = [
   "has_glycemia_bloodwork_export",
   "has_daily_wearable_activity_export",
@@ -160,6 +168,8 @@ type OptionalContextSourceFamilyId =
   (typeof OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS)[number];
 type DeferredUntilMinimumPairConfirmedId =
   (typeof DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS)[number];
+type FirstPassSubmissionPriorityOrderId =
+  (typeof FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS)[number];
 type FirstSubmitterAskId = (typeof FIRST_SUBMITTER_ASK_IDS)[number];
 type SafeCompletionChecklistItemId =
   (typeof SAFE_COMPLETION_CHECKLIST_ITEM_IDS)[number];
@@ -272,6 +282,22 @@ interface RowOwnerActionRoute {
   targetAgeBand: typeof TARGET_AGE_BAND;
 }
 
+interface AverageSubmitterSubmissionPriority {
+  averageSubmitterLikelySubmittable: true;
+  deferredUntilMinimumPairConfirmedIds: DeferredUntilMinimumPairConfirmedId[];
+  firstPassOnly: true;
+  firstPassSubmissionPriorityOrderIds: FirstPassSubmissionPriorityOrderId[];
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  modelEvidencePromotionAllowed: false;
+  optionalContextNotRequiredForFirstStep: OptionalContextSourceFamilyId[];
+  prioritizedInputKindIds: RequiredInputKindId[];
+  productDisplayAuthorized: false;
+  rowLevelDataAcceptedByR1178: false;
+  rowParsingPerformedByR1178: false;
+  sourcePriority: typeof TARGET_INPUT_PRIORITY;
+  targetAgeBand: typeof TARGET_AGE_BAND;
+}
+
 export interface R1178AverageSubmitterCurrentLoopSurfacingOptions {
   createdAt?: string;
   outputDir?: string;
@@ -318,6 +344,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
   currentLoopSurfacing: {
     allowedValueKindIds: AllowedValueKindId[];
     averageSubmitterPriorityPacketCommand: typeof R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_COMMAND;
+    averageSubmitterSubmissionPriority: AverageSubmitterSubmissionPriority;
     blockedContentIds: BlockedContentId[];
     conclusion: SurfacingConclusion;
     currentLoopCommand: string;
@@ -360,6 +387,7 @@ export interface R1178AverageSubmitterCurrentLoopSurfacingOutput {
   summary: {
     allowedValueKindIds: AllowedValueKindId[];
     averageSubmitterPriorityPacketCommand: typeof R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_COMMAND;
+    averageSubmitterSubmissionPriority: AverageSubmitterSubmissionPriority;
     blockedContentIds: BlockedContentId[];
     conclusion: SurfacingConclusion;
     currentLoopCommand: string;
@@ -460,6 +488,8 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     nextAction,
     priorityVisibleInCurrentLoop,
   });
+  const averageSubmitterSubmissionPriority =
+    buildAverageSubmitterSubmissionPriority();
   const currentLoopCommand = currentLoopCommandFor(rowOwnerActionRoute);
   const createdAt = createdAtFor(options.createdAt);
 
@@ -467,6 +497,7 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
     allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
     averageSubmitterPriorityPacketCommand:
       R1177_AVERAGE_SUBMITTER_PRIORITY_PACKET_COMMAND,
+    averageSubmitterSubmissionPriority,
     blockedContentIds: [...BLOCKED_CONTENT_IDS],
     conclusion,
     currentLoopCommand,
@@ -511,6 +542,8 @@ export async function runR1178AverageSubmitterCurrentLoopSurfacing(
       allowedValueKindIds: summary.allowedValueKindIds,
       averageSubmitterPriorityPacketCommand:
         summary.averageSubmitterPriorityPacketCommand,
+      averageSubmitterSubmissionPriority:
+        summary.averageSubmitterSubmissionPriority,
       blockedContentIds: summary.blockedContentIds,
       conclusion: summary.conclusion,
       currentLoopCommand: summary.currentLoopCommand,
@@ -910,6 +943,30 @@ function rowOwnerActionRouteFor(input: {
   };
 }
 
+function buildAverageSubmitterSubmissionPriority(): AverageSubmitterSubmissionPriority {
+  return {
+    averageSubmitterLikelySubmittable: true,
+    deferredUntilMinimumPairConfirmedIds: [
+      ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS,
+    ],
+    firstPassOnly: true,
+    firstPassSubmissionPriorityOrderIds: [
+      ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS,
+    ],
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    modelEvidencePromotionAllowed: false,
+    optionalContextNotRequiredForFirstStep: [
+      ...OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS,
+    ],
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    productDisplayAuthorized: false,
+    rowLevelDataAcceptedByR1178: false,
+    rowParsingPerformedByR1178: false,
+    sourcePriority: TARGET_INPUT_PRIORITY,
+    targetAgeBand: TARGET_AGE_BAND,
+  };
+}
+
 function rowOwnerActionRouteStatusFor(input: {
   minimumFeaturePairConfirmed: boolean;
   priorityVisibleInCurrentLoop: boolean;
@@ -1140,13 +1197,22 @@ function cliSummary(
   output: R1178AverageSubmitterCurrentLoopSurfacingOutput
 ): Record<string, unknown> {
   return {
+    averageSubmitterSubmissionPriorityOrderIds:
+      output.summary.averageSubmitterSubmissionPriority
+        .firstPassSubmissionPriorityOrderIds,
     conclusion: output.summary.conclusion,
     currentLoopCommand: output.summary.currentLoopCommand,
     currentMissingRequirementIds: output.summary.currentMissingRequirementIds,
     currentSurfacingBlockerIds: output.summary.currentSurfacingBlockerIds,
+    deferredUntilMinimumPairConfirmedIds:
+      output.summary.averageSubmitterSubmissionPriority
+        .deferredUntilMinimumPairConfirmedIds,
     firstSubmitterAskIds: output.summary.firstSubmitterAskIds,
     minimumFeaturePairConfirmed: output.summary.minimumFeaturePairConfirmed,
     minimumFeaturePairRequired: output.summary.minimumFeaturePairRequired,
+    optionalContextNotRequiredForFirstStep:
+      output.summary.averageSubmitterSubmissionPriority
+        .optionalContextNotRequiredForFirstStep,
     nextAction: output.summary.nextAction,
     packetId: output.packetId,
     prioritizedInputKindIds: output.summary.prioritizedInputKindIds,

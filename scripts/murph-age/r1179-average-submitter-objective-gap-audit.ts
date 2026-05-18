@@ -46,6 +46,26 @@ const REQUIRED_INPUT_KIND_IDS = [
   "lab_portal_export_or_spreadsheet",
   "phone_watch_or_wearable_activity_export",
 ] as const;
+const OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS = [
+  "common_bloodwork_core",
+  "vitals_body_context",
+] as const;
+const DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS = [
+  "common_bloodwork_core",
+  "vitals_body_context",
+  "wearable_sleep",
+  "wearable_recovery",
+  "wearable_hrv",
+  "advanced_biomarkers",
+] as const;
+const FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS = [
+  "glycemia_bloodwork_labs_first",
+  "daily_activity_phone_watch_wearable_first",
+  "routine_labs_optional_after_minimum_pair",
+  "basic_vitals_context_optional_after_minimum_pair",
+  "sleep_recovery_hrv_after_minimum_pair",
+  "advanced_biomarkers_last",
+] as const;
 const SAFE_COMPLETION_CHECKLIST_ITEM_IDS = [
   "confirm_target_age_band_without_identifiers",
   "confirm_glycemia_bloodwork_export_available",
@@ -87,6 +107,7 @@ const ROW_OWNER_SAFE_CONFIRMATION_RESPONSE_KIND_IDS = [
 const OBJECTIVE_REQUIREMENT_IDS = [
   "ordinary_16_50_priority_selected",
   "minimum_lab_wearable_pair_visible",
+  "average_submitter_submission_priority_visible",
   "row_owner_action_route_visible",
   "safe_current_loop_command_visible",
   "safe_assertion_answer_sheet_available",
@@ -122,6 +143,9 @@ const R1164_FEATURE_ONLY_RESEARCH_HANDOFF_COMMAND =
 
 type MinimumFeaturePairSourceFamilyId = typeof MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS[number];
 type RequiredInputKindId = typeof REQUIRED_INPUT_KIND_IDS[number];
+type OptionalContextSourceFamilyId = typeof OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS[number];
+type DeferredUntilMinimumPairConfirmedId = typeof DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS[number];
+type FirstPassSubmissionPriorityOrderId = typeof FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS[number];
 type SafeCompletionChecklistItemId = typeof SAFE_COMPLETION_CHECKLIST_ITEM_IDS[number];
 type RequiredAssertionChecklistId = typeof REQUIRED_ASSERTION_CHECKLIST_IDS[number];
 type BlockedContentId = typeof BLOCKED_CONTENT_IDS[number];
@@ -188,6 +212,22 @@ interface RowOwnerSafeConfirmationAsk {
   safeCompletionChecklistItemIds: SafeCompletionChecklistItemId[];
 }
 
+interface AverageSubmitterSubmissionPriority {
+  averageSubmitterLikelySubmittable: true;
+  deferredUntilMinimumPairConfirmedIds: DeferredUntilMinimumPairConfirmedId[];
+  firstPassOnly: true;
+  firstPassSubmissionPriorityOrderIds: FirstPassSubmissionPriorityOrderId[];
+  minimumFeaturePairRequired: MinimumFeaturePairSourceFamilyId[];
+  modelEvidencePromotionAllowed: false;
+  optionalContextNotRequiredForFirstStep: OptionalContextSourceFamilyId[];
+  prioritizedInputKindIds: RequiredInputKindId[];
+  productDisplayAuthorized: false;
+  rowLevelDataAcceptedByR1179: false;
+  rowParsingPerformedByR1179: false;
+  sourcePriority: typeof TARGET_INPUT_PRIORITY;
+  targetAgeBand: typeof TARGET_AGE_BAND;
+}
+
 export interface R1179AverageSubmitterObjectiveGapAuditOptions {
   createdAt?: string;
   outputDir?: string;
@@ -237,6 +277,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
   inputArtifacts: Record<InputArtifactKey, ArtifactSummary>;
   objectiveGapAudit: {
     allowedValueKindIds: AllowedValueKindId[];
+    averageSubmitterSubmissionPriority: AverageSubmitterSubmissionPriority;
     blockedContentIds: BlockedContentId[];
     blockedRequirementIds: ObjectiveRequirementId[];
     conclusion: GapAuditConclusion;
@@ -269,6 +310,7 @@ export interface R1179AverageSubmitterObjectiveGapAuditOutput {
   schemaVersion: typeof R1179_AVERAGE_SUBMITTER_OBJECTIVE_GAP_AUDIT_SCHEMA_VERSION;
   status: "research-local-aggregate-only";
   summary: {
+    averageSubmitterSubmissionPriority: AverageSubmitterSubmissionPriority;
     blockedRequirementIds: ObjectiveRequirementId[];
     conclusion: GapAuditConclusion;
     currentEvidenceArtifactIds: EvidenceArtifactId[];
@@ -341,6 +383,11 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
       readStringArrayAt(r1178, ["summary", "prioritizedInputKindIds"]),
       REQUIRED_INPUT_KIND_IDS,
     );
+  const averageSubmitterSubmissionPriorityVisible = evidence.r1178
+    && matchesAverageSubmitterSubmissionPriority(
+      readValueAt(r1178, ["summary", "averageSubmitterSubmissionPriority"]),
+      "R1178",
+    );
   const rowOwnerActionRouteVisible = minimumPairVisible
     && rowOwnerActionRouteStatus !== null
     && rowOwnerActionRouteStatus !== "waiting_on_current_loop_or_priority_packet"
@@ -372,6 +419,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
   ]);
   const requirementStatuses = buildRequirementStatuses({
     evidence,
+    averageSubmitterSubmissionPriorityVisible,
     featureOnlyResearchHandoffReady,
     minimumPairVisible,
     prioritySelected,
@@ -403,7 +451,10 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
   const readyToMarkComplete = goalAchieved;
   const createdAt = createdAtFor(options.createdAt);
   const rowOwnerSafeConfirmationAsk = buildRowOwnerSafeConfirmationAsk();
+  const averageSubmitterSubmissionPriority =
+    buildAverageSubmitterSubmissionPriority();
   const summary: R1179AverageSubmitterObjectiveGapAuditOutput["summary"] = {
+    averageSubmitterSubmissionPriority,
     blockedRequirementIds,
     conclusion,
     currentEvidenceArtifactIds,
@@ -466,6 +517,8 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
     },
     objectiveGapAudit: {
       allowedValueKindIds: [...ALLOWED_VALUE_KIND_IDS],
+      averageSubmitterSubmissionPriority:
+        summary.averageSubmitterSubmissionPriority,
       blockedContentIds: [...BLOCKED_CONTENT_IDS],
       blockedRequirementIds: summary.blockedRequirementIds,
       conclusion: summary.conclusion,
@@ -509,6 +562,7 @@ export async function runR1179AverageSubmitterObjectiveGapAudit(
 }
 
 function buildRequirementStatuses(params: {
+  averageSubmitterSubmissionPriorityVisible: boolean;
   evidence: Record<"r1145" | "r1173" | "r1174" | "r1176" | "r1178", boolean>;
   featureOnlyResearchHandoffReady: boolean;
   minimumPairVisible: boolean;
@@ -532,6 +586,12 @@ function buildRequirementStatuses(params: {
       nextAction: "refresh_r1178_current_loop_surfacing",
       requirementId: "minimum_lab_wearable_pair_visible",
       satisfied: params.minimumPairVisible,
+    }),
+    statusEntry({
+      evidenceArtifactIds: params.evidence.r1178 ? [R1178_PACKET_ID] : [],
+      nextAction: "refresh_r1178_current_loop_surfacing",
+      requirementId: "average_submitter_submission_priority_visible",
+      satisfied: params.averageSubmitterSubmissionPriorityVisible,
     }),
     statusEntry({
       evidenceArtifactIds: params.evidence.r1178 ? [R1178_PACKET_ID] : [],
@@ -636,6 +696,30 @@ function buildRowOwnerSafeConfirmationAsk(): RowOwnerSafeConfirmationAsk {
   };
 }
 
+function buildAverageSubmitterSubmissionPriority(): AverageSubmitterSubmissionPriority {
+  return {
+    averageSubmitterLikelySubmittable: true,
+    deferredUntilMinimumPairConfirmedIds: [
+      ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS,
+    ],
+    firstPassOnly: true,
+    firstPassSubmissionPriorityOrderIds: [
+      ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS,
+    ],
+    minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS],
+    modelEvidencePromotionAllowed: false,
+    optionalContextNotRequiredForFirstStep: [
+      ...OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS,
+    ],
+    prioritizedInputKindIds: [...REQUIRED_INPUT_KIND_IDS],
+    productDisplayAuthorized: false,
+    rowLevelDataAcceptedByR1179: false,
+    rowParsingPerformedByR1179: false,
+    sourcePriority: TARGET_INPUT_PRIORITY,
+    targetAgeBand: TARGET_AGE_BAND,
+  };
+}
+
 function matchesR1178AverageSubmitterCurrentLoopSurfacing(value: unknown | null): boolean {
   return matchesArtifact(value, R1178_PACKET_ID, R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION)
     && readStringAt(value, ["summary", "sourcePriority"]) === TARGET_INPUT_PRIORITY
@@ -662,6 +746,46 @@ function matchesR1178AverageSubmitterCurrentLoopSurfacing(value: unknown | null)
     && readBooleanAt(value, ["summary", "rowOwnerPrivateValuesStored"]) === false
     && readBooleanAt(value, ["summary", "rowParsingPerformedByR1178"]) === false
     && allowedRowOwnerRouteStatus(readStringAt(value, ["summary", "rowOwnerActionRoute", "rowOwnerActionRouteStatus"]));
+}
+
+function matchesAverageSubmitterSubmissionPriority(
+  value: unknown,
+  producer: "R1178" | "R1179",
+): boolean {
+  const rowLevelDataAcceptedFlag = producer === "R1178"
+    ? "rowLevelDataAcceptedByR1178"
+    : "rowLevelDataAcceptedByR1179";
+  const rowParsingPerformedFlag = producer === "R1178"
+    ? "rowParsingPerformedByR1178"
+    : "rowParsingPerformedByR1179";
+  return readBooleanAt(value, ["averageSubmitterLikelySubmittable"]) === true
+    && readBooleanAt(value, ["firstPassOnly"]) === true
+    && readStringAt(value, ["sourcePriority"]) === TARGET_INPUT_PRIORITY
+    && readStringAt(value, ["targetAgeBand"]) === TARGET_AGE_BAND
+    && exactStringSet(
+      readStringArrayAt(value, ["firstPassSubmissionPriorityOrderIds"]),
+      FIRST_PASS_SUBMISSION_PRIORITY_ORDER_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["minimumFeaturePairRequired"]),
+      MINIMUM_FEATURE_PAIR_SOURCE_FAMILY_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["prioritizedInputKindIds"]),
+      REQUIRED_INPUT_KIND_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["optionalContextNotRequiredForFirstStep"]),
+      OPTIONAL_CONTEXT_SOURCE_FAMILY_IDS,
+    )
+    && exactStringSet(
+      readStringArrayAt(value, ["deferredUntilMinimumPairConfirmedIds"]),
+      DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED_IDS,
+    )
+    && readBooleanAt(value, ["modelEvidencePromotionAllowed"]) === false
+    && readBooleanAt(value, ["productDisplayAuthorized"]) === false
+    && readBooleanAt(value, [rowLevelDataAcceptedFlag]) === false
+    && readBooleanAt(value, [rowParsingPerformedFlag]) === false;
 }
 
 function routeAppropriateR1178CurrentLoopCommandVisible(
@@ -1040,11 +1164,20 @@ async function main(): Promise<void> {
       r1178Path: process.env.MURPH_AGE_R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_PATH,
     });
     process.stdout.write(`${JSON.stringify({
+      averageSubmitterSubmissionPriorityOrderIds:
+        output.summary.averageSubmitterSubmissionPriority
+          .firstPassSubmissionPriorityOrderIds,
       blockedRequirementIds: output.summary.blockedRequirementIds,
       conclusion: output.summary.conclusion,
+      deferredUntilMinimumPairConfirmedIds:
+        output.summary.averageSubmitterSubmissionPriority
+          .deferredUntilMinimumPairConfirmedIds,
       goalAchieved: output.summary.goalAchieved,
       minimumFeaturePairRequired: output.summary.minimumFeaturePairRequired,
       nextAction: output.summary.nextAction,
+      optionalContextNotRequiredForFirstStep:
+        output.summary.averageSubmitterSubmissionPriority
+          .optionalContextNotRequiredForFirstStep,
       packetId: output.packetId,
       prioritizedInputKindIds: output.summary.prioritizedInputKindIds,
       productDisplayAuthorized: output.summary.productDisplayAuthorized,

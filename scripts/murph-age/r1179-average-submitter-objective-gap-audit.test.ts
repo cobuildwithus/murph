@@ -23,6 +23,26 @@ const REQUIRED_INPUT_KINDS = [
   "lab_portal_export_or_spreadsheet",
   "phone_watch_or_wearable_activity_export",
 ] as const;
+const OPTIONAL_CONTEXT = [
+  "common_bloodwork_core",
+  "vitals_body_context",
+] as const;
+const DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED = [
+  "common_bloodwork_core",
+  "vitals_body_context",
+  "wearable_sleep",
+  "wearable_recovery",
+  "wearable_hrv",
+  "advanced_biomarkers",
+] as const;
+const FIRST_PASS_SUBMISSION_PRIORITY_ORDER = [
+  "glycemia_bloodwork_labs_first",
+  "daily_activity_phone_watch_wearable_first",
+  "routine_labs_optional_after_minimum_pair",
+  "basic_vitals_context_optional_after_minimum_pair",
+  "sleep_recovery_hrv_after_minimum_pair",
+  "advanced_biomarkers_last",
+] as const;
 const SAFE_COMPLETION_CHECKLIST = [
   "confirm_target_age_band_without_identifiers",
   "confirm_glycemia_bloodwork_export_available",
@@ -82,6 +102,25 @@ describe("R1179 average submitter objective gap audit", () => {
       expect(path.basename(outputPath)).toBe("r1179-average-submitter-objective-gap-audit.latest.json");
       expect(output.schemaVersion).toBe(R1179_AVERAGE_SUBMITTER_OBJECTIVE_GAP_AUDIT_SCHEMA_VERSION);
       expect(output.summary).toMatchObject({
+        averageSubmitterSubmissionPriority: {
+          averageSubmitterLikelySubmittable: true,
+          deferredUntilMinimumPairConfirmedIds: [
+            ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
+          ],
+          firstPassOnly: true,
+          firstPassSubmissionPriorityOrderIds: [
+            ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+          ],
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          modelEvidencePromotionAllowed: false,
+          optionalContextNotRequiredForFirstStep: [...OPTIONAL_CONTEXT],
+          prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+          productDisplayAuthorized: false,
+          rowLevelDataAcceptedByR1179: false,
+          rowParsingPerformedByR1179: false,
+          sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+          targetAgeBand: "roughly_16_50",
+        },
         blockedRequirementIds: [
           "row_owner_safe_assertion_confirmed",
           "feature_only_research_handoff_ready",
@@ -135,6 +174,9 @@ describe("R1179 average submitter objective gap audit", () => {
       expect(output.objectiveGapAudit.rowOwnerSafeConfirmationAsk).toEqual(
         output.summary.rowOwnerSafeConfirmationAsk,
       );
+      expect(output.objectiveGapAudit.averageSubmitterSubmissionPriority).toEqual(
+        output.summary.averageSubmitterSubmissionPriority,
+      );
       expect(output.summary.currentEvidenceArtifactIds).toEqual([
         "r1178-average-submitter-current-loop-surfacing",
         "r1145-ordinary-consumer-current-chain-completion-audit",
@@ -145,6 +187,7 @@ describe("R1179 average submitter objective gap audit", () => {
       expect(output.objectiveGapAudit.requirementStatuses).toMatchObject([
         { requirementId: "ordinary_16_50_priority_selected", status: "satisfied" },
         { requirementId: "minimum_lab_wearable_pair_visible", status: "satisfied" },
+        { requirementId: "average_submitter_submission_priority_visible", status: "satisfied" },
         { requirementId: "row_owner_action_route_visible", status: "satisfied" },
         { requirementId: "safe_current_loop_command_visible", status: "satisfied" },
         { requirementId: "safe_assertion_answer_sheet_available", status: "satisfied" },
@@ -499,6 +542,44 @@ describe("R1179 average submitter objective gap audit", () => {
     }
   });
 
+  it("blocks the objective when R1178 omits the explicit average-submitter submission priority", async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-r1178-priority-missing-"));
+    try {
+      const paths = await writeInputs(tmp, { confirmed: false, realMetrics: false });
+      const r1178 = await readJsonObject(paths.r1178Path);
+      const summary = recordAt(r1178, "summary");
+      delete summary.averageSubmitterSubmissionPriority;
+      await writeFile(paths.r1178Path, `${JSON.stringify(r1178)}\n`);
+
+      const { output } = await runR1179AverageSubmitterObjectiveGapAudit({
+        createdAt: CREATED_AT,
+        outputDir: path.join(tmp, "out"),
+        ...paths,
+      });
+
+      expect(output.summary).toMatchObject({
+        blockedRequirementIds: [
+          "average_submitter_submission_priority_visible",
+          "row_owner_safe_assertion_confirmed",
+          "feature_only_research_handoff_ready",
+          "real_lab_wearable_route_metrics_recorded",
+        ],
+        firstBlockedRequirementId: "average_submitter_submission_priority_visible",
+        nextAction: "refresh_r1178_current_loop_surfacing",
+      });
+      expect(output.objectiveGapAudit.requirementStatuses.find(
+        (entry) => entry.requirementId === "average_submitter_submission_priority_visible",
+      )).toMatchObject({
+        evidenceArtifactIds: ["r1178-average-submitter-current-loop-surfacing"],
+        nextAction: "refresh_r1178_current_loop_surfacing",
+        status: "blocked",
+      });
+      expect(findForbiddenAggregateEgress(output)).toEqual([]);
+    } finally {
+      await rm(tmp, { force: true, recursive: true });
+    }
+  });
+
   it("does not publish the row-owner confirmation env flag when the R1176 live chain is missing", async () => {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "murph-age-r1179-missing-r1176-"));
     try {
@@ -546,8 +627,11 @@ describe("R1179 average submitter objective gap audit", () => {
       expect(result.stderr).toBe("");
       expect(result.stdout).not.toContain(tmp);
       const cli = JSON.parse(result.stdout) as {
+        averageSubmitterSubmissionPriorityOrderIds?: unknown;
         conclusion?: unknown;
+        deferredUntilMinimumPairConfirmedIds?: unknown;
         nextAction?: unknown;
+        optionalContextNotRequiredForFirstStep?: unknown;
         packetId?: unknown;
         rowOwnerSafeConfirmationAsk?: unknown;
         rowOwnerSafeConfirmationAskText?: unknown;
@@ -557,9 +641,16 @@ describe("R1179 average submitter objective gap audit", () => {
         topBlockedRequirementId?: unknown;
       };
       expect(cli).toMatchObject({
+        averageSubmitterSubmissionPriorityOrderIds: [
+          ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+        ],
         conclusion: "average_submitter_objective_gap_audit_blocked_on_row_owner_safe_assertion",
+        deferredUntilMinimumPairConfirmedIds: [
+          ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
+        ],
         nextAction:
           "review_r1173_safe_assertion_answer_sheet_then_rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
+        optionalContextNotRequiredForFirstStep: [...OPTIONAL_CONTEXT],
         packetId: "r1179-average-submitter-objective-gap-audit",
         rowOwnerSafeConfirmationAskId: ROW_OWNER_SAFE_CONFIRMATION_ASK_ID,
         rowOwnerSafeConfirmationAskVisible: true,
@@ -709,6 +800,25 @@ function r1178Fixture(confirmed: boolean): Record<string, unknown> {
     schemaVersion: R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION,
     status: "research-local-aggregate-only",
     summary: {
+      averageSubmitterSubmissionPriority: {
+        averageSubmitterLikelySubmittable: true,
+        deferredUntilMinimumPairConfirmedIds: [
+          ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
+        ],
+        firstPassOnly: true,
+        firstPassSubmissionPriorityOrderIds: [
+          ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+        ],
+        minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+        modelEvidencePromotionAllowed: false,
+        optionalContextNotRequiredForFirstStep: [...OPTIONAL_CONTEXT],
+        prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+        productDisplayAuthorized: false,
+        rowLevelDataAcceptedByR1178: false,
+        rowParsingPerformedByR1178: false,
+        sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+        targetAgeBand: "roughly_16_50",
+      },
       currentLoopCommand,
       currentMissingRequirementIds: confirmed ? [] : [...BLOCKED_REQUIREMENTS],
       minimumFeaturePairConfirmed: confirmed,

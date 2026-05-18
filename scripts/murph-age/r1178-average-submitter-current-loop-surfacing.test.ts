@@ -35,6 +35,14 @@ const DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED = [
   "wearable_hrv",
   "advanced_biomarkers",
 ] as const;
+const FIRST_PASS_SUBMISSION_PRIORITY_ORDER = [
+  "glycemia_bloodwork_labs_first",
+  "daily_activity_phone_watch_wearable_first",
+  "routine_labs_optional_after_minimum_pair",
+  "basic_vitals_context_optional_after_minimum_pair",
+  "sleep_recovery_hrv_after_minimum_pair",
+  "advanced_biomarkers_last",
+] as const;
 const FIRST_SUBMITTER_ASKS = [
   "has_glycemia_bloodwork_export",
   "has_daily_wearable_activity_export",
@@ -87,6 +95,25 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       expect(output.schemaVersion).toBe(R1178_AVERAGE_SUBMITTER_CURRENT_LOOP_SURFACING_SCHEMA_VERSION);
       expect(output.summary).toMatchObject({
         conclusion: "average_submitter_priority_visible_in_current_loop",
+        averageSubmitterSubmissionPriority: {
+          averageSubmitterLikelySubmittable: true,
+          deferredUntilMinimumPairConfirmedIds: [
+            ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
+          ],
+          firstPassOnly: true,
+          firstPassSubmissionPriorityOrderIds: [
+            ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+          ],
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          modelEvidencePromotionAllowed: false,
+          optionalContextNotRequiredForFirstStep: [...OPTIONAL_CONTEXT],
+          prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+          productDisplayAuthorized: false,
+          rowLevelDataAcceptedByR1178: false,
+          rowParsingPerformedByR1178: false,
+          sourcePriority: "consumer_bloodwork_labs_wearables_16_50_first",
+          targetAgeBand: "roughly_16_50",
+        },
         currentLoopCommand: R1173_COMMAND,
         currentLoopConclusionBeforePriorityPacket: "executor_waiting_on_consumer_safe_availability_confirmation",
         currentLoopNextActionBeforePriorityPacket:
@@ -133,6 +160,13 @@ describe("R1178 average-submitter current-loop surfacing", () => {
         upstreamR1177NextAction: "rerun_r1176_with_row_owner_feature_only_safe_assertion_confirmation",
       });
       expect(output.currentLoopSurfacing).toMatchObject({
+        averageSubmitterSubmissionPriority: {
+          firstPassSubmissionPriorityOrderIds: [
+            ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+          ],
+          minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
+          prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
+        },
         averageSubmitterPriorityPacketCommand: R1177_COMMAND,
         currentLoopCommand: R1173_COMMAND,
         minimumFeaturePairRequired: [...MINIMUM_FEATURE_PAIR],
@@ -533,18 +567,28 @@ describe("R1178 average-submitter current-loop surfacing", () => {
       expect(result.stderr).toBe("");
       expect(result.stdout).not.toContain(tmp);
       const cli = JSON.parse(result.stdout) as {
+        averageSubmitterSubmissionPriorityOrderIds?: unknown;
         conclusion?: unknown;
         currentLoopCommand?: unknown;
+        deferredUntilMinimumPairConfirmedIds?: unknown;
         firstSubmitterAskIds?: unknown;
+        optionalContextNotRequiredForFirstStep?: unknown;
         packetId?: unknown;
         prioritizedInputKindIds?: unknown;
         rowOwnerActionRouteStatus?: unknown;
         rowOwnerFirstRunnableActionId?: unknown;
       };
       expect(cli).toMatchObject({
+        averageSubmitterSubmissionPriorityOrderIds: [
+          ...FIRST_PASS_SUBMISSION_PRIORITY_ORDER,
+        ],
         conclusion: "average_submitter_priority_visible_in_current_loop",
         currentLoopCommand: R1173_COMMAND,
+        deferredUntilMinimumPairConfirmedIds: [
+          ...DEFERRED_UNTIL_MINIMUM_PAIR_CONFIRMED,
+        ],
         firstSubmitterAskIds: [...FIRST_SUBMITTER_ASKS],
+        optionalContextNotRequiredForFirstStep: [...OPTIONAL_CONTEXT],
         packetId: "r1178-average-submitter-current-loop-surfacing",
         prioritizedInputKindIds: [...REQUIRED_INPUT_KINDS],
         rowOwnerActionRouteStatus: "waiting_on_row_owner_feature_only_assertion",
