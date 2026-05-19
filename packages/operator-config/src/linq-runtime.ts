@@ -16,7 +16,6 @@ import {
 import {
   errorMessage,
   normalizeNullableString,
-  redactSensitivePathSegments,
 } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -24,6 +23,21 @@ const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
 const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
+const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
+const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
+const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
+  'code',
+  'detail',
+  'details',
+  'error',
+  'errors',
+  'message',
+  'request_id',
+  'status',
+  'statusCode',
+  'trace_id',
+  'type',
+])
 
 type LinqOperation =
   | 'create_chat'
@@ -35,19 +49,35 @@ type LinqOperation =
   | 'typing_start'
   | 'typing_stop'
 
+type LinqFailureKind = 'chat_not_found'
+
 type LinqSafeRequestDetails = {
   failureStage?: 'configuration' | 'http' | 'transport'
   hasIdempotencyKey?: boolean
   hasReplyToMessageId?: boolean
+  linqFailureKind?: LinqFailureKind
   method?: LinqHttpMethod
   operation: LinqOperation
   path?: string
   phoneNumberCount?: number
   provider: 'linq'
   recipientCount?: number
+  requestBodyShape?: string
+  requestMessageLength?: number
+  requestMessagePartCount?: number
+  responseBodyKeyCount?: number
+  responseBodyKind?: string
+  responseBodyKeys?: string[]
+  responseBodyStringFields?: string[]
+  responseBodyStringFieldCount?: number
+  responseBodyTextLength?: number
   retryable?: boolean
   status?: number
   subscribedEventCount?: number
+  transportErrorCauseCount?: number
+  transportErrorName?: string
+  transportErrorPresent?: boolean
+  transportErrorTextLength?: number
   timedOut?: boolean
   timeoutMs?: number
 }
@@ -130,6 +160,20 @@ export async function probeLinqApi(
       .map((entry) => normalizeNullableString(entry.phone_number ?? null))
       .filter((value): value is string => value !== null),
   }
+}
+
+export function isLinqChatNotFoundSendMessageError(
+  error: unknown,
+): error is VaultCliError {
+  return error instanceof VaultCliError
+    && error.code === 'LINQ_API_REQUEST_FAILED'
+    && error.context?.provider === 'linq'
+    && error.context?.operation === 'send_message'
+    && error.context?.method === 'POST'
+    && error.context?.path === '/chats/[chat]/messages'
+    && error.context?.status === 404
+    && error.context?.failureStage === 'http'
+    && error.context?.linqFailureKind === 'chat_not_found'
 }
 
 export async function sendLinqChatMessage(
@@ -418,25 +462,31 @@ async function requestLinq<T>(input: {
   signal?: AbortSignal
 }): Promise<T> {
   const request = resolveLinqRequest(input)
+  const diagnosticPath = sanitizeLinqPathForDiagnostics(input.path)
+  const details: LinqSafeRequestDetails = {
+    ...input.details,
+    ...buildLinqRequestBodyDiagnostics(input.body, request.body),
+    path: diagnosticPath,
+  }
 
   return requestJsonWithRetry<T, LinqFetchResponse>({
     createHttpError: (response) =>
       createLinqHttpError(
         response,
-        input.details,
+        details,
         input.method,
-        input.path,
+        diagnosticPath,
         input.allowDeleteRetries === true,
       ),
     fetchResponse: () =>
       fetchLinqResponse({
         allowDeleteRetries: input.allowDeleteRetries === true,
         body: request.body,
-        details: input.details,
+        details,
         fetchImplementation: request.fetchImplementation,
         headers: request.headers,
         method: input.method,
-        path: input.path,
+        path: diagnosticPath,
         signal: input.signal,
         url: request.url,
       }),
@@ -549,14 +599,17 @@ async function createLinqHttpError(
   allowDeleteRetries: boolean,
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
+  const responseDiagnostics = buildLinqErrorResponseDiagnostics(payload, rawText)
+  const linqFailureKind = classifyLinqFailureKind(payload)
 
   return new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
-    extractLinqErrorMessage(payload, rawText) ??
-      `Linq request ${method} ${path} failed with HTTP ${response.status}.`,
+    `Linq request ${method} ${path} failed with HTTP ${response.status}.`,
     {
       ...details,
+      ...responseDiagnostics,
       failureStage: 'http',
+      ...(linqFailureKind ? { linqFailureKind } : {}),
       method,
       path,
       retryable: shouldRetryLinqHttpStatus(
@@ -570,6 +623,76 @@ async function createLinqHttpError(
   )
 }
 
+function buildLinqRequestBodyDiagnostics(
+  body: Record<string, unknown> | undefined,
+  serializedBody: string | undefined,
+): Partial<LinqSafeRequestDetails> {
+  if (!body || !serializedBody) {
+    return {}
+  }
+
+  const message = readRecord(body.message)
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  const requestMessageLength = parts.reduce((total, part) => {
+    const record = readRecord(part)
+    return total + (typeof record?.value === 'string' ? record.value.length : 0)
+  }, 0)
+
+  return {
+    requestBodyShape: summarizeLinqJsonObjectShape(body),
+    requestMessageLength,
+    requestMessagePartCount: parts.length,
+  }
+}
+
+function buildLinqErrorResponseDiagnostics(
+  payload: unknown,
+  rawText: string | null,
+): Partial<LinqSafeRequestDetails> {
+  if (rawText !== null) {
+    return {
+      responseBodyKind: 'text',
+      responseBodyTextLength: rawText.length,
+    }
+  }
+
+  if (payload === null || payload === undefined) {
+    return {
+      responseBodyKind: 'empty',
+    }
+  }
+
+  const serialized = JSON.stringify(payload)
+
+  if (Array.isArray(payload)) {
+    return {
+      responseBodyKind: 'json_array',
+      responseBodyTextLength: serialized.length,
+    }
+  }
+
+  if (typeof payload === 'object') {
+    const record = payload as Record<string, unknown>
+    const keys = Object.keys(record).sort()
+    const safeKeys = keys.filter(isSafeLinqResponseBodyKey)
+    return {
+      responseBodyKind: 'json_object',
+      responseBodyKeyCount: keys.length,
+      responseBodyKeys: safeKeys,
+      responseBodyStringFieldCount:
+        keys.filter((key) => typeof record[key] === 'string').length,
+      responseBodyStringFields:
+        safeKeys.filter((key) => typeof record[key] === 'string'),
+      responseBodyTextLength: serialized.length,
+    }
+  }
+
+  return {
+    responseBodyKind: `json_${typeof payload}`,
+    responseBodyTextLength: serialized.length,
+  }
+}
+
 function createLinqRequestError(input: {
   details: LinqSafeRequestDetails
   error: unknown
@@ -579,20 +702,17 @@ function createLinqRequestError(input: {
   timedOut: boolean
   retryable: boolean
 }): VaultCliError {
-  const transportError = readTransportErrorDetail(input.error)
+  const transportErrorDiagnostics = buildLinqTransportErrorDiagnostics(input.error)
   const baseMessage = input.timedOut
     ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
-  const message = transportError
-    ? `${baseMessage} Cause: ${transportError}.`
-    : baseMessage
 
   return new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
-    message,
+    baseMessage,
     {
       ...input.details,
-      error: transportError ?? errorMessage(input.error),
+      ...transportErrorDiagnostics,
       failureStage: 'transport',
       method: input.method,
       path: input.path,
@@ -602,6 +722,58 @@ function createLinqRequestError(input: {
       timedOut: input.timedOut,
     },
   )
+}
+
+function buildLinqTransportErrorDiagnostics(
+  error: unknown,
+): Partial<LinqSafeRequestDetails> {
+  const messages = readTransportErrorMessages(error)
+  const joinedMessages = messages.join(' <- ')
+  const errorName = readSafeLinqTransportErrorName(error)
+  return {
+    ...(messages.length > 0
+      ? {
+          transportErrorCauseCount: messages.length,
+          transportErrorPresent: true,
+          transportErrorTextLength: joinedMessages.length,
+        }
+      : {
+          transportErrorPresent: true,
+        }),
+    ...(errorName ? { transportErrorName: errorName } : {}),
+  }
+}
+
+function isSafeLinqResponseBodyKey(key: string): boolean {
+  return LINQ_SAFE_RESPONSE_BODY_KEYS.has(key)
+}
+
+function classifyLinqFailureKind(payload: unknown): LinqFailureKind | null {
+  const record = readRecord(payload)
+  if (!record) {
+    return null
+  }
+
+  const code = readLinqResponseStringField(record, 'code')
+  if (code && LINQ_CHAT_NOT_FOUND_CODES.has(code)) {
+    return 'chat_not_found'
+  }
+
+  const message =
+    readLinqResponseStringField(record, 'message') ??
+    readLinqResponseStringField(record, 'error') ??
+    readLinqResponseStringField(record, 'detail')
+  return message && LINQ_CHAT_NOT_FOUND_MESSAGES.has(message)
+    ? 'chat_not_found'
+    : null
+}
+
+function readLinqResponseStringField(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key]
+  return typeof value === 'string' ? value : null
 }
 
 function isRetryableLinqRequestError(error: unknown): error is VaultCliError {
@@ -663,17 +835,10 @@ async function waitForLinqRetryDelay(
   })
 }
 
-function extractLinqErrorMessage(payload: unknown, rawText: string | null): string | null {
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>
-    return (
-      normalizeNullableString(typeof record.message === 'string' ? record.message : null) ??
-      normalizeNullableString(typeof record.error === 'string' ? record.error : null) ??
-      normalizeNullableString(typeof record.detail === 'string' ? record.detail : null)
-    )
-  }
-
-  return normalizeNullableString(rawText)
+function sanitizeLinqPathForDiagnostics(path: string): string {
+  return normalizeRequiredString(path, 'path')
+    .replace(/\/chats\/[^/]+/gu, '/chats/[chat]')
+    .replace(/\/messages\/[^/]+/gu, '/messages/[message]')
 }
 
 function readRequestOrigin(value: string): string | null {
@@ -684,14 +849,14 @@ function readRequestOrigin(value: string): string | null {
   }
 }
 
-function readTransportErrorDetail(error: unknown): string | null {
+function readTransportErrorMessages(error: unknown): string[] {
   const seenMessages = new Set<string>()
   const messages: string[] = []
   let current: unknown = error
   let depth = 0
 
   while (current !== null && current !== undefined && depth < 4) {
-    const message = normalizeNullableString(redactSensitivePathSegments(errorMessage(current)))
+    const message = normalizeNullableString(errorMessage(current))
     if (message && !seenMessages.has(message)) {
       seenMessages.add(message)
       messages.push(message)
@@ -705,7 +870,34 @@ function readTransportErrorDetail(error: unknown): string | null {
     depth += 1
   }
 
-  return messages.length > 0 ? messages.join(' <- ') : null
+  return messages
+}
+
+function readSafeLinqTransportErrorName(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null
+  }
+
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(error.name) ? error.name : null
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function summarizeLinqJsonObjectShape(value: Record<string, unknown>): string {
+  const topLevelKeys = Object.keys(value).sort()
+  const message = readRecord(value.message)
+  if (!message) {
+    return `object:${topLevelKeys.join(',')}`
+  }
+
+  return [
+    `object:${topLevelKeys.join(',')}`,
+    `message:${Object.keys(message).sort().join(',')}`,
+  ].join('|')
 }
 
 function normalizeLinqBaseUrl(value: string): string {

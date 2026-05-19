@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  deleteHostedProviderLinqMessages,
+  markHostedProviderLinqRead,
   sendHostedProviderLinqChatAction,
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
@@ -56,7 +58,8 @@ describe("hosted provider effects", () => {
       const url = String(input);
       if (url.endsWith("/chats/stale-chat/messages")) {
         return new Response(JSON.stringify({
-          message: "Chat not found",
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
         }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -143,7 +146,8 @@ describe("hosted provider effects", () => {
       const url = String(input);
       if (url.endsWith("/chats/stale-chat/messages")) {
         return new Response(JSON.stringify({
-          message: "Chat not found",
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
         }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -213,6 +217,118 @@ describe("hosted provider effects", () => {
     assert.equal(
       String(fetchImplementation.mock.calls[2]?.[0]),
       "https://api.linqapp.com/api/partner/v3/chats",
+    );
+  });
+
+  it("does not try another Linq recovery sender after an ambiguous create-chat response", async () => {
+    const fetchImplementation = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-chat/messages")) {
+        return new Response(JSON.stringify({
+          code: "CHAT_NOT_FOUND",
+          message: "redacted provider detail",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 404,
+        });
+      }
+      if (url.endsWith("/phone_numbers")) {
+        return new Response(JSON.stringify({
+          phone_numbers: [
+            { phone_number: "+15550000" },
+            { phone_number: "+15550002" },
+          ],
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/chats")) {
+        return new Response(JSON.stringify({
+          message: "request timeout",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 408,
+        });
+      }
+
+      return new Response(null, {
+        status: 500,
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      message: "hello",
+      target: "stale-chat",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+    });
+
+    const createChatCalls = fetchImplementation.mock.calls.filter(([input]) =>
+      String(input).endsWith("/chats")
+    );
+    expect(createChatCalls).toHaveLength(1);
+  });
+
+  it("does not recover unclassified Linq thread send 404 responses", async () => {
+    const fetchMock = vi.fn(async (
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url.endsWith("/chats/stale-chat/messages")) {
+        return new Response(JSON.stringify({
+          message: "Reply target not found",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 404,
+        });
+      }
+
+      return new Response(null, {
+        status: 500,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      message: "hello",
+      target: "stale-chat",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({
+        status: 404,
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchMock.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats/stale-chat/messages",
     );
   });
 
@@ -316,6 +432,50 @@ describe("hosted provider effects", () => {
     );
     assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
     assert.equal(fetchMock.mock.calls[1]?.[1]?.method, "DELETE");
+  });
+
+  it("uses the hosted provider fetch dependency for Linq non-send effects", async () => {
+    const rawGlobalFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => {
+      throw new Error("raw global fetch should not be used");
+    });
+    vi.stubGlobal("fetch", rawGlobalFetch);
+    const fetchImplementation = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ) => new Response(null, {
+      status: 204,
+    }));
+    const dependencies = {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    };
+
+    await sendHostedProviderLinqChatAction({
+      action: "typing",
+      target: "chat_123",
+    }, dependencies);
+    await sendHostedProviderLinqChatAction({
+      action: "typing_stop",
+      target: "chat_123",
+    }, dependencies);
+    await markHostedProviderLinqRead({
+      chatId: "chat_123",
+    }, dependencies);
+    await deleteHostedProviderLinqMessages({
+      messageIds: ["message_123"],
+    }, dependencies);
+
+    expect(rawGlobalFetch).not.toHaveBeenCalled();
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(fetchImplementation.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
+      "https://api.linqapp.com/api/partner/v3/chats/chat_123/typing",
+      "https://api.linqapp.com/api/partner/v3/chats/chat_123/read",
+      "https://api.linqapp.com/api/partner/v3/messages/message_123",
+    ]);
   });
 
   it("sends WhatsApp messages through Worker-owned provider env", async () => {

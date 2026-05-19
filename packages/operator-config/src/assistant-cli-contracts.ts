@@ -822,6 +822,7 @@ export const assistantCronJobStateSchema = z
     lastFailedAt: isoTimestampSchema.nullable(),
     consecutiveFailures: z.number().int().nonnegative(),
     lastError: z.string().nullable(),
+    pendingDeliveryIntentId: assistantOutboxIntentIdSchema.nullable().optional(),
     runningAt: isoTimestampSchema.nullable(),
     runningPid: z.number().int().positive().nullable(),
   })

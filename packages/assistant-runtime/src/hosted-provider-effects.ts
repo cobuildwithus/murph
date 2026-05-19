@@ -5,6 +5,7 @@ import {
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import {
+  isLinqChatNotFoundSendMessageError,
   markLinqChatRead,
   probeLinqApi,
   startLinqChatTypingIndicator,
@@ -132,11 +133,15 @@ export async function sendHostedProviderLinqChatAction(
   request: HostedRuntimeLinqChatActionRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<void> {
+  const fetchImplementation = adaptHostedProviderFetchForLinq(
+    dependencies.fetchImplementation,
+  );
   if (request.action === "typing") {
     await startLinqChatTypingIndicator({
       chatId: request.target,
     }, {
       env: dependencies.env,
+      fetchImplementation,
       signal: dependencies.signal,
     });
     return;
@@ -147,6 +152,7 @@ export async function sendHostedProviderLinqChatAction(
       chatId: request.target,
     }, {
       env: dependencies.env,
+      fetchImplementation,
       signal: dependencies.signal,
     });
     return;
@@ -163,6 +169,9 @@ export async function markHostedProviderLinqRead(
     chatId: request.chatId,
   }, {
     env: dependencies.env,
+    fetchImplementation: adaptHostedProviderFetchForLinq(
+      dependencies.fetchImplementation,
+    ),
     signal: dependencies.signal,
   });
 }
@@ -173,6 +182,9 @@ export async function deleteHostedProviderLinqMessages(
 ): Promise<void> {
   await deleteHostedLinqMessages({
     env: dependencies.env,
+    fetchImplementation: adaptHostedProviderFetchForLinq(
+      dependencies.fetchImplementation,
+    ),
     messageIds: request.messageIds,
     signal: dependencies.signal,
   });
@@ -267,6 +279,15 @@ async function materializeHostedProviderLinqDirectThread(input: {
       if (isHostedProviderDeliveryConfirmationPendingError(error)) {
         throw error;
       }
+      if (shouldContinueLinqDirectThreadRecoveryAfterError(error)) {
+        continue;
+      }
+      if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {
+        throw createHostedProviderDeliveryConfirmationPendingError(
+          "Recovered iMessage direct delivery could not be confirmed safely.",
+        );
+      }
+      throw error;
     }
   }
 
@@ -321,12 +342,40 @@ function looksLikeHostedProviderRedactedLinqTarget(
 }
 
 function looksLikeMissingLinqChatError(error: unknown): error is VaultCliError {
-  return error instanceof VaultCliError
-    && error.code === "LINQ_API_REQUEST_FAILED"
-    && error.context?.provider === "linq"
-    && error.context?.status === 404
-    && typeof error.message === "string"
-    && error.message.includes("Chat not found");
+  return isLinqChatNotFoundSendMessageError(error);
+}
+
+function shouldContinueLinqDirectThreadRecoveryAfterError(error: unknown): boolean {
+  if (
+    !(error instanceof VaultCliError)
+    || error.code !== "LINQ_API_REQUEST_FAILED"
+    || error.context?.failureStage !== "http"
+    || error.context?.retryable === true
+  ) {
+    return false;
+  }
+
+  const status = error.context?.status;
+  return typeof status === "number" &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429;
+}
+
+function isPotentiallyAcceptedLinqDirectThreadRecoveryError(
+  error: unknown,
+): boolean {
+  if (!(error instanceof VaultCliError) || error.code !== "LINQ_API_REQUEST_FAILED") {
+    return false;
+  }
+
+  if (error.context?.retryable === true || error.context?.failureStage === "transport") {
+    return true;
+  }
+
+  const status = error.context?.status;
+  return typeof status === "number" && (status === 408 || status >= 500);
 }
 
 function normalizeDirectLinqRecipient(value: string | null | undefined): string | null {

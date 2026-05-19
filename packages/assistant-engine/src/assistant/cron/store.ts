@@ -302,6 +302,7 @@ export function isAssistantCronJobDue(
   return (
     job.enabled &&
     job.state.runningAt === null &&
+    (job.state.pendingDeliveryIntentId ?? null) === null &&
     job.state.nextRunAt !== null &&
     job.state.nextRunAt <= nowIso
   )

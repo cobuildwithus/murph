@@ -1255,7 +1255,7 @@ test('sendLinqMessage honors Linq Retry-After headers on 429 responses', async (
   }
 })
 
-test('sendLinqMessage falls back to raw Linq error text when the error body is not JSON', async () => {
+test('sendLinqMessage keeps raw Linq error text out of user-facing errors', async () => {
   await assert.rejects(
     () =>
       sendLinqMessage(
@@ -1282,15 +1282,23 @@ test('sendLinqMessage falls back to raw Linq error text when the error body is n
     (error: unknown) => {
       assert.equal(error instanceof VaultCliError, true)
       assert.equal((error as VaultCliError).code, 'LINQ_API_REQUEST_FAILED')
-      assert.equal((error as VaultCliError).message, 'Plain Linq failure')
+      assert.equal(
+        (error as VaultCliError).message,
+        'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
+      )
       assert.deepEqual((error as VaultCliError).context, {
         failureStage: 'http',
         hasIdempotencyKey: false,
         hasReplyToMessageId: false,
         method: 'POST',
         operation: 'send_message',
-        path: '/chats/chat_123/messages',
+        path: '/chats/[chat]/messages',
         provider: 'linq',
+        requestBodyShape: 'object:message|message:parts',
+        requestMessageLength: 'Queued the Linq reply.'.length,
+        requestMessagePartCount: 1,
+        responseBodyKind: 'text',
+        responseBodyTextLength: 'Plain Linq failure'.length,
         retryable: false,
         status: 400,
       })

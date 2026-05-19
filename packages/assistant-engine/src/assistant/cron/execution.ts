@@ -27,7 +27,6 @@ import {
   type AssistantCronCanonicalRuntimeRecord,
   type AssistantCronCanonicalRuntimeState,
 } from './runtime-state.js'
-import { computeAssistantCronNextRunAt } from './schedule.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
   buildCanonicalAutomationUpsertInput,
@@ -49,6 +48,10 @@ import {
   sortAssistantCronJobs,
   writeAssistantCronStore,
 } from './store.js'
+import {
+  resolveAssistantCronFailureBackoffMs,
+  resolveAssistantCronNextRunAfterSuccess,
+} from './finalization.js'
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
@@ -67,6 +70,13 @@ export async function claimResolvedAssistantCronJob(input: {
       throw new VaultCliError(
         'ASSISTANT_CRON_JOB_RUNNING',
         `Assistant cron job "${existing.name}" is already running.`,
+      )
+    }
+
+    if (existing.state.pendingDeliveryIntentId) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_PENDING',
+        `Assistant cron job "${existing.name}" is waiting for outbound delivery confirmation.`,
       )
     }
 
@@ -100,6 +110,13 @@ export async function claimResolvedAssistantCronJob(input: {
     throw new VaultCliError(
       'ASSISTANT_CRON_JOB_RUNNING',
       `Assistant cron job "${input.job.job.name}" is already running.`,
+    )
+  }
+
+  if (currentRuntimeState.state.pendingDeliveryIntentId) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_PENDING',
+      `Assistant cron job "${input.job.job.name}" is waiting for outbound delivery confirmation.`,
     )
   }
 
@@ -224,7 +241,8 @@ export async function executeClaimedAssistantCronJob(input: {
   let sessionId: string | null = null
   let response: string | null = null
   let errorText: string | null = null
-  let status: 'failed' | 'succeeded' = 'failed'
+  let status: AssistantCronRunRecord['status'] = 'failed'
+  let pendingDeliveryIntentId: string | null = null
   const occurrenceAt =
     input.job.kind === 'canonical'
       ? input.job.runtimeState.state.pendingOccurrenceAt ??
@@ -256,6 +274,7 @@ export async function executeClaimedAssistantCronJob(input: {
         scheduledLogId: input.job.source.scheduledLogId,
         occurrenceAt,
       })
+      status = 'succeeded'
     } else {
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
@@ -285,8 +304,13 @@ export async function executeClaimedAssistantCronJob(input: {
 
       sessionId = result.session.sessionId
       response = result.response ?? result.decision.privateSummary
+      if (result.deliveryOutcome?.kind === 'queued') {
+        pendingDeliveryIntentId = result.deliveryOutcome.intentId
+        status = 'skipped'
+      } else {
+        status = 'succeeded'
+      }
     }
-    status = 'succeeded'
   } catch (error) {
     errorText = errorMessage(error)
     status = 'failed'
@@ -327,6 +351,7 @@ export async function executeClaimedAssistantCronJob(input: {
         job: current,
         finishedAt,
         responseSessionId: sessionId,
+        pendingDeliveryIntentId,
         run: {
           ...run,
           status,
@@ -380,6 +405,7 @@ export async function executeClaimedAssistantCronJob(input: {
         input.job.source.continuityPolicy === 'preserve'
           ? sessionId
           : null,
+      pendingDeliveryIntentId,
       source: input.job.source,
     })
     const persistedRuntimeState: AssistantCronCanonicalRuntimeRecord = {
@@ -461,10 +487,9 @@ function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string 
 function finalizeAssistantCronJobAfterRun(input: {
   finishedAt: string
   job: AssistantCronJob
+  pendingDeliveryIntentId: string | null
   responseSessionId: string | null
-  run: AssistantCronRunRecord & {
-    status: 'failed' | 'succeeded'
-  }
+  run: AssistantCronRunRecord
 }): AssistantCronJob {
   const runningClearedState = {
     ...input.job.state,
@@ -504,6 +529,25 @@ function finalizeAssistantCronJobAfterRun(input: {
     })
   }
 
+  if (input.run.status === 'skipped' && input.pendingDeliveryIntentId !== null) {
+    return assistantCronJobSchema.parse({
+      ...input.job,
+      target: shouldAutoBindSession
+        ? {
+            ...input.job.target,
+            sessionId: input.responseSessionId,
+          }
+        : input.job.target,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        nextRunAt: null,
+        lastError: null,
+        pendingDeliveryIntentId: input.pendingDeliveryIntentId,
+      },
+    })
+  }
+
   const failureCount = input.job.state.consecutiveFailures + 1
   const nextRunAt = input.job.enabled
     ? new Date(
@@ -531,47 +575,11 @@ function shouldRemoveAssistantCronJobAfterRun(
   return job.schedule.kind === 'at' && !job.keepAfterRun && run.status === 'succeeded'
 }
 
-function resolveAssistantCronNextRunAfterSuccess(
-  job: AssistantCronJob,
-  now: Date,
-): string | null {
-  if (!job.enabled) {
-    return job.state.nextRunAt
-  }
-
-  if (job.schedule.kind === 'at') {
-    return null
-  }
-
-  return computeAssistantCronNextRunAt(job.schedule, now)
-}
-
-function resolveAssistantCronFailureBackoffMs(failureCount: number): number {
-  if (failureCount <= 1) {
-    return 30_000
-  }
-
-  if (failureCount === 2) {
-    return 60_000
-  }
-
-  if (failureCount === 3) {
-    return 5 * 60_000
-  }
-
-  if (failureCount === 4) {
-    return 15 * 60_000
-  }
-
-  return 60 * 60_000
-}
-
 function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
   finishedAt: string
+  pendingDeliveryIntentId: string | null
   responseSessionId: string | null
-  run: AssistantCronRunRecord & {
-    status: 'failed' | 'succeeded'
-  }
+  run: AssistantCronRunRecord
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord
 }): AssistantCronCanonicalRuntimeRecord {
@@ -595,6 +603,20 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
         lastSucceededAt: input.finishedAt,
         lastError: null,
         consecutiveFailures: 0,
+      },
+    }
+  }
+
+  if (input.run.status === 'skipped' && input.pendingDeliveryIntentId !== null) {
+    return {
+      ...input.runtimeState,
+      sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        retryAfterAt: null,
+        lastError: null,
+        pendingDeliveryIntentId: input.pendingDeliveryIntentId,
       },
     }
   }

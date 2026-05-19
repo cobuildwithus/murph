@@ -5,6 +5,7 @@ import {
   parseHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
+  isLinqChatNotFoundSendMessageError,
   type LinqFetch,
   probeLinqApi,
   resolveLinqApiToken,
@@ -326,8 +327,14 @@ async function maybeRecoverMissingLinqDirectThread(input: {
         message: input.message,
         replyToMessageId: input.replyToMessageId ?? null,
       })
-    } catch {
-      continue
+    } catch (error) {
+      if (shouldContinueLinqDirectThreadRecoveryAfterError(error)) {
+        continue
+      }
+      if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {
+        throw createAssistantDeliveryConfirmationPendingError(error)
+      }
+      throw error
     }
     if (!delivered || typeof delivered !== 'object') {
       continue
@@ -356,12 +363,40 @@ async function maybeRecoverMissingLinqDirectThread(input: {
 }
 
 function looksLikeMissingLinqChatError(error: unknown): error is VaultCliError {
-  return error instanceof VaultCliError
-    && error.code === 'LINQ_API_REQUEST_FAILED'
-    && error.context?.provider === 'linq'
-    && error.context?.status === 404
-    && typeof error.message === 'string'
-    && error.message.includes('Chat not found')
+  return isLinqChatNotFoundSendMessageError(error)
+}
+
+function shouldContinueLinqDirectThreadRecoveryAfterError(error: unknown): boolean {
+  if (
+    !(error instanceof VaultCliError)
+    || error.code !== 'LINQ_API_REQUEST_FAILED'
+    || error.context?.failureStage !== 'http'
+    || error.context?.retryable === true
+  ) {
+    return false
+  }
+
+  const status = error.context?.status
+  return typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429
+}
+
+function isPotentiallyAcceptedLinqDirectThreadRecoveryError(
+  error: unknown,
+): boolean {
+  if (!(error instanceof VaultCliError) || error.code !== 'LINQ_API_REQUEST_FAILED') {
+    return false
+  }
+
+  if (error.context?.retryable === true || error.context?.failureStage === 'transport') {
+    return true
+  }
+
+  const status = error.context?.status
+  return typeof status === 'number' && (status === 408 || status >= 500)
 }
 
 function normalizeDirectLinqRecipient(value: string | null): string | null {

@@ -124,6 +124,7 @@ export interface AssistantNotificationInput
 
 export interface AssistantNotificationResult {
   decision: AssistantNotificationDecision
+  deliveryOutcome?: AssistantDeliveryOutcome | null
   response: string | null
   session: AssistantSession
 }
@@ -346,6 +347,7 @@ export async function sendAssistantNotificationLocal(
             ...decision,
             text: responseText,
           },
+          deliveryOutcome,
           response: responseText,
           session: deliveryOutcome.session,
         }
