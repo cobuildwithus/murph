@@ -14,7 +14,7 @@ Key decisions:
 - At/after host checkpoint deadline, checkpoint instead of starting new projected work.
 
 State:
-- Active.
+- Completed.
 
 Done:
 - Reviewed repo workflow, reliability, security, hosted runtime protocol, testing map, and assistant-runtime docs.

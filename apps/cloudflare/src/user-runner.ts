@@ -1650,7 +1650,7 @@ export class HostedUserRunner {
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          runtimeResultNextWakeAtPresent: input.result.nextWakeAt !== null,
+          runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
           scheduledWakeAt: recheck.nextAlarmAt,
         },
         level: "warn",
@@ -1672,7 +1672,7 @@ export class HostedUserRunner {
         details: {
           mailboxBacklogPresent,
           mailboxLagLaneCount: webStatus.mailboxLag.length,
-          runtimeResultNextWakeAtPresent: input.result.nextWakeAt !== null,
+          runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
           scheduledWakeAt: recheck.nextAlarmAt,
           workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
           workspaceVersion: webStatus.workspace?.version ?? null,
@@ -1725,7 +1725,7 @@ export class HostedUserRunner {
       details: {
         mailboxBacklogPresent,
         mailboxLagLaneCount: webStatus.mailboxLag.length,
-        runtimeResultNextWakeAtPresent: input.result.nextWakeAt !== null,
+        runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
         scheduledWakeAt: nextWakeAt,
         workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
         workspaceVersion: webStatus.workspace?.version ?? null,

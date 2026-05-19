@@ -399,8 +399,8 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     details: {
       checkpointPolicy: "full",
       checkpointReason: input.request.reason,
-      nextWakeAtPresent: input.request.nextWakeAt !== null,
-      nextWakeReasonPresent: input.request.nextWakeReason !== null,
+      nextWakeAtPresent: input.request.nextWakeAt != null,
+      nextWakeReasonPresent: input.request.nextWakeReason != null,
       preservedArtifactCount: preservedArtifacts?.length ?? 0,
       preservedStatePresent: input.preservedState !== null && input.preservedState !== undefined,
       redactedStatusPresent: input.request.redactedStatus !== null,
