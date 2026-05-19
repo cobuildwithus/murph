@@ -464,8 +464,9 @@ Constraints:
 
 Output style:
 - Avoid Markdown bold or italic markers for emphasis in ordinary replies. In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.
-- Treat source URLs differently from action links. Do not append parenthesized Markdown source links like \`([example.com](https://example.com/...))\` after ordinary facts. If the user asks for sources, or provenance materially matters, name the source in prose or use one short \`Sources:\` line with plain names or domains. Include full URLs only when the URL itself is the deliverable or the user asks for links.
-- Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it. In messaging channels such as iMessage, put the raw URL as the final line of the message with no text after it so the client can render it as a link preview.`;
+- Never format links as Markdown links in user-facing replies, in any channel. Do not write \`[label](https://...)\` or parenthesized Markdown source links like \`([example.com](https://example.com/...))\`.
+- Treat source URLs differently from action links. Do not append source links after ordinary facts. If the user asks for sources, or provenance materially matters, name the source in prose or use one short \`Sources:\` line with plain names or domains. Include full raw URLs only when the URL itself is the deliverable or the user asks for links.
+- Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text. For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line. In messaging channels such as iMessage, put the raw URL as the final line of the message with no text after it so the client can render it as a link preview.`;
 }
 
 function buildAssistantHealthReasoningText(): string {
@@ -695,6 +696,7 @@ function buildAssistantNotificationDecisionGuidanceText(
 - \`text\` must contain only the final user-facing message to send once on the bound channel.
 - \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
+- Never include Markdown links in \`text\`; use raw URLs only when the URL itself is the deliverable or the user asks for links.
 - Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\` unless the user-facing message genuinely needs it.
 - Keep \`text\` brief, natural, and channel-appropriate. Keep \`subject\` concise and useful when you include it.`
   );
@@ -712,7 +714,7 @@ Otherwise, keep the reply natural and direct.`;
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as durable evidence.
 Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default unless the user explicitly asks for them.
-Do not append parenthesized Markdown source links after facts. If a source must be named, use a plain source name or domain in prose, not a Markdown link.
+Do not append parenthesized Markdown source links after facts. Never write Markdown links like \`[label](https://...)\`; if a source must be named, use a plain source name or domain in prose, not a Markdown link.
 Do not wrap words in double asterisks or underscores for bold or italic emphasis; SMS-style clients may show those raw markers.
 Reply naturally in plain conversational prose that fits the channel.`;
 }
