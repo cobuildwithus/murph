@@ -503,7 +503,8 @@ export interface MurphAgeResultAuthorization {
 export type MurphAgeResearchCandidateCardBlockerCode =
   | "INPUT_BUNDLE_INCOMPLETE"
   | "LOCAL_MODEL_CARD_NOT_LOADED"
-  | "PRODUCT_MODE_RESEARCH_ONLY";
+  | "PRODUCT_MODE_RESEARCH_ONLY"
+  | "PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT";
 
 export interface MurphAgeResearchCandidateCardAssessment {
   availableFeatureKeys: string[];
@@ -1963,6 +1964,13 @@ const MURPH_AGE_BP_BODY_METRIC_KEYS = new Set(
   MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
 );
 
+const MURPH_AGE_SCORE_BEARING_LAB_METRIC_KEYS = new Set(
+  [
+    ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
+    ...MURPH_AGE_LAB5_FEATURES.flatMap((feature) => feature.metricKeys),
+  ].filter((metricKey) => !MURPH_AGE_BP_BODY_METRIC_KEYS.has(metricKey)),
+);
+
 const MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.flatMap((feature) => feature.metricKeys),
   ...MURPH_AGE_BP_BODY_FEATURES.flatMap((feature) => feature.metricKeys),
@@ -3262,6 +3270,14 @@ function assessMurphAgeResearchCandidateCards(input: MurphAgeInputBundleAssessme
     const blockerCodes: MurphAgeResearchCandidateCardBlockerCode[] = [];
     if (bundleAssessment.status !== "ready") blockerCodes.push("INPUT_BUNDLE_INCOMPLETE");
     if (!modelLoaded) blockerCodes.push("LOCAL_MODEL_CARD_NOT_LOADED");
+    if (
+      cardId === "r399_nhis_proxy_10y_acm_research"
+      && bundleAssessment.status === "ready"
+      && input.selectedCardId !== cardId
+      && hasMurphAgeScoreBearingLabIntent(input)
+    ) {
+      blockerCodes.push("PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT");
+    }
     if (input.mode === "product" && !cardPolicy?.productAuthorized) {
       blockerCodes.push("PRODUCT_MODE_RESEARCH_ONLY");
     }
@@ -4234,7 +4250,7 @@ export function assessMurphAgeInputBundle(
   if (lab5Assessment.status === "ready") return lab5Assessment;
 
   const r399Assessment = assessMurphAgeR399ProxyAnchor(input);
-  if (r399Assessment.status === "ready") return r399Assessment;
+  if (r399Assessment.status === "ready" && !hasMurphAgeScoreBearingLabIntent(input)) return r399Assessment;
 
   const wearableAssessment = assessMurphAgeWearableContext(input);
   if (wearableAssessment.status === "context-only") return wearableAssessment;
@@ -4257,6 +4273,13 @@ export function assessMurphAgeInputBundle(
       message: "No current Murph Age research input bundle has enough ready metrics to score or contextualize.",
     }],
   });
+}
+
+function hasMurphAgeScoreBearingLabIntent(input: MurphAgeInputBundleAssessmentInput): boolean {
+  return input.points.some((point) =>
+    MURPH_AGE_SCORE_BEARING_LAB_METRIC_KEYS.has(resolveMetricInputKey(point.metricKey))
+    && isMurphAgeInputBundleMetricPointAllowed(point)
+  );
 }
 
 function assessMurphAgeLab9BpBody(

@@ -222,6 +222,7 @@ const murphAgeResearchCandidateCardBlockerSchema = z.enum([
   'INPUT_BUNDLE_INCOMPLETE',
   'LOCAL_MODEL_CARD_NOT_LOADED',
   'PRODUCT_MODE_RESEARCH_ONLY',
+  'PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT',
 ])
 const murphAgePublicResearchCandidateCardAssessmentSchema = z.object({
   availableFeatureKeys: z.array(murphAgePublicFeatureKeySchema),

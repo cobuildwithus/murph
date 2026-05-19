@@ -5282,6 +5282,69 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
   assert.equal(defaultLab9Candidate.inputStatus, "abstain");
   assert.equal(defaultLab9Candidate.blockerCodes.includes("INPUT_BUNDLE_INCOMPLETE"), true);
 
+  const partialLabPoints = [
+    measurementMetricPoint("bmi", "kg/m^2", 24.2),
+    measurementMetricPoint("hba1c", "%", 5.4),
+  ];
+  const partialLabResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: partialLabPoints,
+    sex: "female",
+  });
+
+  assert.equal(partialLabResearch.status, "abstain");
+  assert.equal(partialLabResearch.result, null);
+  assert.equal(partialLabResearch.bundleAssessment.bundleId, "insufficient");
+  assert.equal(partialLabResearch.cardPolicy, null);
+  const partialLabR399Candidate = partialLabResearch.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "r399_nhis_proxy_10y_acm_research"
+  );
+  assert.ok(partialLabR399Candidate);
+  assert.equal(partialLabR399Candidate.selected, false);
+  assert.equal(partialLabR399Candidate.inputStatus, "ready");
+  assert.equal(partialLabR399Candidate.modelLoaded, true);
+  assert.equal(
+    partialLabR399Candidate.blockerCodes.includes("PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT"),
+    true,
+  );
+  const partialLabPublicReport = toPublicMurphAgeCalculatorReport(partialLabResearch);
+  const partialLabPublicR399Candidate = partialLabPublicReport.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "r399_nhis_proxy_10y_acm_research"
+  );
+  assert.ok(partialLabPublicR399Candidate);
+  assert.equal(
+    partialLabPublicR399Candidate.blockerCodes.includes("PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT"),
+    true,
+  );
+
+  const explicitR399PartialLabResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: partialLabPoints,
+    sex: "female",
+  });
+
+  assert.equal(explicitR399PartialLabResearch.status, "ready");
+  assert.equal(explicitR399PartialLabResearch.result?.status, "ready");
+  assert.equal(explicitR399PartialLabResearch.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(explicitR399PartialLabResearch.cardPolicy?.cardId, "r399_nhis_proxy_10y_acm_research");
+  const explicitPartialLabR399Candidate = explicitR399PartialLabResearch.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "r399_nhis_proxy_10y_acm_research"
+  );
+  assert.ok(explicitPartialLabR399Candidate);
+  assert.equal(explicitPartialLabR399Candidate.selected, true);
+  assert.equal(explicitPartialLabR399Candidate.inputStatus, "ready");
+  assert.equal(
+    explicitPartialLabR399Candidate.blockerCodes.includes("PROXY_FALLBACK_SUPPRESSED_BY_LAB_INTENT"),
+    false,
+  );
+
   const summary = summarizeMurphAgeCalculatorOutput(research);
   assert.equal(summary.displayStatus, "research-only");
   assert.equal(summary.displayBlockedReason, "product-not-authorized");
