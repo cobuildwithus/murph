@@ -101,6 +101,50 @@ export class HostedTelegramSyncError extends Error {
   }
 }
 
+export function toHostedTelegramLinkErrorMessage(error: unknown): string {
+  const errorCode = readPrivyTelegramLinkErrorCode(error);
+
+  switch (errorCode) {
+    case "linked_to_another_user":
+      return "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.";
+    case "cannot_link_more_of_type":
+      return "This Murph account already has a Telegram account linked.";
+    case "disallowed_login_method":
+    case "not_supported":
+      return "Telegram linking is not enabled for this account yet.";
+    case "must_be_authenticated":
+      return "Sign in again before linking Telegram.";
+    case "exited_link_flow":
+      return "Telegram linking was canceled. Try again when you're ready.";
+    case "client_request_timeout":
+    case "too_many_requests":
+      return "Telegram linking is taking too long. Try again in a moment.";
+    case "failed_to_link_account":
+    case "unknown_auth_error":
+    case "oauth_unexpected":
+    default:
+      return "Could not link Telegram right now.";
+  }
+}
+
+function readPrivyTelegramLinkErrorCode(error: unknown): string | null {
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  const privyErrorCode = error.privyErrorCode;
+  if (typeof privyErrorCode === "string") {
+    return privyErrorCode;
+  }
+
+  const code = error.code;
+  return typeof code === "string" ? code : null;
+}
+
 export async function syncHostedTelegramConnectionWithRetry(input: {
   expectedTelegramUserId: string;
   fetchImpl?: typeof fetch;

@@ -13,6 +13,7 @@ import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboard
 import {
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
+  toHostedTelegramLinkErrorMessage,
   type HostedTelegramSyncOverride,
   type HostedTelegramSyncResult,
 } from "./hosted-telegram-settings-helpers";
@@ -25,11 +26,10 @@ const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
-  autoLink?: boolean;
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, autoLink, initialTelegramAccount, onSynced } = props;
+  const { authenticated, initialTelegramAccount, onSynced } = props;
   const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
   const { refreshUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
@@ -49,13 +49,12 @@ export function HostedTelegramCardSettings(props: {
   });
   const currentTelegram = displayState.currentTelegram;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
-  const canUsePrivyTelegramLink = authenticated && privyReady && privyAuthenticated;
 
   const { linkTelegram } = useLinkAccount({
-    onError: (_error, details) => {
+    onError: (error, details) => {
       if (!details || details.linkMethod === "telegram") {
         setIsLinkingTelegram(false);
-        setErrorMessage("Could not link Telegram right now.");
+        setErrorMessage(toHostedTelegramLinkErrorMessage(error));
       }
     },
     onSuccess: (params) => {
@@ -144,15 +143,6 @@ export function HostedTelegramCardSettings(props: {
     syncLinkedTelegram,
   ]);
 
-  const autoLinkTriggeredRef = useRef(false);
-  useEffect(() => {
-    if (!autoLink || autoLinkTriggeredRef.current || !canUsePrivyTelegramLink) return;
-    if (currentTelegram) return;
-    autoLinkTriggeredRef.current = true;
-    void handleLinkTelegram();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoLink, canUsePrivyTelegramLink]);
-
   async function handleLinkTelegram() {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -183,7 +173,7 @@ export function HostedTelegramCardSettings(props: {
       linkTelegram();
     } catch (error) {
       setIsLinkingTelegram(false);
-      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
+      setErrorMessage(toHostedTelegramLinkErrorMessage(error));
     }
   }
 
@@ -210,7 +200,7 @@ export function HostedTelegramCardSettings(props: {
     ?? successMessage
     ?? (isSyncingTelegram && !isQuietSyncingTelegram
       ? "Saving your Telegram connection…"
-      : autoLink && !privyReady
+      : !privyReady
         ? "Preparing Telegram linking…"
         : null);
 

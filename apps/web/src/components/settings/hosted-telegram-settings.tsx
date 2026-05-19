@@ -14,6 +14,7 @@ import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboard
 import {
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
+  toHostedTelegramLinkErrorMessage,
   type HostedTelegramSyncOverride,
   type HostedTelegramSyncResult,
 } from "./hosted-telegram-settings-helpers";
@@ -48,10 +49,10 @@ export function ConnectTelegram(props: {
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
 
   const { linkTelegram } = useLinkAccount({
-    onError: (_error, details) => {
+    onError: (error, details) => {
       if (!details || details.linkMethod === "telegram") {
         setIsLinkingTelegram(false);
-        setErrorMessage("Could not link Telegram right now.");
+        setErrorMessage(toHostedTelegramLinkErrorMessage(error));
       }
     },
     onSuccess: (params) => {
@@ -166,7 +167,7 @@ export function ConnectTelegram(props: {
       linkTelegram();
     } catch (error) {
       setIsLinkingTelegram(false);
-      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
+      setErrorMessage(toHostedTelegramLinkErrorMessage(error));
     }
   }
   return (
