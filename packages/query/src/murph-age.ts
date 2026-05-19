@@ -61,6 +61,7 @@ export interface CalculateMurphAgeForVaultInput extends Omit<MurphAgeCalculation
 
 export interface CalculateMurphAgeFromVaultInputBundleInput extends Omit<MurphAgeCalculatorInput, "points"> {
   asOf: string;
+  modelCardArtifactRoot?: string;
   vaultRoot: string;
 }
 
@@ -277,7 +278,10 @@ export async function calculateMurphAgeFromVaultInputBundle(
     vaultRoot: input.vaultRoot,
   });
   const localModelCards = mode === "research"
-    ? await loadMurphAgeLocalModelCardArtifacts({ vaultRoot: input.vaultRoot })
+    ? await loadMurphAgeLocalModelCardArtifacts({
+      modelCardArtifactRoot: input.modelCardArtifactRoot,
+      vaultRoot: input.vaultRoot,
+    })
     : { models: {}, warnings: [] };
 
   const output = calculateMurphAgeFromInputBundle({
@@ -626,9 +630,10 @@ export function defaultMurphAgeModelCardArtifactRoot(vaultRoot: string): string 
 }
 
 export async function loadMurphAgeLocalModelCardArtifacts(input: {
+  modelCardArtifactRoot?: string;
   vaultRoot: string;
 }): Promise<MurphAgeLocalModelCardLoadResult> {
-  const root = defaultMurphAgeModelCardArtifactRoot(input.vaultRoot);
+  const root = input.modelCardArtifactRoot ?? defaultMurphAgeModelCardArtifactRoot(input.vaultRoot);
   let entries: Array<{ isFile(): boolean; name: string }>;
   try {
     entries = await readdir(root, { withFileTypes: true });

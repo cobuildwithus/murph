@@ -547,6 +547,56 @@ test("calculateMurphAgeFromVaultInputBundle loads ignored local research model-c
   }
 });
 
+test("calculateMurphAgeFromVaultInputBundle can load server-scoped research model-card artifacts", async () => {
+  const vaultRoot = await createProjectionVault();
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab9.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const loaded = await loadMurphAgeLocalModelCardArtifacts({
+      modelCardArtifactRoot,
+      vaultRoot,
+    });
+    assert.equal(loaded.warnings.length, 0);
+    assert.equal(loaded.models.lab9_bp_body_10y_acm_research?.modelId, "fixture-lab9-research-model");
+
+    const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      modelCardArtifactRoot,
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.mode, "research");
+    assert.equal(publicReport.displaySummary.displayStatus, "research-only");
+    assert.equal(publicReport.authorization.productAuthorized, false);
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+
+    const encodedReport = JSON.stringify(publicReport);
+    assert.equal(encodedReport.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedReport.includes(vaultRoot), false);
+    assert.equal(encodedReport.includes("metric-point:"), false);
+    assert.equal(encodedReport.includes("\"value\""), false);
+    assert.equal(encodedReport.includes("fixture-lab9-research-model"), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+  }
+});
+
 test("calculateMurphAgeFromVaultInputBundle scores the explicit R399 local anchor artifact", async () => {
   const vaultRoot = await createProjectionVault();
   try {
@@ -1369,6 +1419,10 @@ async function createProjectionVault(): Promise<string> {
 
 async function writeLocalModelCardArtifact(vaultRoot: string, fileName: string, artifact: unknown): Promise<void> {
   const root = defaultMurphAgeModelCardArtifactRoot(vaultRoot);
+  await writeModelCardArtifact(root, fileName, artifact);
+}
+
+async function writeModelCardArtifact(root: string, fileName: string, artifact: unknown): Promise<void> {
   await mkdir(root, { recursive: true });
   await writeFile(path.join(root, fileName), `${JSON.stringify(artifact, null, 2)}\n`);
 }
