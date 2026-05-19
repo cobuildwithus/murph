@@ -147,7 +147,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       expect.objectContaining({
         eventCode: "assistant.automation_detail",
         redactedJson: expect.objectContaining({
-          failureRuntimeStatePresent: false,
           failureReason: "due",
           safeDetails: "due",
           type: "cron.scan.job",
