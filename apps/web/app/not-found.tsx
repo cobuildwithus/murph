@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 const QUOTES = [
@@ -63,29 +64,32 @@ export default async function NotFound() {
   const backHref = authenticated ? "/home" : "/";
 
   return (
-    <div className="flex min-h-[80vh] flex-col items-center justify-center px-6">
-      <div className="max-w-lg text-center">
-        <h1 className="font-serif text-7xl font-semibold tracking-tight text-foreground">
-          404
-        </h1>
+    <>
+      <main className="flex min-h-[80vh] flex-col items-center justify-center px-6">
+        <div className="max-w-lg text-center">
+          <h1 className="font-serif text-7xl font-semibold tracking-tight text-foreground">
+            404
+          </h1>
 
-        <div className="mt-10 space-y-3">
-          <p className="font-serif text-lg italic leading-relaxed text-foreground/80">
-            &ldquo;{quote.text}&rdquo;
-          </p>
-          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            {quote.author}
-          </p>
+          <div className="mt-10 space-y-3">
+            <p className="font-serif text-lg italic leading-relaxed text-foreground/80">
+              &ldquo;{quote.text}&rdquo;
+            </p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              {quote.author}
+            </p>
+          </div>
+
+          <Link
+            href={backHref}
+            prefetch={false}
+            className="mt-10 inline-block rounded-2xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Back to Murph
+          </Link>
         </div>
-
-        <Link
-          href={backHref}
-          prefetch={false}
-          className="mt-10 inline-block rounded-2xl bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          Back to Murph
-        </Link>
-      </div>
-    </div>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

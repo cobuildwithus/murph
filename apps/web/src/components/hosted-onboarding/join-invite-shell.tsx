@@ -46,7 +46,6 @@ function JoinInviteSidebar() {
 export function JoinInviteShell({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
-      <style>{`#site-footer { display: none; }`}</style>
       <JoinInviteSidebar />
 
       <section className="relative flex flex-1 items-start justify-start overflow-hidden px-6 py-8 md:px-14 md:py-10">
@@ -59,7 +58,6 @@ export function JoinInviteShell({ children }: { children: ReactNode }) {
 export function JoinInviteCenteredShell({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
-      <style>{`#site-footer { display: none; }`}</style>
       <JoinInviteSidebar />
 
       <section className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-20">

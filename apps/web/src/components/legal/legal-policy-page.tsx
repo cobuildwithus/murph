@@ -3,6 +3,8 @@ import path from "node:path";
 
 import Link from "next/link";
 
+import { SiteFooter } from "@/src/components/homepage/site-footer";
+
 interface HeadingBlock {
   level: 1 | 2 | 3;
   text: string;
@@ -42,25 +44,28 @@ export async function LegalPolicyPage({
   const blocks = parseLegalPolicyMarkdown(markdown);
 
   return (
-    <main className="min-h-screen bg-background px-6 py-12 antialiased sm:px-10 lg:px-16">
-      <article className="mx-auto max-w-2xl">
-        <div className="mb-10 flex items-center justify-between border-b border-border pb-5">
-          <Link
-            href="/"
-            className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Murph
-          </Link>
-          <a
-            href={pdfHref}
-            className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary transition-colors hover:text-foreground"
-          >
-            Download PDF
-          </a>
-        </div>
-        <div className="space-y-5">{blocks.map(renderBlock)}</div>
-      </article>
-    </main>
+    <>
+      <main className="min-h-screen bg-background px-6 py-12 antialiased sm:px-10 lg:px-16">
+        <article className="mx-auto max-w-2xl">
+          <div className="mb-10 flex items-center justify-between border-b border-border pb-5">
+            <Link
+              href="/"
+              className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Murph
+            </Link>
+            <a
+              href={pdfHref}
+              className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-primary transition-colors hover:text-foreground"
+            >
+              Download PDF
+            </a>
+          </div>
+          <div className="space-y-5">{blocks.map(renderBlock)}</div>
+        </article>
+      </main>
+      <SiteFooter />
+    </>
   );
 }
 
