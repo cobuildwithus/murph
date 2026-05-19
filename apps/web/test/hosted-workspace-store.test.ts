@@ -1289,6 +1289,42 @@ describe("hosted runtime log store", () => {
     expect(result.redactedJson).toEqual(diagnostic);
   });
 
+  it("rejects raw OpenAI diagnostic payload fields before persistence", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    await expect(recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "runner",
+      eventCode: "runner.provider_egress_diagnostic",
+      level: "debug",
+      phase: "fetch",
+      redacted: {
+        promptText: "redacted",
+      },
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/not allowed/u);
+
+    await expect(recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "runner",
+      eventCode: "runner.provider_egress_diagnostic",
+      level: "debug",
+      phase: "fetch",
+      redacted: {
+        requestBody: "redacted",
+      },
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/not allowed/u);
+
+    expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
+  });
+
   it("allows bounded sanitized device-sync failure summaries", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

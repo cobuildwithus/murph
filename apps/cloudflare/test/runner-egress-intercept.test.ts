@@ -15,6 +15,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  buildHostedOpenAiCacheDiagnostic,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -254,18 +255,20 @@ describe("hostedRunnerIntercept", () => {
       generation: "7",
       userId: "member_123",
     });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
-    expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
-    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
-    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-    expect(forwarded.headers.has("cookie")).toBe(false);
-    expect(forwarded.headers.has("openai-organization")).toBe(false);
-    expect(forwarded.headers.has("openai-project")).toBe(false);
-    expect(forwarded.headers.has("proxy-authorization")).toBe(false);
-    expect(forwarded.headers.has("x-api-key")).toBe(false);
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("openai-organization")).toBe(false);
+    expect(forwardedRequest.headers.has("openai-project")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(forwardedRequest.headers.has("x-api-key")).toBe(false);
   });
 
   it("rejects OpenAI credential injection without a valid runtime write fence", async () => {
@@ -399,13 +402,15 @@ describe("hostedRunnerIntercept", () => {
       generation: "7",
       userId: "member_123",
     });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.openai.com/v1/responses/compact");
-    expect(forwarded.headers.get("authorization")).toBe("Bearer openai-worker-secret");
-    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
-    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
-    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses/compact");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });
 
   it("records OpenAI cache diagnostics as redacted metadata when background work is available", async () => {
@@ -551,6 +556,112 @@ describe("hostedRunnerIntercept", () => {
     expect(runtimeLogJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
       .not.toContain(syntheticHiddenText);
+  });
+
+  it("records OpenAI cache diagnostics when background work is unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ loggedCount: 1 }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify({
+          input: "hello",
+          model: "gpt-5.5",
+          prompt_cache_retention: "24h",
+          stream: true,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeDefined();
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        eventCode?: string;
+        redactedJson?: Record<string, unknown>;
+      }>;
+    };
+    expect(runtimeLogBody.entries?.[0]).toEqual(expect.objectContaining({
+      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
+      redactedJson: expect.objectContaining({
+        endpointKind: "responses",
+        fingerprintKind: "hmac-sha256",
+        inputFingerprintPresent: false,
+        requestFingerprintPresent: false,
+      }),
+    }));
+    const captureCall = mocks.emitHostedExecutionStructuredLog.mock.calls.find(([entry]) =>
+      entry.message === "Hosted runner OpenAI cache diagnostic captured."
+    );
+    expect(captureCall?.[0].details).toEqual(expect.objectContaining({
+      runtimeLogScheduled: false,
+    }));
+  });
+
+  it("builds bounded OpenAI cache diagnostics for degraded request bodies", async () => {
+    const smallBody = JSON.stringify({
+      input: "hello",
+      model: "tenant-private-model-123",
+      prompt_cache_key: "cache-namespace-synthetic-1234567890",
+      prompt_cache_retention: "24h",
+    });
+    const smallDiagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: new TextEncoder().encode(smallBody),
+    });
+
+    expect(smallDiagnostic).toEqual(expect.objectContaining({
+      cacheNamespaceFingerprintPresent: false,
+      cacheNamespacePresent: true,
+      fingerprintKind: "none",
+      inputFingerprintPresent: false,
+      jsonType: "object",
+      jsonValid: true,
+      modelKind: "other",
+      requestFingerprintPresent: false,
+    }));
+    expect(JSON.stringify(smallDiagnostic)).not.toContain("tenant-private-model-123");
+    expect(JSON.stringify(smallDiagnostic)).not.toContain("cache-namespace-synthetic");
+
+    const invalidDiagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      fingerprintSecret: "diagnostic-fingerprint-secret",
+      method: "POST",
+      requestBytes: new TextEncoder().encode("{"),
+    });
+
+    expect(invalidDiagnostic).toEqual(expect.objectContaining({
+      fingerprintKind: "hmac-sha256",
+      jsonType: "invalid",
+      jsonValid: false,
+      requestFingerprintPresent: false,
+    }));
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {
