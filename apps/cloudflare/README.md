@@ -118,10 +118,11 @@ Optional execution vars and secrets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the child runner receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
-- `HOSTED_AI_USAGE_REPORTING_SECRET` and `HOSTED_LOG_FINGERPRINT_SECRET` are
-  Worker-owned platform secrets only. They must not be forwarded into the child
-  runtime env; usage attribution is added at the Worker/web-control boundary
-  when configured.
+- `HOSTED_LOG_FINGERPRINT_SECRET` is a required Worker-owned platform secret for
+  prompt-cache diagnostics. It must not be forwarded into the child runtime env.
+- `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
+  secret. It must not be forwarded into the child runtime env; usage
+  attribution is added at the Worker/web-control boundary when configured.
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
 - opt-in runtime integrations such as `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the child container by sentinel placeholders, while native parser binaries and the Whisper model are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes
 

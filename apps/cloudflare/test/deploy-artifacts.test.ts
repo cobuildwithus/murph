@@ -856,6 +856,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     CF_WORKER_NAME: "hosted-worker",
     ...requiredHostedCryptoWorkerVars,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
+    HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     OPENAI_API_KEY: "openai-key",
   };
