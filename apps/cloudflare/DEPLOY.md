@@ -64,12 +64,14 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 - `OPENAI_API_KEY`
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
+`HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of child runtime env.
 
 ## Optional Vars
 
@@ -194,7 +196,6 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the child runtime env.
-- `HOSTED_LOG_FINGERPRINT_SECRET` when Worker-owned log fingerprinting is enabled. This secret must stay out of child runtime env.
 - `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET` and optional
   `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID` for legacy signed allow-decision
   compatibility metadata. Current Cloudflare runner start authority does not

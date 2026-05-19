@@ -713,6 +713,9 @@ describe("hosted deploy automation helpers", () => {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
       expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
     }
+    expect(
+      workflow.slice(validateDeployEnvStepIndex, workflow.indexOf("- name: Prepare deploy artifacts")),
+    ).toContain("HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}");
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
@@ -919,6 +922,7 @@ describe("hosted deploy automation helpers", () => {
       ...legacyHostedAssistantProviderSecrets,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -934,6 +938,7 @@ describe("hosted deploy automation helpers", () => {
     })).toEqual({
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -953,6 +958,7 @@ describe("hosted deploy automation helpers", () => {
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -968,6 +974,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -983,6 +990,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -997,6 +1005,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",

@@ -22,8 +22,13 @@ accounting is wrong.
 - `packages/cli/**`
 - `apps/cloudflare/src/runner-egress-intercept.ts`
 - `apps/cloudflare/src/worker-contracts.ts`
+- `apps/cloudflare/scripts/deploy-automation/**`
+- `.github/workflows/deploy-cloudflare-hosted.yml`
 - `apps/cloudflare/test/runner-egress-intercept.test.ts`
+- `apps/cloudflare/test/deploy-*.test.ts`
 - `apps/web/test/hosted-workspace-store.test.ts`
+- `apps/cloudflare/README.md`
+- `apps/cloudflare/DEPLOY.md`
 - hosted runtime log event contract/tests
 - hosted Codex/OpenAI config surfaces if evidence points there
 - focused provider usage and prompt-cache tests
@@ -33,7 +38,7 @@ accounting is wrong.
 - Printing prompt/message/transcript contents.
 - Pulling or exposing environment secrets.
 - Broad provider migrations or model upgrades.
-- Hosted deploy changes.
+- Broad deploy changes unrelated to prompt-cache diagnostics.
 
 ## Plan
 
@@ -45,7 +50,8 @@ accounting is wrong.
 4. Patch the smallest wrong layer if found.
 5. Add metadata-only egress diagnostics if the provider request path is
    correct but insufficiently observable.
-6. Run focused verification for touched owners.
+6. Require Worker-owned diagnostic fingerprinting in hosted deploy preflight.
+7. Run focused verification for touched owners.
 
 ## Diagnostic Design Notes
 
