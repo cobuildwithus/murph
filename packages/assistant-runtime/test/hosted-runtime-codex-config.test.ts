@@ -46,6 +46,7 @@ const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
+const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 50_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
@@ -97,7 +98,13 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /^model = /mu);
   assert.match(config, /^model_provider = "hosted-openai"$/mu);
   assert.match(config, /model_reasoning_effort = "medium"/u);
-  assert.match(config, /^model_auto_compact_token_limit = 220000$/mu);
+  assert.match(
+    config,
+    new RegExp(
+      `^model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}$`,
+      "mu",
+    ),
+  );
   assert.match(config, /^log_dir = "\/tmp\/murph-codex-log"$/mu);
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
@@ -130,7 +137,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(codexHomeMode, 0o700);
 });
 
-test("hosted Cloudflare Codex config injects an auto-compaction limit below 250k tokens", async () => {
+test("hosted Cloudflare Codex config injects the hosted auto-compaction limit", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
@@ -141,7 +148,7 @@ test("hosted Cloudflare Codex config injects an auto-compaction limit below 250k
   });
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assertHostedCodexAutoCompactTokenLimitBelowCeiling(config);
+  assertHostedCodexAutoCompactTokenLimit(config);
 });
 
 test("hosted Codex runtime config strips legacy hosted assistant seed env before bootstrap", async () => {
@@ -1166,7 +1173,7 @@ test("hosted Codex config TOML uses env var names rather than credential values"
     [
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
-      "model_auto_compact_token_limit = 220000",
+      `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
       'log_dir = "/tmp/murph-codex-log"',
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
@@ -1780,7 +1787,7 @@ function readHostedLocalCodexStubThreadId(messages: readonly Record<string, unkn
   throw new Error("Expected hosted local Codex stub thread/start response.");
 }
 
-function assertHostedCodexAutoCompactTokenLimitBelowCeiling(config: string): void {
+function assertHostedCodexAutoCompactTokenLimit(config: string): void {
   const matches = [...config.matchAll(/^model_auto_compact_token_limit\s*=\s*(\d+)$/gmu)];
   assert.equal(
     matches.length,
@@ -1793,6 +1800,11 @@ function assertHostedCodexAutoCompactTokenLimitBelowCeiling(config: string): voi
     Number.isSafeInteger(limit) && limit > 0,
     true,
     "Hosted Codex config auto-compaction token limit must be a positive integer.",
+  );
+  assert.equal(
+    limit,
+    HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT,
+    "Hosted Codex config auto-compaction token limit must match the hosted reply budget.",
   );
   assert.equal(
     limit < HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING,
