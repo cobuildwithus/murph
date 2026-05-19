@@ -277,6 +277,69 @@ test('age model-cards reports local research readiness without model internals',
   }
 })
 
+test('age report can use an explicit research model-card artifact root', async () => {
+  const vaultRoot = await createProjectionVault()
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-model-cards-'))
+  try {
+    await rebuildQueryProjection(vaultRoot)
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ])
+    await writeLocalModelCardArtifact(vaultRoot, 'lab9.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    }, artifactRoot)
+
+    const report = requireData(await runSliceCli<MurphAgePublicCalculatorReport>([
+      'age',
+      'report',
+      '--vault',
+      vaultRoot,
+      '--as-of',
+      '2026-05-10T00:00:00.000Z',
+      '--chronological-age-years',
+      '45',
+      '--sex',
+      'female',
+      '--mode',
+      'research',
+      '--card-id',
+      'lab9_bp_body_10y_acm_research',
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+
+    assert.equal(report.status, 'ready')
+    assert.equal(report.mode, 'research')
+    assert.equal(report.authorization.cardId, 'lab9_bp_body_10y_acm_research')
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    assert.equal(report.result?.authorization.cardId, 'lab9_bp_body_10y_acm_research')
+
+    const status = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+    assert.deepEqual(status.loadedCardIds, ['lab9_bp_body_10y_acm_research'])
+    assert.deepEqual(status.researchReadyCardIds, ['lab9_bp_body_10y_acm_research'])
+
+    const encodedReport = JSON.stringify(report)
+    assert.equal(encodedReport.includes(artifactRoot), false)
+    assert.equal(encodedReport.includes('modelCardArtifactRoot'), false)
+    assert.equal(encodedReport.includes('fixture-lab9-research-model'), false)
+    assert.equal(encodedReport.includes('coefficient'), false)
+    assert.equal(encodedReport.includes('selectedPointIds'), false)
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+    await rm(artifactRoot, { force: true, recursive: true })
+  }
+})
+
 test('age model-cards reports missing local artifacts as policy blockers', async () => {
   const vaultRoot = await createProjectionVault()
   try {
@@ -1571,8 +1634,9 @@ async function writeLocalModelCardArtifact(
   vaultRoot: string,
   fileName: string,
   artifact: unknown,
+  artifactRoot?: string,
 ): Promise<void> {
-  const root = defaultMurphAgeModelCardArtifactRoot(vaultRoot)
+  const root = artifactRoot ?? defaultMurphAgeModelCardArtifactRoot(vaultRoot)
   await mkdir(root, { recursive: true })
   await writeFile(path.join(root, fileName), `${JSON.stringify(artifact, null, 2)}\n`)
 }

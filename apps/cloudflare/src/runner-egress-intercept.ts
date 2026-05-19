@@ -1,8 +1,12 @@
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_LOG_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
@@ -79,6 +83,14 @@ const OPENAI_EGRESS_POLICY = [
     pathname: "/v1/models",
   },
 ] as const;
+export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
+  "runner.provider_egress_diagnostic";
+const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
+const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
+const OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS = [8 * 1024, 32 * 1024, 128 * 1024] as const;
+const OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS = 12;
+const OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER = new TextDecoder();
+const OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER = new TextEncoder();
 
 const MAPBOX_EGRESS_POLICY = [
   {
@@ -112,7 +124,15 @@ interface ProviderPathMatch {
 
 interface HostedRunnerOutboundContext {
   containerId?: string;
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
+
+export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
+type HostedRunnerDiagnosticScalar = boolean | null | number | string;
+export type HostedRunnerDiagnosticJson = Record<
+  string,
+  HostedRunnerDiagnosticScalar | HostedRunnerDiagnosticScalar[]
+>;
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
@@ -140,7 +160,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
   }
 
   const handled =
-    await maybeHandleOpenAiRequest({ env, request, url, userId })
+    await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ env, request, url, userId })
     ?? await maybeHandleLinqRequest({ env, request, url, userId })
     ?? await maybeHandleTelegramRequest({ env, request, url, userId })
@@ -214,6 +234,7 @@ export async function handleHostedRunnerOpenAiOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleOpenAiRequest({
+      ctx: _ctx,
       env,
       request,
       url,
@@ -291,6 +312,7 @@ async function requireHandledProviderEgress(response: Response | null): Promise<
 }
 
 async function maybeHandleOpenAiRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   url: URL;
@@ -320,11 +342,384 @@ async function maybeHandleOpenAiRequest(input: {
   const token = readRequiredInterceptSecret(input.env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return await fetch(await createHostedRunnerUpstreamRequest(
+  const upstreamRequest = await createHostedRunnerUpstreamRequest(
     input.request,
     createProviderUpstreamUrl(input.url, pathMatch),
     headers,
+  );
+  const endpointKind = readOpenAiCacheDiagnosticEndpointKind(pathnameSuffix);
+  if (endpointKind) {
+    await emitHostedRunnerOpenAiCacheDiagnostic({
+      ctx: input.ctx ?? null,
+      endpointKind,
+      env: input.env,
+      request: input.request,
+      upstreamRequest,
+      userId: input.userId,
+    });
+  }
+  return await fetch(upstreamRequest);
+}
+
+function readOpenAiCacheDiagnosticEndpointKind(
+  pathnameSuffix: string,
+): HostedOpenAiCacheDiagnosticEndpointKind | null {
+  if (pathnameSuffix === "/v1/responses") {
+    return "responses";
+  }
+  if (pathnameSuffix === "/v1/responses/compact") {
+    return "responses_compact";
+  }
+  return null;
+}
+
+async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
+  ctx: HostedRunnerOutboundContext | null;
+  endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  upstreamRequest: Request;
+  userId: string | null;
+}): Promise<void> {
+  let diagnostic: HostedRunnerDiagnosticJson;
+  try {
+    const requestBytes = new Uint8Array(await input.upstreamRequest.clone().arrayBuffer());
+    diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: input.endpointKind,
+      method: input.request.method,
+      requestBytes,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        diagnosticCaptured: false,
+        endpointKind: input.endpointKind,
+      },
+      error,
+      level: "warn",
+      message: "Hosted runner OpenAI cache diagnostic capture failed.",
+      phase: "wake.running",
+    });
+    return;
+  }
+
+  const runtimeLogScheduled =
+    input.userId !== null
+    && typeof input.ctx?.waitUntil === "function";
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      runtimeLogScheduled,
+      ...diagnostic,
+    },
+    message: "Hosted runner OpenAI cache diagnostic captured.",
+    phase: "wake.running",
+  });
+
+  if (!runtimeLogScheduled || !input.userId || !input.ctx?.waitUntil) {
+    return;
+  }
+
+  input.ctx.waitUntil(writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
+    diagnostic,
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  }).catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        endpointKind: input.endpointKind,
+        runtimeLogScheduled: true,
+      },
+      error,
+      level: "warn",
+      message: "Hosted runner OpenAI cache diagnostic runtime-log write failed.",
+      phase: "wake.running",
+    });
+  }));
+}
+
+export async function buildHostedOpenAiCacheDiagnostic(input: {
+  endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
+  method: string;
+  requestBytes: Uint8Array;
+}): Promise<HostedRunnerDiagnosticJson> {
+  const diagnostic: HostedRunnerDiagnosticJson = {
+    diagnosticVersion: HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION,
+    endpointKind: input.endpointKind,
+    jsonType: "unknown",
+    jsonValid: false,
+    methodKind: readOpenAiDiagnosticMethodKind(input.method),
+    providerKind: "openai",
+    requestBytes: input.requestBytes.byteLength,
+  };
+
+  await appendDigestDiagnostics({
+    bytes: input.requestBytes,
+    fieldPrefix: "request",
+    output: diagnostic,
+  });
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(input.requestBytes));
+  } catch {
+    diagnostic.jsonType = "invalid";
+    return diagnostic;
+  }
+
+  diagnostic.jsonValid = true;
+  diagnostic.jsonType = readOpenAiDiagnosticJsonType(parsed);
+  if (!isHostedOpenAiDiagnosticRecord(parsed)) {
+    return diagnostic;
+  }
+
+  diagnostic.requestFieldCount = Object.keys(parsed).length;
+  diagnostic.modelKind = readOpenAiDiagnosticCode(readStringRecordProperty(parsed, "model")) ?? "missing";
+  diagnostic.cacheRetentionKind = readOpenAiCacheRetentionKind(parsed.prompt_cache_retention);
+
+  const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
+  diagnostic.cacheNamespacePresent = cacheNamespace !== null;
+  if (cacheNamespace) {
+    await appendSensitiveIdentifierDigest({
+      fieldPrefix: "cacheNamespace",
+      output: diagnostic,
+      value: cacheNamespace,
+    });
+  }
+
+  const previousResponseId = readStringRecordProperty(parsed, "previous_response_id");
+  diagnostic.previousResponsePresent = previousResponseId !== null;
+  if (previousResponseId) {
+    await appendSensitiveIdentifierDigest({
+      fieldPrefix: "previousResponse",
+      output: diagnostic,
+      value: previousResponseId,
+    });
+  }
+
+  const instructions = readStringRecordProperty(parsed, "instructions");
+  diagnostic.instructionsPresent = instructions !== null;
+  if (instructions) {
+    diagnostic.instructionsBytes = byteLengthOfDiagnosticText(instructions);
+  }
+
+  const inputValue = parsed.input;
+  diagnostic.inputPresent = Object.hasOwn(parsed, "input");
+  diagnostic.inputType = readOpenAiDiagnosticJsonType(inputValue);
+  diagnostic.inputCount = readOpenAiInputCount(inputValue);
+  const inputBytes = encodeOpenAiDiagnosticJsonValue(inputValue);
+  if (inputBytes) {
+    diagnostic.inputBytes = inputBytes.byteLength;
+    await appendDigestDiagnostics({
+      bytes: inputBytes,
+      fieldPrefix: "input",
+      output: diagnostic,
+    });
+  }
+
+  diagnostic.toolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
+  diagnostic.includeCount = Array.isArray(parsed.include) ? parsed.include.length : 0;
+  diagnostic.storePresent = Object.hasOwn(parsed, "store");
+  diagnostic.streamPresent = Object.hasOwn(parsed, "stream");
+
+  return diagnostic;
+}
+
+async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
+  diagnostic: HostedRunnerDiagnosticJson;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<void> {
+  const attemptId = readRuntimeLogHeader(input.request.headers, HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
+  const leaseGeneration = readRuntimeLogHeader(
+    input.request.headers,
+    HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  );
+  const workspaceVersion = readRuntimeLogHeader(
+    input.request.headers,
+    HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+  );
+  const response = await handleRunnerOutboundRequest(
+    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNTIME_LOG_PATH}`, {
+      body: JSON.stringify({
+        entries: [{
+          at: new Date().toISOString(),
+          ...(attemptId ? { attemptId } : {}),
+          component: "runner",
+          eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
+          ...(leaseGeneration ? { leaseGeneration } : {}),
+          level: "debug",
+          phase: "fetch",
+          redactedJson: input.diagnostic,
+          ...(workspaceVersion ? { workspaceVersion } : {}),
+        }],
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    }),
+    input.env,
+    input.userId,
+  );
+
+  if (!response.ok) {
+    throw new Error(`Hosted OpenAI cache diagnostic runtime-log write returned HTTP ${response.status}.`);
+  }
+  await drainHostedRunnerMetadataResponse(response);
+}
+
+async function appendDigestDiagnostics(input: {
+  bytes: Uint8Array;
+  fieldPrefix: "input" | "request";
+  output: HostedRunnerDiagnosticJson;
+}): Promise<void> {
+  const digestPresentKey = `${input.fieldPrefix}DigestPresent`;
+  input.output[digestPresentKey] = input.bytes.byteLength >= OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES;
+  if (input.bytes.byteLength < OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES) {
+    return;
+  }
+
+  input.output[`${input.fieldPrefix}Digest`] = await sha256DiagnosticDigest(input.bytes);
+  const prefixLengths = readOpenAiCacheDiagnosticPrefixLengths(input.bytes.byteLength);
+  input.output[`${input.fieldPrefix}PrefixLengths`] = prefixLengths;
+  input.output[`${input.fieldPrefix}PrefixDigests`] = await Promise.all(
+    prefixLengths.map((length) => sha256DiagnosticDigest(input.bytes.subarray(0, length))),
+  );
+}
+
+async function appendSensitiveIdentifierDigest(input: {
+  fieldPrefix: "cacheNamespace" | "previousResponse";
+  output: HostedRunnerDiagnosticJson;
+  value: string;
+}): Promise<void> {
+  const eligible = input.value.length >= OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS;
+  input.output[`${input.fieldPrefix}DigestPresent`] = eligible;
+  if (!eligible) {
+    return;
+  }
+
+  input.output[`${input.fieldPrefix}Digest`] = await sha256DiagnosticDigest(
+    OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(input.value),
+  );
+}
+
+function readOpenAiCacheDiagnosticPrefixLengths(byteLength: number): number[] {
+  return Array.from(new Set(
+    OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS
+      .map((limit) => Math.min(limit, byteLength))
+      .filter((length) => length > 0),
   ));
+}
+
+function readOpenAiDiagnosticMethodKind(method: string): string {
+  return method === "POST" ? "POST" : "other";
+}
+
+function readOpenAiDiagnosticCode(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(normalized)
+    ? normalized
+    : "other";
+}
+
+function readOpenAiCacheRetentionKind(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "default";
+  }
+  if (value === "24h" || value === "in_memory") {
+    return value;
+  }
+  return "other";
+}
+
+function readOpenAiDiagnosticJsonType(value: unknown): string {
+  if (value === undefined) {
+    return "missing";
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  switch (typeof value) {
+    case "boolean":
+    case "number":
+    case "string":
+      return typeof value;
+    case "object":
+      return "object";
+    default:
+      return "other";
+  }
+}
+
+function readOpenAiInputCount(value: unknown): number {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  return typeof value === "string" && value.length === 0 ? 0 : 1;
+}
+
+function readStringRecordProperty(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {
+  if (value === undefined) {
+    return null;
+  }
+  const serialized = JSON.stringify(value);
+  return typeof serialized === "string"
+    ? OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized)
+    : null;
+}
+
+function byteLengthOfDiagnosticText(value: string): number {
+  return OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(value).byteLength;
+}
+
+async function sha256DiagnosticDigest(bytes: Uint8Array): Promise<string> {
+  const digestInput = bytes.buffer instanceof ArrayBuffer
+    ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    : copyDiagnosticBytesToArrayBuffer(bytes);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", digestInput));
+  return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function copyDiagnosticBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function isHostedOpenAiDiagnosticRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRuntimeLogHeader(headers: Headers, name: string): string | null {
+  const normalized = headers.get(name)?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function drainHostedRunnerMetadataResponse(response: Response): Promise<void> {
+  if (response.body === null || response.bodyUsed) {
+    return;
+  }
+  await response.arrayBuffer();
 }
 
 async function maybeHandleMapboxRequest(input: {

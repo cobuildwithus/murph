@@ -32,6 +32,9 @@ runtime phase boundaries.
 8. Patch the diagnosed stale active-runtime/write-fence path so unconfirmed
    container liveness can be replaced after the startup grace window, and keep
    alarm-started local runtime work attached until the local drive settles.
+9. Add assistant input-selection and outbox metadata boundaries so production
+   can distinguish "mailbox imported but no reply candidate" from provider,
+   cron, and delivery failures without logging raw content or identifiers.
 
 ## Verification
 
@@ -221,6 +224,11 @@ runtime phase boundaries.
 - Control-plane fetch failures now carry fixed-vocabulary cause metadata through
   the runtime platform, child result, and RunnerContainer indexed logs:
   fetch cause kind/code/name, timeout, and caller/request/timeout abort flags.
+- Production evidence from the current Linq incident shows one text did not
+  reach hosted web ingress, while the previous text reached mailbox import and
+  then failed to become an auto-reply candidate before cron/outbox work ran.
+  The remaining missing boundary is assistant input staging/candidate listing
+  and outbox failure classification.
 - Artifact fetches now emit metadata-only start, response, body-read start,
   body-read completion, and pre-response/body-read failure boundaries with
   redacted object paths and per-platform ordinals, so the next production

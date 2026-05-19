@@ -6,6 +6,7 @@ import Script from "next/script";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
+import { SiteFooterSlot } from "@/src/components/homepage/site-footer-slot";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
@@ -48,7 +49,9 @@ export default async function RootLayout(input: { children: React.ReactNode }) {
           <PhoneCountryCodeProvider>
             <div className="flex min-h-screen flex-col">
               <div className="flex-1">{input.children}</div>
-              <SiteFooter />
+              <SiteFooterSlot>
+                <SiteFooter />
+              </SiteFooterSlot>
             </div>
           </PhoneCountryCodeProvider>
         </AuthProvider>

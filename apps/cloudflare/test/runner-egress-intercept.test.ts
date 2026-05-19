@@ -15,6 +15,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  buildHostedOpenAiCacheDiagnostic,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -23,6 +24,7 @@ import {
   handleHostedRunnerTelegramOutbound,
   handleHostedRunnerWhatsAppOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+  HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
   hostedRunnerIntercept,

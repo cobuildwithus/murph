@@ -364,7 +364,7 @@ export const MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT = {
 
 export interface MurphAgeCalculatorInput {
   asOf?: string;
-  cardId?: "r399_nhis_proxy_10y_acm_research";
+  cardId?: MurphAgeScoreBearingCardId;
   chronologicalAgeYears: number;
   mode?: MurphAgeCalculatorMode;
   models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;

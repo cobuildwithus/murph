@@ -32,6 +32,8 @@ export interface ExperimentCardChart {
 
 export interface ExperimentCardData {
   title: string;
+  /** One-line "how to run it yourself" recipe from the protocol facts. */
+  protocol?: string;
   signals: ExperimentCardSignal[];
   chart?: ExperimentCardChart;
 }
@@ -44,7 +46,7 @@ export const EXPERIMENT_CARD_PARAM = "d";
  * this as `?v=`, so a new version busts the immutable browser cache that would
  * otherwise keep serving an old render for unchanged experiment data.
  */
-export const EXPERIMENT_CARD_VERSION = 6;
+export const EXPERIMENT_CARD_VERSION = 7;
 
 /** The card layout only has room for three metric tiles. */
 export const EXPERIMENT_CARD_MAX_SIGNALS = 3;
@@ -85,6 +87,7 @@ export function decodeExperimentCardData(
 function normalizeCardData(data: ExperimentCardData): ExperimentCardData {
   return {
     title: data.title.trim(),
+    protocol: data.protocol?.trim() || undefined,
     signals: data.signals
       .slice(0, EXPERIMENT_CARD_MAX_SIGNALS)
       .map((signal) => ({
@@ -145,6 +148,10 @@ function parseCardData(input: unknown): ExperimentCardData | null {
 
   return {
     title,
+    protocol:
+      typeof record.protocol === "string"
+        ? record.protocol.trim() || undefined
+        : undefined,
     signals,
     chart: parseCardChart(record.chart),
   };

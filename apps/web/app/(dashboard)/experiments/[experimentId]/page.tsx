@@ -51,7 +51,10 @@ export default async function ExperimentDetailPage({
     <div className="flex flex-col gap-10">
       {resultsPublic && (
         <Suspense fallback={<ResultsSummarySkeleton />}>
-          <ActiveRunSummaryClient protocol={resultsPublic} />
+          <ActiveRunSummaryClient
+            protocol={resultsPublic}
+            protocolFacts={protocolTab.protocolFacts}
+          />
         </Suspense>
       )}
       <ProtocolTab
