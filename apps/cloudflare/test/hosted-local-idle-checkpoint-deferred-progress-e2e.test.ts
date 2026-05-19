@@ -259,7 +259,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       lastActivityExpiryError = error;
     }
 
-    const status = await readHostedRunnerStatusWithLogLimit(50);
+    const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
     if (
@@ -270,7 +270,9 @@ async function waitForIdleShutdownCheckpoint(input: {
       && !status.inFlight
       && !status.lastErrorCode
       && (input.expectedConversationSeqEnd === undefined
-        ? hasIdleShutdownSnapshotLog(status.recentLogs ?? [])
+        ? hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          })
         : hasCommittedIdleCheckpointProgressEvidence(status, {
             expectedConversationSeqEnd: input.expectedConversationSeqEnd,
             expectedWorkspaceVersion: input.previousWorkspaceVersion,
@@ -285,7 +287,9 @@ async function waitForIdleShutdownCheckpoint(input: {
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint after deferred progress.",
     `activity expiry attempts: ${activityExpiryAttempts}`,
-    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+    ...(lastStatus
+      ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`]
+      : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
       : []),
@@ -297,13 +301,13 @@ async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatus
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 120_000) {
-    const status = await readHostedRunnerStatusWithLogLimit(50);
+    const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
     if (status.lastErrorCode) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for foreground invocation idle.",
-        `last status: ${JSON.stringify(status)}`,
+        `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
       ]));
     }
 
@@ -316,7 +320,7 @@ async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatus
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted foreground invocation idle.",
-    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
+    ...(lastStatus ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`] : []),
   ]));
 }
 
@@ -450,9 +454,9 @@ function expectCommittedIdleCheckpointProgressEvidence(
     "Expected committed idle-checkpoint mailbox progress evidence.",
     `expected: ${JSON.stringify(input)}`,
     `workspace progress: ${JSON.stringify(summarizeWorkspaceCheckpointProgress(status))}`,
-    `snapshot logs: ${JSON.stringify((status.recentLogs ?? []).filter((log) =>
-      log.eventCode === "checkpoint.snapshot_finished"
-      && log.redactedJson?.checkpointReason === "idle_shutdown"
+    `snapshot logs: ${JSON.stringify(summarizeIdleShutdownSnapshotLogs(
+      status.recentLogs ?? [],
+      input.expectedWorkspaceVersion,
     ))}`,
   ].join("\n"));
 }
@@ -470,6 +474,36 @@ function summarizeWorkspaceCheckpointProgress(
       ? conversationImportedSeq
       : null,
     workspaceVersion: status.workspace?.version ?? null,
+  };
+}
+
+function summarizeHostedStatusForFailure(status: HostedRunnerStatusResponse): {
+  idleShutdownSnapshots: ReturnType<typeof summarizeIdleShutdownSnapshotLogs>;
+  inFlight: boolean;
+  lastErrorCode: string | null;
+  mailboxLag: Array<{
+    importedSeq: string;
+    lag: string;
+    lane: HostedRunnerStatusResponse["mailboxLag"][number]["lane"];
+    maxSeq: string;
+  }>;
+  mailboxLogs: ReturnType<typeof summarizeMailboxImportLogs>;
+  nextAlarmAtPresent: boolean;
+  workspaceProgress: ReturnType<typeof summarizeWorkspaceCheckpointProgress>;
+} {
+  return {
+    idleShutdownSnapshots: summarizeIdleShutdownSnapshotLogs(status.recentLogs ?? []),
+    inFlight: status.inFlight,
+    lastErrorCode: status.lastErrorCode ?? null,
+    mailboxLag: status.mailboxLag.map((lane) => ({
+      importedSeq: lane.importedSeq,
+      lag: lane.lag,
+      lane: lane.lane,
+      maxSeq: lane.maxSeq,
+    })),
+    mailboxLogs: summarizeMailboxImportLogs(status.recentLogs ?? []),
+    nextAlarmAtPresent: status.nextAlarmAt != null,
+    workspaceProgress: summarizeWorkspaceCheckpointProgress(status),
   };
 }
 
@@ -491,7 +525,9 @@ function hasCommittedIdleCheckpointProgressEvidence(
     status.workspace?.redactedStatus?.hostedMailboxConversationImportedSeq;
   return typeof workspaceImportedSeq === "string"
     && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0
-    && hasIdleShutdownSnapshotLog(status.recentLogs ?? []);
+    && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
+      expectedWorkspaceVersion: input.expectedWorkspaceVersion,
+    });
 }
 
 function findDeferredMailboxImportLog(
@@ -557,10 +593,43 @@ function summarizeMailboxImportLogs(
     }));
 }
 
-function hasIdleShutdownSnapshotLog(logs: readonly HostedRuntimeLogEntry[]): boolean {
+function summarizeIdleShutdownSnapshotLogs(
+  logs: readonly HostedRuntimeLogEntry[],
+  expectedWorkspaceVersion?: string,
+): Array<{
+  checkpointReason: unknown;
+  eventCode: HostedRuntimeLogEntry["eventCode"];
+  workspaceVersion?: string | null;
+}> {
+  return logs
+    .filter((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.checkpointReason === "idle_shutdown"
+      && (
+        expectedWorkspaceVersion === undefined
+        || entry.workspaceVersion === expectedWorkspaceVersion
+      )
+    )
+    .map((entry) => ({
+      checkpointReason: entry.redactedJson?.checkpointReason,
+      eventCode: entry.eventCode,
+      workspaceVersion: entry.workspaceVersion ?? null,
+    }));
+}
+
+function hasIdleShutdownSnapshotLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedWorkspaceVersion?: string;
+  } = {},
+): boolean {
   return logs.some((entry) =>
     entry.eventCode === "checkpoint.snapshot_finished"
     && entry.redactedJson?.checkpointReason === "idle_shutdown"
+    && (
+      input.expectedWorkspaceVersion === undefined
+      || entry.workspaceVersion === input.expectedWorkspaceVersion
+    )
   );
 }
 

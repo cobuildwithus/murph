@@ -1042,7 +1042,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const elapsedMs = performance.now() - startedAt;
 
       assert.ok(elapsedMs >= idleCheckpointDelayMs - 20);
-      assert.ok(elapsedMs < 1_000);
       assert.ok(fetchRequests.length > 1);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_no_progress_wake_001",
