@@ -68,8 +68,16 @@ import {
   resolveAssistantCronTargetDefaults,
   validateAssistantCronDeliveryTarget,
 } from './cron/targets.ts'
+import {
+  reconcileAssistantCronDeliveryIntent,
+  repairPendingAssistantCronDeliveries,
+} from './cron/delivery-reconciliation.ts'
 
 export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
+export {
+  reconcileAssistantCronDeliveryIntent,
+  repairPendingAssistantCronDeliveries,
+}
 export { addAssistantCronJob, installAssistantCronPreset }
 export type {
   AddAssistantCronJobInput,
@@ -253,6 +261,12 @@ export async function setAssistantCronJobEnabled(
       paths,
       vault,
     })
+    if (resolved.job.state.pendingDeliveryIntentId) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_PENDING',
+        `Assistant cron job "${resolved.job.name}" is waiting for outbound delivery confirmation.`,
+      )
+    }
     const now = new Date()
 
     if (resolved.kind === 'local') {
@@ -450,6 +464,10 @@ export async function runAssistantCronJobNow(
 ): Promise<AssistantCronRunExecutionResult> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
+  await repairPendingAssistantCronDeliveries({
+    paths,
+    vault: input.vault,
+  })
 
   const claimed = await withAssistantCronWriteLock(paths, async () => {
     const resolved = await resolveAssistantCronJobForMutation({
@@ -506,6 +524,10 @@ export async function processDueAssistantCronJobsLocal(
     succeeded: 0,
     failed: 0,
   }
+  await repairPendingAssistantCronDeliveries({
+    paths,
+    vault: input.vault,
+  })
   await emitAssistantCronScanEvents({
     onEvent: input.onEvent,
     paths,
@@ -611,6 +633,7 @@ async function emitAssistantCronScanEvents(input: {
         localTime:
           job.schedule.kind === 'dailyLocal' ? job.schedule.localTime : null,
         nextRunAt: job.state.nextRunAt,
+        pendingDelivery: Boolean(job.state.pendingDeliveryIntentId),
         reason: resolveAssistantCronDueReason(job, nowIso),
         routeConfigured: assistantCronJobHasDeliveryRoute(job),
         running: job.state.runningAt !== null,
@@ -637,7 +660,7 @@ function emitAssistantCronJobCompletedEvent(input: {
 }): void {
   const safeDetailsByStatus: Record<AssistantCronRunRecord['status'], string> = {
     failed: 'cron_job_enqueue_failed',
-    skipped: 'cron_job_enqueue_skipped',
+    skipped: 'cron_job_delivery_pending',
     succeeded: 'cron_job_enqueue_succeeded',
   }
 
@@ -664,6 +687,10 @@ function resolveAssistantCronDueReason(job: AssistantCronJob, nowIso: string): s
 
   if (job.state.runningAt !== null) {
     return 'running'
+  }
+
+  if (job.state.pendingDeliveryIntentId) {
+    return 'delivery_pending'
   }
 
   if (job.state.nextRunAt === null) {

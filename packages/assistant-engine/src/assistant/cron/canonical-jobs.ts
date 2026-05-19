@@ -448,6 +448,9 @@ function projectCanonicalAssistantCronJobState(input: {
     lastFailedAt: input.runtimeState.state.lastFailedAt,
     consecutiveFailures: input.runtimeState.state.consecutiveFailures,
     lastError: input.runtimeState.state.lastError,
+    ...(input.runtimeState.state.pendingDeliveryIntentId
+      ? { pendingDeliveryIntentId: input.runtimeState.state.pendingDeliveryIntentId }
+      : {}),
     runningAt: input.runtimeState.state.runningAt,
     runningPid: input.runtimeState.state.runningPid,
   }
@@ -478,6 +481,10 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
   if (!isCanonicalAssistantCronSourceEnabled(input.source)) {
+    return null
+  }
+
+  if (input.state.pendingDeliveryIntentId) {
     return null
   }
 

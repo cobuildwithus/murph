@@ -860,10 +860,13 @@ describe('assistant channels runtime seam', () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      'Chat not found',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
       {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
         operation: 'send_message',
-        path: '/chats/stale-chat/messages',
+        path: '/chats/[chat]/messages',
         provider: 'linq',
         retryable: false,
         status: 404,
@@ -876,6 +879,7 @@ describe('assistant channels runtime seam', () => {
           'LINQ_API_REQUEST_FAILED',
           'Forbidden',
           {
+            failureStage: 'http',
             operation: 'create_chat',
             path: '/chats',
             provider: 'linq',
@@ -951,6 +955,68 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('does not try another Linq recovery sender after an ambiguous create-chat response', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    runtimeMocks.createLinqChat
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Linq request POST /chats failed with HTTP 408.',
+          {
+            failureStage: 'http',
+            method: 'POST',
+            operation: 'create_chat',
+            path: '/chats',
+            provider: 'linq',
+            retryable: false,
+            status: 408,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        chatId: 'should-not-send',
+        messageId: 'should-not-send',
+      })
+    runtimeMocks.probeLinqApi.mockResolvedValue({
+      ok: true,
+      phoneNumbers: ['+15550000', '+15550002'],
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: '+15550001',
+          bindingDelivery: createAssistantBindingDelivery('thread', 'stale-chat'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: null,
+        },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledOnce()
+  })
+
   it('passes direct recipient context to injected Linq sends', async () => {
     const sendLinq = vi.fn().mockResolvedValue({
       providerMessageId: 'sent-message',
@@ -991,14 +1057,53 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('does not recover unclassified Linq send 404 errors as stale chats', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const unclassifiedNotFoundError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(unclassifiedNotFoundError)
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: ' +15550001 ',
+          bindingDelivery: createAssistantBindingDelivery('thread', ' stale-chat '),
+          explicitTarget: null,
+          idempotencyKey: ' idem-stale-thread ',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: ' reply-9 ',
+        },
+        {},
+      ),
+    ).rejects.toBe(unclassifiedNotFoundError)
+
+    expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
+  })
+
   it('keeps stale Linq thread recovery confirmation-pending when no new chat id is returned', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      'Chat not found',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
       {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
         operation: 'send_message',
-        path: '/chats/stale-chat/messages',
+        path: '/chats/[chat]/messages',
         provider: 'linq',
         retryable: false,
         status: 404,
@@ -1082,10 +1187,13 @@ describe('assistant channels runtime seam', () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      'Chat not found',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
       {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
         operation: 'send_message',
-        path: '/chats/stale-chat/messages',
+        path: '/chats/[chat]/messages',
         provider: 'linq',
         retryable: false,
         status: 404,

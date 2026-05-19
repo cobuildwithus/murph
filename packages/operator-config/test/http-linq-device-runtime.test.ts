@@ -403,7 +403,7 @@ test('markLinqChatRead posts a no-body read acknowledgement with Linq metadata',
       error.context?.provider === 'linq' &&
       error.context?.failureStage === 'http' &&
       error.context?.method === 'POST' &&
-      error.context?.path === '/chats/chat-123/read' &&
+      error.context?.path === '/chats/[chat]/read' &&
       error.context?.retryable === false &&
       error.context?.status === 503,
   )
@@ -513,7 +513,8 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
       error.context?.failureStage === 'http' &&
       error.context?.retryable === true &&
       error.context?.status === 429 &&
-      error.message === 'rate limited',
+      error.message ===
+        'Linq request POST /webhook-subscriptions failed with HTTP 429.',
   )
 })
 
@@ -556,6 +557,158 @@ test('deleteLinqMessage treats missing provider messages as an idempotent succes
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
   expect(fetchImplementation.mock.calls[0]?.[0]).toContain('/messages/message-present')
   expect(fetchImplementation.mock.calls[1]?.[0]).toContain('/messages/message-missing')
+})
+
+test('linq runtime records safe request and response diagnostics for provider http failures', async () => {
+  await assert.rejects(
+    () =>
+      sendLinqChatMessage(
+        {
+          chatId: 'sample-chat-route-value',
+          idempotencyKey: 'reply-key-safe-diagnostics',
+          message: 'hello reminder',
+          replyToMessageId: 'reply-sample-message-id',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: '<REDACTED_TOKEN>',
+          },
+          fetchImplementation: async () =>
+            createJsonResponse(
+              {
+                'sample-chat-route-value': 'dynamic key should stay private',
+                errors: [
+                  {
+                    message: 'chat sample-chat-route-value rejected message',
+                  },
+                ],
+                trace_id: 'trace-sample-response-value',
+              },
+              {
+                status: 400,
+              },
+            ),
+        },
+      ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+
+      const contextJson = JSON.stringify(error.context)
+      return (
+        error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.message ===
+          'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
+        error.context?.path === '/chats/[chat]/messages' &&
+        error.context?.requestBodyShape ===
+          'object:message|message:idempotency_key,parts,reply_to' &&
+        error.context?.requestMessageLength === 'hello reminder'.length &&
+        error.context?.requestMessagePartCount === 1 &&
+        error.context?.responseBodyKind === 'json_object' &&
+        error.context?.responseBodyKeyCount === 3 &&
+        JSON.stringify(error.context?.responseBodyKeys) ===
+          JSON.stringify(['errors', 'trace_id']) &&
+        error.context?.responseBodyStringFieldCount === 2 &&
+        JSON.stringify(error.context?.responseBodyStringFields) ===
+          JSON.stringify(['trace_id']) &&
+        !contextJson.includes('hello reminder') &&
+        !contextJson.includes('sample-chat-route-value') &&
+        !contextJson.includes('trace-sample-response-value')
+      )
+    },
+  )
+})
+
+test('linq runtime does not surface top-level provider error text or transport cause text', async () => {
+  await assert.rejects(
+    () =>
+      sendLinqChatMessage(
+        {
+          chatId: 'sample-chat-route',
+          message: 'sample reminder text',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: '<REDACTED_TOKEN>',
+          },
+          fetchImplementation: async () =>
+            createJsonResponse(
+              {
+                message:
+                  'chat sample-chat-route rejected sample reminder text',
+              },
+              {
+                status: 400,
+              },
+            ),
+        },
+      ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+
+      const serialized = JSON.stringify({
+        message: error.message,
+        context: error.context,
+      })
+      return (
+        error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.message ===
+          'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
+        error.context?.responseBodyKind === 'json_object' &&
+        JSON.stringify(error.context?.responseBodyKeys) ===
+          JSON.stringify(['message']) &&
+        JSON.stringify(error.context?.responseBodyStringFields) ===
+          JSON.stringify(['message']) &&
+        !serialized.includes('sample-chat-route') &&
+        !serialized.includes('sample reminder text')
+      )
+    },
+  )
+
+  await assert.rejects(
+    () =>
+      sendLinqChatMessage(
+        {
+          chatId: 'transport-sample-chat',
+          message: 'transport sample body',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: '<REDACTED_TOKEN>',
+          },
+          fetchImplementation: async () => {
+            throw new Error(
+              'POST https://api.linqapp.com/api/partner/v3/chats/transport-sample-chat/messages failed for transport sample body',
+            )
+          },
+        },
+      ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+
+      const serialized = JSON.stringify({
+        message: error.message,
+        context: error.context,
+      })
+      return (
+        error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.message ===
+          'Linq request POST /chats/[chat]/messages failed before a response was returned.' &&
+        error.context?.transportErrorPresent === true &&
+        error.context?.transportErrorCauseCount === 1 &&
+        error.context?.transportErrorName === 'Error' &&
+        typeof error.context?.transportErrorTextLength === 'number' &&
+        !serialized.includes('transport-sample-chat') &&
+        !serialized.includes('transport sample body') &&
+        !('error' in (error.context ?? {}))
+      )
+    },
+  )
 })
 
 test('deleteLinqMessage retries transient delete failures because delete is idempotent', async () => {
@@ -892,7 +1045,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message ===
-        'Linq request POST /chats/chat-123/messages timed out after 30000ms. Cause: timed out downstream.' &&
+        'Linq request POST /chats/[chat]/messages timed out after 30000ms.' &&
       error.context?.operation === 'send_message' &&
       error.context?.provider === 'linq' &&
       error.context?.failureStage === 'transport' &&
@@ -902,7 +1055,10 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error.context?.retryable === false &&
       error.context?.timedOut === true &&
       error.context?.timeoutMs === 30000 &&
-      error.context?.error === 'timed out downstream',
+      error.context?.transportErrorPresent === true &&
+      error.context?.transportErrorCauseCount === 1 &&
+      error.context?.transportErrorName === 'Error' &&
+      error.context?.transportErrorTextLength === 'timed out downstream'.length,
   )
   await vi.advanceTimersByTimeAsync(30_000)
   await timeoutAssertion

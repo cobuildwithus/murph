@@ -13,6 +13,7 @@ import {
   sanitizeAssistantDeliveryErrorForPersistence,
   sanitizeAssistantOutboxIntentForPersistence,
 } from '../redaction.js'
+import { reconcileAssistantCronDeliveryIntent } from '../cron/delivery-reconciliation.js'
 import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
   createAssistantDeliveryAmbiguousError,
@@ -123,7 +124,7 @@ export async function markAssistantOutboxIntentSent(input: {
 }): Promise<AssistantOutboxIntent> {
   const completedAt = input.delivery.sentAt
 
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+  const sentIntent = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
@@ -181,6 +182,11 @@ export async function markAssistantOutboxIntentSent(input: {
     })
     return sentIntent
   })
+  await attemptAssistantCronDeliveryReconciliation({
+    intent: sentIntent,
+    vault: input.vault,
+  })
+  return sentIntent
 }
 
 export async function updateAssistantOutboxAfterDispatchFailure(input: {
@@ -218,7 +224,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     ? false
     : input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
 
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+  const failedIntent = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
@@ -277,6 +283,11 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     })
     return failedIntent
   })
+  await attemptAssistantCronDeliveryReconciliation({
+    intent: failedIntent,
+    vault: input.vault,
+  })
+  return failedIntent
 }
 
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
@@ -706,7 +717,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     normalizeAssistantDeliveryError(input.error),
   )!
 
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+  const updatedIntent = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
@@ -718,12 +729,12 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
       : null
     const updatedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
-      ...baseIntent,
-      deliveryConfirmationPending: false,
-      updatedAt: failedAt,
-      nextAttemptAt,
-      status: input.status,
-      lastError: deliveryError,
+        ...baseIntent,
+        deliveryConfirmationPending: false,
+        updatedAt: failedAt,
+        nextAttemptAt,
+        status: input.status,
+        lastError: deliveryError,
       }),
     )
     await writeJsonFileAtomic(input.intentPath, updatedIntent)
@@ -754,4 +765,44 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     })
     return updatedIntent
   })
+  await attemptAssistantCronDeliveryReconciliation({
+    intent: updatedIntent,
+    vault: input.vault,
+  })
+  return updatedIntent
+}
+
+async function attemptAssistantCronDeliveryReconciliation(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<void> {
+  try {
+    await reconcileAssistantCronDeliveryIntent(input)
+  } catch (error) {
+    await recordAssistantDiagnosticEvent({
+      vault: input.vault,
+      component: 'outbox',
+      kind: 'cron.delivery-reconciliation.failed',
+      level: 'warn',
+      code: 'ASSISTANT_CRON_DELIVERY_RECONCILIATION_FAILED',
+      message:
+        'Assistant cron delivery reconciliation failed after an outbox terminal update.',
+      intentId: input.intent.intentId,
+      sessionId: input.intent.sessionId,
+      turnId: input.intent.turnId,
+      data: {
+        errorName: readSafeAssistantOutboxErrorName(error),
+        intentStatus: input.intent.status,
+      },
+    }).catch(() => undefined)
+  }
+}
+
+function readSafeAssistantOutboxErrorName(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null
+  }
+
+  const name = error.name.trim()
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/u.test(name) ? name : null
 }

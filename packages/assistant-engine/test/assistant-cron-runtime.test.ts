@@ -3,6 +3,8 @@ import path from 'node:path'
 
 import {
   assistantCronJobSchema,
+  assistantOutboxIntentSchema,
+  type AssistantOutboxIntent,
   type AssistantCronJob,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -99,6 +101,8 @@ import {
   listAssistantCronJobs,
   listAssistantCronRuns,
   processDueAssistantCronJobsLocal,
+  reconcileAssistantCronDeliveryIntent,
+  repairPendingAssistantCronDeliveries,
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
   setAssistantCronJobTarget,
@@ -121,6 +125,11 @@ import {
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import {
+  markAssistantOutboxIntentMirrorTerminalById,
+  markAssistantOutboxIntentSentById,
+  saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -427,6 +436,28 @@ describe('assistant cron runtime orchestration', () => {
     expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
       'active',
     )
+  })
+
+  it('blocks enable toggles while a canonical delivery confirmation is pending', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-pending-enable-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'pending-enable')
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: 'outbox_pending_enable',
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+
+    await expect(
+      setAssistantCronJobEnabled(vaultRoot, canonicalJob.jobId, false),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_PENDING',
+    })
   })
 
   it('updates local targets with dry-run previews and continuity resets', async () => {
@@ -889,6 +920,26 @@ describe('assistant cron runtime orchestration', () => {
   it('processes a canonical daily-local midnight job when runtime state is missing', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const queuedIntentId = 'outbox_queued_scheduled_delivery'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued scheduled reminder.',
+        text: 'Remember to sleep.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: queuedIntentId,
+        session: {
+          sessionId: 'session-default',
+        },
+      },
+      response: 'Remember to sleep.',
+      session: {
+        sessionId: 'session-default',
+      },
+    })
     cronMocks.loadVault.mockResolvedValue({
       metadata: {
         timezone: 'Asia/Kuala_Lumpur',
@@ -935,7 +986,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(summary).toEqual({
       failed: 0,
       processed: 1,
-      succeeded: 1,
+      succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -950,8 +1001,21 @@ describe('assistant cron runtime orchestration', () => {
       }),
     )
     const updated = await getAssistantCronJob(vaultRoot, 'automation-kl-midnight')
-    expect(updated.state.lastSucceededAt).toBe('2026-05-04T16:00:12.000Z')
-    expect(updated.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    expect(updated.state.lastSucceededAt).toBeNull()
+    expect(updated.state.nextRunAt).toBeNull()
+    expect(updated.state.pendingDeliveryIntentId).toBe(queuedIntentId)
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-kl-midnight',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'skipped',
+        }),
+      ],
+    })
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -981,15 +1045,424 @@ describe('assistant cron runtime orchestration', () => {
         expect.objectContaining({
           failureContext: expect.objectContaining({
             routeConfigured: true,
-            runStatus: 'succeeded',
+            runStatus: 'skipped',
             scheduleKind: 'dailyLocal',
             sourceKind: 'automation',
           }),
-          safeDetails: 'cron_job_enqueue_succeeded',
+          safeDetails: 'cron_job_delivery_pending',
           type: 'cron.job.completed',
         }),
       ]),
     )
+
+    await reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: queuedIntentId,
+        lastError: {
+          code: 'LINQ_API_REQUEST_FAILED',
+          message: 'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
+        },
+        sentAt: null,
+        status: 'failed',
+        updatedAt: '2026-05-04T16:00:20.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })
+
+    const failed = await getAssistantCronJob(vaultRoot, 'automation-kl-midnight')
+    expect(failed.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(failed.state.lastSucceededAt).toBeNull()
+    expect(failed.state.lastFailedAt).toBe('2026-05-04T16:00:20.000Z')
+    expect(failed.state.lastError).toBe(
+      'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
+    )
+    expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
+  })
+
+  it('keeps queue-only canonical cron pending until sent outbox confirmation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const queuedIntentId = 'outbox_queued_sent_scheduled_delivery'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued scheduled reminder.',
+        text: 'Remember to sleep.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: queuedIntentId,
+        session: {
+          sessionId: 'session-default',
+        },
+      },
+      response: 'Remember to sleep.',
+      session: {
+        sessionId: 'session-default',
+      },
+    })
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'Asia/Kuala_Lumpur',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-kl-pending-sent-')
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-kl-pending-sent',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-05-03T22:17:55.000Z',
+      instructions: 'Remind me to sleep.',
+      route: {
+        channel: 'linq',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '00:00',
+      },
+      slug: 'midnight-sleep-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Midnight sleep reminder',
+      updatedAt: '2026-05-03T22:17:55.000Z',
+    })
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+
+    const pending = await getAssistantCronJob(vaultRoot, 'automation-kl-pending-sent')
+    expect(pending.state.lastSucceededAt).toBeNull()
+    expect(pending.state.nextRunAt).toBeNull()
+    expect(pending.state.pendingDeliveryIntentId).toBe(queuedIntentId)
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+
+    await reconcileAssistantCronDeliveryIntent({
+      intent: {
+        intentId: queuedIntentId,
+        lastError: null,
+        sentAt: '2026-05-04T16:00:20.000Z',
+        status: 'sent',
+        updatedAt: '2026-05-04T16:00:20.000Z',
+      } as AssistantOutboxIntent,
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })
+
+    const sent = await getAssistantCronJob(vaultRoot, 'automation-kl-pending-sent')
+    expect(sent.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(sent.state.lastSucceededAt).toBe('2026-05-04T16:00:20.000Z')
+    expect(sent.state.lastError).toBeNull()
+    expect(sent.state.consecutiveFailures).toBe(0)
+    expect(sent.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+  })
+
+  it('repairs pending canonical cron delivery when the outbox intent is already terminal', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const queuedIntentId = 'outbox_terminal_before_scan_delivery'
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Queued scheduled reminder.',
+        text: 'Remember to sleep.',
+      },
+      deliveryOutcome: {
+        kind: 'queued',
+        error: null,
+        intentId: queuedIntentId,
+        session: {
+          sessionId: 'session-default',
+        },
+      },
+      response: 'Remember to sleep.',
+      session: {
+        sessionId: 'session-default',
+      },
+    })
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'Asia/Kuala_Lumpur',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-repair-terminal-')
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-repair-terminal',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-05-03T22:17:55.000Z',
+      instructions: 'Remind me to sleep.',
+      route: {
+        channel: 'linq',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '00:00',
+      },
+      slug: 'repair-terminal-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Repair terminal reminder',
+      updatedAt: '2026-05-03T22:17:55.000Z',
+    })
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+
+    const pending = await getAssistantCronJob(vaultRoot, 'automation-repair-terminal')
+    expect(pending.state.pendingDeliveryIntentId).toBe(queuedIntentId)
+
+    await saveAssistantOutboxIntent(vaultRoot, assistantOutboxIntentSchema.parse({
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: queuedIntentId,
+      sessionId: 'asst_repair_terminal',
+      turnId: 'turn_repair_terminal',
+      createdAt: '2026-05-04T16:00:12.000Z',
+      updatedAt: '2026-05-04T16:00:20.000Z',
+      lastAttemptAt: '2026-05-04T16:00:18.000Z',
+      nextAttemptAt: null,
+      sentAt: '2026-05-04T16:00:20.000Z',
+      attemptCount: 1,
+      status: 'sent',
+      message: 'Remember to sleep.',
+      subject: null,
+      dedupeKey: 'dedupe-repair-terminal',
+      targetFingerprint: 'target-fingerprint-repair-terminal',
+      channel: 'linq',
+      identityId: null,
+      actorId: 'participant-1',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+      replyToMessageId: null,
+      bindingDelivery: null,
+      deliverySource: null,
+      explicitTarget: null,
+      delivery: {
+        channel: 'linq',
+        idempotencyKey: null,
+        messageLength: 'Remember to sleep.'.length,
+        providerMessageId: 'linq-message-repair-terminal',
+        providerThreadId: 'thread-1',
+        sentAt: '2026-05-04T16:00:20.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+      lastError: null,
+    }))
+
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      safeDetails?: string
+      type: string
+    }> = []
+    await expect(
+      processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        onEvent: (event) => {
+          events.push(event)
+        },
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 0,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+
+    const repaired = await getAssistantCronJob(vaultRoot, 'automation-repair-terminal')
+    expect(repaired.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(repaired.state.lastSucceededAt).toBe('2026-05-04T16:00:20.000Z')
+    expect(repaired.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            dueJobs: 0,
+            loadedJobs: 1,
+          }),
+          safeDetails: 'cron_scan_started',
+          type: 'cron.scan.started',
+        }),
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            due: false,
+            pendingDelivery: false,
+            reason: 'not_due',
+          }),
+          safeDetails: 'not_due',
+          type: 'cron.scan.job',
+        }),
+      ]),
+    )
+
+    await expect(
+      runAssistantCronJobNow({
+        job: 'automation-repair-terminal',
+        trigger: 'manual',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      run: expect.objectContaining({
+        status: 'succeeded',
+      }),
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails a stale pending canonical delivery when its outbox intent is missing', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-missing-pending-delivery-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'missing-pending-delivery')
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: 'outbox_missing_pending_delivery',
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+
+    await expect(
+      repairPendingAssistantCronDeliveries({
+        missingIntentStaleAfterMs: 1_000,
+        now: new Date('2026-04-09T10:00:00.000Z'),
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      checked: 1,
+      reconciled: 1,
+    })
+
+    const repaired = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(repaired.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(repaired.state.lastFailedAt).toBe('2026-04-09T10:00:00.000Z')
+    expect(repaired.state.lastError).toBe(
+      'Assistant cron pending delivery outbox intent is no longer available.',
+    )
+    expect(repaired.state.nextRunAt).toBe('2026-04-09T10:00:30.000Z')
+  })
+
+  it('reconciles pending cron deliveries from terminal outbox transitions', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-outbox-hook-',
+    )
+    const sentJob = await createCanonicalJob(vaultRoot, 'outbox-hook-sent')
+    const sentIntentId = 'outbox_hook_sent_delivery'
+    await updateCanonicalRuntimeState(vaultRoot, sentJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: sentIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T10:00:00.000Z',
+      intentId: sentIntentId,
+    }))
+
+    await expect(
+      markAssistantOutboxIntentSentById({
+        delivery: {
+          channel: 'linq',
+          idempotencyKey: null,
+          messageLength: 'Remember to sleep.'.length,
+          providerMessageId: 'linq-message-outbox-hook',
+          providerThreadId: 'thread-1',
+          sentAt: '2026-04-08T10:00:20.000Z',
+          target: 'thread-1',
+          targetKind: 'thread',
+        },
+        intentId: sentIntentId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      status: 'sent',
+    })
+
+    const sent = await getAssistantCronJob(vaultRoot, sentJob.jobId)
+    expect(sent.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(sent.state.lastSucceededAt).toBe('2026-04-08T10:00:20.000Z')
+    expect(sent.state.consecutiveFailures).toBe(0)
+
+    const abandonedJob = await createCanonicalJob(vaultRoot, 'outbox-hook-abandoned')
+    const abandonedIntentId = 'outbox_hook_abandoned_delivery'
+    await updateCanonicalRuntimeState(vaultRoot, abandonedJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:00.000Z',
+        pendingDeliveryIntentId: abandonedIntentId,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T10:00:00.000Z',
+      intentId: abandonedIntentId,
+    }))
+
+    await expect(
+      markAssistantOutboxIntentMirrorTerminalById({
+        error: new Error('provider abandoned delivery'),
+        failedAt: new Date('2026-04-08T10:01:00.000Z'),
+        intentId: abandonedIntentId,
+        status: 'abandoned',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      status: 'abandoned',
+    })
+
+    const abandoned = await getAssistantCronJob(vaultRoot, abandonedJob.jobId)
+    expect(abandoned.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(abandoned.state.lastFailedAt).toBe('2026-04-08T10:01:00.000Z')
+    expect(abandoned.state.lastError).toBe('provider abandoned delivery')
+    expect(abandoned.state.nextRunAt).toBe('2026-04-08T10:01:30.000Z')
   })
 })
 
@@ -1080,6 +1553,47 @@ async function createCanonicalJob(
       localTime: '10:00',
     },
     vault: vaultRoot,
+  })
+}
+
+function buildTestLinqOutboxIntent(input: {
+  createdAt: string
+  intentId: string
+  message?: string
+  status?: AssistantOutboxIntent['status']
+  updatedAt?: string
+}): AssistantOutboxIntent {
+  const message = input.message ?? 'Remember to sleep.'
+  return assistantOutboxIntentSchema.parse({
+    schema: 'murph.assistant-outbox-intent.v1',
+    intentId: input.intentId,
+    sessionId: `asst_${input.intentId}`,
+    turnId: `turn_${input.intentId}`,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt ?? input.createdAt,
+    lastAttemptAt: null,
+    nextAttemptAt: null,
+    sentAt: null,
+    attemptCount: 0,
+    status: input.status ?? 'pending',
+    message,
+    subject: null,
+    dedupeKey: `dedupe-${input.intentId}`,
+    targetFingerprint: `target-fingerprint-${input.intentId}`,
+    channel: 'linq',
+    identityId: null,
+    actorId: 'participant-1',
+    threadId: 'thread-1',
+    threadIsDirect: true,
+    replyToMessageId: null,
+    bindingDelivery: null,
+    deliverySource: null,
+    explicitTarget: null,
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: null,
+    deliveryTransportIdempotent: false,
+    lastError: null,
   })
 }
 

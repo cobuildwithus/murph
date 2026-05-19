@@ -72,10 +72,14 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
-      error.message === 'temporarily down' &&
+      error.message ===
+        'Linq request DELETE /chats/[chat]/typing failed with HTTP 503.' &&
       error.context?.operation === 'typing_stop' &&
       error.context?.provider === 'linq' &&
       error.context?.failureStage === 'http' &&
+      error.context?.path === '/chats/[chat]/typing' &&
+      error.context?.responseBodyKind === 'text' &&
+      error.context?.responseBodyTextLength === '  temporarily down  '.length &&
       error.context?.retryable === false &&
       error.context?.status === 503,
   )
