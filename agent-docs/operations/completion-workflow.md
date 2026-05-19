@@ -25,7 +25,7 @@ This completion workflow is standing user approval to spawn the required local C
    - ordinary repo code/test/config changes then run `task-finish-review`
    - add `simplify` only when the conditions below are met
 5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
-6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security, privacy, data minimization, and leakage risks.
+6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security plus narrow privacy leakage or unnecessary-exposure risks.
 7. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it after any simplify/security-privacy pass but before the final completion review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`.
 8. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
 9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.5` with medium reasoning after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
@@ -69,7 +69,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 ## Audit Worker Rules
 
 - `coverage-write` is the default write-capable audit pass, must run on `gpt-5.5` with medium reasoning, and should stay narrowly scoped to tests or direct-proof scaffolding.
-- `security-privacy-review` is a review-only pass for changes that touch user data/state, auth/session behavior, secrets, payments, health data, contact identifiers, observability/logging, external surfaces, or trust boundaries. It should read `agent-docs/SECURITY.md` and focus on data minimization, leakage risks, authority expansion, and privacy/security regressions.
+- `security-privacy-review` is a review-only pass for changes that touch user data/state, auth/session behavior, secrets, payments, health data, contact identifiers, observability/logging, external surfaces, or trust boundaries. It should read `agent-docs/SECURITY.md` and focus on security regressions, authority expansion, fail-closed behavior, leakage risks, and only minimal privacy issues tied to concrete unnecessary exposure.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
@@ -109,8 +109,8 @@ For the required `security-privacy-review` pass, also provide:
 - The exact sensitive data, state, auth/session, external surface, logging, or trust-boundary behavior under review.
 - An explicit instruction to read `agent-docs/SECURITY.md` before reviewing.
 - The intended authority boundary, including who or what should be able to see, mutate, or infer the affected data.
-- Any data-minimization decisions already made, plus known tradeoffs or accepted residual exposure.
-- Any direct security/privacy scenario proof already gathered, or the exact gap if manual verification still needs to happen.
+- Any exposure-minimization decisions already made, plus known tradeoffs or accepted residual exposure.
+- Any direct security or concrete privacy-leakage scenario proof already gathered, or the exact gap if manual verification still needs to happen.
 
 For the required `coverage-write` pass, also provide:
 
