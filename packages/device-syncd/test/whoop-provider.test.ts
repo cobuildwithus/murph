@@ -321,6 +321,172 @@ test("WHOOP provider rejects refresh responses that omit the rotated refresh tok
   assert.equal(new URLSearchParams(requestBody ?? "").get("scope"), "offline");
 });
 
+test("WHOOP provider marks invalid refresh-token grants as reauthorization required", async () => {
+  let requestBody: string | null = null;
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        requestBody = readRequestBody(init);
+        return createJsonResponse({
+          error: "invalid_grant",
+          error_description: "The refresh token is invalid.",
+        }, 400);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
+      error.httpStatus === 400 &&
+      error.retryable === false &&
+      error.accountStatus === "reauthorization_required",
+  );
+  assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("refresh_token"), "persisted-refresh-token");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("scope"), "offline");
+});
+
+test("WHOOP provider does not mark other refresh-token OAuth errors as reauthorization required", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          error: "invalid_request",
+          error_description: "The token request is malformed.",
+        }, 400);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
+      error.httpStatus === 400 &&
+      error.retryable === false &&
+      error.accountStatus === null,
+  );
+});
+
+test("WHOOP provider does not mark client credential token failures as reauthorization required", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          error: "invalid_client",
+          error_description: "The OAuth client credentials are invalid.",
+        }, 401);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
+      error.httpStatus === 401 &&
+      error.retryable === false &&
+      error.accountStatus === null,
+  );
+});
+
+test("WHOOP provider does not mark opaque token endpoint authorization failures as reauthorization required", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return new Response("", { status: 401 });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
+      error.httpStatus === 401 &&
+      error.retryable === false &&
+      error.accountStatus === null,
+  );
+});
+
+test("WHOOP provider treats rate-limited token requests as retryable", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          error: "rate_limited",
+        }, 429);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
+      error.httpStatus === 429 &&
+      error.retryable === true &&
+      error.accountStatus === null,
+  );
+});
+
 test("WHOOP provider requires an existing refresh token before attempting refresh", async () => {
   let fetchCalled = false;
   const provider = createWhoopDeviceSyncProvider({
