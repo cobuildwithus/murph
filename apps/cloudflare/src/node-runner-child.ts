@@ -466,6 +466,12 @@ function buildHostedExecutionChildRuntimeErrorDiagnostics(
     ...(bundleValidation
       ? {
           childRuntimeBundleArchiveOperation: bundleValidation.operation,
+          ...(bundleValidation.validationCause
+            ? {
+                childRuntimeBundleArchiveValidationCause:
+                  bundleValidation.validationCause,
+              }
+            : {}),
           childRuntimeBundleRefKeyPresent: bundleValidation.refKeyPresent,
           childRuntimeBundleRefPresent: bundleValidation.refHash !== null
             || bundleValidation.refKeyPresent

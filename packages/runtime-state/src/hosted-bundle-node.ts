@@ -101,12 +101,25 @@ export interface HostedBundleSnapshotRootsInput {
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
   materializedPreservedArtifactPaths?: ReadonlySet<string>;
-  onBeforeSerialize?: () => Promise<void> | void;
+  onBeforeSerialize?: (
+    diagnostics: HostedBundleSnapshotArchiveDiagnostics,
+  ) => Promise<void> | void;
   preservedArtifacts?: readonly HostedBundleArtifactLocation[];
   roots: readonly HostedBundleSnapshotRootInput[];
   shouldIncludePreservedArtifact?: (
     input: HostedBundleArtifactLocation,
   ) => boolean | Promise<boolean>;
+  validatePreservedArtifact?: (
+    input: HostedBundleArtifactLocation,
+  ) => Promise<void> | void;
+}
+
+export interface HostedBundleSnapshotArchiveDiagnostics {
+  archiveArtifactCount: number;
+  archiveFileCount: number;
+  archiveInlineFileCount: number;
+  preservedArtifactCandidateCount: number;
+  preservedArtifactIncludedCount: number;
 }
 
 type HostedCheckpointDebugEntrySource = "explicit" | "preserved" | "walk";
@@ -200,6 +213,7 @@ async function snapshotHostedBundleRootsWithDebugTrace(
 ): Promise<Uint8Array | null> {
   const files: HostedBundleArchiveFile[] = [];
   const includedPaths = new Set<string>();
+  const includedPreservedArtifacts: HostedBundleArtifactLocation[] = [];
   let includedRootCount = 0;
   const configuredRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
   const includedRootsByKey = new Map<string, HostedBundleSnapshotRootInput[]>();
@@ -267,6 +281,7 @@ async function snapshotHostedBundleRootsWithDebugTrace(
   }
 
   const materializedPreservedArtifactPaths = input.materializedPreservedArtifactPaths ?? new Set<string>();
+  let preservedArtifactIncludedCount = 0;
   for (const artifact of input.preservedArtifacts ?? []) {
     await input.assertSnapshotLive?.();
     if (!configuredRootsByKey.has(artifact.root)) {
@@ -274,6 +289,10 @@ async function snapshotHostedBundleRootsWithDebugTrace(
     }
 
     const normalizedPath = normalizeBundlePath(artifact.path);
+    const preservedArtifact = {
+      ...artifact,
+      path: normalizedPath,
+    };
     const preservedPathKey = `${artifact.root}:${normalizedPath}`;
     if (includedPaths.has(preservedPathKey)) {
       recordHostedCheckpointDebugEntry(debugTrace, {
@@ -288,10 +307,9 @@ async function snapshotHostedBundleRootsWithDebugTrace(
     }
 
     if (input.shouldIncludePreservedArtifact) {
-      const shouldIncludePreservedArtifact = await input.shouldIncludePreservedArtifact({
-        ...artifact,
-        path: normalizedPath,
-      });
+      const shouldIncludePreservedArtifact = await input.shouldIncludePreservedArtifact(
+        preservedArtifact,
+      );
       if (!shouldIncludePreservedArtifact) {
         recordHostedCheckpointDebugEntry(debugTrace, {
           decision: "exclude",
@@ -337,12 +355,24 @@ async function snapshotHostedBundleRootsWithDebugTrace(
       path: normalizedPath,
       root: artifact.root,
     });
+    includedPreservedArtifacts.push(preservedArtifact);
     includedPaths.add(preservedPathKey);
+    preservedArtifactIncludedCount += 1;
   }
 
   await input.assertSnapshotLive?.();
-  await input.onBeforeSerialize?.();
+  const archiveDiagnostics = {
+    archiveArtifactCount: files.filter(isHostedBundleArtifactEntry).length,
+    archiveFileCount: files.length,
+    archiveInlineFileCount: files.filter((file) => !isHostedBundleArtifactEntry(file)).length,
+    preservedArtifactCandidateCount: input.preservedArtifacts?.length ?? 0,
+    preservedArtifactIncludedCount,
+  };
+  await input.onBeforeSerialize?.(archiveDiagnostics);
   debugTrace?.setArchiveFileCount(files.length);
+  for (const artifact of includedPreservedArtifacts) {
+    await input.validatePreservedArtifact?.(artifact);
+  }
 
   return serializeHostedBundleArchive({
     files,

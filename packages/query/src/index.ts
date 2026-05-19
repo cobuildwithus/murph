@@ -364,6 +364,8 @@ export type {
   AssessMurphAgeWearableShadowReadinessFromVaultInput,
   CalculateMurphAgeForVaultInput,
   CalculateMurphAgeFromVaultInputBundleInput,
+  GetMurphAgeResearchPreviewForSubmittedInputsInput,
+  GetMurphAgeResearchPreviewForVaultInput,
   MurphAgeInputReadinessForVault,
   MurphAgeLocalModelCardArtifact,
   MurphAgeLocalModelCardLoadResult,
@@ -379,6 +381,7 @@ export {
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+  resolveMurphAgeModelCardArtifactRoot,
 } from "./murph-age.ts";
 
 export async function calculateMurphAgeForVault(
@@ -407,6 +410,20 @@ export async function summarizeMurphAgeFromVaultInputBundle(
 ): Promise<import("@murphai/health-metrics").MurphAgePublicDisplaySummary> {
   const mod = await import("./murph-age.ts");
   return mod.summarizeMurphAgeFromVaultInputBundle(input);
+}
+
+export async function getMurphAgeResearchPreviewForVault(
+  input: import("./murph-age.ts").GetMurphAgeResearchPreviewForVaultInput,
+): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
+  const mod = await import("./murph-age.ts");
+  return mod.getMurphAgeResearchPreviewForVault(input);
+}
+
+export async function getMurphAgeResearchPreviewForSubmittedInputs(
+  input: import("./murph-age.ts").GetMurphAgeResearchPreviewForSubmittedInputsInput,
+): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
+  const mod = await import("./murph-age.ts");
+  return mod.getMurphAgeResearchPreviewForSubmittedInputs(input);
 }
 
 export async function listMetricTargets(

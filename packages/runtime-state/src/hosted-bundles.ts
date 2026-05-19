@@ -34,6 +34,7 @@ import {
   type HostedBundleArtifactSnapshotInput,
   type HostedBundleInlineRestoreFilter,
   type HostedBundleInlineRestoreInput,
+  type HostedBundleSnapshotArchiveDiagnostics,
 } from "./hosted-bundle-node.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
@@ -109,6 +110,11 @@ export interface HostedCodexHomeSnapshotDiagnostics {
 }
 
 export interface HostedWorkspaceSnapshotSizeDiagnostics {
+  workspaceSnapshotArchiveArtifactCount: number | null;
+  workspaceSnapshotArchiveFileCount: number | null;
+  workspaceSnapshotArchiveInlineFileCount: number | null;
+  workspaceSnapshotArchivePreservedArtifactCandidateCount: number | null;
+  workspaceSnapshotArchivePreservedArtifactIncludedCount: number | null;
   workspaceSnapshotClassSummary: string[];
   workspaceSnapshotExternalArtifactBytes: number;
   workspaceSnapshotExternalArtifactCount: number;
@@ -213,6 +219,9 @@ interface HostedExecutionContextSnapshotInput {
   prepareCodexContinuitySnapshot?: HostedCodexContinuitySnapshotPreparer | null;
   preservedInlineManifestFiles?: readonly HostedPortableWorkspaceManifestFile[];
   preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
+  validatePreservedArtifact?: (
+    input: HostedBundleArtifactRestoreInput,
+  ) => Promise<void> | void;
   vaultRoot: string;
   workspaceSnapshotSizeDiagnosticsSink?: (
     diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
@@ -465,7 +474,8 @@ async function snapshotHostedPortableWorkspaceBundleWithProviderContinuityPolicy
         .map((relativePath) => normalizeWorkspaceSnapshotArtifactPathKey(relativePath))
         .filter((artifactPathKey): artifactPathKey is string => artifactPathKey !== null),
     ),
-    onBeforeSerialize: async () => {
+    onBeforeSerialize: async (archiveDiagnostics) => {
+      workspaceSnapshotSizeDiagnostics.recordArchive(archiveDiagnostics);
       await input.workspaceSnapshotSizeDiagnosticsSink?.(
         workspaceSnapshotSizeDiagnostics.finish(),
       );
@@ -498,6 +508,7 @@ async function snapshotHostedPortableWorkspaceBundleWithProviderContinuityPolicy
     shouldIncludePreservedArtifact(artifact) {
       return shouldPreserveWorkspaceSnapshotArtifact(artifact);
     },
+    validatePreservedArtifact: input.validatePreservedArtifact,
   });
 
   if (vaultBundle === null) {
@@ -2244,6 +2255,7 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
   hashSecret: string | null;
 }): {
   finish(): HostedWorkspaceSnapshotSizeDiagnostics;
+  recordArchive(input: HostedBundleSnapshotArchiveDiagnostics): void;
   record(input: {
     artifact: HostedBundleArtifactSnapshotInput;
     externalized: boolean;
@@ -2257,10 +2269,21 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
   let inlineBytes = 0;
   let maxFileBytes = 0;
   let maxFileClass: string | null = null;
+  let archiveDiagnostics: HostedBundleSnapshotArchiveDiagnostics | null = null;
 
   return {
     finish() {
       return {
+        workspaceSnapshotArchiveArtifactCount:
+          archiveDiagnostics?.archiveArtifactCount ?? null,
+        workspaceSnapshotArchiveFileCount:
+          archiveDiagnostics?.archiveFileCount ?? null,
+        workspaceSnapshotArchiveInlineFileCount:
+          archiveDiagnostics?.archiveInlineFileCount ?? null,
+        workspaceSnapshotArchivePreservedArtifactCandidateCount:
+          archiveDiagnostics?.preservedArtifactCandidateCount ?? null,
+        workspaceSnapshotArchivePreservedArtifactIncludedCount:
+          archiveDiagnostics?.preservedArtifactIncludedCount ?? null,
         workspaceSnapshotClassSummary:
           summarizeHostedWorkspaceSnapshotClasses(classMetrics),
         workspaceSnapshotExternalArtifactBytes: externalArtifactBytes,
@@ -2273,6 +2296,9 @@ function createHostedWorkspaceSnapshotSizeDiagnosticsCollector(input: {
         workspaceSnapshotMaxFileBytes: maxFileBytes,
         workspaceSnapshotMaxFileClass: maxFileClass,
       };
+    },
+    recordArchive(input) {
+      archiveDiagnostics = input;
     },
     record({ artifact, externalized }) {
       const bytes = artifact.bytes.byteLength;

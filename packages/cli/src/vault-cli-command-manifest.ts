@@ -84,7 +84,9 @@ import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import {
   murphAgeInputReadinessResultSchema,
+  murphAgeModelCardStatusResultSchema,
   murphAgeReportResultSchema,
+  murphAgeSubmittedPreviewPayloadSchema,
   registerMurphAgeCommands,
 } from './commands/murph-age.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
@@ -669,6 +671,30 @@ export const vaultCliCommandDescriptors = [
         hint:
           'Product mode is the default and may return abstain while Murph Age remains research-only. Research mode is for local model development, not user-facing product claims.',
         output: murphAgeReportResultSchema,
+      },
+      {
+        path: ['age', 'scaffold'],
+        description:
+          'Emit the canonical research-preview JSON payload shape for submitted labs, body metrics, blood pressure, and wearable summaries.',
+        hint:
+          'Edit the emitted payload, save it as JSON, then run age preview --input @payload.json. Wearable values are accepted as context but do not affect the score yet.',
+        output: murphAgeSubmittedPreviewPayloadSchema,
+      },
+      {
+        path: ['age', 'preview'],
+        description:
+          'Return a research-only Murph Age preview from a submitted JSON payload of labs, body metrics, blood pressure, and wearable summaries.',
+        hint:
+          'This command is research-only. It is for local model development and demos, not product claims or medical recommendations.',
+        output: murphAgeReportResultSchema,
+      },
+      {
+        path: ['age', 'model-cards'],
+        description:
+          'Return metadata-only readiness status for local Murph Age model-card artifacts and current policy blockers.',
+        hint:
+          'This command reports policy and artifact presence only. It does not expose model internals, row values, predictions, or product claims.',
+        output: murphAgeModelCardStatusResultSchema,
       },
     ],
     register({ cli, services }) {

@@ -8,6 +8,7 @@ import {
   assessMurphAgeInputReadinessFromVault,
   assessMurphAgeWearableShadowReadinessFromVault,
   calculateMurphAgePublicReportFromVaultInputBundle,
+  getMurphAgeResearchPreviewForSubmittedInputs,
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
 import {
@@ -21,6 +22,10 @@ import {
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
+import {
+  inputFileOptionSchema,
+  loadJsonInputObject,
+} from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const murphAgeModeSchema = z.enum(['product', 'research'])
@@ -41,6 +46,11 @@ const murphAgeModelCardIdSchema = z.enum([
   'lab9_bp_body_10y_acm_research',
   'r399_nhis_proxy_10y_acm_research',
   'wearable_context_no_risk',
+])
+const murphAgeScoreBearingModelCardIdSchema = z.enum([
+  'lab5_bp_bmi_transport_research',
+  'lab9_bp_body_10y_acm_research',
+  'r399_nhis_proxy_10y_acm_research',
 ])
 const murphAgeRecommendedModelCardIdSchema = z.union([
   murphAgeModelCardIdSchema,
@@ -207,6 +217,23 @@ const murphAgePublicInputBundleReadinessSchema = z.object({
 const murphAgePublicInputReadinessSummarySchema = z.object({
   bundle: murphAgePublicInputBundleReadinessSchema,
   contextBundles: z.array(murphAgePublicInputBundleReadinessSchema),
+})
+const murphAgeResearchCandidateCardBlockerSchema = z.enum([
+  'INPUT_BUNDLE_INCOMPLETE',
+  'LOCAL_MODEL_CARD_NOT_LOADED',
+  'PRODUCT_MODE_RESEARCH_ONLY',
+])
+const murphAgePublicResearchCandidateCardAssessmentSchema = z.object({
+  availableFeatureKeys: z.array(murphAgePublicFeatureKeySchema),
+  blockerCodes: z.array(murphAgeResearchCandidateCardBlockerSchema),
+  bundleId: murphAgeInputBundleIdSchema,
+  cardId: murphAgeScoreBearingModelCardIdSchema,
+  inputStatus: murphAgeInputBundleStatusSchema,
+  missingFeatureKeys: z.array(murphAgePublicFeatureKeySchema),
+  modelLoaded: z.boolean(),
+  selected: z.boolean(),
+  selectedMetricKeys: z.array(murphAgePublicMetricKeySchema),
+  warnings: z.array(murphAgePublicWarningSchema),
 })
 const murphAgeInputScoreReadinessStatusSchema = z.enum([
   'context-only',
@@ -455,8 +482,9 @@ export const murphAgeReportResultSchema = z.object({
   displaySummary: murphAgePublicDisplaySummarySchema,
   inputReadiness: murphAgePublicInputReadinessSummarySchema,
   mode: murphAgeModeSchema,
+  researchCandidateCards: z.array(murphAgePublicResearchCandidateCardAssessmentSchema),
   result: murphAgePublicResultSchema.nullable(),
-  schemaVersion: z.literal('murph.age.public-calculator-report.v3'),
+  schemaVersion: z.literal('murph.age.public-calculator-report.v4'),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
 })
@@ -474,6 +502,41 @@ const murphAgeModelCardArtifactRootSchema = z.string()
   .describe(
     'Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.',
   )
+const murphAgeSubmittedMetricInputSchema = z.object({
+  confidence: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  context: z.object({
+    fastingStatus: z.enum(['fasting', 'non_fasting', 'unknown']).optional(),
+    flag: z.string().min(1).max(128).optional(),
+    measurementMethodKey: z.string().min(1).max(128).optional(),
+    qualifiers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    referenceRange: z.object({
+      high: z.number().optional(),
+      low: z.number().optional(),
+      text: z.string().min(1).max(500).optional(),
+    }).optional(),
+  }).optional(),
+  effectiveDate: z.string().min(1).optional(),
+  metricKey: z.string().min(1).max(128),
+  observedAt: z.string().min(1).optional(),
+  sourceKind: z.string().min(1).max(128).optional(),
+  sourceLabel: z.string().min(1).max(500).nullable().optional(),
+  unit: z.string().min(1).max(128).nullable().optional(),
+  value: z.number().nullable(),
+})
+export const murphAgeSubmittedPreviewPayloadSchema = z.object({
+  asOf: strictUtcTimestampSchema
+    .describe('UTC timestamp for the calculation cutoff, such as 2026-05-10T00:00:00.000Z.'),
+  cardId: murphAgeReportCardIdSchema.optional(),
+  chronologicalAgeYears: z
+    .number()
+    .nonnegative()
+    .max(130)
+    .describe('Current chronological age in years.'),
+  modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
+  sex: murphAgeSexSchema,
+  submittedMetrics: z.array(murphAgeSubmittedMetricInputSchema).min(1),
+})
+type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
 
 export function registerMurphAgeCommands(
   cli: Cli.Cli,
@@ -523,7 +586,7 @@ export function registerMurphAgeCommands(
         options: {
           asOf: '2026-05-10T00:00:00.000Z',
           chronologicalAgeYears: 45,
-          cardId: 'r399_nhis_proxy_10y_acm_research',
+          cardId: 'lab5_bp_bmi_transport_research',
           mode: 'research',
           sex: 'female',
           vault: './vault',
@@ -544,6 +607,58 @@ export function registerMurphAgeCommands(
         mode: options.mode,
         sex: options.sex,
         vaultRoot: options.vault,
+      })
+    },
+  })
+
+  age.command('scaffold', {
+    description:
+      'Emit the canonical research-preview JSON payload shape for submitted labs, body metrics, blood pressure, and wearable summaries.',
+    args: emptyArgsSchema,
+    options: z.object({}),
+    examples: [
+      {
+        description:
+          'Print a Murph Age research-preview payload that can be passed to age preview --input @payload.json.',
+      },
+    ],
+    hint:
+      'Edit the emitted payload, save it as JSON, then run age preview --input @payload.json. Wearable values are accepted as context but do not affect the score yet.',
+    output: murphAgeSubmittedPreviewPayloadSchema,
+    run() {
+      return scaffoldMurphAgeSubmittedPreviewPayload()
+    },
+  })
+
+  age.command('preview', {
+    description:
+      'Return a research-only Murph Age preview from a submitted JSON payload of labs, body metrics, blood pressure, and wearable summaries.',
+    args: emptyArgsSchema,
+    options: z.object({
+      input: inputFileOptionSchema.describe('Submitted Murph Age payload in @file.json form or - for stdin.'),
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
+    }),
+    examples: [
+      {
+        description:
+          'Run a local research preview from a JSON payload without requiring a vault.',
+        options: {
+          input: '@murph-age-preview.json',
+          modelCardArtifactRoot: './.runtime/operations/murph-age/model-cards',
+        },
+      },
+    ],
+    hint:
+      'This command is research-only. It is for local model development and demos, not product claims or medical recommendations.',
+    output: murphAgeReportResultSchema,
+    async run({ options }) {
+      const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+        await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
+      )
+
+      return getMurphAgeResearchPreviewForSubmittedInputs({
+        ...payload,
+        modelCardArtifactRoot: options.modelCardArtifactRoot ?? payload.modelCardArtifactRoot,
       })
     },
   })
@@ -640,6 +755,29 @@ export function registerMurphAgeCommands(
   })
 
   cli.command(age)
+}
+
+function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayload {
+  return {
+    asOf: '2026-05-19T00:00:00.000Z',
+    chronologicalAgeYears: 45,
+    sex: 'female',
+    submittedMetrics: [
+      { metricKey: 'HbA1c', unit: '%', value: 5.4 },
+      { metricKey: 'HDL_C', unit: 'mg/dL', value: 58 },
+      { metricKey: 'Triglycerides', unit: 'mg/dL', value: 95 },
+      { metricKey: 'creatinine', unit: 'mg/dL', value: 0.82 },
+      { metricKey: 'systolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 118 },
+      { metricKey: 'diastolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 72 },
+      { metricKey: 'body_mass_index', sourceKind: 'measurement', unit: 'kg/m2', value: 23.2 },
+      { metricKey: 'steps', sourceKind: 'wearable-summary', unit: 'count', value: 9800 },
+      { metricKey: 'total-sleep-minutes', sourceKind: 'sleep-summary', unit: 'minutes', value: 430 },
+      { metricKey: 'resting-heart-rate', sourceKind: 'wearable-summary', unit: 'bpm', value: 58 },
+      { metricKey: 'hrv-rmssd', sourceKind: 'wearable-summary', unit: 'ms', value: 55 },
+      { metricKey: 'wearable_valid_day_count_28d', sourceKind: 'wearable-summary', unit: 'count', value: 24 },
+      { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.86 },
+    ],
+  }
 }
 
 function isKnownMurphAgeModelCardId(

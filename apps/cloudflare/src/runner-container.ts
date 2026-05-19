@@ -2093,6 +2093,8 @@ function buildRunnerChildRuntimeDiagnosticMetadata(
 
   const runtimeFields = {
     childRuntimeBundleArchiveOperation: "runnerChildRuntimeBundleArchiveOperation",
+    childRuntimeBundleArchiveValidationCause:
+      "runnerChildRuntimeBundleArchiveValidationCause",
     childRuntimeBundleRefKeyPresent: "runnerChildRuntimeBundleRefKeyPresent",
     childRuntimeBundleRefPresent: "runnerChildRuntimeBundleRefPresent",
     childRuntimeBundleRefSize: "runnerChildRuntimeBundleRefSize",

@@ -26,6 +26,7 @@ import {
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   calculateMurphAgePublicReportFromInputBundle,
+  calculateMurphAgePublicReportFromSubmittedInputs,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
@@ -2744,7 +2745,7 @@ test("exposes wearable shadow increment policies without score authorization", (
 
 test("validates aggregate wearable shadow result cards as blocked research evidence", () => {
   const resultCard = {
-    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+    anchorCardId: "lab9_bp_body_10y_acm_research",
     evaluation: {
       aggregateMetricDeltas: {
         brierDelta: -0.0012,
@@ -2788,6 +2789,15 @@ test("validates aggregate wearable shadow result cards as blocked research evide
     assert.equal(anchorValidation.status, "valid");
     assert.deepEqual(anchorValidation.warnings, []);
   }
+  const r399AnchorValidation = validateMurphAgeWearableShadowIncrementResultCard({
+    ...resultCard,
+    anchorCardId: "r399_nhis_proxy_10y_acm_research",
+  });
+  assert.equal(r399AnchorValidation.status, "invalid");
+  assert.equal(
+    r399AnchorValidation.warnings.some((warning) => warning.message.includes("not compatible")),
+    true,
+  );
 
   const notEstimatedValidation = validateMurphAgeWearableShadowIncrementResultCard({
     ...resultCard,
@@ -3726,6 +3736,26 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(research.result?.authorization.contextOnlyMetricKeys.includes("resting-heart-rate"), true);
   assert.equal(research.bundleAssessment.bundleId, "lab9-bp-body");
   assert.equal(research.bundleAssessment.selectedPointIds.includes("metric-point:steps:2026-05-08:dispatcher-wearable:0"), false);
+  const selectedLab9Candidate = research.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "lab9_bp_body_10y_acm_research"
+  );
+  assert.ok(selectedLab9Candidate);
+  assert.equal(selectedLab9Candidate.selected, true);
+  assert.equal(selectedLab9Candidate.bundleId, "lab9-bp-body");
+  assert.equal(selectedLab9Candidate.inputStatus, "ready");
+  assert.equal(selectedLab9Candidate.modelLoaded, true);
+  assert.equal(selectedLab9Candidate.blockerCodes.length, 0);
+  assert.equal(selectedLab9Candidate.selectedMetricKeys.includes("hba1c"), true);
+  assert.equal("selectedPointIds" in selectedLab9Candidate, false);
+  assert.equal("value" in selectedLab9Candidate, false);
+  const lab5CandidateWithoutModel = research.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "lab5_bp_bmi_transport_research"
+  );
+  assert.ok(lab5CandidateWithoutModel);
+  assert.equal(lab5CandidateWithoutModel.selected, false);
+  assert.equal(lab5CandidateWithoutModel.inputStatus, "ready");
+  assert.equal(lab5CandidateWithoutModel.modelLoaded, false);
+  assert.equal(lab5CandidateWithoutModel.blockerCodes.includes("LOCAL_MODEL_CARD_NOT_LOADED"), true);
   assert.equal(research.contextAssessments.length, 1);
   assert.equal(research.contextAssessments[0]?.bundleId, "wearable-context");
   assert.equal(research.contextAssessments[0]?.status, "context-only");
@@ -3794,6 +3824,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.validationGate?.status, "blocked");
   assert.equal(researchSummary.validationGate?.productPromotionEvidence, false);
   assert.equal(researchSummary.researchEstimateAvailable, true);
+  assert.equal(researchSummary.selectedScoreBearingFeatureKeys.includes("hba1c"), true);
+  assert.equal(researchSummary.selectedScoreBearingFeatureKeys.includes("model-feature"), false);
   assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("hba1c"), true);
   assert.equal(researchSummary.selectedScoreBearingMetricKeys.includes("steps"), false);
   assert.equal(researchSummary.contextOnlyMetricKeys.includes("steps"), true);
@@ -4065,6 +4097,27 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchReport.result?.biologicalAgeYears, research.result?.biologicalAgeYears);
   assert.equal(publicResearchReport.result?.risk?.probability, research.result?.risk?.probability);
   assert.equal(publicResearchReport.result?.authorization.productAuthorized, false);
+  assert.equal(publicResearchReport.researchCandidateCards.length, 3);
+  const publicLab9Candidate = publicResearchReport.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "lab9_bp_body_10y_acm_research"
+  );
+  assert.ok(publicLab9Candidate);
+  assert.equal(publicLab9Candidate.selected, true);
+  assert.equal(publicLab9Candidate.modelLoaded, true);
+  assert.equal(publicLab9Candidate.blockerCodes.length, 0);
+  assert.equal(publicLab9Candidate.selectedMetricKeys.includes("hba1c"), true);
+  for (const forbiddenCandidateKey of [
+    "label",
+    "selectedPointIds",
+    "value",
+    "unit",
+    "prediction",
+    "coefficient",
+    "contributionLogit",
+    "contributionYears",
+  ]) {
+    assert.equal(forbiddenCandidateKey in publicLab9Candidate, false);
+  }
   assert.equal(publicResearchReport.result ? "modelId" in publicResearchReport.result : true, false);
   assert.equal(publicResearchReport.result ? "modelVersion" in publicResearchReport.result : true, false);
   assert.equal(publicResearchReport.result?.risk ? "endpoint" in publicResearchReport.result.risk : true, false);
@@ -4476,6 +4529,115 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(lab5ResearchWithWearables.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
 
+  const explicitLab5SensitivityWithFullLab9Inputs = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "lab5_bp_bmi_transport_research",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    points: [...lab9WithWearableContextPoints, labMetricPoint("glucose", "mg/dL", 92)],
+    sex: "female",
+  });
+
+  assert.equal(explicitLab5SensitivityWithFullLab9Inputs.status, "ready");
+  assert.equal(explicitLab5SensitivityWithFullLab9Inputs.bundleAssessment.bundleId, "lab5-bp-bmi");
+  assert.equal(explicitLab5SensitivityWithFullLab9Inputs.cardPolicy?.cardId, "lab5_bp_bmi_transport_research");
+  assert.equal(explicitLab5SensitivityWithFullLab9Inputs.result?.modelId, "fixture-lab5-research-card-model");
+  assert.equal(
+    explicitLab5SensitivityWithFullLab9Inputs.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION"
+    ),
+    false,
+  );
+  assert.equal(
+    explicitLab5SensitivityWithFullLab9Inputs.result?.featureAttributions.some((feature) =>
+      feature.metricKey === "albumin"
+    ),
+    false,
+  );
+
+  const submittedLab5Report = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [
+      { metricKey: "HbA1c", unit: "%", value: 5.4 },
+      { metricKey: "glucose", unit: "mg/dL", value: 92 },
+      { metricKey: "HDL_C", unit: "mg/dL", value: 58 },
+      { metricKey: "Triglycerides", unit: "mg/dL", value: 95 },
+      { metricKey: "creatinine", unit: "mg/dL", value: 0.82 },
+      { metricKey: "egfr", unit: "mL/min/1.73m^2", value: 95 },
+      { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+      { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 9_800 },
+      { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+      { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.86 },
+      { metricKey: "private metric", unit: "count", value: 1 },
+    ],
+  });
+
+  assert.equal(submittedLab5Report.status, "ready");
+  assert.equal(submittedLab5Report.mode, "research");
+  assert.equal(submittedLab5Report.displaySummary.displayStatus, "research-only");
+  assert.equal(submittedLab5Report.result?.authorization.cardId, "lab5_bp_bmi_transport_research");
+  assert.equal(submittedLab5Report.result?.featureAttributions.some((feature) => feature.metricKey === "glucose"), true);
+  assert.equal(submittedLab5Report.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  assert.equal(submittedLab5Report.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(submittedLab5Report.warnings.some((warning) => warning.code === "INVALID_INPUT"), true);
+	  assert.equal(JSON.stringify(submittedLab5Report).includes("private metric"), false);
+	  assert.equal(JSON.stringify(submittedLab5Report).includes("metric-point:"), false);
+	  assert.equal(JSON.stringify(submittedLab5Report).includes("\"value\""), false);
+
+	  const rejectedSubmittedReport = calculateMurphAgePublicReportFromSubmittedInputs({
+	    asOf,
+	    chronologicalAgeYears: 45,
+	    mode: "research",
+	    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+	    sex: "female",
+	    submittedMetrics: [
+	      { metricKey: "HbA1c", sourceKind: "space-lab", unit: "%", value: 5.4 },
+	      { metricKey: "steps", sourceKind: "test-result", unit: "count", value: 9_800 },
+	      { metricKey: "glucose", observedAt: "not-a-date", unit: "mg/dL", value: 92 },
+	      { metricKey: "creatinine", effectiveDate: "not-a-date", unit: "mg/dL", value: 0.82 },
+	      { metricKey: "egfr", unit: "mL/min/1.73m^2", value: Number.NaN },
+	    ],
+	  });
+
+	  assert.equal(rejectedSubmittedReport.status, "abstain");
+	  assert.equal(rejectedSubmittedReport.warnings.filter((warning) => warning.code === "INVALID_INPUT").length, 5);
+	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("space-lab"), false);
+	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("not-a-date"), false);
+	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("metric-point:"), false);
+	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("\"value\""), false);
+
+	  const explicitLab9WithLab5OnlyInputs = calculateMurphAgeFromInputBundle({
+	    asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab5Points,
+    sex: "female",
+  });
+
+  assert.equal(explicitLab9WithLab5OnlyInputs.status, "abstain");
+  assert.equal(explicitLab9WithLab5OnlyInputs.result, null);
+  assert.equal(explicitLab9WithLab5OnlyInputs.bundleAssessment.bundleId, "lab9-bp-body");
+  assert.equal(explicitLab9WithLab5OnlyInputs.cardPolicy?.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(
+    explicitLab9WithLab5OnlyInputs.warnings.some((warning) =>
+      warning.code === "MODEL_CARD_POLICY_VIOLATION"
+    ),
+    false,
+  );
+  assert.equal(
+    explicitLab9WithLab5OnlyInputs.warnings.some((warning) =>
+      warning.code === "MODEL_FEATURE_MISSING"
+    ),
+    true,
+  );
+
   const wearableOnly = calculateMurphAgeFromInputBundle({
     asOf,
     chronologicalAgeYears: 45,
@@ -4766,7 +4928,27 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
     wearableMetricPoint("wearable-valid-day-count-28d", "wearable-summary"),
     wearableMetricPoint("wearable-coverage-index", "wearable-summary"),
   ];
+  const functionContextPoints = completeFunctionContextPoints();
   const r399Model = fixtureR399ProxyResearchModel();
+  const scoreBearingNumericSnapshot = (output: ReturnType<typeof calculateMurphAgeFromInputBundle>) => {
+    assert.ok(output.result);
+    return {
+      ageDeltaYears: output.result.ageDeltaYears,
+      biologicalAgeYears: output.result.biologicalAgeYears,
+      featureAttributions: output.result.featureAttributions.map((feature) => ({
+        contributionLogit: feature.contributionLogit,
+        contributionYears: feature.contributionYears,
+        featureKey: feature.featureKey,
+        metricKey: feature.metricKey,
+        moduleId: feature.moduleId,
+        status: feature.status,
+        value: feature.value,
+      })),
+      intervalYears: output.result.intervalYears,
+      moduleAttributions: output.result.moduleAttributions,
+      riskProbability: output.result.risk?.probability,
+    };
+  };
 
   const product = calculateMurphAgeFromInputBundle({
     asOf,
@@ -4786,6 +4968,15 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
   assert.equal(product.authorization.riskToAgeDisplayAuthorized, false);
   assert.equal(product.warnings.some((warning) => warning.code === "MODEL_CARD_NOT_AUTHORIZED"), true);
 
+  const contextFreeResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: r399Points,
+    sex: "female",
+  });
   const research = calculateMurphAgeFromInputBundle({
     asOf,
     cardId: "r399_nhis_proxy_10y_acm_research",
@@ -4795,9 +4986,43 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
     points: [...r399Points, ...wearableContextPoints],
     sex: "female",
   });
+  const researchWithAllContext = calculateMurphAgeFromInputBundle({
+    asOf,
+    cardId: "r399_nhis_proxy_10y_acm_research",
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: [...r399Points, ...wearableContextPoints, ...functionContextPoints],
+    sex: "female",
+  });
 
+  assert.equal(contextFreeResearch.status, "ready");
   assert.equal(research.status, "ready");
+  assert.equal(researchWithAllContext.status, "ready");
   assert.equal(research.result?.status, "ready");
+  const contextFreeScore = scoreBearingNumericSnapshot(contextFreeResearch);
+  assert.deepEqual(scoreBearingNumericSnapshot(research), contextFreeScore);
+  assert.deepEqual(scoreBearingNumericSnapshot(researchWithAllContext), contextFreeScore);
+  assert.equal(contextFreeResearch.contextAssessments.length, 0);
+  assert.deepEqual(
+    researchWithAllContext.contextAssessments.map((assessment) => assessment.bundleId).sort(),
+    ["function-context", "wearable-context"],
+  );
+  assert.equal(researchWithAllContext.authorization.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(researchWithAllContext.authorization.contextOnlyMetricKeys.includes("adl-limitation-count"), true);
+  for (const contextOnlyMetricKey of [
+    "steps",
+    "wearable-coverage-index",
+    "adl-limitation-count",
+    "mobility-limitation-count",
+  ]) {
+    assert.equal(
+      researchWithAllContext.result?.featureAttributions.some((feature) =>
+        feature.metricKey === contextOnlyMetricKey
+      ),
+      false,
+    );
+  }
   assert.equal(research.result?.modelId, "fixture-r399-proxy-anchor-model");
   assert.equal(research.result?.authorization.cardId, "r399_nhis_proxy_10y_acm_research");
   assert.equal(research.result?.authorization.productAuthorized, false);
@@ -4811,6 +5036,20 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
   assert.equal(
     research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.anchorCardId,
     "r399_nhis_proxy_10y_acm_research",
+  );
+  assert.equal(
+    research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.anchorCompatible,
+    false,
+  );
+  assert.equal(
+    research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.status,
+    "blocked",
+  );
+  assert.equal(
+    researchWithAllContext.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "activity"
+    )?.selectedMetricKeys.includes("steps"),
+    true,
   );
   assert.equal(
     research.wearableShadowIncrementAssessments.find((assessment) => assessment.family === "activity")?.scoreBearing,
@@ -4864,6 +5103,39 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
   assert.equal(research.result?.moduleAttributions.some((module) => module.moduleId === "demographics"), true);
   assert.equal(research.result?.moduleAttributions.some((module) => module.moduleId === "behavior"), true);
 
+  const defaultResearch = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 52,
+    mode: "research",
+    models: { r399_nhis_proxy_10y_acm_research: r399Model },
+    points: [...r399Points, ...wearableContextPoints],
+    sex: "female",
+  });
+
+  assert.equal(defaultResearch.status, "ready");
+  assert.equal(defaultResearch.bundleAssessment.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(defaultResearch.cardPolicy?.cardId, "r399_nhis_proxy_10y_acm_research");
+  assert.equal(defaultResearch.result?.modelId, "fixture-r399-proxy-anchor-model");
+  assert.equal(defaultResearch.contextAssessments[0]?.bundleId, "wearable-context");
+  assert.equal(defaultResearch.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+  const defaultR399Candidate = defaultResearch.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "r399_nhis_proxy_10y_acm_research"
+  );
+  assert.ok(defaultR399Candidate);
+  assert.equal(defaultR399Candidate.selected, true);
+  assert.equal(defaultR399Candidate.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(defaultR399Candidate.inputStatus, "ready");
+  assert.equal(defaultR399Candidate.modelLoaded, true);
+  assert.equal(defaultR399Candidate.blockerCodes.length, 0);
+  assert.equal(defaultR399Candidate.selectedMetricKeys.includes("steps"), false);
+  const defaultLab9Candidate = defaultResearch.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "lab9_bp_body_10y_acm_research"
+  );
+  assert.ok(defaultLab9Candidate);
+  assert.equal(defaultLab9Candidate.selected, false);
+  assert.equal(defaultLab9Candidate.inputStatus, "abstain");
+  assert.equal(defaultLab9Candidate.blockerCodes.includes("INPUT_BUNDLE_INCOMPLETE"), true);
+
   const summary = summarizeMurphAgeCalculatorOutput(research);
   assert.equal(summary.displayStatus, "research-only");
   assert.equal(summary.displayBlockedReason, "product-not-authorized");
@@ -4875,6 +5147,17 @@ test("dispatches the R399 NHIS proxy anchor as an explicit research-only base mo
 
   const publicReport = toPublicMurphAgeCalculatorReport(research);
   assert.equal(publicReport.inputReadiness.bundle.bundleId, "r399-nhis-proxy-anchor");
+  assert.equal(publicReport.researchCandidateCards.length, 3);
+  const publicR399Candidate = publicReport.researchCandidateCards.find((candidate) =>
+    candidate.cardId === "r399_nhis_proxy_10y_acm_research"
+  );
+  assert.ok(publicR399Candidate);
+  assert.equal(publicR399Candidate.selected, true);
+  assert.equal(publicR399Candidate.modelLoaded, true);
+  assert.equal(publicR399Candidate.blockerCodes.length, 0);
+  assert.equal(publicR399Candidate.selectedMetricKeys.includes("steps"), false);
+  assert.equal("selectedPointIds" in publicR399Candidate, false);
+  assert.equal("value" in publicR399Candidate, false);
   assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.status === "imputed"), true);
   assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
   assert.equal(publicReport.result ? "modelId" in publicReport.result : true, false);

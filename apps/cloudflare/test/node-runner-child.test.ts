@@ -605,6 +605,7 @@ describe("runHostedExecutionChild", () => {
         code: "bundle_archive_validation_error",
         details: {
           bundleArchiveOperation: "runner-output",
+          bundleArchiveValidationCause: "archive_invalid",
           bundleRefKeyPresent: false,
           bundleRefPresent: false,
           bundleRefSize: 1234,
@@ -643,6 +644,7 @@ describe("runHostedExecutionChild", () => {
     expect(payload.ok).toBe(false);
     expect(payload.error?.details).toMatchObject({
       childRuntimeBundleArchiveOperation: "runner-output",
+      childRuntimeBundleArchiveValidationCause: "archive_invalid",
       childRuntimeBundleRefKeyPresent: false,
       childRuntimeBundleRefPresent: true,
       childRuntimeBundleRefSize: 1234,
