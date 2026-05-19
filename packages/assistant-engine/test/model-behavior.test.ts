@@ -294,16 +294,62 @@ describe('assistant user-facing wording guidance', () => {
       'Treat source URLs differently from action links',
     )
     expect(prompt).toContain(
-      'Do not append parenthesized Markdown source links',
+      'Never format links as Markdown links in user-facing replies, in any channel',
     )
     expect(prompt).toContain(
-      'Include full URLs only when the URL itself is the deliverable or the user asks for links',
+      'Do not write `[label](https://...)`',
+    )
+    expect(prompt).toContain(
+      'Do not append parenthesized Markdown source links after facts',
+    )
+    expect(prompt).toContain(
+      'Include full raw URLs only when the URL itself is the deliverable or the user asks for links',
     )
     expect(prompt).toContain(
       'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, or Markdown presentation by default',
     )
     expect(prompt).toContain(
-      'If a source must be named, use a plain source name or domain in prose, not a Markdown link',
+      'if a source must be named, use a plain source name or domain in prose, not a Markdown link',
+    )
+    expect(prompt).not.toContain(
+      'as a normal Markdown link when the channel supports it',
+    )
+  })
+
+  it('bans Markdown links outside messaging channels too', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'local',
+    }))
+
+    expect(prompt).toContain(
+      'Never format links as Markdown links in user-facing replies, in any channel',
+    )
+    expect(prompt).toContain(
+      'Do not write `[label](https://...)`',
+    )
+    expect(prompt).not.toContain(
+      'as a normal Markdown link when the channel supports it',
+    )
+  })
+
+  it('bans Markdown links in scheduled notification text contracts', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        channel: 'linq',
+      }),
+    ).prompt
+
+    expect(prompt).toContain(
+      'Never format links as Markdown links in user-facing replies, in any channel',
+    )
+    expect(prompt).toContain(
+      'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
+    )
+    expect(prompt).toContain(
+      'Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text` unless the user-facing message genuinely needs it',
+    )
+    expect(prompt).not.toContain(
+      'Markdown links, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text` unless',
     )
   })
 })
@@ -401,7 +447,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '664ced99aa451b9e99c4bf109081852694a7d86ffd68e827983016669e4125a1',
+      'e8705b24b0f75cfc31232ef2ec31845f073185c09210da3726c004d67d9a3e4d',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
