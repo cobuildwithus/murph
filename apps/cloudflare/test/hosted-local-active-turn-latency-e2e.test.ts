@@ -1,13 +1,37 @@
 import { execFile } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  seedHostedWorkspaceCheckpointForTest,
+} from "#hosted-web-testing";
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedBrowserVaultReplicaRef,
+  type HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  sha256HostedBundleHex,
+  snapshotHostedExecutionContext,
+} from "@murphai/runtime-state/node";
+import {
+  createIntegratedVaultServices,
+} from "@murphai/vault-usecases/vault-services";
 
 import {
   startHostedLocalFullStackScenario,
@@ -39,15 +63,24 @@ const productionLikeAssistantModel = "gpt-5.5";
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const configuredDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
+const idleShutdownDelayProbeIdleDelayMs = 180_000;
+const projectedWakeNoSnapshotObservationMs = 5_000;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
+const cleanupPaths: string[] = [];
 
 afterEach(async () => {
   await scenario?.stop();
   scenario = null;
   await linqStub?.stop();
   linqStub = null;
+  await Promise.all(cleanupPaths.splice(0).map((target) =>
+    rm(target, {
+      force: true,
+      recursive: true,
+    })
+  ));
 }, 120_000);
 
 describe("hosted local active-turn latency e2e", () => {
@@ -71,6 +104,30 @@ describe("hosted local active-turn latency e2e", () => {
       expect(result.lateInputHandled).toBe(true);
       expect(result.outboundReplyCount).toBe(1);
       expect(result.webhookToFirstReplyMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      await database.cleanup();
+    }
+  }, 900_000);
+
+  it("does not run the full idle-shutdown snapshot immediately for projected wakes under the 180s idle delay", async () => {
+    const database = await createSharedProbeDatabase();
+
+    try {
+      const proof = await runIdleShutdownDelayProbe({
+        localDatabaseUrl: database.url,
+      });
+
+      process.stdout.write(
+        `${[
+          "Hosted idle-shutdown delay probe:",
+          `idleShutdownSnapshots=${proof.idleShutdownSnapshotCount}`,
+          `snapshotObservationMs=${Math.round(proof.snapshotObservationMs)}`,
+          `workspaceCheckpointChanged=${String(proof.workspaceCheckpointChanged)}`,
+        ].join(" ")}\n`,
+      );
+
+      expect(proof.idleShutdownSnapshotCount).toBe(0);
+      expect(proof.workspaceCheckpointChanged).toBe(false);
     } finally {
       await database.cleanup();
     }
@@ -184,6 +241,92 @@ async function runActiveTurnLatencyProbe(input: {
   }
 }
 
+async function runIdleShutdownDelayProbe(input: {
+  localDatabaseUrl: string;
+}): Promise<{
+  idleShutdownSnapshotCount: number;
+  snapshotObservationMs: number;
+  workspaceCheckpointChanged: boolean;
+}> {
+  const probeId = randomUUID().replace(/-/gu, "").slice(0, 12);
+  const userId = `member_local_idle_shutdown_delay_${probeId}`;
+  const chatId = `chat_local_idle_shutdown_delay_${probeId}`;
+  const memberPhone = buildLinqRecipientPhoneNumber(userId);
+  const homePhone = buildLinqHomePhoneNumber(userId);
+  const replyText = "Idle shutdown delay probe reply.";
+  const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+
+  await startIdleShutdownDelayProbeScenario({
+    localDatabaseUrl: input.localDatabaseUrl,
+    memberPhone,
+  });
+
+  try {
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: userId,
+      memberPhone,
+    });
+    await requireScenario().bindActiveHostedLinqHomeChat({
+      chatId,
+      memberId: userId,
+      recipientPhone: memberPhone,
+    });
+    await seedActivatedWorkspaceCheckpoint(userId);
+    const baselineStatus = await readHostedRunnerStatusWithLogLimit(userId, 100);
+    const baselineSnapshotCount = countIdleShutdownSnapshotLogs(baselineStatus);
+    const baselineCheckpoint = readWorkspaceCheckpointFingerprint(baselineStatus);
+    expect(baselineCheckpoint.version).not.toBeNull();
+
+    const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
+    requireScenario().queueAssistantResponses([replyText]);
+
+    const response = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_idle_shutdown_delay_${probeId}`,
+        messageId: `msg_idle_shutdown_delay_${probeId}`,
+        text: "idle shutdown delay probe input",
+      }),
+    );
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    const reply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: baselineSendCount,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
+
+    await waitForProjectedOutboxDeliveryWake(userId);
+    const snapshotObservationStartedAt = performance.now();
+    const snapshotStatus = await observeIdleShutdownSnapshots({
+      durationMs: projectedWakeNoSnapshotObservationMs,
+      userId,
+    });
+    const snapshotObservationMs = performance.now() - snapshotObservationStartedAt;
+    const observedCheckpoint = readWorkspaceCheckpointFingerprint(snapshotStatus);
+
+    return {
+      idleShutdownSnapshotCount:
+        countIdleShutdownSnapshotLogs(snapshotStatus) - baselineSnapshotCount,
+      snapshotObservationMs,
+      workspaceCheckpointChanged:
+        !workspaceCheckpointFingerprintsMatch(baselineCheckpoint, observedCheckpoint),
+    };
+  } finally {
+    await scenario?.stop();
+    scenario = null;
+    await linqStub?.stop();
+    linqStub = null;
+  }
+}
+
 async function startProbeScenario(input: {
   localDatabaseUrl: string;
   memberPhone: string;
@@ -193,6 +336,7 @@ async function startProbeScenario(input: {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
@@ -208,6 +352,231 @@ async function startProbeScenario(input: {
     scenarioLabel: "Local hosted active-turn latency e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function startIdleShutdownDelayProbeScenario(input: {
+  localDatabaseUrl: string;
+  memberPhone: string;
+}): Promise<void> {
+  linqStub = await startHostedLocalLinqStub();
+  scenario = await startHostedLocalFullStackScenario({
+    additionalEnv: {
+      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(idleShutdownDelayProbeIdleDelayMs),
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+      HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: input.memberPhone,
+      LINQ_API_BASE_URL: requireLinqStub().baseUrl,
+      LINQ_API_TOKEN: "linq-local-test-token",
+      LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+    },
+    assistantProviderStubModelId: productionLikeAssistantModel,
+    localDatabaseUrl: input.localDatabaseUrl,
+    persistDirOverride: workerPersistDirOverride,
+    persistDirPrefix: "murph-hosted-local-idle-shutdown-delay-",
+    requiredRunnerEnvProfile: "linq",
+    scenarioLabel: "Local hosted idle-shutdown delay probe e2e",
+    streamLogs: streamDevLogs,
+  });
+}
+
+async function observeIdleShutdownSnapshots(input: {
+  durationMs: number;
+  userId: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastStatus: HostedRunnerStatusResponse | null = null;
+
+  while (Date.now() - startedAt < input.durationMs) {
+    const status = await readHostedRunnerStatusWithLogLimit(input.userId, 100);
+    lastStatus = status;
+    await sleep(250);
+  }
+
+  return lastStatus ?? await readHostedRunnerStatusWithLogLimit(input.userId, 100);
+}
+
+async function waitForProjectedOutboxDeliveryWake(
+  userId: string,
+): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  let lastStatus: HostedRunnerStatusResponse | null = null;
+
+  while (Date.now() - startedAt < 10_000) {
+    const status = await readHostedRunnerStatusWithLogLimit(userId, 100);
+    lastStatus = status;
+    if (hasProjectedOutboxDeliveryWakeLog(status)) {
+      return status;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for an outbox delivery log with projected follow-up wake metadata.",
+    ...(lastStatus ? [`last status summary: ${summarizeHostedStatusForFailure(lastStatus)}`] : []),
+  ]));
+}
+
+async function readHostedRunnerStatusWithLogLimit(
+  userId: string,
+  logLimit: number,
+): Promise<HostedRunnerStatusResponse> {
+  const status = parseHostedRunnerStatusResponse(
+    await requireScenario().harness.requestJson(
+      `/internal/users/${encodeURIComponent(userId)}/status?logLimit=${logLimit}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+        },
+      },
+    ),
+  );
+  if (status.userId !== userId) {
+    throw new Error("Hosted runner status read returned a different user.");
+  }
+  return status;
+}
+
+function hasProjectedOutboxDeliveryWakeLog(status: HostedRunnerStatusResponse): boolean {
+  return (status.recentLogs ?? []).some((entry) =>
+    entry.eventCode === "outbox.delivery_finished"
+    && entry.redactedJson?.nextWakeAtPresent === true
+  );
+}
+
+function countIdleShutdownSnapshotLogs(status: HostedRunnerStatusResponse): number {
+  return (status.recentLogs ?? []).filter((entry) =>
+    entry.eventCode === "checkpoint.snapshot_finished"
+    && entry.redactedJson?.checkpointReason === "idle_shutdown"
+  ).length;
+}
+
+interface WorkspaceCheckpointFingerprint {
+  checkpointedAt: string | null;
+  snapshotRefJson: string;
+  version: string | null;
+}
+
+function readWorkspaceCheckpointFingerprint(
+  status: HostedRunnerStatusResponse,
+): WorkspaceCheckpointFingerprint {
+  const workspace = status.workspace ?? null;
+  return {
+    checkpointedAt: workspace?.checkpointedAt ?? null,
+    snapshotRefJson: JSON.stringify(workspace?.snapshotRef ?? null),
+    version: workspace?.version ?? null,
+  };
+}
+
+function workspaceCheckpointFingerprintsMatch(
+  left: WorkspaceCheckpointFingerprint,
+  right: WorkspaceCheckpointFingerprint,
+): boolean {
+  return left.checkpointedAt === right.checkpointedAt
+    && left.snapshotRefJson === right.snapshotRefJson
+    && left.version === right.version;
+}
+
+function summarizeHostedStatusForFailure(status: HostedRunnerStatusResponse): string {
+  const workspace = status.workspace ?? null;
+  return JSON.stringify({
+    lastErrorCode: status.lastErrorCode ?? null,
+    logCount: status.recentLogs?.length ?? 0,
+    nextAlarmAtPresent: status.nextAlarmAt != null,
+    workspaceCheckpointedAtPresent: workspace?.checkpointedAt != null,
+    workspaceSnapshotRefPresent: workspace?.snapshotRef != null,
+    workspaceVersionPresent: workspace?.version !== undefined,
+  });
+}
+
+async function seedActivatedWorkspaceCheckpoint(userId: string): Promise<void> {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-idle-shutdown-vault-"));
+  cleanupPaths.push(root);
+  const operatorHomeRoot = path.join(root, "operator-home");
+  const vaultRoot = path.join(root, "vault");
+  await mkdir(operatorHomeRoot, { recursive: true });
+
+  await createIntegratedVaultServices().core.init({
+    requestId: "seed-idle-shutdown",
+    timezone: "America/New_York",
+    vault: vaultRoot,
+  });
+
+  const snapshot = await snapshotHostedExecutionContext({
+    operatorHomeRoot,
+    vaultRoot,
+  });
+  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const checkpoint = await seedHostedWorkspaceCheckpointForTest({
+    browserVaultReplicaRef: createBrowserVaultReplicaRef({
+      sourceBundleHash: hash,
+    }),
+    environment: requireScenario().runtimeEnv,
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatusJson: {
+      seeded: true,
+    },
+    snapshotRef: createSnapshotBundleRef({
+      hash,
+      size: snapshot.bundle.byteLength,
+    }),
+    userId,
+  });
+  expect(checkpoint.status).toBe("updated");
+
+  await uploadHostedSnapshotArtifact({
+    bytes: snapshot.bundle,
+    hash,
+    userId,
+  });
+}
+
+async function uploadHostedSnapshotArtifact(input: {
+  bytes: Uint8Array;
+  hash: string;
+  userId: string;
+}): Promise<void> {
+  await requireScenario().harness.request(
+    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
+    {
+      body: new Blob([new Uint8Array(input.bytes)]),
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+      },
+      method: "PUT",
+    },
+  );
+}
+
+function createSnapshotBundleRef(input: {
+  hash: string;
+  size: number;
+}): HostedExecutionSnapshotRef {
+  return {
+    hash: input.hash,
+    key: `cloudflare-workspace-snapshots/${input.hash}.bundle`,
+    size: input.size,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function createBrowserVaultReplicaRef(input: {
+  sourceBundleHash: string;
+}): HostedBrowserVaultReplicaRef {
+  return {
+    byteLength: 256,
+    dataVersion: `idle-shutdown-${input.sourceBundleHash.slice(0, 16)}`,
+    generatedAt: new Date().toISOString(),
+    keyId: "browser-vault-replica:idle-shutdown",
+    objectKey: `browser-vault/idle-shutdown-${input.sourceBundleHash.slice(0, 32)}.json`,
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:idle-shutdown",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash: input.sourceBundleHash,
+  };
 }
 
 async function createSharedProbeDatabase(): Promise<{
