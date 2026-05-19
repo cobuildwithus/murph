@@ -5,6 +5,7 @@ import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-
 describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () => {
   it("scans active due connections while excluding pending dirty state", async () => {
     const dueAt = new Date("2026-05-05T00:01:00.000Z");
+    const recoveryBucketStartedAt = new Date("2026-05-05T00:00:00.000Z");
     const queryCalls: unknown[] = [];
     const prisma = {
       $queryRaw: vi.fn(async (query: unknown) => {
@@ -26,6 +27,7 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     const result = await store.listDueReconcileConnectionsForSweep({
       dueAt,
       limit: 999,
+      recoveryBucketStartedAt,
     });
 
     expect(result).toEqual([
@@ -46,9 +48,14 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain("not exists");
     expect(query.text).toContain('"dirty"."connection_id" = "connection"."id"');
     expect(query.text).toContain('"dirty"."dirty_revision" > "dirty"."processed_revision"');
+    expect(query.text).toContain('from "device_sync_signal" as "signal"');
+    expect(query.text).toContain('"signal"."connection_id" = "connection"."id"');
+    expect(query.text).toContain('"signal"."kind" = \'reconcile_due\'');
+    expect(query.text).toContain('"signal"."next_reconcile_at" = "connection"."next_reconcile_at"');
+    expect(query.text).toContain('"signal"."created_at" >= $2');
     expect(query.text).toContain(
       'order by\n        "connection"."next_reconcile_at" asc,\n        "connection"."updated_at" asc,\n        "connection"."id" asc',
     );
-    expect(query.values).toEqual([dueAt, 251]);
+    expect(query.values).toEqual([dueAt, recoveryBucketStartedAt, 251]);
   });
 });

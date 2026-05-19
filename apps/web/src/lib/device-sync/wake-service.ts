@@ -344,13 +344,10 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 }
 
 export async function appendHostedDeviceSyncWake(input: {
-  createdAt?: string | null;
   connectionId: string;
-  eventId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
-  signalCreateMode?: "always" | "inserted";
   source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
   userId: string;
@@ -362,7 +359,6 @@ export async function appendHostedDeviceSyncWake(input: {
   });
   const wake = buildHostedDeviceSyncWake({
     ...input,
-    eventId: input.eventId ?? null,
     hint,
   });
   const persistSignal = async (tx: HostedPrismaTransactionClient) => {
@@ -378,36 +374,28 @@ export async function appendHostedDeviceSyncWake(input: {
       reason: normalizeNullableString(hint.reason),
       nextReconcileAt: hint.nextReconcileAt ?? null,
       revokeWarning: hint.revokeWarning ?? null,
-      createdAt: input.createdAt ?? input.occurredAt,
+      createdAt: input.occurredAt,
       tx,
     });
   };
-  const signalCreateMode = input.signalCreateMode ?? "always";
 
   const appendResult = await persistHostedDeviceSyncWake({
-    ...(input.source === "scheduled-reconcile"
-      ? { runnerNudgeIntent: "device-sync-reconcile-recovery" }
-      : {}),
     wake,
     store,
-    persist: signalCreateMode === "always" ? persistSignal : async () => {},
-    ...(signalCreateMode === "inserted"
-      ? {
-          persistAfterAppend: async (
-            tx: HostedPrismaTransactionClient,
-            mailboxAppend: AppendHostedMailboxItemResult,
-          ) => {
-            if (mailboxAppend.inserted) {
-              await persistSignal(tx);
-            }
-          },
-        }
-      : {}),
+    persist: persistSignal,
   });
 
   return {
     wakeAppended: appendResult.inserted || appendResult.duplicate,
   };
+}
+
+export interface HostedDeviceSyncScheduledReconcileWakeResult {
+  reason?: string;
+  wakeAccepted: boolean;
+  wakeAppended: boolean;
+  wakeDuplicate: boolean;
+  wakeInserted: boolean;
 }
 
 export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
@@ -418,22 +406,68 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   provider: string;
   traceId?: string | null;
   userId: string;
-}): Promise<{ wakeAppended: boolean; reason?: string }> {
-  return appendHostedDeviceSyncWake({
-    connectionId: input.connectionId,
-    createdAt: input.createdAt,
-    eventId: input.eventId,
+}): Promise<HostedDeviceSyncScheduledReconcileWakeResult> {
+  const prisma = getPrisma();
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    prisma,
+  });
+  const hint = buildHostedDeviceSyncSignalPayload({
     hint: {
       nextReconcileAt: input.nextReconcileAt,
       occurredAt: input.nextReconcileAt,
     },
     occurredAt: input.nextReconcileAt,
+    traceId: input.traceId ?? null,
+  });
+  const wake = buildHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    eventId: input.eventId,
+    hint,
+    occurredAt: input.nextReconcileAt,
     provider: input.provider,
-    signalCreateMode: "inserted",
     source: "scheduled-reconcile",
     traceId: input.traceId ?? null,
     userId: input.userId,
   });
+  const appendResult = await persistHostedDeviceSyncWake({
+    runnerNudgeIntent: "device-sync-reconcile-recovery",
+    startWorkflowOnDuplicate: false,
+    wake,
+    store,
+    persist: async () => {},
+    persistAfterAppend: async (
+      tx: HostedPrismaTransactionClient,
+      mailboxAppend: AppendHostedMailboxItemResult,
+    ) => {
+      if (!mailboxAppend.inserted) {
+        return;
+      }
+
+      await store.createSignal({
+        userId: input.userId,
+        connectionId: input.connectionId,
+        provider: input.provider,
+        kind: "reconcile_due",
+        occurredAt: hint.occurredAt ?? null,
+        traceId: normalizeNullableString(hint.traceId),
+        eventType: null,
+        resourceCategory: null,
+        reason: null,
+        nextReconcileAt: hint.nextReconcileAt ?? null,
+        revokeWarning: null,
+        createdAt: input.createdAt,
+        tx,
+      });
+    },
+  });
+
+  return {
+    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
+    wakeAccepted: appendResult.inserted || appendResult.duplicate,
+    wakeAppended: appendResult.inserted,
+    wakeDuplicate: appendResult.duplicate,
+    wakeInserted: appendResult.inserted,
+  };
 }
 
 export async function appendHostedDeviceSyncDirtyWake(input: {
@@ -484,6 +518,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
   runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
+  startWorkflowOnDuplicate?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
   persistAfterAppend?(
@@ -495,7 +530,11 @@ async function persistHostedDeviceSyncWake(input: {
   // Webhook retries rebuild fresh signal rows, so the canonical wake identity must stay
   // tied to the stable wake event id instead of the transient signal primary key.
   let mailboxItemId: string | null = null;
-  let mailboxAppendResult: AppendHostedMailboxItemResult | null = null;
+  const mailboxAppendState: {
+    result: AppendHostedMailboxItemResult | null;
+  } = {
+    result: null,
+  };
 
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
@@ -504,10 +543,11 @@ async function persistHostedDeviceSyncWake(input: {
       tx,
     });
     mailboxItemId = mailboxAppend.item.id;
-    mailboxAppendResult = mailboxAppend;
+    mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
   });
 
+  const mailboxAppendResult = mailboxAppendState.result;
   if (!mailboxItemId || !mailboxAppendResult) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_SYNC_WAKE_MAILBOX_APPEND_MISSING",
@@ -517,9 +557,14 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
-  await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId, {
-    runnerNudgeIntent: input.runnerNudgeIntent ?? null,
-  });
+  if (
+    mailboxAppendResult.inserted ||
+    (mailboxAppendResult.duplicate && input.startWorkflowOnDuplicate !== false)
+  ) {
+    await startHostedDeviceSyncWakeWorkflowBestEffort(mailboxItemId, {
+      runnerNudgeIntent: input.runnerNudgeIntent ?? null,
+    });
+  }
 
   await input.complete?.();
 

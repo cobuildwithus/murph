@@ -511,6 +511,7 @@ export class PrismaHostedConnectionStore {
   async listDueReconcileConnectionsForSweep(input: {
     dueAt: Date;
     limit: number;
+    recoveryBucketStartedAt: Date;
   }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
     const limit = Math.max(1, Math.min(input.limit, 251));
     const rows = await this.prisma.$queryRaw<Array<{
@@ -533,6 +534,14 @@ export class PrismaHostedConnectionStore {
           from "device_sync_dirty_connection" as "dirty"
           where "dirty"."connection_id" = "connection"."id"
             and "dirty"."dirty_revision" > "dirty"."processed_revision"
+        )
+        and not exists (
+          select 1
+          from "device_sync_signal" as "signal"
+          where "signal"."connection_id" = "connection"."id"
+            and "signal"."kind" = 'reconcile_due'
+            and "signal"."next_reconcile_at" = "connection"."next_reconcile_at"
+            and "signal"."created_at" >= ${input.recoveryBucketStartedAt}
         )
       order by
         "connection"."next_reconcile_at" asc,

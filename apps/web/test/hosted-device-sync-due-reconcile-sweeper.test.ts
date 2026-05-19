@@ -17,6 +17,9 @@ describe("hosted device-sync due reconcile sweeper", () => {
     vi.clearAllMocks();
     mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValue({
       wakeAppended: true,
+      wakeAccepted: true,
+      wakeDuplicate: false,
+      wakeInserted: true,
     });
   });
 
@@ -41,6 +44,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(store.listDueReconcileConnectionsForSweep).toHaveBeenCalledWith({
       dueAt: new Date("2026-05-05T00:01:00.000Z"),
       limit: 6,
+      recoveryBucketStartedAt: new Date("2026-05-05T00:00:00.000Z"),
     });
     expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith({
       connectionId: "dsc_due_1",
@@ -56,19 +60,15 @@ describe("hosted device-sync due reconcile sweeper", () => {
       skippedDueConnections: 0,
       wakeAppended: 1,
       wakeAttempted: 1,
+      wakeDuplicate: 0,
+      wakeFailed: 0,
       wakeLimit: 5,
       wakeNotAppended: 0,
     });
-    expect(logger.info).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile sweeper appending scheduled device-sync wake.",
-      expect.objectContaining({
-        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
-        nextReconcileAt: "2026-05-05T00:00:00.000Z",
-        userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
-      }),
-    );
-    expect(JSON.stringify(logger.info.mock.calls)).not.toContain("member_due_1");
-    expect(JSON.stringify(logger.info.mock.calls)).not.toContain("dsc_due_1");
+    const infoLogs = JSON.stringify(logger.info.mock.calls);
+    expect(infoLogs).not.toContain("member_due_1");
+    expect(infoLogs).not.toContain("dsc_due_1");
+    expect(infoLogs).not.toContain("whoop");
   });
 
   it("uses a stable scheduled wake event id inside the same recovery bucket", async () => {
@@ -185,6 +185,9 @@ describe("hosted device-sync due reconcile sweeper", () => {
     mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValueOnce({
       reason: "append_failed",
       wakeAppended: false,
+      wakeAccepted: false,
+      wakeDuplicate: false,
+      wakeInserted: false,
     });
 
     const result = await runHostedDeviceSyncDueReconcileSweeper({
@@ -194,13 +197,12 @@ describe("hosted device-sync due reconcile sweeper", () => {
     });
 
     expect(result.wakeNotAppended).toBe(1);
+    expect(result.wakeFailed).toBe(1);
     expect(result.skippedDueConnections).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync due reconcile sweeper device-sync wake was not appended.",
       expect.objectContaining({
-        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
         reason: "append_failed",
-        userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
       }),
     );
     expect(logger.warn).toHaveBeenCalledWith(
@@ -214,6 +216,38 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_due_2");
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_due_1");
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("dsc_due_2");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("whoop");
+  });
+
+  it("counts duplicate scheduled wakes separately from newly appended wakes", async () => {
+    const store = buildStore([
+      {
+        connectionId: "dsc_due_1",
+        nextReconcileAt: "2026-05-05T00:00:00.000Z",
+        provider: "whoop",
+        userId: "member_due_1",
+      },
+    ]);
+    mocks.appendHostedDeviceSyncScheduledReconcileWake.mockResolvedValueOnce({
+      wakeAccepted: true,
+      wakeAppended: false,
+      wakeDuplicate: true,
+      wakeInserted: false,
+    });
+
+    const result = await runHostedDeviceSyncDueReconcileSweeper({
+      logger: buildLogger(),
+      nudgeLimit: 1,
+      store,
+    });
+
+    expect(result).toMatchObject({
+      wakeAppended: 0,
+      wakeAttempted: 1,
+      wakeDuplicate: 1,
+      wakeFailed: 0,
+      wakeNotAppended: 0,
+    });
   });
 
   it("continues the sweep when one scheduled wake append throws", async () => {
@@ -236,6 +270,9 @@ describe("hosted device-sync due reconcile sweeper", () => {
       .mockRejectedValueOnce(new Error("append failed"))
       .mockResolvedValueOnce({
         wakeAppended: true,
+        wakeAccepted: true,
+        wakeDuplicate: false,
+        wakeInserted: true,
       });
 
     const result = await runHostedDeviceSyncDueReconcileSweeper({
@@ -248,14 +285,14 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(result).toMatchObject({
       wakeAppended: 1,
       wakeAttempted: 2,
+      wakeDuplicate: 0,
+      wakeFailed: 1,
       wakeNotAppended: 1,
     });
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync due reconcile sweeper device-sync wake append failed.",
       expect.objectContaining({
-        connectionFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
         errorName: "Error",
-        userFingerprint: expect.stringMatching(/^[0-9a-f]{16}$/u),
       }),
     );
   });
