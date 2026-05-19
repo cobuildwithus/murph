@@ -124,6 +124,12 @@ describe("executeHostedMailboxEvent", () => {
           primaryConversationScope: "thread",
           actorFallbackConversationScope: "raw-scope",
           sessionTurnCount: -1,
+          actorFallbackConversationIndexed: true,
+          conversationLookupIndexedCandidateCount: 1,
+          conversationLookupKeyCount: 2,
+          conversationLookupMatchedScope: "thread",
+          primaryConversationIndexed: false,
+          sessionResolutionLookupSource: "conversation-key",
         },
       },
       wake,
@@ -132,9 +138,15 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).toEqual(
       expect.objectContaining({
         actorFingerprint: "h1_abcdef0123456789abcdef01",
+        actorFallbackConversationIndexed: true,
         channel: "linq",
+        conversationLookupIndexedCandidateCount: 1,
+        conversationLookupKeyCount: 2,
+        conversationLookupMatchedScope: "thread",
+        primaryConversationIndexed: false,
         primaryConversationScope: "thread",
         schema: "murph.assistant-context-diagnostics.v1",
+        sessionResolutionLookupSource: "conversation-key",
         source: "assistant-notification",
         stage: "assistant-session-resolved",
       }),
@@ -555,6 +567,88 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("providerContinuation");
     expect(entry?.redacted).not.toHaveProperty("resumeProviderSessionIdPresent");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+  });
+
+  it("captures provider prompt-size diagnostics without prompt text", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_prompt_size",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_prompt_size",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_prompt_size",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-provider-prompt-size-diagnostics.v1",
+          type: "assistant.provider.prompt_size",
+          providerPromptDiagnosticKind: "primary",
+          providerPromptBytes: 4096,
+          userPromptBytes: 5,
+          turnContextPromptBytes: 2048,
+          developerInstructionsBytes: 1024,
+          developerInstructionsPresent: true,
+          activeTurnHistoryCount: 0,
+          activeTurnHistoryPresent: false,
+          conversationContextPresent: true,
+          refreshThreadInstructions: false,
+          resumeCodexThreadIdPresent: true,
+          prompt: "private prompt text should not be logged",
+          userPrompt: "hello",
+          threadId: "raw-thread-id",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_provider_prompt_size",
+      level: "info",
+      message: "Hosted assistant provider prompt-size diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        activeTurnHistoryCount: 0,
+        activeTurnHistoryPresent: false,
+        conversationContextPresent: true,
+        developerInstructionsBytes: 1024,
+        developerInstructionsPresent: true,
+        providerPromptBytes: 4096,
+        providerPromptDiagnosticKind: "primary",
+        providerTraceKind: "provider.prompt_size",
+        refreshThreadInstructions: false,
+        requestId: "req_prompt_size",
+        resumeCodexThreadIdPresent: true,
+        schema: "murph.assistant-provider-prompt-size-diagnostics.v1",
+        turnContextPromptBytes: 2048,
+        userPromptBytes: 5,
+      }),
+    });
+    expect(entry?.redacted).not.toHaveProperty("prompt");
+    expect(entry?.redacted).not.toHaveProperty("userPrompt");
+    expect(entry?.redacted).not.toHaveProperty("threadId");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("private prompt text");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("hello");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
   });
 
   it("sends generic assistant notifications and returns noop wake metrics", async () => {

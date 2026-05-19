@@ -181,6 +181,9 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
         sessionTurnCount: input.resolved.session.turnCount,
         existingTranscriptEntryCount: transcript.entryCount,
         existingTranscriptWelcomeVisible: transcript.welcomeVisible,
+        ...buildHostedAssistantSessionResolutionDiagnosticDetails(
+          input.resolved,
+        ),
         ...buildHostedAssistantContextFingerprintDetails({
           actorId: binding.actorId ?? input.message.actorId ?? null,
           channel: binding.channel ?? input.message.channel ?? null,
@@ -195,6 +198,27 @@ export async function emitHostedAssistantContextSessionResolvedTrace(input: {
     })
   } catch {
     // Diagnostic trace hooks must not block the assistant turn.
+  }
+}
+
+function buildHostedAssistantSessionResolutionDiagnosticDetails(
+  resolved: ResolvedAssistantSession,
+): HostedAssistantContextFingerprintDetails {
+  const diagnostics = resolved.resolutionDiagnostics
+  if (!diagnostics) {
+    return {}
+  }
+
+  return {
+    actorFallbackConversationIndexed:
+      diagnostics.actorFallbackConversationIndexed,
+    conversationLookupIndexedCandidateCount:
+      diagnostics.conversationLookupIndexedCandidateCount,
+    conversationLookupKeyCount: diagnostics.conversationLookupKeyCount,
+    conversationLookupMatchedScope: diagnostics.conversationLookupMatchedScope,
+    primaryConversationIndexed: diagnostics.primaryConversationIndexed,
+    sessionResolutionLookupSource:
+      diagnostics.sessionResolutionLookupSource,
   }
 }
 

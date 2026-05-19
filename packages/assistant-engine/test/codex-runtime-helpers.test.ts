@@ -79,6 +79,42 @@ function readProviderTraceRawEvent(
   return event.rawEvent as Record<string, unknown>
 }
 
+function findProviderTraceRawEvent(
+  events: readonly AssistantProviderTraceEvent[],
+  providerTraceKind: string,
+): Record<string, unknown> {
+  const rawEvents = events
+    .map((event) => readProviderTraceRawEvent(event))
+    .filter((event) => event.providerTraceKind === providerTraceKind)
+  if (rawEvents.length !== 1) {
+    throw new Error(
+      `expected exactly one provider trace kind ${providerTraceKind}, got ${rawEvents.length}`,
+    )
+  }
+
+  return rawEvents[0]!
+}
+
+function findProviderPromptSizeTraceRawEvent(
+  events: readonly AssistantProviderTraceEvent[],
+  providerPromptDiagnosticKind: string,
+): Record<string, unknown> {
+  const rawEvents = events
+    .map((event) => readProviderTraceRawEvent(event))
+    .filter(
+      (event) =>
+        event.providerTraceKind === 'provider.prompt_size' &&
+        event.providerPromptDiagnosticKind === providerPromptDiagnosticKind,
+    )
+  if (rawEvents.length !== 1) {
+    throw new Error(
+      `expected exactly one provider prompt-size trace kind ${providerPromptDiagnosticKind}, got ${rawEvents.length}`,
+    )
+  }
+
+  return rawEvents[0]!
+}
+
 describe('Codex assistant registry helpers', () => {
   it('resolves provider labels for Codex app-server variants', () => {
     expect(
@@ -1116,6 +1152,90 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).not.toContain('+15550100001')
   })
 
+  it('emits metadata-only provider prompt-size diagnostics', async () => {
+    const traceEvents: AssistantProviderTraceEvent[] = []
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-prompt-size',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-prompt-size',
+      turnId: 'turn-prompt-size',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      activeTurnMessages: [
+        {
+          content: 'private draft should not be logged',
+          role: 'assistant',
+        },
+      ],
+      developerInstructions: 'Private developer instructions.',
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      refreshThreadInstructions: true,
+      sessionContext: {
+        binding: createAssistantBinding({
+          actorId: 'actor-private',
+          channel: 'telegram',
+          identityId: 'identity-private',
+          threadId: 'thread-private',
+          threadIsDirect: true,
+        }),
+      },
+      turnContextPrompt: 'Private runtime context.',
+      userPrompt: 'hello',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const prompt =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.prompt
+    if (typeof prompt !== 'string') {
+      throw new Error('expected Codex prompt')
+    }
+    const diagnostic = findProviderPromptSizeTraceRawEvent(
+      traceEvents,
+      'primary',
+    )
+    expect(diagnostic).toMatchObject({
+      activeTurnHistoryCount: 1,
+      activeTurnHistoryPresent: true,
+      conversationContextPresent: true,
+      developerInstructionsBytes: Buffer.byteLength(
+        'Private developer instructions.',
+        'utf8',
+      ),
+      developerInstructionsPresent: true,
+      providerPromptBytes: Buffer.byteLength(prompt, 'utf8'),
+      providerPromptDiagnosticKind: 'primary',
+      providerTraceKind: 'provider.prompt_size',
+      refreshThreadInstructions: true,
+      resumeCodexThreadIdPresent: false,
+      schema: 'murph.assistant-provider-prompt-size-diagnostics.v1',
+      turnContextPromptBytes: Buffer.byteLength(
+        'Private runtime context.',
+        'utf8',
+      ),
+      type: 'assistant.provider.prompt_size',
+      userPromptBytes: Buffer.byteLength('hello', 'utf8'),
+    })
+    const serializedDiagnostic = JSON.stringify(diagnostic)
+    expect(serializedDiagnostic).not.toContain('hello')
+    expect(serializedDiagnostic).not.toContain('private draft')
+    expect(serializedDiagnostic).not.toContain('Private developer')
+    expect(serializedDiagnostic).not.toContain('Private runtime')
+    expect(serializedDiagnostic).not.toContain('actor-private')
+    expect(serializedDiagnostic).not.toContain('identity-private')
+    expect(serializedDiagnostic).not.toContain('thread-private')
+  })
+
   it('clones catalog capabilities', () => {
     const capabilities = {
       ...DEFAULT_CODEX_MODEL_CAPABILITIES,
@@ -1352,8 +1472,30 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.codexContinuation).toEqual({
       kind: 'thread-start',
     })
-    expect(traceEvents).toHaveLength(1)
-    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+    expect(findProviderPromptSizeTraceRawEvent(
+      traceEvents,
+      'primary',
+    )).toMatchObject({
+      activeTurnHistoryCount: 0,
+      activeTurnHistoryPresent: false,
+      providerPromptDiagnosticKind: 'primary',
+      refreshThreadInstructions: false,
+      resumeCodexThreadIdPresent: true,
+    })
+    expect(findProviderPromptSizeTraceRawEvent(
+      traceEvents,
+      'fresh-thread-fallback',
+    )).toMatchObject({
+      activeTurnHistoryCount: 2,
+      activeTurnHistoryPresent: true,
+      providerPromptDiagnosticKind: 'fresh-thread-fallback',
+      refreshThreadInstructions: true,
+      resumeCodexThreadIdPresent: false,
+    })
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.resume_failure',
+    )).toMatchObject({
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_RESUME_STALE',
       codexResumeFailureErrorKind: 'resume-stale',
       codexResumeFailureEventCount: null,
@@ -1484,8 +1626,10 @@ describe('Codex assistant registry helpers', () => {
       kind: 'thread-start',
     })
     expect(attempt.result.codexThreadId).toBe('fresh-thread-after-invalid-output')
-    expect(traceEvents).toHaveLength(2)
-    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.invalid_output_resume_failure',
+    )).toMatchObject({
       codexInvalidOutputErrorCode: 'ASSISTANT_CODEX_FAILED',
       codexInvalidOutputErrorField: 'input.193.output',
       codexInvalidOutputErrorKind: 'invalid-input-output',
@@ -1509,7 +1653,10 @@ describe('Codex assistant registry helpers', () => {
       schema: 'murph.assistant-codex-invalid-output-diagnostics.v1',
       type: 'assistant.codex.invalid_output_resume_failure',
     })
-    expect(readProviderTraceRawEvent(traceEvents[1])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.invalid_output_resume_fallback',
+    )).toMatchObject({
       codexInvalidOutputFallbackEventCount: 0,
       codexInvalidOutputFallbackProviderActionCount: 0,
       codexInvalidOutputFallbackResult: 'succeeded',
@@ -1665,8 +1812,10 @@ describe('Codex assistant registry helpers', () => {
     }
     expect(attempt.error).toBe(expectedError)
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    expect(traceEvents).toHaveLength(1)
-    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.resume_failure',
+    )).toMatchObject({
       codexResumeFailureCodexFailureStage: 'turn_failed',
       codexResumeFailureCodexTurnStatus: 'failed',
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
@@ -1752,8 +1901,10 @@ describe('Codex assistant registry helpers', () => {
     }
     expect(attempt.error).toBe(expectedError)
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    expect(traceEvents).toHaveLength(1)
-    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.resume_failure',
+    )).toMatchObject({
       codexResumeFailureCodexFailureStage: 'turn_failed',
       codexResumeFailureCodexTurnStatus: 'failed',
       codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
@@ -1821,14 +1972,19 @@ describe('Codex assistant registry helpers', () => {
       throw new Error('expected failed provider attempt')
     }
     expect(attempt.error).toBe(fallbackError)
-    expect(traceEvents).toHaveLength(2)
-    expect(readProviderTraceRawEvent(traceEvents[0])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.invalid_output_resume_failure',
+    )).toMatchObject({
       codexInvalidOutputFailureProviderActionCount: 2,
       codexInvalidOutputInputIndex: 7,
       codexInvalidOutputPhase: 'resume-failed',
       providerTraceKind: 'codex.invalid_output_resume_failure',
     })
-    expect(readProviderTraceRawEvent(traceEvents[1])).toMatchObject({
+    expect(findProviderTraceRawEvent(
+      traceEvents,
+      'codex.invalid_output_resume_fallback',
+    )).toMatchObject({
       codexInvalidOutputFallbackErrorCode: 'ASSISTANT_CODEX_FAILED',
       codexInvalidOutputFallbackErrorMessageLength: fallbackError.message.length,
       codexInvalidOutputFallbackErrorMessagePresent: true,

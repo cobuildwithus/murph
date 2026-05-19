@@ -167,6 +167,14 @@ describe('hosted assistant context diagnostics', () => {
     const resolved: ResolvedAssistantSession = {
       created: false,
       paths: resolveAssistantStatePaths(vault),
+      resolutionDiagnostics: {
+        actorFallbackConversationIndexed: false,
+        conversationLookupIndexedCandidateCount: 1,
+        conversationLookupKeyCount: 2,
+        conversationLookupMatchedScope: 'thread',
+        primaryConversationIndexed: true,
+        sessionResolutionLookupSource: 'conversation-key',
+      },
       session: {
         alias: null,
         binding: {
@@ -221,8 +229,14 @@ describe('hosted assistant context diagnostics', () => {
     expect(traceEvents[0]).toMatchObject({
       existingTranscriptEntryCount: 2,
       existingTranscriptWelcomeVisible: true,
+      actorFallbackConversationIndexed: false,
+      conversationLookupIndexedCandidateCount: 1,
+      conversationLookupKeyCount: 2,
+      conversationLookupMatchedScope: 'thread',
+      primaryConversationIndexed: true,
       primaryConversationScope: 'thread',
       sessionResolutionCreated: false,
+      sessionResolutionLookupSource: 'conversation-key',
       sessionTurnCount: 2,
       source: 'assistant-message',
     })

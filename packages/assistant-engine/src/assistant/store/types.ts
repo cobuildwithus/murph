@@ -46,9 +46,27 @@ export interface ResolveAssistantSessionInput
   maxSessionAgeMs?: number | null
 }
 
+export type AssistantSessionResolutionLookupSource =
+  | 'alias'
+  | 'conversation-key'
+  | 'created'
+  | 'session-id'
+
+export type AssistantConversationLookupScope = 'actor' | 'none' | 'thread'
+
+export interface AssistantSessionResolutionDiagnostics {
+  actorFallbackConversationIndexed: boolean | null
+  conversationLookupIndexedCandidateCount: number | null
+  conversationLookupKeyCount: number
+  conversationLookupMatchedScope: AssistantConversationLookupScope | null
+  primaryConversationIndexed: boolean | null
+  sessionResolutionLookupSource: AssistantSessionResolutionLookupSource
+}
+
 export interface ResolvedAssistantSession {
   created: boolean
   paths: AssistantStatePaths
+  resolutionDiagnostics?: AssistantSessionResolutionDiagnostics
   session: AssistantSession
 }
 

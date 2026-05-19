@@ -46,6 +46,10 @@ const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = "assistant.provider.plan";
+const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA =
+  "murph.assistant-provider-prompt-size-diagnostics.v1";
+const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE =
+  "assistant.provider.prompt_size";
 const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
   "murph.assistant-codex-invalid-output-diagnostics.v1";
 const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
@@ -68,6 +72,10 @@ const HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES = new Set([
 const HOSTED_ASSISTANT_PROVIDER_WORKING_DIRECTORY_KIND_VALUES = new Set([
   "hosted-stable-proc-cwd",
   "raw",
+]);
+const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
+  "fresh-thread-fallback",
+  "primary",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
   "fallback-failed",
@@ -235,6 +243,20 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
   "codexResumeFailureOutputArrayLengths",
   "codexResumeFailureOutputStringLengths",
+] as const;
+const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
+  "activeTurnHistoryPresent",
+  "conversationContextPresent",
+  "developerInstructionsPresent",
+  "refreshThreadInstructions",
+  "resumeCodexThreadIdPresent",
+] as const;
+const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
+  "activeTurnHistoryCount",
+  "developerInstructionsBytes",
+  "providerPromptBytes",
+  "turnContextPromptBytes",
+  "userPromptBytes",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_MAX_LENGTH = 2048;
 const HOSTED_ASSISTANT_PROVIDER_DIAGNOSTIC_TEXT_KEY_PATTERN =
@@ -550,7 +572,6 @@ export function emitHostedAssistantProviderTraceLog(input: {
   const redactedContext =
     sanitizeHostedExecutionStructuredLogDetails(input.details ?? {}) ?? {};
   const redactedDetails = {
-    ...redactedDiagnostic,
     ...redactedContext,
     ...redactedDiagnostic,
   };
@@ -584,6 +605,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: planDiagnostic,
       message: "Hosted assistant provider plan captured.",
+    };
+  }
+
+  const promptSizeDiagnostic =
+    readHostedAssistantProviderPromptSizeDiagnosticTrace(event);
+  if (promptSizeDiagnostic) {
+    return {
+      details: promptSizeDiagnostic,
+      message: "Hosted assistant provider prompt-size diagnostics captured.",
     };
   }
 
@@ -691,6 +721,55 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
         ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
     workingDirectoryKind,
   };
+}
+
+function readHostedAssistantProviderPromptSizeDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA
+    || type !== ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const diagnosticKind = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "providerPromptDiagnosticKind",
+    HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES,
+  );
+  if (!diagnosticKind) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    providerPromptDiagnosticKind: diagnosticKind,
+    providerTraceKind: "provider.prompt_size",
+    schema: ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA,
+  };
+  for (const key of HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+
+  return details;
 }
 
 function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
