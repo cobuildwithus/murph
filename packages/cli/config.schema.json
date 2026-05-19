@@ -3331,11 +3331,18 @@
                           ]
                         },
                         "cardId": {
-                          "description": "Explicit research card override. Currently only the frozen R399 NHIS proxy anchor is selectable.",
+                          "description": "Explicit research card override for local research model-card artifacts.",
                           "type": "string",
                           "enum": [
+                            "lab5_bp_bmi_transport_research",
+                            "lab9_bp_body_10y_acm_research",
                             "r399_nhis_proxy_10y_acm_research"
                           ]
+                        },
+                        "modelCardArtifactRoot": {
+                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
+                          "type": "string",
+                          "minLength": 1
                         }
                       }
                     }
@@ -3388,6 +3395,11 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "modelCardArtifactRoot": {
+                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
+                          "type": "string",
+                          "minLength": 1
                         }
                       }
                     }

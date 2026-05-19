@@ -2,8 +2,8 @@ declare module 'incur' {
   interface Register {
     commands: {
       'age inputs': { args: {}; options: { vault: string; requestId?: string; asOf: string } }
-      'age model-cards': { args: {}; options: { vault: string; requestId?: string } }
-      'age report': { args: {}; options: { vault: string; requestId?: string; asOf: string; chronologicalAgeYears: number; sex: "female" | "male"; mode: "product" | "research"; cardId?: "r399_nhis_proxy_10y_acm_research" } }
+      'age model-cards': { args: {}; options: { vault: string; requestId?: string; modelCardArtifactRoot?: string } }
+      'age report': { args: {}; options: { vault: string; requestId?: string; asOf: string; chronologicalAgeYears: number; sex: "female" | "male"; mode: "product" | "research"; cardId?: "lab5_bp_bmi_transport_research" | "lab9_bp_body_10y_acm_research" | "r399_nhis_proxy_10y_acm_research"; modelCardArtifactRoot?: string } }
       'allergy import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'allergy list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'allergy save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
