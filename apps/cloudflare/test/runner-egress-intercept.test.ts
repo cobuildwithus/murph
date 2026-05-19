@@ -120,7 +120,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "42",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -253,7 +252,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/responses");
@@ -364,7 +362,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/models");
@@ -399,7 +396,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.openai.com/v1/responses/compact");
@@ -668,7 +664,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
@@ -708,7 +703,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.linqapp.com/api/partner/v3/phone_numbers");
@@ -744,7 +738,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://linq.example.test/custom/tenant/v3/chats/chat_1/messages");
@@ -1022,7 +1015,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
@@ -1076,7 +1068,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe(
@@ -1135,7 +1126,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
@@ -1170,7 +1160,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://telegram.example.test/bottelegram-worker-secret/sendMessage");
@@ -1198,7 +1187,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe(
@@ -1253,7 +1241,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
@@ -1443,7 +1430,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://whatsapp.example.test/v25.0/phone_123/messages");
@@ -1473,7 +1459,6 @@ describe("hostedRunnerIntercept", () => {
       attemptId: "attempt_1",
       generation: "7",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe("https://whatsapp.example.test/meta/proxy/v25.0/phone_123/messages");
@@ -1540,7 +1525,6 @@ function createInterceptEnv(input: {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }) => Promise<boolean>;
 }): RunnerOutboundEnvironmentSource {
   return {

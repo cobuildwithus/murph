@@ -129,7 +129,6 @@ describe("cloudflare worker queue backpressure routes", () => {
       attemptId: lease.attemptId,
       generation: lease.generation,
       userId: "member_123",
-      workspaceVersion: "7",
     })).resolves.toBe(true);
 
     await expect(harness.durableObject.finishRuntimeWriteFenceForSmoke({

@@ -38,6 +38,7 @@ import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -621,13 +622,9 @@ describe("handleRunnerOutboundRequest", () => {
   it("proxies workspace checkpoints after live lease validation", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
     const ownsActiveInvocationLease = vi.fn(async () => true);
-    const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
-      recorded: true,
-    }));
     const getByName = vi.fn(() => ({
       bindUser,
       ownsActiveInvocationLease,
-      recordActiveInvocationWorkspaceCheckpoint,
     }));
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
@@ -675,9 +672,165 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
-    expect(recordActiveInvocationWorkspaceCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("proxies workspace checkpoints when only the checkpoint body carries workspace version", async () => {
+    const ownsActiveInvocationLease = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(
+      JSON.stringify(createHostedWorkspaceCheckpointResponse("5")),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(ownsActiveInvocationLease).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+    });
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(requestInit?.headers).get("x-hosted-runtime-workspace-version")).toBe("4");
+  });
+
+  it("rejects browser-vault replica publishes when the workspace version header is missing", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH}`, {
+        body: JSON.stringify({
+          replicaRef: createBrowserVaultReplicaRef("c".repeat(64)),
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts artifact writes after a checkpoint advances the child workspace version", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const checkpointFetch = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(
+      JSON.stringify(createHostedWorkspaceCheckpointResponse("5")),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", checkpointFetch);
+
+    const checkpointResponse = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      env,
+      "member_123" ,
+    );
+    expect(checkpointResponse.status).toBe(200);
+
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sha256 = sha256Hex(bytes);
+    const artifactResponse = await handleRunnerOutboundRequest(
+      createArtifactPutRequest({
+        bytes,
+        sha256,
+        workspaceVersion: "5",
+      }),
+      env,
+      "member_123" ,
+    );
+
+    expect(artifactResponse.status).toBe(200);
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
   it("prefers runtime write-fence validation over the legacy active-invocation method", async () => {
@@ -734,7 +887,6 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       generation: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
@@ -812,9 +964,6 @@ describe("handleRunnerOutboundRequest", () => {
                 return { userId };
               },
               ownsActiveInvocationLease: vi.fn(async () => false),
-              recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
-                recorded: true,
-              })),
             };
           },
         },
@@ -830,9 +979,7 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("keeps workspace version enforcement on workspace checkpoints", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -995,9 +1142,7 @@ describe("handleRunnerOutboundRequest", () => {
     const fixture = await createHostedRuntimeCryptoContextFixture({
       userId: "member_123",
     });
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     vi.stubGlobal("fetch", fixture.fetchMock);
     const body = await createMailboxPayloadDecodeBody();
     const response = await handleRunnerOutboundRequest(
@@ -1217,19 +1362,27 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects Telegram file effects when the workspace version does not match the write fence", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+  it("authorizes Telegram file effects when the workspace version header is stale", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
-    ) => new Response(null, {
-      status: 204,
+    ) => new Response(JSON.stringify({
+      ok: true,
+      result: {
+        file_id: "telegram_file_123",
+        file_path: "photos/file.jpg",
+        file_size: 1234,
+        file_unique_id: "telegram_unique_123",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1250,15 +1403,13 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("authorizes email sends after live lease validation", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "4",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const emailSendMock = vi.fn(async () => undefined);
 
     const response = await handleRunnerOutboundRequest(
@@ -1292,15 +1443,12 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(emailSendMock).toHaveBeenCalledOnce();
   });
 
-  it("rejects email sends when the workspace version does not match the write fence", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+  it("authorizes email sends when the workspace version header is stale", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
     const emailSendMock = vi.fn(async () => undefined);
 
     const response = await handleRunnerOutboundRequest(
@@ -1328,15 +1476,14 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
-    expect(emailSendMock).not.toHaveBeenCalled();
+    expect(emailSendMock).toHaveBeenCalledOnce();
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {
@@ -1864,7 +2011,6 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       leaseGeneration: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(getByName).toHaveBeenCalledTimes(2);
     expect(bindUser).not.toHaveBeenCalled();
@@ -2003,11 +2149,9 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("rejects artifact PUTs when the workspace version does not match the write fence", async () => {
+  it("accepts artifact PUTs when the workspace version header is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -2037,9 +2181,37 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
-    expect(firstResponse.status).toBe(401);
+    expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(2);
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("accepts artifact PUTs without a workspace version header", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sha256 = sha256Hex(bytes);
+
+    const response = await handleRunnerOutboundRequest(
+      createArtifactPutRequest({
+        bytes,
+        sha256,
+        workspaceVersion: null,
+      }),
+      env,
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -2203,9 +2375,7 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("writes browser-vault replicas after live lease validation", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -2236,11 +2406,9 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("rejects browser-vault replica writes when the workspace version does not match the write fence", async () => {
+  it("accepts browser-vault replica writes when the workspace version header is stale", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const runner = createWorkspaceVersionAwareUserRunner({
-      activeWorkspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
@@ -2258,9 +2426,9 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fixture.fetchMock).not.toHaveBeenCalled();
+    expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
 
@@ -2931,14 +3099,16 @@ async function createMailboxPayloadDecodeBody(input: {
 function createArtifactPutRequest(input: {
   bytes: Uint8Array;
   sha256: string;
-  workspaceVersion: string;
+  workspaceVersion: string | null;
 }): Request {
   return new Request(`http://artifacts.worker/objects/${input.sha256}`, {
     body: toArrayBuffer(input.bytes),
     headers: createRunnerProxyHeaders({
       "x-hosted-runtime-attempt-id": "attempt_1",
       "x-hosted-runtime-lease-generation": "9",
-      "x-hosted-runtime-workspace-version": input.workspaceVersion,
+      ...(input.workspaceVersion === null
+        ? {}
+        : { "x-hosted-runtime-workspace-version": input.workspaceVersion }),
     }),
     method: "PUT",
   });
@@ -2973,13 +3143,25 @@ function createBrowserVaultReplica(sourceBundleHash: string) {
   };
 }
 
+function createBrowserVaultReplicaRef(sourceBundleHash: string) {
+  return {
+    byteLength: 256,
+    dataVersion: "runner-outbound-test",
+    generatedAt: "2026-04-26T00:00:00.000Z",
+    keyId: "browser-key-runner-outbound",
+    objectKey: "browser-vault/member-test/replica.json",
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:runner-outbound",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  } as const;
+}
+
 function createWorkspaceVersionAwareUserRunner(input: {
-  activeWorkspaceVersion?: string;
   attemptId?: string;
   leaseGeneration?: string;
   userId?: string;
 } = {}) {
-  const activeWorkspaceVersion = input.activeWorkspaceVersion ?? "5";
   const attemptId = input.attemptId ?? "attempt_1";
   const leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
@@ -2988,7 +3170,6 @@ function createWorkspaceVersionAwareUserRunner(input: {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-    workspaceVersion?: string | null;
   }) => {
     if (
       lease.attemptId !== attemptId
@@ -2998,13 +3179,8 @@ function createWorkspaceVersionAwareUserRunner(input: {
       return false;
     }
 
-    return lease.workspaceVersion === undefined
-      || lease.workspaceVersion === null
-      || lease.workspaceVersion === activeWorkspaceVersion;
+    return true;
   });
-  const recordActiveInvocationWorkspaceCheckpoint = vi.fn(async () => ({
-    recorded: true,
-  }));
 
   return {
     bindUser,
@@ -3012,11 +3188,9 @@ function createWorkspaceVersionAwareUserRunner(input: {
       return {
         bindUser,
         ownsActiveInvocationLease,
-        recordActiveInvocationWorkspaceCheckpoint,
       };
     },
     ownsActiveInvocationLease,
-    recordActiveInvocationWorkspaceCheckpoint,
   };
 }
 
@@ -3102,7 +3276,6 @@ function createRunnerOutboundEnv(
                 attemptId: string;
                 leaseGeneration: string;
                 userId: string;
-                workspaceVersion?: string | null;
               }) => Promise<boolean>;
             };
             if (typeof legacyStub.ownsActiveInvocationLease === "function") {
@@ -3110,7 +3283,6 @@ function createRunnerOutboundEnv(
                 attemptId: input.attemptId,
                 leaseGeneration: input.generation,
                 userId: input.userId,
-                workspaceVersion: input.workspaceVersion,
               });
             }
             return true;

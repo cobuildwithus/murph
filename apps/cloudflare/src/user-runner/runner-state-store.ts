@@ -259,11 +259,11 @@ export class RunnerStateStore {
       throw new Error("Hosted runner write fence is stale.");
     }
 
-    meta.active_workspace_version = input.workspaceVersion;
+    meta.active_workspace_version = requireWorkspaceVersion(input.workspaceVersion);
     this.writeMetaRowSync(meta);
     return {
       ...input.token,
-      workspaceVersion: input.workspaceVersion,
+      workspaceVersion: meta.active_workspace_version,
     };
   }
 
@@ -579,7 +579,6 @@ export class RunnerStateStore {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<RunnerWriteFenceValidationResult> {
     const meta = this.requireMetaRowSync();
     const token = this.readWriteFenceTokenSync(meta);
@@ -595,14 +594,8 @@ export class RunnerStateStore {
       };
     }
 
-    const ownsWriteFence = (
-      input.workspaceVersion === undefined
-      || input.workspaceVersion === null
-      || token.workspaceVersion === input.workspaceVersion
-    );
-
     return {
-      owns: ownsWriteFence,
+      owns: true,
       record: this.readStateFromMetaSync(meta),
     };
   }
@@ -808,6 +801,13 @@ function readRuntimeDueAt(record: RunnerStateRecord): string | null {
     return null;
   }
   return latestIsoDate(record.wakeAt, record.backoffUntil);
+}
+
+function requireWorkspaceVersion(value: string): string {
+  if (!/^[0-9]+$/u.test(value)) {
+    throw new TypeError("Hosted runner workspace version must be a non-negative base-10 integer string.");
+  }
+  return value;
 }
 
 function readRuntimeDueReason(record: RunnerStateRecord): "retry" | "wake" | null {

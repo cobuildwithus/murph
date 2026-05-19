@@ -14,7 +14,10 @@ export interface RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string | null;
 }
 
-export interface RunnerRuntimeWriteFenceWriteHeaders
+export interface RunnerRuntimeWriteFenceWriteAuthority
+  extends RunnerRuntimeWriteFenceHeaders {}
+
+export interface RunnerRuntimeWriteFenceWorkspaceAuthority
   extends RunnerRuntimeWriteFenceHeaders {
   workspaceVersion: string;
 }
@@ -78,14 +81,13 @@ export async function requireRunnerRuntimeWriteFenceWrite(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
-}): Promise<RunnerRuntimeWriteFenceWriteHeaders> {
-  const headers = requireRunnerRuntimeWriteFenceWriteHeaders(input.request);
+}): Promise<RunnerRuntimeWriteFenceWriteAuthority> {
+  const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const ownsWriteFence = await validateRunnerRuntimeWriteFence(stub, {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
-    workspaceVersion: headers.workspaceVersion,
   });
   if (!ownsWriteFence) {
     throw new RunnerRuntimeWriteFenceError();
@@ -94,13 +96,28 @@ export async function requireRunnerRuntimeWriteFenceWrite(input: {
   return headers;
 }
 
+export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerRuntimeWriteFenceWorkspaceAuthority> {
+  const headers = await requireRunnerRuntimeWriteFenceWrite(input);
+  if (!headers.workspaceVersion) {
+    throw new RunnerRuntimeWriteFenceError();
+  }
+
+  return {
+    ...headers,
+    workspaceVersion: headers.workspaceVersion,
+  };
+}
+
 async function validateRunnerRuntimeWriteFence(
   stub: Awaited<ReturnType<typeof resolveRunnerOutboundUserRunnerStub>>,
   input: {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   },
 ): Promise<boolean> {
   const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;
@@ -119,20 +136,6 @@ export function requireRunnerRuntimeWriteFenceHeaders(
   }
 
   return headers;
-}
-
-export function requireRunnerRuntimeWriteFenceWriteHeaders(
-  request: Request,
-): RunnerRuntimeWriteFenceWriteHeaders {
-  const headers = requireRunnerRuntimeWriteFenceHeaders(request);
-  if (!headers.workspaceVersion) {
-    throw new RunnerRuntimeWriteFenceError();
-  }
-
-  return {
-    ...headers,
-    workspaceVersion: headers.workspaceVersion,
-  };
 }
 
 export function writeRunnerRuntimeWriteFenceHeaders(

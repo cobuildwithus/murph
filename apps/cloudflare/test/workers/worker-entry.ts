@@ -119,7 +119,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<boolean> {
     return await this.runner.validateRuntimeWriteFence(input);
   }
@@ -401,7 +400,6 @@ function getUserRunnerStub(userId: string) {
             attemptId: string;
             generation: string;
             userId: string;
-            workspaceVersion?: string | null;
           }): Promise<boolean>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
