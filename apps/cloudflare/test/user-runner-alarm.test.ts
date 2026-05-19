@@ -105,6 +105,10 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
       reason: "nudge",
       userId: "member_123",
+      workspace: expect.objectContaining({
+        userId: "member_123",
+        version: "5",
+      }),
       workspaceVersion: "5",
     });
     expect(readRunnerMeta(sql)).toMatchObject({

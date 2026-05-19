@@ -188,30 +188,47 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
+    const workspaceInvocationRequest = {
+      attemptId: "attempt_1",
+      budget: {
+        maxMailboxItems: 25,
+        maxRuntimeMs: 30_000,
+      },
+      deadlineAt: "2026-04-27T00:10:00.000Z",
+      idleCheckpointDelayMs: 180_000,
+      leaseGeneration: "7",
+      reason: "nudge" as const,
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const workspaceState = {
+      checkpointedAt: "2026-04-27T00:00:00.000Z",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_123",
+      version: "4",
+    };
+
+    expect(parseHostedWorkspaceInvocationRequest(workspaceInvocationRequest)).toEqual(
+      workspaceInvocationRequest,
+    );
     expect(parseHostedWorkspaceInvocationRequest({
-      attemptId: "attempt_1",
-      budget: {
-        maxMailboxItems: 25,
-        maxRuntimeMs: 30_000,
-      },
-      deadlineAt: "2026-04-27T00:10:00.000Z",
-      idleCheckpointDelayMs: 180_000,
-      leaseGeneration: "7",
-      reason: "nudge",
-      userId: "member_123",
-      workspaceVersion: "4",
+      ...workspaceInvocationRequest,
+      workspace: null,
     })).toEqual({
-      attemptId: "attempt_1",
-      budget: {
-        maxMailboxItems: 25,
-        maxRuntimeMs: 30_000,
-      },
-      deadlineAt: "2026-04-27T00:10:00.000Z",
-      idleCheckpointDelayMs: 180_000,
-      leaseGeneration: "7",
-      reason: "nudge",
-      userId: "member_123",
-      workspaceVersion: "4",
+      ...workspaceInvocationRequest,
+      workspace: null,
+    });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      workspace: workspaceState,
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      workspace: workspaceState,
     });
     expect(() => parseHostedWorkspaceInvocationRequest({
       attemptId: "attempt_3",

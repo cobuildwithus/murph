@@ -305,6 +305,139 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("uses invocation workspace state without a startup workspace-port read", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const suppliedWorkspace = createWorkspaceState({ version: "0" });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_invocation_workspace",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspace: suppliedWorkspace,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Invocation workspace state test should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Invocation workspace state test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: {
+              async read() {
+                throw new Error("Invocation workspace state should avoid startup workspace read.");
+              },
+              async checkpoint() {
+                throw new Error("Invocation workspace state test should not checkpoint.");
+              },
+            },
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("fails closed when invocation workspace state has a stale version", async () => {
+    const events: string[] = [];
+
+    await expect(
+      runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_invocation_workspace_stale",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspace: createWorkspaceState({ version: "6" }),
+            workspaceVersion: "5",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Snapshot should not run after stale invocation workspace.");
+          },
+          async importItem() {
+            throw new Error("Import should not run after stale invocation workspace.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events,
+              workspace: null,
+            }),
+          }),
+          vaultRoot: "synthetic-vault-root",
+        },
+      ),
+    ).rejects.toBeInstanceOf(HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError);
+
+    assert.deepEqual(events, []);
+  });
+
+  test("fails closed when invocation workspace state belongs to another user", async () => {
+    const events: string[] = [];
+    const artifactGetCalls: string[] = [];
+
+    await expect(
+      runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_invocation_workspace_other_user",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspace: createWorkspaceState({
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/other-user.bundle.json",
+                size: 512,
+              }),
+              userId: "member_synthetic_workspace_other",
+              version: "0",
+            }),
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Snapshot should not run after invocation workspace user mismatch.");
+          },
+          async importItem() {
+            throw new Error("Import should not run after invocation workspace user mismatch.");
+          },
+          platform: createPlatform({
+            artifactGetCalls,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events,
+              workspace: null,
+            }),
+          }),
+          vaultRoot: "synthetic-vault-root",
+        },
+      ),
+    ).rejects.toBeInstanceOf(HostedWorkspaceRunnerUserMismatchError);
+
+    assert.deepEqual(events, []);
+    assert.deepEqual(artifactGetCalls, []);
+  });
+
   test("emits metadata-only phase boundary logs for checkpoint and bridge shutdown", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -4861,7 +4994,9 @@ describe("hosted workspace runtime entrypoint", () => {
 
   test("parses additive workspace-invocation inputs and rejects legacy run-drain fields", () => {
     const parsed = parseHostedAssistantWorkspaceRuntimeJobInput({
-      request: createWorkspaceRunRequest(),
+      request: createWorkspaceRunRequest({
+        workspace: createWorkspaceState({ version: "0" }),
+      }),
       runtime: {
         forwardedEnv: {
           HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
@@ -4871,9 +5006,17 @@ describe("hosted workspace runtime entrypoint", () => {
 
     assert.equal(parsed.request.attemptId, "attempt_synthetic_workspace_run");
     assert.equal(parsed.request.reason, "nudge");
+    assert.equal(parsed.request.workspace?.version, "0");
     assert.deepEqual(parsed.runtime?.forwardedEnv, {
       HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
     });
+
+    const nullWorkspaceParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
+      request: createWorkspaceRunRequest({
+        workspace: null,
+      }),
+    });
+    assert.equal(nullWorkspaceParsed.request.workspace, null);
 
     const timedParsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: {
