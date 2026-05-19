@@ -83,9 +83,25 @@ const OPENAI_EGRESS_POLICY = [
     pathname: "/v1/models",
   },
 ] as const;
+const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-5.2",
+  "gpt-5.3-codex",
+  "gpt-5.3-codex-spark",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.5",
+  "o3",
+  "o3-mini",
+  "o4-mini",
+]);
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
 const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
+const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 2 * 1024 * 1024;
+const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS = [8 * 1024, 32 * 1024, 128 * 1024] as const;
 const OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS = 12;
@@ -366,7 +382,9 @@ async function maybeHandleOpenAiRequest(input: {
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(diagnosticPromise);
     } else {
+      const response = await fetch(upstreamRequest);
       await diagnosticPromise;
+      return response;
     }
   }
   return await fetch(upstreamRequest);
@@ -429,7 +447,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     phase: "wake.running",
   });
 
-  if (!runtimeLogScheduled || !input.userId) {
+  if (!input.userId) {
     return;
   }
 
@@ -443,7 +461,7 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       component: "runner",
       details: {
         endpointKind: input.endpointKind,
-        runtimeLogScheduled: true,
+        runtimeLogScheduled,
       },
       error,
       level: "warn",
@@ -480,6 +498,11 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
     output: diagnostic,
   });
 
+  if (input.requestBytes.byteLength > OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES) {
+    diagnostic.jsonSkippedReasonKind = "too_large";
+    return diagnostic;
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(input.requestBytes));
@@ -495,7 +518,7 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   }
 
   diagnostic.requestFieldCount = Object.keys(parsed).length;
-  diagnostic.modelKind = readOpenAiDiagnosticCode(readStringRecordProperty(parsed, "model")) ?? "missing";
+  diagnostic.modelKind = readOpenAiDiagnosticModelKind(readStringRecordProperty(parsed, "model"));
   diagnostic.cacheRetentionKind = readOpenAiCacheRetentionKind(parsed.prompt_cache_retention);
 
   const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
@@ -602,9 +625,13 @@ async function appendFingerprintDiagnostics(input: {
 }): Promise<void> {
   const fingerprintKey = input.fingerprintKey;
   const fingerprintPresentKey = `${input.fieldPrefix}FingerprintPresent`;
-  input.output[fingerprintPresentKey] =
+  const prefixFingerprintEligible =
     Boolean(fingerprintKey)
     && input.bytes.byteLength >= OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES;
+  const fullFingerprintEligible =
+    prefixFingerprintEligible
+    && input.bytes.byteLength <= OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES;
+  input.output[fingerprintPresentKey] = fullFingerprintEligible;
   if (
     !fingerprintKey
     || input.bytes.byteLength < OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES
@@ -613,11 +640,15 @@ async function appendFingerprintDiagnostics(input: {
   }
   const activeFingerprintKey = fingerprintKey;
 
-  input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
-    bytes: input.bytes,
-    fieldPrefix: input.fieldPrefix,
-    fingerprintKey: activeFingerprintKey,
-  });
+  if (fullFingerprintEligible) {
+    input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
+      bytes: input.bytes,
+      fieldPrefix: input.fieldPrefix,
+      fingerprintKey: activeFingerprintKey,
+    });
+  } else {
+    input.output[`${input.fieldPrefix}FullFingerprintSkipped`] = true;
+  }
   const prefixLengths = readOpenAiCacheDiagnosticPrefixLengths(input.bytes.byteLength);
   input.output[`${input.fieldPrefix}PrefixLengths`] = prefixLengths;
   input.output[`${input.fieldPrefix}PrefixFingerprints`] = await Promise.all(
@@ -667,14 +698,12 @@ function readOpenAiDiagnosticMethodKind(method: string): string {
   return method === "POST" ? "POST" : "other";
 }
 
-function readOpenAiDiagnosticCode(value: string | null): string | null {
+function readOpenAiDiagnosticModelKind(value: string | null): string {
   const normalized = value?.trim() ?? "";
   if (!normalized) {
-    return null;
+    return "missing";
   }
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(normalized)
-    ? normalized
-    : "other";
+  return OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS.has(normalized) ? normalized : "other";
 }
 
 function readOpenAiCacheRetentionKind(value: unknown): string {

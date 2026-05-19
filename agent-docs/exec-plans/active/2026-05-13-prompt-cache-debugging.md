@@ -57,8 +57,13 @@ accounting is wrong.
   `HOSTED_LOG_FINGERPRINT_SECRET` is configured; raw prompts, messages,
   request bodies, headers, secrets, cache keys, and previous response ids are
   not logged.
-- Diagnostic capture runs under `waitUntil` when the runner provides it, so
-  runtime-log persistence does not add a synchronous provider-fetch dependency.
+- Arbitrary request-body model strings collapse to `other` unless they are a
+  small allowlisted public model kind.
+- `waitUntil` is an optional scheduler only. When the container outbound path
+  lacks it, the provider fetch starts before the diagnostic is awaited and the
+  runtime log is still persisted.
+- Full-body JSON parsing and full-body fingerprints are capped; prefix
+  fingerprints remain bounded to fixed windows.
 
 ## Verification
 
