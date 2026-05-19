@@ -21,7 +21,9 @@ accounting is wrong.
 - `packages/operator-config/**`
 - `packages/cli/**`
 - `apps/cloudflare/src/runner-egress-intercept.ts`
+- `apps/cloudflare/src/worker-contracts.ts`
 - `apps/cloudflare/test/runner-egress-intercept.test.ts`
+- `apps/web/test/hosted-workspace-store.test.ts`
 - hosted runtime log event contract/tests
 - hosted Codex/OpenAI config surfaces if evidence points there
 - focused provider usage and prompt-cache tests
@@ -45,6 +47,19 @@ accounting is wrong.
    correct but insufficiently observable.
 6. Run focused verification for touched owners.
 
+## Diagnostic Design Notes
+
+- OpenAI Responses diagnostics live at the Cloudflare runner egress boundary
+  and use the existing hosted runtime-log write path.
+- Durable diagnostic payloads are metadata-only: counts, byte lengths,
+  presence booleans, model/cache-retention kinds, and keyed fingerprints.
+- Request/input/cache identifiers use HMAC-SHA256 fingerprints when
+  `HOSTED_LOG_FINGERPRINT_SECRET` is configured; raw prompts, messages,
+  request bodies, headers, secrets, cache keys, and previous response ids are
+  not logged.
+- Diagnostic capture runs under `waitUntil` when the runner provides it, so
+  runtime-log persistence does not add a synchronous provider-fetch dependency.
+
 ## Verification
 
 - `pnpm exec vitest run packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/hosted-execution/test/assistant-usage.test.ts` passed.
@@ -53,3 +68,10 @@ accounting is wrong.
 - `pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live` passed.
 - `pnpm typecheck` stopped on a pre-existing repo tools/contracts export mismatch in `scripts/verify.ts` before reaching touched package failures.
 - `pnpm test` reached broad Repo Vitest, opened an interactive setup prompt, and was terminated; focused tests above cover the changed usage parsing.
+- `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts test/runner-egress-intercept.test.ts` passed.
+- `pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts test/hosted-runtime-control.test.ts` passed.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-workspace-store.test.ts` passed.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir packages/hosted-execution typecheck` passed.
+- `pnpm --dir apps/web typecheck` passed.
+- `pnpm logs:guard` passed.

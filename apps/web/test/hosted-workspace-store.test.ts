@@ -1218,6 +1218,77 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("persists OpenAI cache diagnostics as bounded redacted metadata", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+    const diagnostic = {
+      cacheNamespaceFingerprint: `hmac-sha256:${"a".repeat(64)}`,
+      cacheNamespaceFingerprintPresent: true,
+      cacheNamespacePresent: true,
+      cacheRetentionKind: "24h",
+      diagnosticVersion: 1,
+      endpointKind: "responses",
+      fingerprintKind: "hmac-sha256",
+      inputBytes: 8192,
+      inputCount: 1,
+      inputFingerprintPresent: true,
+      inputPrefixFingerprints: [`hmac-sha256:${"b".repeat(64)}`],
+      inputPrefixLengths: [8192],
+      inputPresent: true,
+      inputType: "array",
+      instructionsBytes: 4096,
+      instructionsPresent: true,
+      jsonType: "object",
+      jsonValid: true,
+      methodKind: "POST",
+      modelKind: "gpt-5.5",
+      previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
+      previousResponseFingerprintPresent: true,
+      previousResponsePresent: true,
+      providerKind: "openai",
+      requestBytes: 16384,
+      requestFieldCount: 9,
+      requestFingerprintPresent: true,
+      requestPrefixFingerprints: [`hmac-sha256:${"d".repeat(64)}`],
+      requestPrefixLengths: [8192],
+      storePresent: true,
+      streamPresent: true,
+      toolCount: 1,
+    };
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      attemptId: "attempt_1",
+      component: "runner",
+      eventCode: "runner.provider_egress_diagnostic",
+      leaseGeneration: "7",
+      level: "debug",
+      phase: "fetch",
+      redacted: diagnostic,
+      tx,
+      userId: "member_workspace_1",
+      workspaceVersion: "4",
+    });
+
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attemptId: "attempt_1",
+        component: "runner",
+        eventCode: "runner.provider_egress_diagnostic",
+        leaseGeneration: 7n,
+        level: "debug",
+        phase: "fetch",
+        redactedJson: diagnostic,
+        userId: "member_workspace_1",
+        workspaceVersion: 4n,
+      }),
+    });
+    expect(result.redactedJson).toEqual(diagnostic);
+  });
+
   it("allows bounded sanitized device-sync failure summaries", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({
