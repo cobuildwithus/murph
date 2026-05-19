@@ -15,7 +15,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  buildHostedOpenAiCacheDiagnostic,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -353,6 +352,7 @@ describe("hostedRunnerIntercept", () => {
         method: "GET",
       }),
       createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
         OPENAI_API_KEY: "openai-worker-secret",
         validateRuntimeWriteFence,
       }),
@@ -406,6 +406,151 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
     expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+  });
+
+  it("records OpenAI cache diagnostics as redacted metadata when background work is available", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ loggedCount: 1 }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      return new Response("ok");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const syntheticCacheNamespace = "cache-namespace-synthetic-1234567890";
+    const syntheticPreviousResponse = "response-synthetic-1234567890";
+    const syntheticHiddenText = "synthetic-hidden-user-content-marker";
+    const syntheticStablePrefix = "synthetic-stable-cache-prefix-segment ".repeat(240);
+    const requestBody = {
+      include: ["reasoning.encrypted_content"],
+      input: [{
+        content: [{
+          text: `${syntheticStablePrefix}${syntheticHiddenText}`,
+          type: "input_text",
+        }],
+        role: "user",
+      }],
+      instructions: `synthetic instructions ${syntheticStablePrefix}`,
+      model: "gpt-5.5",
+      previous_response_id: syntheticPreviousResponse,
+      prompt_cache_key: syntheticCacheNamespace,
+      prompt_cache_retention: "24h",
+      store: true,
+      stream: true,
+      tools: [{ type: "web_search_preview" }],
+    };
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(requestBody),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+
+    const upstreamCall = findFetchCall(fetchMock, "api.openai.com");
+    expect(upstreamCall).toBeDefined();
+    const upstreamRequest = upstreamCall?.[0];
+    expect(upstreamRequest).toBeInstanceOf(Request);
+    expect((upstreamRequest as Request).method).toBe("POST");
+    expect((upstreamRequest as Request).url).toBe("https://api.openai.com/v1/responses");
+    expect((upstreamRequest as Request).headers.get("content-type"))
+      .toBe("application/json; charset=utf-8");
+    expect((upstreamRequest as Request).headers.get("authorization"))
+      .toBe("Bearer openai-worker-secret");
+    await expect((upstreamRequest as Request).clone().json()).resolves.toEqual(requestBody);
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{
+        attemptId?: string;
+        component?: string;
+        eventCode?: string;
+        leaseGeneration?: string;
+        level?: string;
+        phase?: string;
+        redactedJson?: Record<string, unknown>;
+        workspaceVersion?: string;
+      }>;
+    };
+    const entry = runtimeLogBody.entries?.[0];
+    expect(entry).toEqual(expect.objectContaining({
+      attemptId: "attempt_1",
+      component: "runner",
+      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
+      leaseGeneration: "7",
+      level: "debug",
+      phase: "fetch",
+      workspaceVersion: "4",
+    }));
+    expect(entry?.redactedJson).toEqual(expect.objectContaining({
+      cacheNamespacePresent: true,
+      cacheRetentionKind: "24h",
+      endpointKind: "responses",
+      fingerprintKind: "hmac-sha256",
+      inputCount: 1,
+      inputFingerprintPresent: true,
+      inputType: "array",
+      jsonType: "object",
+      jsonValid: true,
+      methodKind: "POST",
+      modelKind: "gpt-5.5",
+      previousResponsePresent: true,
+      providerKind: "openai",
+      requestFingerprintPresent: true,
+      streamPresent: true,
+      toolCount: 1,
+    }));
+    expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
+    expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
+    );
+    expect(entry?.redactedJson?.inputPrefixFingerprints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
+    );
+
+    const runtimeLogJson = JSON.stringify(runtimeLogBody);
+    expect(runtimeLogJson).not.toContain(syntheticCacheNamespace);
+    expect(runtimeLogJson).not.toContain(syntheticPreviousResponse);
+    expect(runtimeLogJson).not.toContain(syntheticHiddenText);
+    expect(runtimeLogJson).not.toContain("synthetic-stable-cache-prefix-segment");
+    expect(runtimeLogJson).not.toContain("diagnostic-fingerprint-secret");
+    expect(runtimeLogJson).not.toContain("openai-worker-secret");
+    expect(runtimeLogJson).not.toContain(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(syntheticHiddenText);
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {
@@ -1514,6 +1659,7 @@ describe("hostedRunnerIntercept", () => {
 
 function createInterceptEnv(input: {
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
+  HOSTED_LOG_FINGERPRINT_SECRET?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
@@ -1533,6 +1679,7 @@ function createInterceptEnv(input: {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
+    HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
     LINQ_API_BASE_URL: input.LINQ_API_BASE_URL,
     LINQ_API_TOKEN: input.LINQ_API_TOKEN,
     MAPBOX_ACCESS_TOKEN: input.MAPBOX_ACCESS_TOKEN,
@@ -1555,4 +1702,23 @@ function readForwardedRequest(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>)
   const request = fetchMock.mock.calls[0]?.[0];
   expect(request).toBeInstanceOf(Request);
   return request as Request;
+}
+
+function findFetchCall(
+  fetchMock: ReturnType<typeof vi.fn<typeof fetch>>,
+  hostname: string,
+): Parameters<typeof fetch> | undefined {
+  return fetchMock.mock.calls.find((call) =>
+    new URL(readFetchTargetUrl(call[0])).hostname === hostname
+  );
+}
+
+function readFetchTargetUrl(target: Parameters<typeof fetch>[0]): string {
+  if (target instanceof Request) {
+    return target.url;
+  }
+  if (target instanceof URL) {
+    return target.toString();
+  }
+  return String(target);
 }

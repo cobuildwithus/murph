@@ -89,6 +89,8 @@ const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
 const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS = [8 * 1024, 32 * 1024, 128 * 1024] as const;
 const OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS = 12;
+const OPENAI_CACHE_DIAGNOSTIC_FINGERPRINT_CONTEXT =
+  "murph.hosted-openai-cache-diagnostic.v1";
 const OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER = new TextDecoder();
 const OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER = new TextEncoder();
 
@@ -125,6 +127,10 @@ interface ProviderPathMatch {
 interface HostedRunnerOutboundContext {
   containerId?: string;
   waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+interface HostedRunnerDiagnosticBodySource {
+  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
@@ -349,14 +355,19 @@ async function maybeHandleOpenAiRequest(input: {
   );
   const endpointKind = readOpenAiCacheDiagnosticEndpointKind(pathnameSuffix);
   if (endpointKind) {
-    await emitHostedRunnerOpenAiCacheDiagnostic({
+    const diagnosticPromise = emitHostedRunnerOpenAiCacheDiagnostic({
       ctx: input.ctx ?? null,
       endpointKind,
       env: input.env,
       request: input.request,
-      upstreamRequest,
+      upstreamRequestBody: upstreamRequest.clone(),
       userId: input.userId,
     });
+    if (typeof input.ctx?.waitUntil === "function") {
+      input.ctx.waitUntil(diagnosticPromise);
+    } else {
+      await diagnosticPromise;
+    }
   }
   return await fetch(upstreamRequest);
 }
@@ -378,14 +389,15 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
-  upstreamRequest: Request;
+  upstreamRequestBody: HostedRunnerDiagnosticBodySource;
   userId: string | null;
 }): Promise<void> {
   let diagnostic: HostedRunnerDiagnosticJson;
   try {
-    const requestBytes = new Uint8Array(await input.upstreamRequest.clone().arrayBuffer());
+    const requestBytes = new Uint8Array(await input.upstreamRequestBody.arrayBuffer());
     diagnostic = await buildHostedOpenAiCacheDiagnostic({
       endpointKind: input.endpointKind,
+      fingerprintSecret: readOpenAiCacheDiagnosticFingerprintSecret(input.env),
       method: input.request.method,
       requestBytes,
     });
@@ -417,11 +429,11 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
     phase: "wake.running",
   });
 
-  if (!runtimeLogScheduled || !input.userId || !input.ctx?.waitUntil) {
+  if (!runtimeLogScheduled || !input.userId) {
     return;
   }
 
-  input.ctx.waitUntil(writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
+  await writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog({
     diagnostic,
     env: input.env,
     request: input.request,
@@ -438,17 +450,22 @@ async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
       message: "Hosted runner OpenAI cache diagnostic runtime-log write failed.",
       phase: "wake.running",
     });
-  }));
+  });
 }
 
 export async function buildHostedOpenAiCacheDiagnostic(input: {
   endpointKind: HostedOpenAiCacheDiagnosticEndpointKind;
+  fingerprintSecret?: string | null;
   method: string;
   requestBytes: Uint8Array;
 }): Promise<HostedRunnerDiagnosticJson> {
+  const fingerprintKey = await createOpenAiCacheDiagnosticFingerprintKey(
+    input.fingerprintSecret ?? null,
+  );
   const diagnostic: HostedRunnerDiagnosticJson = {
     diagnosticVersion: HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION,
     endpointKind: input.endpointKind,
+    fingerprintKind: fingerprintKey ? "hmac-sha256" : "none",
     jsonType: "unknown",
     jsonValid: false,
     methodKind: readOpenAiDiagnosticMethodKind(input.method),
@@ -456,9 +473,10 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
     requestBytes: input.requestBytes.byteLength,
   };
 
-  await appendDigestDiagnostics({
+  await appendFingerprintDiagnostics({
     bytes: input.requestBytes,
     fieldPrefix: "request",
+    fingerprintKey,
     output: diagnostic,
   });
 
@@ -483,8 +501,9 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   const cacheNamespace = readStringRecordProperty(parsed, "prompt_cache_key");
   diagnostic.cacheNamespacePresent = cacheNamespace !== null;
   if (cacheNamespace) {
-    await appendSensitiveIdentifierDigest({
+    await appendSensitiveIdentifierFingerprint({
       fieldPrefix: "cacheNamespace",
+      fingerprintKey,
       output: diagnostic,
       value: cacheNamespace,
     });
@@ -493,8 +512,9 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   const previousResponseId = readStringRecordProperty(parsed, "previous_response_id");
   diagnostic.previousResponsePresent = previousResponseId !== null;
   if (previousResponseId) {
-    await appendSensitiveIdentifierDigest({
+    await appendSensitiveIdentifierFingerprint({
       fieldPrefix: "previousResponse",
+      fingerprintKey,
       output: diagnostic,
       value: previousResponseId,
     });
@@ -513,9 +533,10 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
   const inputBytes = encodeOpenAiDiagnosticJsonValue(inputValue);
   if (inputBytes) {
     diagnostic.inputBytes = inputBytes.byteLength;
-    await appendDigestDiagnostics({
+    await appendFingerprintDiagnostics({
       bytes: inputBytes,
       fieldPrefix: "input",
+      fingerprintKey,
       output: diagnostic,
     });
   }
@@ -573,39 +594,65 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   await drainHostedRunnerMetadataResponse(response);
 }
 
-async function appendDigestDiagnostics(input: {
+async function appendFingerprintDiagnostics(input: {
   bytes: Uint8Array;
   fieldPrefix: "input" | "request";
+  fingerprintKey: CryptoKey | null;
   output: HostedRunnerDiagnosticJson;
 }): Promise<void> {
-  const digestPresentKey = `${input.fieldPrefix}DigestPresent`;
-  input.output[digestPresentKey] = input.bytes.byteLength >= OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES;
-  if (input.bytes.byteLength < OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES) {
+  const fingerprintKey = input.fingerprintKey;
+  const fingerprintPresentKey = `${input.fieldPrefix}FingerprintPresent`;
+  input.output[fingerprintPresentKey] =
+    Boolean(fingerprintKey)
+    && input.bytes.byteLength >= OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES;
+  if (
+    !fingerprintKey
+    || input.bytes.byteLength < OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES
+  ) {
     return;
   }
+  const activeFingerprintKey = fingerprintKey;
 
-  input.output[`${input.fieldPrefix}Digest`] = await sha256DiagnosticDigest(input.bytes);
+  input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
+    bytes: input.bytes,
+    fieldPrefix: input.fieldPrefix,
+    fingerprintKey: activeFingerprintKey,
+  });
   const prefixLengths = readOpenAiCacheDiagnosticPrefixLengths(input.bytes.byteLength);
   input.output[`${input.fieldPrefix}PrefixLengths`] = prefixLengths;
-  input.output[`${input.fieldPrefix}PrefixDigests`] = await Promise.all(
-    prefixLengths.map((length) => sha256DiagnosticDigest(input.bytes.subarray(0, length))),
+  input.output[`${input.fieldPrefix}PrefixFingerprints`] = await Promise.all(
+    prefixLengths.map((length) =>
+      hmacDiagnosticFingerprint({
+        bytes: input.bytes.subarray(0, length),
+        fieldPrefix: `${input.fieldPrefix}:prefix:${length}`,
+        fingerprintKey: activeFingerprintKey,
+      })),
   );
 }
 
-async function appendSensitiveIdentifierDigest(input: {
+async function appendSensitiveIdentifierFingerprint(input: {
   fieldPrefix: "cacheNamespace" | "previousResponse";
+  fingerprintKey: CryptoKey | null;
   output: HostedRunnerDiagnosticJson;
   value: string;
 }): Promise<void> {
-  const eligible = input.value.length >= OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS;
-  input.output[`${input.fieldPrefix}DigestPresent`] = eligible;
-  if (!eligible) {
+  const fingerprintKey = input.fingerprintKey;
+  input.output[`${input.fieldPrefix}FingerprintPresent`] =
+    Boolean(fingerprintKey)
+    && input.value.length >= OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS;
+  if (
+    !fingerprintKey
+    || input.value.length < OPENAI_CACHE_NAMESPACE_MIN_DIGEST_CHARS
+  ) {
     return;
   }
+  const activeFingerprintKey = fingerprintKey;
 
-  input.output[`${input.fieldPrefix}Digest`] = await sha256DiagnosticDigest(
-    OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(input.value),
-  );
+  input.output[`${input.fieldPrefix}Fingerprint`] = await hmacDiagnosticFingerprint({
+    bytes: OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(input.value),
+    fieldPrefix: input.fieldPrefix,
+    fingerprintKey: activeFingerprintKey,
+  });
 }
 
 function readOpenAiCacheDiagnosticPrefixLengths(byteLength: number): number[] {
@@ -692,12 +739,42 @@ function byteLengthOfDiagnosticText(value: string): number {
   return OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(value).byteLength;
 }
 
-async function sha256DiagnosticDigest(bytes: Uint8Array): Promise<string> {
-  const digestInput = bytes.buffer instanceof ArrayBuffer
-    ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-    : copyDiagnosticBytesToArrayBuffer(bytes);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", digestInput));
-  return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+async function createOpenAiCacheDiagnosticFingerprintKey(
+  secret: string | null,
+): Promise<CryptoKey | null> {
+  const normalized = secret?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+  return await crypto.subtle.importKey(
+    "raw",
+    OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(normalized),
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+}
+
+async function hmacDiagnosticFingerprint(input: {
+  bytes: Uint8Array;
+  fieldPrefix: string;
+  fingerprintKey: CryptoKey;
+}): Promise<string> {
+  const context = OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(
+    `${OPENAI_CACHE_DIAGNOSTIC_FINGERPRINT_CONTEXT}\0${input.fieldPrefix}\0`,
+  );
+  const payload = new Uint8Array(context.byteLength + input.bytes.byteLength);
+  payload.set(context);
+  payload.set(input.bytes, context.byteLength);
+  const digestInput = payload.buffer instanceof ArrayBuffer
+    ? payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
+    : copyDiagnosticBytesToArrayBuffer(payload);
+  const digest = new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    input.fingerprintKey,
+    digestInput,
+  ));
+  return `hmac-sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function copyDiagnosticBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -708,6 +785,14 @@ function copyDiagnosticBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 function isHostedOpenAiDiagnosticRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readOpenAiCacheDiagnosticFingerprintSecret(
+  env: RunnerOutboundEnvironmentSource,
+): string | null {
+  const value = env.HOSTED_LOG_FINGERPRINT_SECRET;
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function readRuntimeLogHeader(headers: Headers, name: string): string | null {

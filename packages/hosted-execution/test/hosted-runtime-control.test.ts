@@ -122,6 +122,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
@@ -736,6 +737,55 @@ describe("hosted runtime control contracts", () => {
       entries: [entry],
     })).toEqual({
       entries: [entry],
+    });
+    const openAiDiagnosticEntry = {
+      at: "2026-04-26T00:00:04.000Z",
+      attemptId: "attempt_1",
+      component: "runner",
+      eventCode: "runner.provider_egress_diagnostic",
+      leaseGeneration: "9",
+      level: "debug",
+      phase: "fetch",
+      redactedJson: {
+        cacheNamespaceFingerprint: `hmac-sha256:${"a".repeat(64)}`,
+        cacheNamespaceFingerprintPresent: true,
+        cacheNamespacePresent: true,
+        cacheRetentionKind: "24h",
+        diagnosticVersion: 1,
+        endpointKind: "responses",
+        fingerprintKind: "hmac-sha256",
+        inputBytes: 8192,
+        inputCount: 1,
+        inputFingerprintPresent: true,
+        inputPrefixFingerprints: [`hmac-sha256:${"b".repeat(64)}`],
+        inputPrefixLengths: [8192],
+        inputPresent: true,
+        inputType: "array",
+        instructionsBytes: 4096,
+        instructionsPresent: true,
+        jsonType: "object",
+        jsonValid: true,
+        methodKind: "POST",
+        modelKind: "gpt-5.5",
+        previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
+        previousResponseFingerprintPresent: true,
+        previousResponsePresent: true,
+        providerKind: "openai",
+        requestBytes: 16384,
+        requestFieldCount: 9,
+        requestFingerprintPresent: true,
+        requestPrefixFingerprints: [`hmac-sha256:${"d".repeat(64)}`],
+        requestPrefixLengths: [8192],
+        storePresent: true,
+        streamPresent: true,
+        toolCount: 1,
+      },
+      workspaceVersion: "5",
+    };
+    expect(parseHostedRuntimeLogRequest({
+      entries: [openAiDiagnosticEntry],
+    })).toEqual({
+      entries: [openAiDiagnosticEntry],
     });
     expect(parseHostedRuntimeLogResponse({ loggedCount: 1 })).toEqual({ loggedCount: 1 });
     expect(() => parseHostedRuntimeLogResponse({ loggedCount: 1.5 })).toThrow(
