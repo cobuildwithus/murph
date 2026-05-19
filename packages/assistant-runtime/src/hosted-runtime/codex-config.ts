@@ -38,7 +38,8 @@ const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 220_000;
+// Hosted auto-replies are short-lived, so compact early to bound replayed prompt cost.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 50_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
