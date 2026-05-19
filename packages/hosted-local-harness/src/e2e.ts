@@ -22,6 +22,7 @@ export type HostedLocalE2eScenarioName =
   | "codex-gateway-prefix"
   | "container-continuity"
   | "device-connect"
+  | "device-sync-wake"
   | "idle-checkpoint-deferred-progress"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -71,6 +72,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
     name: "device-connect",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
+    manualOnly: true,
+    name: "device-sync-wake",
   },
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
