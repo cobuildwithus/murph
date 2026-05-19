@@ -28,7 +28,11 @@ import { registerBloodTestCommands } from '../src/commands/health-blood-test-sav
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
-import { murphAgeReportResultSchema, registerMurphAgeCommands } from '../src/commands/murph-age.js'
+import {
+  murphAgeReportResultSchema,
+  murphAgeSubmittedPreviewPayloadSchema,
+  registerMurphAgeCommands,
+} from '../src/commands/murph-age.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import {
@@ -340,6 +344,98 @@ test('age report can use an explicit research model-card artifact root', async (
   }
 })
 
+test('age scaffold emits a submitted-data research preview payload', async () => {
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+    requireData(await runSliceCli<unknown>(['age', 'scaffold'])),
+  )
+  const metricKeys = payload.submittedMetrics.map((metric) => metric.metricKey)
+
+  assert.equal(payload.sex, 'female')
+  assert.equal(payload.chronologicalAgeYears, 45)
+  assert.equal(payload.modelCardArtifactRoot, undefined)
+  assert.equal(metricKeys.includes('HbA1c'), true)
+  assert.equal(metricKeys.includes('steps'), true)
+  assert.equal(metricKeys.includes('total-sleep-minutes'), true)
+  assert.equal(metricKeys.includes('resting-heart-rate'), true)
+  assert.equal(metricKeys.includes('hrv-rmssd'), true)
+})
+
+test('age preview scores submitted labs and wearable context without a vault', async () => {
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-model-cards-'))
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-preview-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  try {
+    await writeLocalModelCardArtifact(payloadRoot, 'lab5.json', {
+      cardId: 'lab5_bp_bmi_transport_research',
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    }, artifactRoot)
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [
+        { metricKey: 'HbA1c', unit: '%', value: 5.3 },
+        { metricKey: 'HDL_C', unit: 'mg/dL', value: 60 },
+        { context: { fastingStatus: 'fasting' }, metricKey: 'Triglycerides', unit: 'mg/dL', value: 90 },
+        { metricKey: 'creatinine', unit: 'mg/dL', value: 0.85 },
+        {
+          context: { measurementMethodKey: 'manual-cuff' },
+          metricKey: 'SBP',
+          sourceKind: 'measurement',
+          unit: 'mmHg',
+          value: 118,
+        },
+        { metricKey: 'diastolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 72 },
+        { metricKey: 'body_mass_index', sourceKind: 'measurement', unit: 'kg/m2', value: 23.2 },
+        { metricKey: 'steps', sourceKind: 'wearable-summary', unit: 'count', value: 10_000 },
+        { metricKey: 'wearable_valid_day_count_28d', sourceKind: 'wearable-summary', unit: 'count', value: 22 },
+        { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.8 },
+        { metricKey: 'private metric', unit: 'count', value: 1 },
+      ],
+    }))
+
+    const report = requireData(await runSliceCli<MurphAgePublicCalculatorReport>([
+      'age',
+      'preview',
+      '--input',
+      `@${payloadPath}`,
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+
+    assert.equal(report.status, 'ready')
+    assert.equal(report.mode, 'research')
+    assert.equal(report.displaySummary.displayStatus, 'research-only')
+    assert.equal(report.result?.authorization.cardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'hba1c'), true)
+    assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'steps'), false)
+    assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(report.warnings.some((warning) => warning.code === 'INVALID_INPUT'), true)
+
+    const encodedReport = JSON.stringify(report)
+    for (const forbidden of [
+      artifactRoot,
+      payloadPath,
+      'private metric',
+      'fixture-lab5-research-model',
+      'fasting',
+      'manual-cuff',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      '"message"',
+      'selectedPointIds',
+      'coefficient',
+    ]) {
+      assert.equal(encodedReport.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(artifactRoot, { force: true, recursive: true })
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
 test('age model-cards reports missing local artifacts as policy blockers', async () => {
   const vaultRoot = await createProjectionVault()
   try {
@@ -643,13 +739,25 @@ test('age report returns a product-mode public abstention instead of research-on
     ]))
 
     assert.equal(report.mode, 'product')
-    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v3')
+    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v4')
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
     assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')
     assert.equal(report.inputReadiness.bundle.selectedMetricKeys.includes('hba1c'), true)
     assert.equal(report.inputReadiness.contextBundles[0]?.bundleId, 'wearable-context')
     assert.equal(report.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes('steps'), true)
+    assert.equal(report.researchCandidateCards.length, 3)
+    const lab9Candidate = report.researchCandidateCards.find((candidate) =>
+      candidate.cardId === 'lab9_bp_body_10y_acm_research'
+    )
+    assert.ok(lab9Candidate)
+    assert.equal(lab9Candidate.selected, true)
+    assert.equal(lab9Candidate.modelLoaded, false)
+    assert.equal(lab9Candidate.inputStatus, 'ready')
+    assert.equal(lab9Candidate.blockerCodes.includes('LOCAL_MODEL_CARD_NOT_LOADED'), true)
+    assert.equal(lab9Candidate.blockerCodes.includes('PRODUCT_MODE_RESEARCH_ONLY'), true)
+    assert.equal(lab9Candidate.selectedMetricKeys.includes('hba1c'), true)
+    assert.equal(hasOwnKey(lab9Candidate, 'selectedPointIds'), false)
     const withPrivateBundleList = (
       key: 'availableFeatureKeys' | 'missingFeatureKeys' | 'selectedMetricKeys',
       value: string,
@@ -713,6 +821,31 @@ test('age report returns a product-mode public abstention instead of research-on
         },
       },
     })
+    const withPrivateResearchCandidateList = (
+      key: 'availableFeatureKeys' | 'missingFeatureKeys' | 'selectedMetricKeys',
+      value: string,
+    ) => ({
+      ...report,
+      researchCandidateCards: report.researchCandidateCards.map((candidate, index) => index === 0
+        ? {
+          ...candidate,
+          [key]: [value],
+        }
+        : candidate),
+    })
+    const withPrivateResearchCandidateWarning = () => ({
+      ...report,
+      researchCandidateCards: report.researchCandidateCards.map((candidate, index) => index === 0
+        ? {
+          ...candidate,
+          warnings: [{
+            code: 'MODEL_FEATURE_MISSING',
+            featureKey: 'private-model-feature',
+            metricKey: 'private-metric-key',
+          }],
+        }
+        : candidate),
+    })
     for (const invalidPublicReadinessReport of [
       withPrivateBundleList('availableFeatureKeys', 'private-model-feature'),
       withPrivateBundleList('missingFeatureKeys', 'private-model-feature'),
@@ -721,6 +854,10 @@ test('age report returns a product-mode public abstention instead of research-on
       withPrivateContextFeatureStatus({ metricKeys: ['private-metric-key'] }),
       withPrivateContextFeatureStatus({ selectedMetricKey: 'private-metric-key' }),
       withPrivateReadinessWarning(),
+      withPrivateResearchCandidateList('availableFeatureKeys', 'private-model-feature'),
+      withPrivateResearchCandidateList('missingFeatureKeys', 'private-model-feature'),
+      withPrivateResearchCandidateList('selectedMetricKeys', 'private-metric-key'),
+      withPrivateResearchCandidateWarning(),
     ]) {
       assert.equal(murphAgeReportResultSchema.safeParse(invalidPublicReadinessReport).success, false)
     }
@@ -815,6 +952,10 @@ test('age report can run explicit local research mode through the public report 
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'albumin'), true)
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'steps'), false)
     assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.includes('activity-volume'), true)
+    const selectedCandidate = report.researchCandidateCards.find((candidate) => candidate.selected)
+    assert.equal(selectedCandidate?.cardId, 'lab9_bp_body_10y_acm_research')
+    assert.equal(selectedCandidate?.modelLoaded, true)
+    assert.equal(selectedCandidate?.blockerCodes.length, 0)
 
     const firstAttribution = report.result?.featureAttributions[0]
     assert.equal(firstAttribution ? hasOwnKey(firstAttribution, 'selectedPointIds') : true, false)

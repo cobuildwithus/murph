@@ -2,6 +2,9 @@ import type {
   HostedExecutionErrorCode,
   HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_BUNDLE_ARCHIVE_VALIDATION_CAUSES,
+} from "./hosted-bundle-validation-cause.js";
 
 export type HostedRunnerChildFirstCompletionKind = "child_result" | "close";
 
@@ -118,6 +121,9 @@ const HOSTED_EXECUTION_CHILD_RUNTIME_BUNDLE_ARCHIVE_OPERATIONS = new Set<string>
   "cleanup-authoritative-next",
   "runner-input",
   "runner-output",
+]);
+const HOSTED_EXECUTION_CHILD_RUNTIME_BUNDLE_ARCHIVE_VALIDATION_CAUSES = new Set<string>([
+  ...HOSTED_BUNDLE_ARCHIVE_VALIDATION_CAUSES,
 ]);
 
 type HostedExecutionChildRuntimeObservedPhaseTraceEntry = {
@@ -487,6 +493,15 @@ export function readHostedExecutionChildRuntimeDiagnosticMetadata(
   );
   if (childRuntimeBundleArchiveOperation) {
     metadata.childRuntimeBundleArchiveOperation = childRuntimeBundleArchiveOperation;
+  }
+
+  const childRuntimeBundleArchiveValidationCause = readAllowedHostedExecutionChildDiagnostic(
+    record.childRuntimeBundleArchiveValidationCause,
+    HOSTED_EXECUTION_CHILD_RUNTIME_BUNDLE_ARCHIVE_VALIDATION_CAUSES,
+  );
+  if (childRuntimeBundleArchiveValidationCause) {
+    metadata.childRuntimeBundleArchiveValidationCause =
+      childRuntimeBundleArchiveValidationCause;
   }
 
   const childRuntimeBundleRefSize = record.childRuntimeBundleRefSize;

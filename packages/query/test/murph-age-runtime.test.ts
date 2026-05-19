@@ -27,10 +27,13 @@ import {
   calculateMurphAgePublicReportFromVaultInputBundle,
   calculateMurphAgeForVault,
   defaultMurphAgeModelCardArtifactRoot,
+  getMurphAgeResearchPreviewForSubmittedInputs,
+  getMurphAgeResearchPreviewForVault,
   loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
   rebuildQueryProjection,
+  resolveMurphAgeModelCardArtifactRoot,
   summarizeMurphAgeFromVaultInputBundle,
 } from "../src/index.ts";
 
@@ -593,6 +596,154 @@ test("calculateMurphAgeFromVaultInputBundle can load server-scoped research mode
     assert.equal(encodedReport.includes("fixture-lab9-research-model"), false);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+  }
+});
+
+test("calculateMurphAgeFromVaultInputBundle can use configured shared research model-card root", async () => {
+  const vaultRoot = await createProjectionVault();
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  const previousRoot = process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT;
+  const previousOutputDir = process.env.MURPH_AGE_MODEL_CARD_OUTPUT_DIR;
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab9.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+    process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = modelCardArtifactRoot;
+
+    assert.equal(resolveMurphAgeModelCardArtifactRoot({ vaultRoot }), modelCardArtifactRoot);
+    delete process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT;
+    process.env.MURPH_AGE_MODEL_CARD_OUTPUT_DIR = modelCardArtifactRoot;
+    assert.equal(resolveMurphAgeModelCardArtifactRoot({ vaultRoot }), modelCardArtifactRoot);
+    process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = modelCardArtifactRoot;
+
+    const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.mode, "research");
+    assert.equal(publicReport.displaySummary.displayStatus, "research-only");
+    assert.equal(publicReport.researchCandidateCards.some((card) =>
+      card.cardId === "lab9_bp_body_10y_acm_research" && card.modelLoaded && card.selected
+    ), true);
+
+    const encodedReport = JSON.stringify(publicReport);
+    assert.equal(encodedReport.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedReport.includes(vaultRoot), false);
+    assert.equal(encodedReport.includes("metric-point:"), false);
+    assert.equal(encodedReport.includes("\"value\""), false);
+    assert.equal(encodedReport.includes("fixture-lab9-research-model"), false);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT;
+    } else {
+      process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = previousRoot;
+    }
+    if (previousOutputDir === undefined) {
+      delete process.env.MURPH_AGE_MODEL_CARD_OUTPUT_DIR;
+    } else {
+      process.env.MURPH_AGE_MODEL_CARD_OUTPUT_DIR = previousOutputDir;
+    }
+    await rm(vaultRoot, { force: true, recursive: true });
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+  }
+});
+
+test("getMurphAgeResearchPreviewForVault defaults to the shared research calculator surface", async () => {
+  const vaultRoot = await createProjectionVault();
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  const previousRoot = process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT;
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+    ]);
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab9.json", {
+      cardId: "lab9_bp_body_10y_acm_research",
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+    process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = modelCardArtifactRoot;
+
+    const publicReport = await getMurphAgeResearchPreviewForVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.mode, "research");
+    assert.equal(publicReport.displaySummary.displayStatus, "research-only");
+    assert.equal(publicReport.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(JSON.stringify(publicReport).includes(modelCardArtifactRoot), false);
+    assert.equal(JSON.stringify(publicReport).includes(vaultRoot), false);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT;
+    } else {
+      process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = previousRoot;
+    }
+    await rm(vaultRoot, { force: true, recursive: true });
+    await rm(modelCardArtifactRoot, { force: true, recursive: true });
+  }
+});
+
+test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted labs without a vault", async () => {
+  const modelCardArtifactRoot = await mkdtemp(path.join(os.tmpdir(), "murph-age-model-card-root-"));
+  try {
+    await writeModelCardArtifact(modelCardArtifactRoot, "lab5.json", {
+      cardId: "lab5_bp_bmi_transport_research",
+      model: fixtureLab5ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    });
+
+    const publicReport = await getMurphAgeResearchPreviewForSubmittedInputs({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      modelCardArtifactRoot,
+      sex: "female",
+      submittedMetrics: [
+        { metricKey: "HbA1c", unit: "%", value: 5.3 },
+        { metricKey: "HDL_C", unit: "mg/dL", value: 60 },
+        { metricKey: "Triglycerides", unit: "mg/dL", value: 90 },
+        { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
+        { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
+        { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
+        { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
+        { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.8 },
+      ],
+    });
+
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.mode, "research");
+    assert.equal(publicReport.displaySummary.displayStatus, "research-only");
+    assert.equal(publicReport.result?.authorization.cardId, "lab5_bp_bmi_transport_research");
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
+    assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(publicReport.researchCandidateCards.some((card) =>
+      card.cardId === "lab5_bp_bmi_transport_research" && card.modelLoaded && card.selected
+    ), true);
+    const encodedReport = JSON.stringify(publicReport);
+    assert.equal(encodedReport.includes(modelCardArtifactRoot), false);
+    assert.equal(encodedReport.includes("fixture-lab5-research-model"), false);
+    assert.equal(encodedReport.includes("metric-point:"), false);
+    assert.equal(encodedReport.includes("\"value\""), false);
+  } finally {
     await rm(modelCardArtifactRoot, { force: true, recursive: true });
   }
 });

@@ -1815,6 +1815,11 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
+            childRuntimeBundleArchiveOperation: "runner-output",
+            childRuntimeBundleArchiveValidationCause: "artifact_integrity",
+            childRuntimeBundleRefKeyPresent: false,
+            childRuntimeBundleRefPresent: true,
+            childRuntimeBundleRefSize: 1234,
             childRuntimeErrorCode: "invalid_request",
             childRuntimeErrorName: "Error",
             childRuntimeErrorStatus: 404,
@@ -1881,6 +1886,11 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
+        childRuntimeBundleArchiveOperation: "runner-output",
+        childRuntimeBundleArchiveValidationCause: "artifact_integrity",
+        childRuntimeBundleRefKeyPresent: false,
+        childRuntimeBundleRefPresent: true,
+        childRuntimeBundleRefSize: 1234,
         childRuntimeErrorCode: "invalid_request",
         childRuntimeErrorName: "Error",
         childRuntimeErrorStatus: 404,
@@ -1944,6 +1954,11 @@ describe("RunnerContainer", () => {
           runnerChildAbortReasonName: "AbortError",
           runnerChildExitCode: 1,
           runnerChildFirstCompletionKind: "close",
+          runnerChildRuntimeBundleArchiveOperation: "runner-output",
+          runnerChildRuntimeBundleArchiveValidationCause: "artifact_integrity",
+          runnerChildRuntimeBundleRefKeyPresent: false,
+          runnerChildRuntimeBundleRefPresent: true,
+          runnerChildRuntimeBundleRefSize: 1234,
           runnerChildRuntimeErrorCode: "invalid_request",
           runnerChildRuntimeErrorName: "Error",
           runnerChildRuntimeErrorStatus: 404,
@@ -1969,6 +1984,11 @@ describe("RunnerContainer", () => {
           runnerChildStdoutTailPresent: true,
           runnerResponseDetailsKeys: [
             "childProcess",
+            "childRuntimeBundleArchiveOperation",
+            "childRuntimeBundleArchiveValidationCause",
+            "childRuntimeBundleRefKeyPresent",
+            "childRuntimeBundleRefPresent",
+            "childRuntimeBundleRefSize",
             "childRuntimeErrorCode",
             "childRuntimeErrorName",
             "childRuntimeErrorStatus",

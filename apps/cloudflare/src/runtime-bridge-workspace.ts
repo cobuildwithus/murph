@@ -377,6 +377,8 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   let leaseCheckCount = 0;
   let workspaceSnapshotSizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null = null;
   const pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[] = [];
+  const pendingArtifactPutRefs = new Set<string>();
+  const preservedArtifactAvailabilityByRef = new Map<string, Promise<boolean>>();
   const skippedInlineFiles = input.preservedState
     ? await readHostedWorkspaceSkippedInlineFilesBestEffort({
         vaultRoot: input.vaultRoot,
@@ -389,6 +391,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
           effectiveManifest: input.preservedState.manifest,
           inlineFiles: input.preservedState.inlineFiles,
           pendingArtifactPuts,
+          pendingArtifactPutRefs,
           skippedInlineFiles,
           vaultRoot: input.vaultRoot,
         }),
@@ -429,6 +432,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
               artifactRefProvider: input.preservedState?.artifactRefProvider,
               artifactSink: async (artifact) => {
                 pendingArtifactPuts.push(artifact);
+                pendingArtifactPutRefs.add(hostedWorkspaceArtifactRefAvailabilityKey(artifact.ref));
               },
               codexHomeSnapshotHashSecret: input.codexHomeSnapshotHashSecret,
               materializedArtifactPaths: await readHostedMaterializedArtifactPaths({
@@ -436,6 +440,34 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
               }),
               operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
               preservedArtifacts,
+              validatePreservedArtifact: async (artifact) => {
+                if (!isHostedWorkspaceArtifactRefMetadataValid(artifact.ref)) {
+                  throw new HostedBundleArchiveValidationError({
+                    cause: new Error(
+                      "Hosted bundle archive contains invalid artifact metadata.",
+                    ),
+                    operation: "runner-output",
+                    ref: null,
+                  });
+                }
+
+                if (pendingArtifactPutRefs.has(hostedWorkspaceArtifactRefAvailabilityKey(artifact.ref))) {
+                  return;
+                }
+
+                const available = await readHostedWorkspaceArtifactRefAvailability({
+                  artifactStore: input.platform.artifactStore,
+                  availabilityByRef: preservedArtifactAvailabilityByRef,
+                  ref: artifact.ref,
+                });
+                if (!available) {
+                  throw new HostedBundleArchiveValidationError({
+                    cause: new Error("Hosted bundle artifact is unavailable."),
+                    operation: "runner-output",
+                    ref: null,
+                  });
+                }
+              },
               vaultRoot: input.vaultRoot,
               workspaceSnapshotSizeDiagnosticsSink: async (diagnostics) => {
                 workspaceSnapshotSizeDiagnostics = diagnostics;
@@ -636,14 +668,18 @@ async function putHostedWorkspaceArtifacts(input: {
 
 function createBaseManifestArtifactRefProvider(
   baseManifest: HostedPortableWorkspaceManifest,
-): (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null {
+  artifactStore?: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"],
+): (
+  artifact: HostedBundleArtifactSnapshotInput,
+) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null> {
   const artifactFiles = new Map(
     baseManifest.files
       .filter((file) => file.artifact)
       .map((file) => [`${file.root}:${file.path}`, file] as const),
   );
+  const availabilityByRef = new Map<string, Promise<boolean>>();
 
-  return (artifact) => {
+  return async (artifact) => {
     const baseFile = artifactFiles.get(`${artifact.root}:${artifact.path}`);
     if (!baseFile?.artifact || baseFile.size !== artifact.bytes.byteLength) {
       return null;
@@ -654,8 +690,62 @@ function createBaseManifestArtifactRefProvider(
       return null;
     }
 
+    if (
+      artifactStore
+      && !(await readHostedWorkspaceArtifactRefAvailability({
+        artifactStore,
+        availabilityByRef,
+        ref: baseFile.artifact,
+      }))
+    ) {
+      return null;
+    }
+
     return baseFile.artifact;
   };
+}
+
+function readHostedWorkspaceArtifactRefAvailability(input: {
+  artifactStore: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"];
+  availabilityByRef: Map<string, Promise<boolean>>;
+  ref: HostedBundleArtifactRef;
+}): Promise<boolean> {
+  const key = hostedWorkspaceArtifactRefAvailabilityKey(input.ref);
+  const existing = input.availabilityByRef.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = isHostedWorkspaceArtifactRefAvailable({
+    artifactStore: input.artifactStore,
+    ref: input.ref,
+  });
+  input.availabilityByRef.set(key, pending);
+  return pending;
+}
+
+function hostedWorkspaceArtifactRefAvailabilityKey(ref: HostedBundleArtifactRef): string {
+  return `${ref.sha256}:${ref.byteSize}`;
+}
+
+function isHostedWorkspaceArtifactRefMetadataValid(ref: HostedBundleArtifactRef): boolean {
+  return Number.isSafeInteger(ref.byteSize)
+    && ref.byteSize >= 0
+    && /^[a-f0-9]{64}$/u.test(ref.sha256);
+}
+
+async function isHostedWorkspaceArtifactRefAvailable(input: {
+  artifactStore: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"];
+  ref: HostedBundleArtifactRef;
+}): Promise<boolean> {
+  try {
+    const bytes = await input.artifactStore.get(input.ref.sha256);
+    return bytes !== null
+      && bytes.byteLength === input.ref.byteSize
+      && sha256HostedBundleHex(bytes) === input.ref.sha256;
+  } catch {
+    return false;
+  }
 }
 
 function createBaseManifestPreservedArtifacts(
@@ -706,6 +796,7 @@ function createHostedWorkspaceBridgePreservedInlineArtifacts(input: {
   effectiveManifest: HostedPortableWorkspaceManifest;
   inlineFiles: readonly HostedBundleInlineLocation[];
   pendingArtifactPuts: HostedWorkspaceArtifactPersistInput[];
+  pendingArtifactPutRefs: Set<string>;
   skippedInlineFiles: readonly HostedWorkspaceSkippedInlineFile[];
   vaultRoot: string;
 }): HostedBundleArtifactRestoreInput[] {
@@ -741,6 +832,7 @@ function createHostedWorkspaceBridgePreservedInlineArtifacts(input: {
       ref,
       root: file.root,
     });
+    input.pendingArtifactPutRefs.add(hostedWorkspaceArtifactRefAvailabilityKey(ref));
   }
   return artifacts;
 }
@@ -785,7 +877,9 @@ function hasHostedRuntimeBridgeEagerArtifactPrefix(
 }
 
 interface HostedWorkspaceEffectivePreservedState {
-  artifactRefProvider: (artifact: HostedBundleArtifactSnapshotInput) => HostedBundleArtifactRef | null;
+  artifactRefProvider: (
+    artifact: HostedBundleArtifactSnapshotInput,
+  ) => HostedBundleArtifactRef | null | Promise<HostedBundleArtifactRef | null>;
   inlineFiles: HostedBundleInlineLocation[];
   manifest: HostedPortableWorkspaceManifest;
   preservedArtifacts: HostedBundleArtifactRestoreInput[];
@@ -799,6 +893,8 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   if (!baseSnapshotRef) {
     return createHostedWorkspaceEffectivePreservedStateFromManifest(
       createEmptyHostedPortableWorkspaceManifest(),
+      [],
+      input.platform.artifactStore,
     );
   }
 
@@ -835,9 +931,14 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
           baseInlineFiles,
           overlayInlineFiles: hotInlineFiles,
         }),
+        input.platform.artifactStore,
       );
     }
-    return createHostedWorkspaceEffectivePreservedStateFromManifest(baseManifest, baseInlineFiles);
+    return createHostedWorkspaceEffectivePreservedStateFromManifest(
+      baseManifest,
+      baseInlineFiles,
+      input.platform.artifactStore,
+    );
   }
 
   const deltaBundle = await input.platform.artifactStore.get(deltaSnapshotRef.hash);
@@ -859,15 +960,17 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
       deltaBundle,
       deltaManifest,
     }),
+    input.platform.artifactStore,
   );
 }
 
 function createHostedWorkspaceEffectivePreservedStateFromManifest(
   manifest: HostedPortableWorkspaceManifest,
   inlineFiles: HostedBundleInlineLocation[] = [],
+  artifactStore?: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"],
 ): HostedWorkspaceEffectivePreservedState {
   return {
-    artifactRefProvider: createBaseManifestArtifactRefProvider(manifest),
+    artifactRefProvider: createBaseManifestArtifactRefProvider(manifest, artifactStore),
     inlineFiles,
     manifest,
     preservedArtifacts: createBaseManifestPreservedArtifacts(manifest),
@@ -1096,6 +1199,7 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  let safeDiagnosticDetail: string | null = null;
   if (diagnostics) {
     if (typeof diagnostics.errorCode === "string") {
       redactedJson.errorCode = diagnostics.errorCode;
@@ -1108,6 +1212,16 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
     }
     if (typeof diagnostics.errorStatus === "number") {
       redactedJson.errorStatus = diagnostics.errorStatus;
+    }
+    if (typeof diagnostics.errorCodeDetail === "string") {
+      redactedJson.errorCodeDetail = redactHostedRuntimeDiagnosticText(
+        diagnostics.errorCodeDetail,
+      );
+    }
+    if (typeof diagnostics.errorDetail === "string") {
+      safeDiagnosticDetail = redactHostedRuntimeDiagnosticText(
+        diagnostics.errorDetail,
+      );
     }
     redactedJson.errorDetailPresent = typeof diagnostics.errorDetail === "string";
     redactedJson.errorCausePresent = typeof diagnostics.errorCause === "string";
@@ -1122,6 +1236,16 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       || bundleValidation.refSize !== null;
     if (bundleValidation.refSize !== null) {
       redactedJson.bundleRefSize = bundleValidation.refSize;
+    }
+    if (bundleValidation.validationCause) {
+      redactedJson.bundleArchiveValidationCause = bundleValidation.validationCause;
+    }
+    const validationDetail = bundleValidation.validationMessage
+      ? redactHostedRuntimeDiagnosticText(bundleValidation.validationMessage)
+      : safeDiagnosticDetail;
+    if (validationDetail) {
+      redactedJson.safeErrorDetail = validationDetail;
+      redactedJson.bundleArchiveValidationDetail = validationDetail;
     }
   }
 }
@@ -1288,6 +1412,26 @@ function appendHostedWorkspaceSnapshotSizeDiagnostics(
   redactedJson: HostedRuntimeRedactedJson,
   diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
 ): void {
+  if (diagnostics.workspaceSnapshotArchiveArtifactCount !== null) {
+    redactedJson.workspaceSnapshotArchiveArtifactCount =
+      diagnostics.workspaceSnapshotArchiveArtifactCount;
+  }
+  if (diagnostics.workspaceSnapshotArchiveFileCount !== null) {
+    redactedJson.workspaceSnapshotArchiveFileCount =
+      diagnostics.workspaceSnapshotArchiveFileCount;
+  }
+  if (diagnostics.workspaceSnapshotArchiveInlineFileCount !== null) {
+    redactedJson.workspaceSnapshotArchiveInlineFileCount =
+      diagnostics.workspaceSnapshotArchiveInlineFileCount;
+  }
+  if (diagnostics.workspaceSnapshotArchivePreservedArtifactCandidateCount !== null) {
+    redactedJson.workspaceSnapshotArchivePreservedArtifactCandidateCount =
+      diagnostics.workspaceSnapshotArchivePreservedArtifactCandidateCount;
+  }
+  if (diagnostics.workspaceSnapshotArchivePreservedArtifactIncludedCount !== null) {
+    redactedJson.workspaceSnapshotArchivePreservedArtifactIncludedCount =
+      diagnostics.workspaceSnapshotArchivePreservedArtifactIncludedCount;
+  }
   redactedJson.workspaceSnapshotClassSummary =
     diagnostics.workspaceSnapshotClassSummary;
   redactedJson.workspaceSnapshotExternalArtifactBytes =

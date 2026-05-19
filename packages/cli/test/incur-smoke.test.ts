@@ -479,6 +479,44 @@ test('murph age descriptor exposes metadata-only input readiness', () => {
   assert.equal('hint' in inputsCommand, true)
   assert.match(String(('hint' in inputsCommand ? inputsCommand.hint : '') ?? ''), /does not calculate an age/u)
   assert.equal('output' in inputsCommand, true)
+
+  const scaffoldCommand = descriptor.leafCommands.find(
+    (leafCommand) => leafCommand.path.join(' ') === 'age scaffold',
+  )
+
+  if (!scaffoldCommand) {
+    throw new Error('expected age scaffold descriptor')
+  }
+  assert.match(scaffoldCommand.description, /research-preview JSON payload/u)
+  assert.match(String(('hint' in scaffoldCommand ? scaffoldCommand.hint : '') ?? ''), /Wearable values/u)
+  assert.equal('output' in scaffoldCommand, true)
+
+  const previewCommand = descriptor.leafCommands.find(
+    (leafCommand) => leafCommand.path.join(' ') === 'age preview',
+  )
+
+  if (!previewCommand) {
+    throw new Error('expected age preview descriptor')
+  }
+  assert.match(previewCommand.description, /submitted JSON payload/u)
+  assert.match(String(('hint' in previewCommand ? previewCommand.hint : '') ?? ''), /research-only/u)
+  assert.equal('output' in previewCommand, true)
+
+  const modelCardsCommand = descriptor.leafCommands.find(
+    (leafCommand) => leafCommand.path.join(' ') === 'age model-cards',
+  )
+
+  if (!modelCardsCommand) {
+    throw new Error('expected age model-cards descriptor')
+  }
+  assert.match(modelCardsCommand.description, /metadata-only/u)
+  assert.match(modelCardsCommand.description, /model-card/u)
+  assert.equal('hint' in modelCardsCommand, true)
+  assert.match(
+    String(('hint' in modelCardsCommand ? modelCardsCommand.hint : '') ?? ''),
+    /does not expose model internals/u,
+  )
+  assert.equal('output' in modelCardsCommand, true)
 })
 
 test('workout descriptor does not expose the removed workout measurement alias', () => {
@@ -1833,6 +1871,18 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.match(
     String(ageInputsCommand?.description ?? ''),
     /metadata-only/u,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'age model-cards'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'age preview'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'age scaffold'),
+    true,
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'commons source list'),

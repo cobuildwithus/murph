@@ -11,6 +11,7 @@ import {
   assessMurphAgeWearableShadowIncrements,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
+  calculateMurphAgeFromSubmittedInputs,
   createMurphAgeAbstainedAuthorization,
   createMurphAgeCustomModelAuthorization,
   isMurphAgeInputBundleMetricPointAllowed,
@@ -43,6 +44,7 @@ import {
   type MurphAgeResult,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
+  type MurphAgeSubmittedCalculatorInput,
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
   type MurphAgeWearableShadowIncrementStatus,
@@ -63,6 +65,18 @@ export interface CalculateMurphAgeFromVaultInputBundleInput extends Omit<MurphAg
   asOf: string;
   modelCardArtifactRoot?: string;
   vaultRoot: string;
+}
+
+export interface GetMurphAgeResearchPreviewForVaultInput
+  extends Omit<CalculateMurphAgeFromVaultInputBundleInput, "mode"> {
+  mode?: "research";
+}
+
+export interface GetMurphAgeResearchPreviewForSubmittedInputsInput
+  extends Omit<MurphAgeSubmittedCalculatorInput, "mode" | "models"> {
+  modelCardArtifactRoot?: string;
+  mode?: "research";
+  models?: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
 }
 
 export { MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION, type MurphAgeLocalModelCardArtifact };
@@ -179,6 +193,10 @@ export interface MurphAgeWearableShadowReadinessForVault {
 }
 
 const MURPH_AGE_MODEL_CARD_RELATIVE_DIR = path.join(".runtime", "operations", "murph-age", "model-cards");
+const MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT_ENV_KEYS = [
+  "MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT",
+  "MURPH_AGE_MODEL_CARD_OUTPUT_DIR",
+] as const;
 const WEARABLE_COVERAGE_WINDOW_DAYS = 28;
 const WEARABLE_COVERAGE_MIN_VALID_DAYS = 14;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -308,6 +326,33 @@ export async function calculateMurphAgePublicReportFromVaultInputBundle(
 ): Promise<MurphAgePublicCalculatorReport> {
   const output = await calculateMurphAgeFromVaultInputBundle(input);
   return toPublicMurphAgeCalculatorReport(output);
+}
+
+export async function getMurphAgeResearchPreviewForVault(
+  input: GetMurphAgeResearchPreviewForVaultInput,
+): Promise<MurphAgePublicCalculatorReport> {
+  return calculateMurphAgePublicReportFromVaultInputBundle({
+    ...input,
+    mode: "research",
+  });
+}
+
+export async function getMurphAgeResearchPreviewForSubmittedInputs(
+  input: GetMurphAgeResearchPreviewForSubmittedInputsInput,
+): Promise<MurphAgePublicCalculatorReport> {
+  const localModelCards = await loadMurphAgeLocalModelCardArtifacts({
+    modelCardArtifactRoot: input.modelCardArtifactRoot,
+  });
+  const output = calculateMurphAgeFromSubmittedInputs({
+    asOf: input.asOf,
+    cardId: input.cardId,
+    chronologicalAgeYears: input.chronologicalAgeYears,
+    mode: "research",
+    models: { ...localModelCards.models, ...input.models },
+    sex: input.sex,
+    submittedMetrics: input.submittedMetrics,
+  });
+  return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
 }
 
 export async function assessMurphAgeInputReadinessFromVault(
@@ -629,11 +674,20 @@ export function defaultMurphAgeModelCardArtifactRoot(vaultRoot: string): string 
   return path.join(vaultRoot, MURPH_AGE_MODEL_CARD_RELATIVE_DIR);
 }
 
+export function resolveMurphAgeModelCardArtifactRoot(input: {
+  modelCardArtifactRoot?: string;
+  vaultRoot?: string;
+}): string {
+  return input.modelCardArtifactRoot
+    ?? configuredMurphAgeModelCardArtifactRoot()
+    ?? defaultMurphAgeModelCardArtifactRoot(input.vaultRoot ?? process.cwd());
+}
+
 export async function loadMurphAgeLocalModelCardArtifacts(input: {
   modelCardArtifactRoot?: string;
-  vaultRoot: string;
+  vaultRoot?: string;
 }): Promise<MurphAgeLocalModelCardLoadResult> {
-  const root = input.modelCardArtifactRoot ?? defaultMurphAgeModelCardArtifactRoot(input.vaultRoot);
+  const root = resolveMurphAgeModelCardArtifactRoot(input);
   let entries: Array<{ isFile(): boolean; name: string }>;
   try {
     entries = await readdir(root, { withFileTypes: true });
@@ -669,6 +723,14 @@ export async function loadMurphAgeLocalModelCardArtifacts(input: {
   }
 
   return { models, warnings };
+}
+
+function configuredMurphAgeModelCardArtifactRoot(): string | undefined {
+  for (const envKey of MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT_ENV_KEYS) {
+    const value = process.env[envKey]?.trim();
+    if (value) return value;
+  }
+  return undefined;
 }
 
 async function readLocalModelCardArtifact(filePath: string): Promise<{
@@ -987,6 +1049,7 @@ function invalidCalculatorOutput(input: {
     cardPolicy: null,
     contextAssessments: [],
     mode: input.mode,
+    researchCandidateCards: [],
     result: null,
     schemaVersion: MURPH_AGE_RESULT_SCHEMA_VERSION,
     status: "abstain",

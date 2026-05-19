@@ -3348,6 +3348,31 @@
                     }
                   }
                 },
+                "scaffold": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "preview": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
+                        },
+                        "modelCardArtifactRoot": {
+                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                },
                 "inputs": {
                   "type": "object",
                   "additionalProperties": false,

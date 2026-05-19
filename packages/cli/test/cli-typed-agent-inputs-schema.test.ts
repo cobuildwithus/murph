@@ -484,6 +484,7 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
+    'age preview',
     'allergy import-json',
     'automation import-json',
     'blood-test import-json',
@@ -512,6 +513,39 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     .sort()
 
   assert.deepEqual(inputCommands, reviewedInputCommands)
+})
+
+test('murph age submitted-data commands stay in generated agent artifacts', async () => {
+  const commands = await loadFullLlmCommands()
+  const generatedTypes = await readFile(
+    new URL('../src/incur.generated.ts', import.meta.url),
+    'utf8',
+  )
+  const configSchema = parseJsonObject(
+    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
+    'config schema',
+  )
+  const previewCommand = requireManifestCommand(commands, {
+    label: 'age preview',
+    commandNames: ['age preview'],
+    fieldHints: ['input', 'modelCardArtifactRoot'],
+  })
+  const scaffoldCommand = requireManifestCommand(commands, {
+    label: 'age scaffold',
+    commandNames: ['age scaffold'],
+    fieldHints: [],
+  })
+
+  assert.equal(schemaIncludesProperty(previewCommand.schema, 'input'), true)
+  assert.equal(schemaIncludesProperty(previewCommand.schema, 'modelCardArtifactRoot'), true)
+  assert.equal(schemaIncludesProperty(scaffoldCommand.schema, 'input'), false)
+  assert.match(generatedTypes, /'age preview': \{ args: \{\}; options: \{ input: string; modelCardArtifactRoot\?: string \} \}/u)
+  assert.match(generatedTypes, /'age scaffold': \{ args: \{\}; options: \{\} \}/u)
+  assert.deepEqual(commandConfigOptionNames(configSchema, 'age preview').sort(), [
+    'input',
+    'modelCardArtifactRoot',
+  ])
+  assert.deepEqual(commandConfigOptionNames(configSchema, 'age scaffold'), [])
 })
 
 test('patch-style edit commands expose typed fields instead of generic patch flags', async () => {
@@ -793,6 +827,9 @@ function commandConfigOptionNames(
       currentCommands[segment],
       `config schema command ${segments.slice(0, index + 1).join(' ')}`,
     )
+    if (commandSchema.properties === undefined && index === segments.length - 1) {
+      return []
+    }
     const commandProperties = requireRecord(
       commandSchema.properties,
       `config schema command ${segments.slice(0, index + 1).join(' ')} properties`,

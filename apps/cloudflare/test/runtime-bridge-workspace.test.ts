@@ -13,10 +13,14 @@ import {
   listHostedBundleArtifacts,
   readHostedBundleTextFile,
   createHostedPortableWorkspaceManifestFromBundle,
+  HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+  HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH,
+  HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
   readHostedPortableWorkspaceManifestFromBundle,
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
+  writeHostedBundleTextFile,
   writeHostedWorkspaceSkippedInlineFiles,
 } from "@murphai/runtime-state/node";
 import {
@@ -260,6 +264,190 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(maxActivePuts).toBeLessThanOrEqual(32);
   });
 
+  it("re-uploads live raw artifacts when the base manifest ref is stale", async () => {
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(baseVaultRoot, vaultRoot);
+    const rawPath = path.join("raw", "captures", "stale.bin");
+    const rawBytes = Buffer.from("same live artifact bytes\n");
+    await mkdir(path.join(baseVaultRoot, "raw", "captures"), { recursive: true });
+    await mkdir(path.join(vaultRoot, "raw", "captures"), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, rawPath), rawBytes);
+    await writeFile(path.join(vaultRoot, rawPath), rawBytes);
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifactBundles.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot: baseVaultRoot,
+    });
+    const baseSnapshotHash = sha256HostedBundleHex(baseSnapshot.bundle);
+    artifactBundles.set(baseSnapshotHash, baseSnapshot.bundle);
+    const rawHash = sha256HostedBundleHex(rawBytes);
+    artifactBundles.delete(rawHash);
+    const baseSnapshotRef = {
+      hash: baseSnapshotHash,
+      key: `cloudflare-workspace-snapshots/${baseSnapshotHash}.bundle`,
+      size: baseSnapshot.bundle.byteLength,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
+      artifactBundles.set(sha256, bytes);
+    });
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "7",
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
+
+    expect(Buffer.from(artifactBundles.get(rawHash) ?? [])).toEqual(rawBytes);
+    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      sha256: rawHash,
+    }));
+    expect(listHostedBundleArtifacts({
+      bytes: bundle,
+      expectedKind: "vault",
+    })).toContainEqual({
+      path: rawPath,
+      ref: {
+        byteSize: rawBytes.byteLength,
+        sha256: rawHash,
+      },
+      root: "vault",
+    });
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toContainEqual(expect.objectContaining({
+      eventCode: "checkpoint.bundle_write_started",
+      redactedJson: expect.objectContaining({
+        pendingArtifactPutCount: 1,
+      }),
+    }));
+    expect(entries).toContainEqual(expect.objectContaining({
+      eventCode: "checkpoint.bundle_write_finished",
+      redactedJson: expect.objectContaining({
+        externalArtifactPutCount: 1,
+      }),
+    }));
+  });
+
+  it("fails full compaction when an unmaterialized preserved artifact ref is stale", async () => {
+    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(baseVaultRoot, vaultRoot);
+    const rawPath = path.join("raw", "captures", "missing.bin");
+    const rawBytes = Buffer.from("missing preserved artifact bytes\n");
+    await mkdir(path.join(baseVaultRoot, "raw", "captures"), { recursive: true });
+    await writeFile(path.join(baseVaultRoot, rawPath), rawBytes);
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifactBundles.set(artifact.ref.sha256, artifact.bytes);
+      },
+      vaultRoot: baseVaultRoot,
+    });
+    const baseSnapshotHash = sha256HostedBundleHex(baseSnapshot.bundle);
+    artifactBundles.set(baseSnapshotHash, baseSnapshot.bundle);
+    const rawHash = sha256HostedBundleHex(rawBytes);
+    artifactBundles.delete(rawHash);
+    const baseSnapshotRef = {
+      hash: baseSnapshotHash,
+      key: `cloudflare-workspace-snapshots/${baseSnapshotHash}.bundle`,
+      size: baseSnapshot.bundle.byteLength,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
+      artifactBundles.set(sha256, bytes);
+    });
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "7",
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted bundle artifact integrity validation failed.");
+
+    expect(putArtifact).not.toHaveBeenCalled();
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toContainEqual(expect.objectContaining({
+      attemptId: "attempt_1",
+      component: "workspace",
+      eventCode: "checkpoint.snapshot_failed",
+      leaseGeneration: "4",
+      level: "error",
+      phase: "checkpoint",
+      redactedJson: expect.objectContaining({
+        bundleArchiveOperation: "runner-output",
+        bundleArchiveValidationCause: "artifact_integrity",
+        bundleArchiveValidationDetail:
+          "Hosted bundle artifact integrity validation failed.",
+        bundlePutBytes: 0,
+        checkpointPolicy: "full",
+        errorCode: "bundle_archive_validation_error",
+        errorCodeDetail: "bundle_archive_validation_error",
+        pendingArtifactPutCount: 0,
+        safeErrorDetail: "Hosted bundle artifact integrity validation failed.",
+        safeErrorMessage: "Hosted bundle archive validation failed.",
+        snapshotMode: "full",
+      }),
+      workspaceVersion: "7",
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain(rawPath);
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain(rawHash);
+  });
+
   it("writes full seed checkpoints when there is no base snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
@@ -471,6 +659,97 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(writeLog).not.toHaveBeenCalled();
   });
 
+  it("logs safe bundle validation detail when full compaction preserves an invalid artifact ref", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "note.md"), "local filesystem only\n", "utf8");
+    const artifactBundles = new Map<string, Uint8Array>();
+    const baseSnapshotRef = createStoredManifestOnlySnapshotRef({
+      artifactBundles,
+      files: [{
+        artifact: {
+          byteSize: 17,
+          sha256: "not-a-valid-artifact-hash",
+        },
+        path: "raw/preserved-invalid.bin",
+        root: "vault",
+        sha256: "not-a-valid-artifact-hash",
+        size: 17,
+      }],
+    });
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "8",
+        }),
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "8",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "8",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted bundle archive contains invalid artifact metadata.");
+
+    expect(putArtifact).not.toHaveBeenCalled();
+    const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toContainEqual(expect.objectContaining({
+      attemptId: "attempt_1",
+      component: "workspace",
+      eventCode: "checkpoint.snapshot_failed",
+      leaseGeneration: "4",
+      level: "error",
+      phase: "checkpoint",
+      redactedJson: expect.objectContaining({
+        bundleArchiveOperation: "runner-output",
+        bundleArchiveValidationCause: "invalid_artifact_metadata",
+        bundleArchiveValidationDetail:
+          "Hosted bundle archive contains invalid artifact metadata.",
+        bundleRefKeyPresent: false,
+        bundleRefPresent: false,
+        bundlePutBytes: 0,
+        checkpointPolicy: "full",
+        errorCode: "bundle_archive_validation_error",
+        errorCodeDetail: "bundle_archive_validation_error",
+        errorDetailPresent: true,
+        errorName: "HostedBundleArchiveValidationError",
+        pendingArtifactPutCount: 0,
+        safeErrorDetail: "Hosted bundle archive contains invalid artifact metadata.",
+        safeErrorMessage: "Hosted bundle archive validation failed.",
+        snapshotMode: "full",
+        workspaceSnapshotArchiveArtifactCount: 1,
+        workspaceSnapshotArchiveFileCount: 2,
+        workspaceSnapshotArchiveInlineFileCount: 1,
+        workspaceSnapshotArchivePreservedArtifactCandidateCount: 1,
+        workspaceSnapshotArchivePreservedArtifactIncludedCount: 1,
+        workspaceSnapshotSizeDiagnosticsPresent: true,
+      }),
+      workspaceVersion: "8",
+    }));
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("raw/preserved-invalid.bin");
+    expect(JSON.stringify(writeLog.mock.calls)).not.toContain("not-a-valid-artifact-hash");
+  });
+
   it("aborts idle shutdown full snapshot publication when the checkpoint lease goes stale", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
@@ -594,6 +873,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const legacyLayeredRef = await createLegacyLayeredSnapshotFixture({
       artifactBundles,
       baseVaultRoot,
+      externalizeHotArtifacts: false,
       hotVaultRoot,
     });
     const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
@@ -1599,9 +1879,17 @@ function createBundleRef(hashCharacter: string) {
 
 async function createStoredBaseSnapshotRef(input: {
   artifactBundles: Map<string, Uint8Array>;
+  externalizeArtifacts?: boolean;
   vaultRoot: string;
 }) {
   const snapshot = await snapshotHostedExecutionContext({
+    ...(input.externalizeArtifacts === false
+      ? {}
+      : {
+          artifactSink: async (artifact) => {
+            input.artifactBundles.set(artifact.ref.sha256, artifact.bytes);
+          },
+        }),
     vaultRoot: input.vaultRoot,
   });
   const hash = sha256HostedBundleHex(snapshot.bundle);
@@ -1614,12 +1902,45 @@ async function createStoredBaseSnapshotRef(input: {
   };
 }
 
+function createStoredManifestOnlySnapshotRef(input: {
+  artifactBundles: Map<string, Uint8Array>;
+  files: readonly Record<string, unknown>[];
+}) {
+  const manifestBody = {
+    files: input.files,
+    policyVersion: HOSTED_PORTABLE_WORKSPACE_MANIFEST_POLICY_VERSION,
+    schema: HOSTED_PORTABLE_WORKSPACE_MANIFEST_SCHEMA,
+  };
+  const manifest = {
+    ...manifestBody,
+    manifestHash: sha256HostedBundleHex(Buffer.from(JSON.stringify(manifestBody))),
+  };
+  const bundle = writeHostedBundleTextFile({
+    bytes: null,
+    kind: "vault",
+    path: HOSTED_PORTABLE_WORKSPACE_MANIFEST_RELATIVE_PATH,
+    root: "workspace-metadata",
+    text: JSON.stringify(manifest) + "\n",
+  });
+  const hash = sha256HostedBundleHex(bundle);
+  input.artifactBundles.set(hash, bundle);
+  return {
+    hash,
+    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
+    size: bundle.byteLength,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+}
+
 async function createLegacyWorkingSnapshotFixture(input: {
   artifactBundles: Map<string, Uint8Array>;
   baseVaultRoot: string;
   vaultRoot: string;
 }) {
   const baseSnapshot = await snapshotHostedExecutionContext({
+    artifactSink: async (artifact) => {
+      input.artifactBundles.set(artifact.ref.sha256, artifact.bytes);
+    },
     vaultRoot: input.baseVaultRoot,
   });
   const baseSnapshotHash = sha256HostedBundleHex(baseSnapshot.bundle);
@@ -1659,13 +1980,23 @@ async function createLegacyWorkingSnapshotFixture(input: {
 async function createLegacyLayeredSnapshotFixture(input: {
   artifactBundles: Map<string, Uint8Array>;
   baseVaultRoot: string;
+  externalizeBaseArtifacts?: boolean;
+  externalizeHotArtifacts?: boolean;
   hotVaultRoot: string;
 }) {
   const baseSnapshotRef = await createStoredBaseSnapshotRef({
+    externalizeArtifacts: input.externalizeBaseArtifacts,
     artifactBundles: input.artifactBundles,
     vaultRoot: input.baseVaultRoot,
   });
   const hotSnapshot = await snapshotHostedExecutionContext({
+    ...(input.externalizeHotArtifacts === false
+      ? {}
+      : {
+          artifactSink: async (artifact) => {
+            input.artifactBundles.set(artifact.ref.sha256, artifact.bytes);
+          },
+        }),
     vaultRoot: input.hotVaultRoot,
   });
   const hotSnapshotHash = sha256HostedBundleHex(hotSnapshot.bundle);

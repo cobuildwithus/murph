@@ -9,6 +9,11 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 
+import {
+  readHostedBundleArchiveValidationCause,
+  type HostedBundleArchiveValidationCause,
+} from "./hosted-bundle-validation-cause.js";
+
 export const HOSTED_BUNDLE_ARCHIVE_VALIDATION_ERROR_CODE =
   "bundle_archive_validation_error";
 const MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES = 128 * 1024 * 1024;
@@ -24,11 +29,14 @@ export type HostedBundleArchiveValidationOperation =
   | "cleanup-authoritative-next"
   | "runner-input"
   | "runner-output";
+export type { HostedBundleArchiveValidationCause };
 
 export class HostedBundleArchiveValidationError extends Error {
   readonly code = HOSTED_BUNDLE_ARCHIVE_VALIDATION_ERROR_CODE;
   readonly details: {
     bundleArchiveOperation: HostedBundleArchiveValidationOperation;
+    bundleArchiveValidationCause: HostedBundleArchiveValidationCause;
+    bundleArchiveValidationMessage: string;
     bundleRefHash: string | null;
     bundleRefKeyPresent: boolean;
     bundleRefPresent: boolean;
@@ -38,13 +46,18 @@ export class HostedBundleArchiveValidationError extends Error {
   readonly refHash: string | null;
   readonly refKeyPresent: boolean;
   readonly refSize: number | null;
+  readonly validationCause: HostedBundleArchiveValidationCause;
+  readonly validationMessage: string;
 
   constructor(input: {
     cause: unknown;
     operation: HostedBundleArchiveValidationOperation;
     ref?: HostedExecutionBundleRef | null;
   }) {
-    super(readHostedBundleValidationMessage(input.cause), {
+    const validation = readHostedBundleValidationClassification(input.cause);
+    const validationCause = validation.cause;
+    const validationMessage = validation.message;
+    super(validationMessage, {
       cause: input.cause,
     });
     this.name = "HostedBundleArchiveValidationError";
@@ -53,8 +66,12 @@ export class HostedBundleArchiveValidationError extends Error {
     this.refKeyPresent =
       typeof input.ref?.key === "string" && input.ref.key.length > 0;
     this.refSize = input.ref?.size ?? null;
+    this.validationCause = validationCause;
+    this.validationMessage = validationMessage;
     this.details = {
       bundleArchiveOperation: input.operation,
+      bundleArchiveValidationCause: validationCause,
+      bundleArchiveValidationMessage: validationMessage,
       bundleRefHash: this.refHash,
       bundleRefKeyPresent: this.refKeyPresent,
       bundleRefPresent: input.ref !== null && input.ref !== undefined,
@@ -68,6 +85,8 @@ export interface HostedBundleArchiveValidationErrorDetails {
   refHash: string | null;
   refKeyPresent: boolean;
   refSize: number | null;
+  validationCause: HostedBundleArchiveValidationCause | null;
+  validationMessage: string | null;
 }
 
 export function assertHostedBundleArchiveValid(input: {
@@ -212,6 +231,8 @@ export function readHostedBundleArchiveValidationErrorDetails(
       refHash: error.refHash,
       refKeyPresent: error.refKeyPresent,
       refSize: error.refSize,
+      validationCause: error.validationCause,
+      validationMessage: error.validationMessage,
     };
   }
 
@@ -237,6 +258,12 @@ export function readHostedBundleArchiveValidationErrorDetails(
     refKeyPresent: readHostedBundleValidationRefKeyPresent(details),
     refSize: readHostedBundleValidationNumber(
       details?.bundleRefSize ?? details?.refSize,
+    ),
+    validationCause: readHostedBundleArchiveValidationCause(
+      details?.bundleArchiveValidationCause ?? details?.validationCause,
+    ),
+    validationMessage: readHostedBundleValidationString(
+      details?.bundleArchiveValidationMessage ?? details?.validationMessage,
     ),
   };
 }
@@ -325,56 +352,106 @@ function readHostedBundleValidationRefKeyPresent(
 }
 
 function readHostedBundleValidationMessage(cause: unknown): string {
+  return readHostedBundleValidationClassification(cause).message;
+}
+
+function readHostedBundleValidationClassification(cause: unknown): {
+  cause: HostedBundleArchiveValidationCause;
+  message: string;
+} {
   const message = cause instanceof Error ? cause.message : "";
 
   if (message.length === 0) {
-    return "Hosted bundle archive is invalid.";
+    return {
+      cause: "archive_invalid",
+      message: "Hosted bundle archive is invalid.",
+    };
   }
 
   if (message === "Hosted bundle payload must be valid base64.") {
-    return "Hosted bundle archive payload is invalid.";
+    return {
+      cause: "payload_invalid",
+      message: "Hosted bundle archive payload is invalid.",
+    };
   }
 
   if (message === "Hosted bundle archive is invalid.") {
-    return message;
+    return {
+      cause: "archive_invalid",
+      message,
+    };
   }
 
   if (
     message === "Hosted bundle archive kind is invalid."
     || message.startsWith("Hosted bundle kind mismatch:")
   ) {
-    return "Hosted bundle archive kind is invalid.";
+    return {
+      cause: "kind_invalid",
+      message: "Hosted bundle archive kind is invalid.",
+    };
   }
 
   if (message.startsWith("Hosted bundle archive exceeds ")) {
-    return message;
+    return {
+      cause: "size_limit",
+      message,
+    };
   }
 
   if (message === "Hosted bundle path is invalid.") {
-    return "Hosted bundle archive contains an invalid file path.";
+    return {
+      cause: "invalid_file_path",
+      message: "Hosted bundle archive contains an invalid file path.",
+    };
   }
 
   if (message === "Hosted bundle root is invalid.") {
-    return "Hosted bundle archive contains an invalid root.";
+    return {
+      cause: "invalid_root",
+      message: "Hosted bundle archive contains an invalid root.",
+    };
   }
 
   if (message.startsWith("Hosted bundle archive contains duplicate file")) {
-    return "Hosted bundle archive contains duplicate file entries.";
+    return {
+      cause: "duplicate_file_entries",
+      message: "Hosted bundle archive contains duplicate file entries.",
+    };
   }
 
-  if (
-    message === "Hosted bundle archive contains invalid artifact metadata."
-    || message === "Hosted bundle archive contains invalid inline file contents."
-    || message === "Hosted bundle archive contains an invalid file entry."
-  ) {
-    return message;
+  if (message === "Hosted bundle archive contains invalid artifact metadata.") {
+    return {
+      cause: "invalid_artifact_metadata",
+      message,
+    };
+  }
+
+  if (message === "Hosted bundle archive contains invalid inline file contents.") {
+    return {
+      cause: "invalid_inline_file_contents",
+      message,
+    };
+  }
+
+  if (message === "Hosted bundle archive contains an invalid file entry.") {
+    return {
+      cause: "invalid_file_entry",
+      message,
+    };
   }
 
   if (message.startsWith("Hosted bundle artifact ")) {
-    return "Hosted bundle artifact integrity validation failed.";
+    return {
+      cause: "artifact_integrity",
+      message: "Hosted bundle artifact integrity validation failed.",
+    };
   }
 
-  return "Hosted bundle archive is invalid.";
+  return {
+    cause: "archive_invalid",
+    message: "Hosted bundle archive is invalid.",
+  };
 }
 
 async function parseHostedBundleArchiveForValidation(
