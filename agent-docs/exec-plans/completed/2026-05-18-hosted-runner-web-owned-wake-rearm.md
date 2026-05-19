@@ -83,6 +83,8 @@ Completed:
 - `pnpm --dir apps/cloudflare test:node -- user-runner-alarm -t "does not report caught-up when mailbox checkpoints are caught up behind an active write fence"` passed.
 - `pnpm --dir apps/cloudflare test:node -- user-runner-alarm -t "web-owned workspace wake|earlier Cloudflare wake"` passed and reported the Cloudflare node workspace green.
 - `pnpm --dir apps/cloudflare test:node -- user-runner-alarm -t "schedules a short recheck when runtime completion requests immediate follow-up work|web-owned workspace wake|earlier Cloudflare wake"` passed and reported the Cloudflare node workspace green.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --project cloudflare-node-platform apps/cloudflare/test/user-runner-alarm.test.ts -t "schedules a short recheck when runtime completion requests immediate follow-up work"` passed.
+- `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --project cloudflare-node-platform apps/cloudflare/test/user-runner-alarm.test.ts -t "web-owned workspace wake|earlier Cloudflare wake"` passed.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/user-runner.ts apps/cloudflare/test/user-runner-alarm.test.ts` passed.
 - `pnpm typecheck` passed.
 - `git diff --check -- apps/cloudflare/src/user-runner.ts apps/cloudflare/src/user-runner/runner-state-store.ts apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/completed/2026-05-18-hosted-runner-web-owned-wake-rearm.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` passed.
@@ -95,8 +97,11 @@ Completion notes:
 - Required `coverage-write` added the earlier-Cloudflare-wake regression and
   reported verification green.
 - Required final completion review found an immediate-runtime-wake regression;
-  the runner now preserves the short recheck path, and focused verification was
-  rerun after the fix.
+  the runner/test fix was restored, focused verification was rerun, and the
+  current working tree contains the short-recheck branch.
+- A later final-review rerun observed the same branch absent after overlapping
+  same-file edits; a clean final review/commit remains blocked by that checkout
+  coordination issue.
 - A scoped `finish-task` commit is unsafe from this checkout because the same
   hosted-runner files and coordination ledger contain overlapping dirty work
   from active tasks.

@@ -464,8 +464,16 @@ export const murphAgeReportResultSchema = z.object({
 const strictUtcTimestampSchema = isoTimestampSchema
   .refine((value) => value.endsWith('Z'), 'Expected a UTC timestamp ending in Z.')
 const murphAgeReportCardIdSchema = z.enum([
+  'lab5_bp_bmi_transport_research',
+  'lab9_bp_body_10y_acm_research',
   'r399_nhis_proxy_10y_acm_research',
 ])
+const murphAgeModelCardArtifactRootSchema = z.string()
+  .min(1)
+  .optional()
+  .describe(
+    'Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.',
+  )
 
 export function registerMurphAgeCommands(
   cli: Cli.Cli,
@@ -495,7 +503,8 @@ export function registerMurphAgeCommands(
         .describe('Use product for normal safe display, or explicit research for local research-only model-card artifacts.'),
       cardId: murphAgeReportCardIdSchema
         .optional()
-        .describe('Explicit research card override. Currently only the frozen R399 NHIS proxy anchor is selectable.'),
+        .describe('Explicit research card override for local research model-card artifacts.'),
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema,
     }),
     examples: [
       {
@@ -531,6 +540,7 @@ export function registerMurphAgeCommands(
         asOf: options.asOf,
         cardId: options.cardId,
         chronologicalAgeYears: options.chronologicalAgeYears,
+        modelCardArtifactRoot: options.modelCardArtifactRoot,
         mode: options.mode,
         sex: options.sex,
         vaultRoot: options.vault,
@@ -584,7 +594,9 @@ export function registerMurphAgeCommands(
     description:
       'Return metadata-only readiness status for local Murph Age model-card artifacts and current policy blockers.',
     args: emptyArgsSchema,
-    options: withBaseOptions({}),
+    options: withBaseOptions({
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema,
+    }),
     examples: [
       {
         description:
@@ -601,6 +613,7 @@ export function registerMurphAgeCommands(
       await assertInitializedVaultRoot(options.vault)
 
       const loaded = await loadMurphAgeLocalModelCardArtifacts({
+        modelCardArtifactRoot: options.modelCardArtifactRoot,
         vaultRoot: options.vault,
       })
       const loadedCardIds = Object.keys(loaded.models)

@@ -20,6 +20,9 @@ accounting is wrong.
 - `packages/assistant-runtime/**`
 - `packages/operator-config/**`
 - `packages/cli/**`
+- `apps/cloudflare/src/runner-egress-intercept.ts`
+- `apps/cloudflare/test/runner-egress-intercept.test.ts`
+- hosted runtime log event contract/tests
 - hosted Codex/OpenAI config surfaces if evidence points there
 - focused provider usage and prompt-cache tests
 
@@ -38,7 +41,9 @@ accounting is wrong.
 3. Inspect recent local runtime/provider diagnostics for cached-token metadata
    only.
 4. Patch the smallest wrong layer if found.
-5. Run focused verification for touched owners.
+5. Add metadata-only egress diagnostics if the provider request path is
+   correct but insufficiently observable.
+6. Run focused verification for touched owners.
 
 ## Verification
 

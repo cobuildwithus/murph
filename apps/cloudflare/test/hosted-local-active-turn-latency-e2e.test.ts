@@ -120,12 +120,15 @@ describe("hosted local active-turn latency e2e", () => {
       process.stdout.write(
         `${[
           "Hosted idle-shutdown delay probe:",
+          `providerCleanupDeleteObserved=${String(proof.providerCleanupDeleteObserved)}`,
+          `providerCleanupObservationMs=${Math.round(proof.providerCleanupObservationMs)}`,
           `idleShutdownSnapshots=${proof.idleShutdownSnapshotCount}`,
           `snapshotObservationMs=${Math.round(proof.snapshotObservationMs)}`,
           `workspaceCheckpointChanged=${String(proof.workspaceCheckpointChanged)}`,
         ].join(" ")}\n`,
       );
 
+      expect(proof.providerCleanupDeleteObserved).toBe(true);
       expect(proof.idleShutdownSnapshotCount).toBe(0);
       expect(proof.workspaceCheckpointChanged).toBe(false);
     } finally {
@@ -245,6 +248,8 @@ async function runIdleShutdownDelayProbe(input: {
   localDatabaseUrl: string;
 }): Promise<{
   idleShutdownSnapshotCount: number;
+  providerCleanupDeleteObserved: boolean;
+  providerCleanupObservationMs: number;
   snapshotObservationMs: number;
   workspaceCheckpointChanged: boolean;
 }> {
@@ -302,8 +307,19 @@ async function runIdleShutdownDelayProbe(input: {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
+    const replyMessageId = requireLinqStub().requireLatestObservedMessageId(chatId);
 
     await waitForProjectedOutboxDeliveryWake(userId);
+    const providerCleanupObservationStartedAt = performance.now();
+    await waitForObservedLinqRequestWithoutNudge({
+      expectedCount: 1,
+      expectedMethod: "DELETE",
+      expectedPath: `/messages/${encodeURIComponent(replyMessageId)}`,
+      timeoutMs: 10_000,
+      userId,
+    });
+    const providerCleanupObservationMs =
+      performance.now() - providerCleanupObservationStartedAt;
     const snapshotObservationStartedAt = performance.now();
     const snapshotStatus = await observeIdleShutdownSnapshots({
       durationMs: projectedWakeNoSnapshotObservationMs,
@@ -315,6 +331,8 @@ async function runIdleShutdownDelayProbe(input: {
     return {
       idleShutdownSnapshotCount:
         countIdleShutdownSnapshotLogs(snapshotStatus) - baselineSnapshotCount,
+      providerCleanupDeleteObserved: true,
+      providerCleanupObservationMs,
       snapshotObservationMs,
       workspaceCheckpointChanged:
         !workspaceCheckpointFingerprintsMatch(baselineCheckpoint, observedCheckpoint),
@@ -380,6 +398,41 @@ async function startIdleShutdownDelayProbeScenario(input: {
     scenarioLabel: "Local hosted idle-shutdown delay probe e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function waitForObservedLinqRequestWithoutNudge(input: {
+  expectedCount: number;
+  expectedMethod: string;
+  expectedPath: string;
+  timeoutMs: number;
+  userId: string;
+}): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < input.timeoutMs) {
+    if (
+      requireLinqStub().countObservedRequests({
+        expectedMethod: input.expectedMethod,
+        expectedPath: input.expectedPath,
+      }) >= input.expectedCount
+    ) {
+      return;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for a Linq request without runner nudges.",
+    `expected method: ${input.expectedMethod}`,
+    `expected path: ${input.expectedPath}`,
+    `observed requests: ${JSON.stringify(summarizeObservedLinqRequestsForFailure())}`,
+  ]));
+}
+
+function summarizeObservedLinqRequestsForFailure(): Array<{ method: string; url: string }> {
+  return requireLinqStub().observedRequests.slice(-20).map((request) => ({
+    method: request.method,
+    url: request.url,
+  }));
 }
 
 async function observeIdleShutdownSnapshots(input: {

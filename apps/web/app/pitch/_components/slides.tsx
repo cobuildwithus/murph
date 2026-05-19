@@ -161,7 +161,7 @@ export function InsightSlide() {
         The next health app is not an app. It is a group chat.
       </SlideHeading>
       <p className="mt-5 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        Health apps got great at measurement. They are still weak at
+        Health apps are great at measurement. They are still weak at
         motivation.
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">

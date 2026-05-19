@@ -721,6 +721,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.error",
   "runner.idle",
   "runner.lease_superseded",
+  "runner.provider_egress_diagnostic",
   "runner.started",
   "workspace.codex_home_snapshot",
 ] as const;

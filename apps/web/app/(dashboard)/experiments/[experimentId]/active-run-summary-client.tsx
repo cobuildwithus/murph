@@ -20,23 +20,26 @@ import {
 import type { ExperimentResultsPublicProjection } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentRunProjection } from "@/src/types/experiments";
 
+/** Minimal shape of a protocol fact — `{ label, value }` from the protocol tab. */
+type ProtocolFact = { label: string; value: string };
+
+interface ActiveRunSummaryProps {
+  protocol: ExperimentResultsPublicProjection;
+  protocolFacts: readonly ProtocolFact[];
+}
+
 export function ActiveRunSummaryClient({
   protocol,
-}: {
-  protocol: ExperimentResultsPublicProjection;
-}) {
+  protocolFacts,
+}: ActiveRunSummaryProps) {
   return (
     <BrowserVaultProvider>
-      <ActiveRunSummaryInner protocol={protocol} />
+      <ActiveRunSummaryInner protocol={protocol} protocolFacts={protocolFacts} />
     </BrowserVaultProvider>
   );
 }
 
-function ActiveRunSummaryInner({
-  protocol,
-}: {
-  protocol: ExperimentResultsPublicProjection;
-}) {
+function ActiveRunSummaryInner({ protocol, protocolFacts }: ActiveRunSummaryProps) {
   const browserVault = useBrowserVault();
   const privateRun = useMemo(
     () =>
@@ -48,8 +51,9 @@ function ActiveRunSummaryInner({
   );
 
   const cardData = useMemo<ExperimentCardData | null>(
-    () => (privateRun ? buildCardData(protocol, privateRun) : null),
-    [protocol, privateRun],
+    () =>
+      privateRun ? buildCardData(protocol, privateRun, protocolFacts) : null,
+    [protocol, privateRun, protocolFacts],
   );
 
   if (browserVault.status === "loading") {
@@ -91,9 +95,11 @@ function ActiveRunSummaryInner({
 function buildCardData(
   protocol: ExperimentResultsPublicProjection,
   run: ExperimentRunProjection,
+  protocolFacts: readonly ProtocolFact[],
 ): ExperimentCardData {
   return {
     title: buildCardTitle(protocol),
+    protocol: buildCardProtocol(protocolFacts),
     signals: run.signals.slice(0, EXPERIMENT_CARD_MAX_SIGNALS).map((signal) => ({
       label: signal.label,
       value: signal.value,
@@ -129,6 +135,32 @@ function buildCardChart(run: ExperimentRunProjection): ExperimentCardChart | und
     values,
     baselineAvg: Number.isFinite(trend.baselineAvg) ? trend.baselineAvg : undefined,
   };
+}
+
+// A one-line "how to run it yourself" recipe from the protocol facts. Skips
+// duration facts (already implied by the title) and long prose values that
+// won't fit a single line.
+function buildCardProtocol(
+  facts: readonly ProtocolFact[],
+): string | undefined {
+  const skipLabels = new Set(["baseline", "intervention"]);
+  const parts: string[] = [];
+
+  for (const fact of facts) {
+    if (skipLabels.has(fact.label.trim().toLowerCase())) {
+      continue;
+    }
+    const value = fact.value.trim();
+    if (!value || value.length > 36) {
+      continue;
+    }
+    parts.push(value);
+    if (parts.length === 3) {
+      break;
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function sortByDayValues(points: { day: number; value: number }[]): number[] {

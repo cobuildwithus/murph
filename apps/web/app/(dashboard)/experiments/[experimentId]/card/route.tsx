@@ -126,6 +126,11 @@ function Card({ data, logoSrc }: { data: ExperimentCardData; logoSrc: string }) 
         >
           {data.title}
         </div>
+        {data.protocol ? (
+          <div style={{ display: "flex", fontSize: 25, color: COLOR.muted }}>
+            {data.protocol}
+          </div>
+        ) : null}
       </div>
 
       {/* Metric tiles */}
