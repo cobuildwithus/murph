@@ -26,12 +26,13 @@ const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
+  autoLink?: boolean;
   initialTelegramAccount?: HostedTelegramSyncOverride | null;
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
-  const { authenticated, initialTelegramAccount, onSynced } = props;
+  const { authenticated, autoLink, initialTelegramAccount, onSynced } = props;
   const { authenticated: privyAuthenticated, ready: privyReady } = usePrivy();
-  const { refreshUser } = useUser();
+  const { refreshUser, user: privyUser } = useUser();
   const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
   const syncRequestSequenceRef = useRef(0);
   const [botLink, setBotLink] = useState<string | null>(null);
@@ -48,7 +49,11 @@ export function HostedTelegramCardSettings(props: {
     user: null,
   });
   const currentTelegram = displayState.currentTelegram;
+  const privyTelegram = resolveHostedTelegramSettingsDisplayState({ user: privyUser }).currentTelegram;
+  const currentTelegramUserId = currentTelegram?.telegramUserId ?? null;
+  const privyTelegramUserId = privyTelegram?.telegramUserId ?? null;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
+  const canUsePrivyTelegramLink = authenticated && privyReady && privyAuthenticated;
 
   const { linkTelegram } = useLinkAccount({
     onError: (error, details) => {
@@ -143,7 +148,7 @@ export function HostedTelegramCardSettings(props: {
     syncLinkedTelegram,
   ]);
 
-  async function handleLinkTelegram() {
+  const handleLinkTelegram = useCallback(() => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -167,6 +172,11 @@ export function HostedTelegramCardSettings(props: {
       return;
     }
 
+    if (!currentTelegramUserId && privyTelegramUserId) {
+      void syncLinkedTelegram("link", privyTelegramUserId);
+      return;
+    }
+
     setIsLinkingTelegram(true);
 
     try {
@@ -175,7 +185,32 @@ export function HostedTelegramCardSettings(props: {
       setIsLinkingTelegram(false);
       setErrorMessage(toHostedTelegramLinkErrorMessage(error));
     }
-  }
+  }, [
+    authenticated,
+    currentTelegramUserId,
+    linkTelegram,
+    privyAuthenticated,
+    privyReady,
+    privyTelegramUserId,
+    syncLinkedTelegram,
+  ]);
+
+  const autoLinkTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!autoLink || autoLinkTriggeredRef.current || !canUsePrivyTelegramLink) return;
+    if (currentTelegramUserId) return;
+
+    const timeoutId = setTimeout(() => {
+      autoLinkTriggeredRef.current = true;
+      handleLinkTelegram();
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, [
+    autoLink,
+    canUsePrivyTelegramLink,
+    currentTelegramUserId,
+    handleLinkTelegram,
+  ]);
 
   if (!authenticated) {
     return (
@@ -200,9 +235,11 @@ export function HostedTelegramCardSettings(props: {
     ?? successMessage
     ?? (isSyncingTelegram && !isQuietSyncingTelegram
       ? "Saving your Telegram connection…"
-      : !privyReady
-        ? "Preparing Telegram linking…"
-        : null);
+      : isLinkingTelegram
+        ? "Opening Telegram…"
+        : !privyReady
+          ? "Preparing Telegram linking…"
+          : null);
 
   return (
     <div className="space-y-5">

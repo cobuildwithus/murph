@@ -9,6 +9,10 @@ const ORIGINAL_PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID;
 const mocks = vi.hoisted(() => ({
   onOpenChange: vi.fn(),
   refresh: vi.fn(),
+  telegramCardProps: [] as Array<{
+    autoLink?: boolean;
+    initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
+  }>,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -70,7 +74,16 @@ vi.mock("@/src/components/settings/hosted-email-settings", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
-  HostedTelegramCardSettings(props: { onSynced?: (payload: { mode: string }) => void }) {
+  HostedTelegramCardSettings(props: {
+    autoLink?: boolean;
+    initialTelegramAccount?: { telegramUserId: string; username: string | null } | null;
+    onSynced?: (payload: { mode: string }) => void;
+  }) {
+    mocks.telegramCardProps.push({
+      autoLink: props.autoLink,
+      initialTelegramAccount: props.initialTelegramAccount,
+    });
+
     return createElement(
       "button",
       {
@@ -84,6 +97,7 @@ vi.mock("@/src/components/settings/hosted-telegram-card-settings", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.telegramCardProps = [];
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "app_test";
   process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID = "client_test";
 });
@@ -125,6 +139,36 @@ describe("HostedSettingsIdentityLinkDialog", () => {
 
       expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
       expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("passes auto-link to the Telegram card when the account has no Telegram snapshot", async () => {
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          telegram: {
+            telegramUserId: null,
+          },
+        },
+        initialMode: "telegram",
+        onOpenChange: mocks.onOpenChange,
+      }),
+    );
+
+    try {
+      expect(mocks.telegramCardProps).toEqual([
+        {
+          autoLink: true,
+          initialTelegramAccount: null,
+        },
+      ]);
     } finally {
       await cleanup();
     }
