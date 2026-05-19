@@ -6,6 +6,7 @@ import { beforeEach, describe, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
@@ -911,6 +912,132 @@ describe("hosted device-sync runtime", () => {
         occurredAt: "2026-04-06T09:20:00.000Z",
         updates: [],
       });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("reconciliation includes provider failure diagnostics when sync failure advances", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createHostedRuntimeDeviceSyncService({
+      secret: DEVICE_SYNC_SECRET,
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      providers: [
+        createFakeProvider({
+          jobExecutor: {
+            async executeJob() {
+              throw deviceSyncError({
+                accountStatus: "disconnected",
+                code: "TOKEN_REQUEST_FAILED",
+                details: {
+                  httpStatusText: "Bad Request",
+                  oauthErrorCode: "invalid_grant",
+                  oauthErrorDescription: "Refresh token expired. Reconnect provider.",
+                  oauthGrantType: "refresh_token",
+                },
+                httpStatus: 400,
+                message: "Provider token request failed.",
+                retryable: false,
+              });
+            },
+          },
+        }),
+      ],
+    });
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "failure-diagnostic",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_failure_diagnostic",
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:15:00.000Z",
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-06T09:18:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during reconciliation");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:16:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get("hosted_conn_failure_diagnostic");
+      assert.ok(localAccountId);
+
+      getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:17:00.000Z",
+        kind: "backfill",
+        maxAttempts: 1,
+        payload: {},
+        provider: "demo",
+      });
+      assert.equal(await service.drainWorker(1), 1);
+
+      const failed = getStore(service).getAccountById(localAccountId);
+      assert.ok(failed);
+      assert.equal(failed.lastErrorCode, "TOKEN_REQUEST_FAILED");
+      assert.equal(failed.status, "disconnected");
+      assert.ok(failed.lastSyncErrorAt);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:18:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      const request = requireApplyUpdatesRequest(appliedRequest);
+      assert.equal(request.occurredAt, "2026-04-06T09:18:00.000Z");
+      assert.equal(request.updates.length, 1);
+      assert.equal(request.updates[0]?.connectionId, "hosted_conn_failure_diagnostic");
+      assert.deepEqual(request.updates[0]?.failureDiagnostic, {
+        accountStatus: "disconnected",
+        code: "TOKEN_REQUEST_FAILED",
+        details: {
+          providerHttpStatus: 400,
+          providerHttpStatusText: "Bad Request",
+          providerOAuthErrorCode: "invalid_grant",
+          providerOAuthErrorDescription: "Refresh token expired. Reconnect provider.",
+          providerOAuthGrantType: "refresh_token",
+        },
+        retryable: false,
+      });
+      assert.equal(request.updates[0]?.localState?.lastSyncErrorAt, failed.lastSyncErrorAt);
+      assert.equal(request.updates[0]?.observedUpdatedAt, "2026-04-06T09:15:00.000Z");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

@@ -1218,6 +1218,49 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("persists sanitized device-sync provider failure diagnostics", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+    const diagnostic = {
+      failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      failureRetryable: false,
+      failureSummary: "WHOOP token request failed.",
+      provider: "whoop",
+      providerHttpStatus: 400,
+      providerHttpStatusText: "Bad Request",
+      providerOAuthErrorCode: "invalid_grant",
+      providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+      providerOAuthGrantType: "refresh_token",
+    };
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-05-19T22:03:27.378Z",
+      component: "device-sync",
+      errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      eventCode: "device-sync.job_failed",
+      level: "warn",
+      phase: "invoke",
+      redacted: diagnostic,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "device-sync",
+        errorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+        eventCode: "device-sync.job_failed",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: diagnostic,
+      }),
+    });
+    expect(result.redactedJson).toEqual(diagnostic);
+  });
+
   it("persists OpenAI cache diagnostics as bounded redacted metadata", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

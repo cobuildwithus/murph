@@ -7,6 +7,7 @@ import {
   parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -22,6 +23,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
+import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import {
@@ -42,6 +44,7 @@ import {
   normalizeHostedDeviceSyncLifecycleStatus,
 } from "./prisma-store/connection-records";
 import { toPrismaJsonObject } from "./prisma-store/prisma-json";
+import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
 
@@ -288,6 +291,17 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             provider: record.provider,
             tokenBundle: tokenBundleToPersist ?? null,
             tx,
+          });
+        }
+
+        if (!versionMismatch && connectionWriteRequested) {
+          await recordHostedRuntimeFailureApplyDiagnostic({
+            appliedAt,
+            baseline,
+            nextAccount,
+            tx,
+            update,
+            userId: input.trustedUserId,
           });
         }
 
@@ -569,6 +583,172 @@ function hostedRuntimeCredentialMutationRequiresTokenFence(
   update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
 ): boolean {
   return update.credential !== undefined;
+}
+
+async function recordHostedRuntimeFailureApplyDiagnostic(input: {
+  appliedAt: string;
+  baseline: HostedRuntimeConnectionSnapshot;
+  nextAccount: PublicDeviceSyncAccount;
+  tx: HostedPrismaTransactionClient;
+  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
+  userId: string;
+}): Promise<void> {
+  if (!didHostedRuntimeFailureStateAdvance(
+    input.baseline.localState.lastSyncErrorAt,
+    input.nextAccount.lastSyncErrorAt,
+  )) {
+    return;
+  }
+
+  const at = input.nextAccount.lastSyncErrorAt ?? input.appliedAt;
+  const errorCode = toHostedRuntimeApplyLogCode(
+    input.nextAccount.lastErrorCode ?? input.update.failureDiagnostic?.code ?? null,
+  );
+  const provider = toHostedRuntimeApplyLogCode(input.nextAccount.provider);
+  const redacted = buildHostedRuntimeFailureApplyRedactedJson(input);
+
+  try {
+    await recordHostedRuntimeLogTx({
+      at,
+      component: "device-sync",
+      errorCode,
+      eventCode: "device-sync.job_failed",
+      level: "warn",
+      phase: "invoke",
+      redacted,
+      tx: input.tx,
+      userId: input.userId,
+    });
+  } catch (error) {
+    console.warn("Hosted device-sync failure diagnostic log write failed.", {
+      errorCode,
+      errorName: error instanceof Error ? error.name : typeof error,
+      provider,
+    });
+  }
+}
+
+function buildHostedRuntimeFailureApplyRedactedJson(input: {
+  baseline: HostedRuntimeConnectionSnapshot;
+  nextAccount: PublicDeviceSyncAccount;
+  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
+}): HostedRuntimeRedactedJson {
+  const diagnostic = input.update.failureDiagnostic ?? null;
+  const summary = sanitizeHostedRuntimeDiagnosticText(
+    input.update.localState?.lastErrorMessage ?? input.nextAccount.lastErrorMessage ?? null,
+  );
+
+  return {
+    failureCode: toHostedRuntimeApplyLogCode(input.nextAccount.lastErrorCode ?? diagnostic?.code ?? null),
+    ...(summary ? { failureSummary: summary } : {}),
+    ...buildHostedRuntimeFailureDiagnosticRedactedJson(diagnostic),
+    hadPriorFailure: Boolean(input.baseline.localState.lastSyncErrorAt),
+    hadPriorSuccess: Boolean(input.baseline.localState.lastSyncCompletedAt),
+    nextReconcileAt: input.nextAccount.nextReconcileAt,
+    provider: toHostedRuntimeApplyLogCode(input.nextAccount.provider),
+    setupPhase: input.nextAccount.setupPhase ?? null,
+    status: toHostedRuntimeApplyLogCode(input.nextAccount.status),
+    syncCompletedAt: input.nextAccount.lastSyncCompletedAt,
+    syncFailedAt: input.nextAccount.lastSyncErrorAt,
+    syncStartedAt: input.nextAccount.lastSyncStartedAt,
+  };
+}
+
+function buildHostedRuntimeFailureDiagnosticRedactedJson(
+  diagnostic: HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"] | null,
+): HostedRuntimeRedactedJson {
+  if (!diagnostic) {
+    return {};
+  }
+
+  return {
+    failureRetryable: diagnostic.retryable,
+    ...(diagnostic.accountStatus
+      ? { providerAccountStatus: toHostedRuntimeApplyLogCode(diagnostic.accountStatus) }
+      : {}),
+    ...buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(diagnostic.details),
+  };
+}
+
+function buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(
+  details: NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"]>["details"],
+): HostedRuntimeRedactedJson {
+  const redacted: HostedRuntimeRedactedJson = {};
+
+  appendHostedRuntimeDiagnosticCode(redacted, "failureCauseCode", details.failureCauseCode);
+  appendHostedRuntimeDiagnosticCode(redacted, "failureCauseName", details.failureCauseName);
+  appendHostedRuntimeDiagnosticReason(redacted, "failureErrorCause", details.failureErrorCause);
+  appendHostedRuntimeDiagnosticCode(redacted, "failureErrorName", details.failureErrorName);
+  appendHostedRuntimeDiagnosticNumber(redacted, "providerHttpStatus", details.providerHttpStatus);
+  appendHostedRuntimeDiagnosticReason(redacted, "providerHttpStatusText", details.providerHttpStatusText);
+  appendHostedRuntimeDiagnosticCode(redacted, "providerOAuthErrorCode", details.providerOAuthErrorCode);
+  appendHostedRuntimeDiagnosticReason(
+    redacted,
+    "providerOAuthErrorDescription",
+    details.providerOAuthErrorDescription,
+  );
+  appendHostedRuntimeDiagnosticCode(redacted, "providerOAuthGrantType", details.providerOAuthGrantType);
+
+  return redacted;
+}
+
+function appendHostedRuntimeDiagnosticNumber(
+  redacted: HostedRuntimeRedactedJson,
+  key: string,
+  value: number | undefined,
+): void {
+  if (value !== undefined) {
+    redacted[key] = value;
+  }
+}
+
+function appendHostedRuntimeDiagnosticCode(
+  redacted: HostedRuntimeRedactedJson,
+  key: string,
+  value: string | undefined,
+): void {
+  if (value) {
+    redacted[key] = toHostedRuntimeApplyLogCode(value);
+  }
+}
+
+function appendHostedRuntimeDiagnosticReason(
+  redacted: HostedRuntimeRedactedJson,
+  key: string,
+  value: string | undefined,
+): void {
+  const sanitized = sanitizeHostedRuntimeDiagnosticText(value ?? null);
+  if (sanitized) {
+    redacted[key] = sanitized;
+  }
+}
+
+function didHostedRuntimeFailureStateAdvance(
+  previousValue: string | null,
+  nextValue: string | null,
+): boolean {
+  if (!nextValue || nextValue === previousValue) {
+    return false;
+  }
+
+  if (!previousValue) {
+    return true;
+  }
+
+  const previousMs = Date.parse(previousValue);
+  const nextMs = Date.parse(nextValue);
+
+  return !Number.isNaN(nextMs) && (Number.isNaN(previousMs) || nextMs > previousMs);
+}
+
+function toHostedRuntimeApplyLogCode(value: string | null | undefined): string {
+  const normalized = value?.trim();
+
+  return normalized
+    && normalized.length <= 96
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)
+    ? normalized
+    : "unclassified";
 }
 
 function resolveHostedRuntimeCredentialUpdate(

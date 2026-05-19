@@ -194,10 +194,30 @@ export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
   nextReconcileAt?: string | null;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
+  failureCauseCode?: string;
+  failureCauseName?: string;
+  failureErrorCause?: string;
+  failureErrorName?: string;
+  providerHttpStatus?: number;
+  providerHttpStatusText?: string;
+  providerOAuthErrorCode?: string;
+  providerOAuthErrorDescription?: string;
+  providerOAuthGrantType?: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeFailureDiagnostic {
+  accountStatus: HostedExecutionDeviceSyncRuntimeConnectionStatus | null;
+  code: string;
+  details: HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails;
+  retryable: boolean;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   connectionId: string;
   connection?: HostedExecutionDeviceSyncRuntimeConnectionStateUpdate;
   credential?: HostedExecutionDeviceSyncRuntimeCredentialUpdate;
+  failureDiagnostic?: HostedExecutionDeviceSyncRuntimeFailureDiagnostic;
   localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
@@ -1098,6 +1118,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     "connection",
     "connectionId",
     "credential",
+    "failureDiagnostic",
     "localState",
     "observedTokenVersion",
     "observedUpdatedAt",
@@ -1112,6 +1133,9 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
   const localState = record.localState === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncRuntimeLocalStateUpdate(record.localState, index);
+  const failureDiagnostic = record.failureDiagnostic === undefined
+    ? undefined
+    : parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(record.failureDiagnostic, index);
   const observedUpdatedAt = record.observedUpdatedAt === undefined
     ? undefined
     : readNullableIsoTimestamp(
@@ -1151,11 +1175,105 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     ),
     ...(connection === undefined ? {} : { connection }),
     ...(credential === undefined ? {} : { credential }),
+    ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
     ...(localState === undefined ? {} : { localState }),
     ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
     ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
     ...(seed === undefined ? {} : { seed }),
   };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeFailureDiagnostic {
+  const label = `Hosted device-sync runtime apply request updates[${index}].failureDiagnostic`;
+  const record = requireObject(value, label);
+  assertHostedExecutionCredentialFields(record, label, [
+    "accountStatus",
+    "code",
+    "details",
+    "retryable",
+  ]);
+  const code = sanitizeHostedRuntimeErrorCode(requireString(record.code, `${label}.code`));
+
+  if (!code) {
+    throw new TypeError(`${label}.code must be a non-empty diagnostic code.`);
+  }
+
+  return {
+    accountStatus: readNullableHostedExecutionDeviceSyncRuntimeConnectionStatus(
+      record.accountStatus,
+      `${label}.accountStatus`,
+    ),
+    code,
+    details: parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
+      record.details,
+      `${label}.details`,
+    ),
+    retryable: requireBoolean(record.retryable, `${label}.retryable`),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
+  if (value === undefined || value === null) {
+    return {};
+  }
+
+  const record = requireObject(value, label);
+  assertHostedExecutionCredentialFields(record, label, [
+    "failureCauseCode",
+    "failureCauseName",
+    "failureErrorCause",
+    "failureErrorName",
+    "providerHttpStatus",
+    "providerHttpStatusText",
+    "providerOAuthErrorCode",
+    "providerOAuthErrorDescription",
+    "providerOAuthGrantType",
+  ]);
+  const details: HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails = {};
+
+  for (const field of [
+    "failureCauseCode",
+    "failureCauseName",
+    "failureErrorName",
+    "providerOAuthErrorCode",
+    "providerOAuthGrantType",
+  ] as const) {
+    if (record[field] !== undefined) {
+      const value = sanitizeHostedRuntimeErrorCode(
+        readNullableStringValue(record[field], `${label}.${field}`),
+      );
+      if (value) {
+        details[field] = value;
+      }
+    }
+  }
+
+  for (const field of [
+    "failureErrorCause",
+    "providerHttpStatusText",
+    "providerOAuthErrorDescription",
+  ] as const) {
+    if (record[field] !== undefined) {
+      const value = sanitizeHostedRuntimeDiagnosticText(
+        readNullableStringValue(record[field], `${label}.${field}`),
+      );
+      if (value) {
+        details[field] = value;
+      }
+    }
+  }
+
+  if (record.providerHttpStatus !== undefined) {
+    details.providerHttpStatus = requireNumber(record.providerHttpStatus, `${label}.providerHttpStatus`);
+  }
+
+  return details;
 }
 
 function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
@@ -1724,6 +1842,22 @@ function readNullableHostedExecutionDeviceSyncRuntimeSetupPhase(
     || phase === "failed"
   ) {
     return phase;
+  }
+
+  throw new TypeError(`${label} is invalid.`);
+}
+
+function readNullableHostedExecutionDeviceSyncRuntimeConnectionStatus(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionStatus | null {
+  if (value === null) {
+    return null;
+  }
+
+  const status = requireString(value, label);
+  if (status === "active" || status === "reauthorization_required" || status === "disconnected") {
+    return status;
   }
 
   throw new TypeError(`${label} is invalid.`);
