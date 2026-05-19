@@ -377,7 +377,7 @@ async function readWorkspacePackageManifest(
   ) as WorkspacePackageManifest;
 }
 
-async function readWorkspacePackageVersions(
+export async function readWorkspacePackageVersions(
   repoRoot: string,
 ): Promise<ReadonlyMap<string, string>> {
   const versions = new Map<string, string>();

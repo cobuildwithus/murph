@@ -7,10 +7,17 @@ import {
   createPackageManagerProcessEnv,
   runPnpmCommand,
 } from "./process.js";
+import { readWorkspacePackageVersions } from "./workspace-artifacts.js";
 
 interface WorkspacePnpmInstallPolicy {
   npmrcLines: string[];
   overrides: Record<string, string>;
+}
+
+interface WorkspacePackageManifest {
+  name?: string;
+  packageManager?: string;
+  version?: string;
 }
 
 export async function installPackedRunnerDependencies(
@@ -28,6 +35,7 @@ export async function installPackedRunnerDependencies(
   ) as {
     dependencies?: Record<string, string>;
     optionalDependencies?: Record<string, string>;
+    packageManager?: string;
     pnpm?: {
       overrides?: Record<string, string>;
     };
@@ -35,12 +43,23 @@ export async function installPackedRunnerDependencies(
   const workspaceInstallPolicy = await readWorkspacePnpmInstallPolicy(
     input.repoRoot,
   );
+  const workspacePackageManager = await readWorkspacePackageManager(
+    input.repoRoot,
+  );
   const workspaceTarballOverrides = buildWorkspaceTarballOverrides(
     bundleDir,
     tarballPaths,
     runtimeWorkspaceClosure,
   );
+  const workspaceTarballReleaseAgeExclusions =
+    await buildWorkspaceTarballReleaseAgeExclusions(
+      input.repoRoot,
+      runtimeWorkspaceClosure,
+    );
 
+  if (workspacePackageManager) {
+    packageJson.packageManager = workspacePackageManager;
+  }
   rewriteDependencySpecs(packageJson.dependencies, workspaceTarballOverrides);
   rewriteDependencySpecs(
     packageJson.optionalDependencies,
@@ -72,6 +91,7 @@ export async function installPackedRunnerDependencies(
     "utf8",
   );
   await installPinnedProductionDependencies(bundleDir, {
+    minimumReleaseAgeExclusions: workspaceTarballReleaseAgeExclusions,
     policy: workspaceInstallPolicy,
     repoRoot: input.repoRoot,
   });
@@ -192,6 +212,7 @@ function resolveInstalledPackageManifestPath(
 async function installPinnedProductionDependencies(
   installRoot: string,
   input: {
+    minimumReleaseAgeExclusions: readonly string[];
     policy: WorkspacePnpmInstallPolicy;
     repoRoot: string;
   },
@@ -200,7 +221,9 @@ async function installPinnedProductionDependencies(
     COREPACK_ENABLE_AUTO_PIN: "0",
   };
 
-  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy);
+  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, input.policy, {
+    minimumReleaseAgeExclusions: input.minimumReleaseAgeExclusions,
+  });
   await seedRunnerBundleLockfileFromRoot(installRoot, input.repoRoot);
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
@@ -302,25 +325,98 @@ function isLocalRunnerBundlePackageKey(key: string): boolean {
 export async function writeRunnerBundlePnpmInstallConfig(
   installRoot: string,
   repoRoot: string,
+  options: {
+    minimumReleaseAgeExclusions?: readonly string[];
+  } = {},
 ): Promise<void> {
   const policy = await readWorkspacePnpmInstallPolicy(repoRoot);
 
-  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, policy);
+  await writeRunnerBundlePnpmInstallConfigFromPolicy(installRoot, policy, options);
 }
 
 async function writeRunnerBundlePnpmInstallConfigFromPolicy(
   installRoot: string,
   policy: WorkspacePnpmInstallPolicy,
+  options: {
+    minimumReleaseAgeExclusions?: readonly string[];
+  } = {},
 ): Promise<void> {
-  if (policy.npmrcLines.length === 0) {
+  const npmrcLines = [
+    ...policy.npmrcLines,
+  ];
+  appendMinimumReleaseAgeExclusionLines(
+    npmrcLines,
+    options.minimumReleaseAgeExclusions ?? [],
+  );
+
+  if (npmrcLines.length === 0) {
     return;
   }
 
   await writeFile(
     path.join(installRoot, ".npmrc"),
-    `${policy.npmrcLines.join("\n")}\n`,
+    `${npmrcLines.join("\n")}\n`,
     "utf8",
   );
+}
+
+function appendMinimumReleaseAgeExclusionLines(
+  lines: string[],
+  exclusions: readonly string[],
+): void {
+  const existingExclusions = new Set<string>();
+  for (const line of lines) {
+    const match = /^minimum-release-age-exclude\[\]=(.+)$/u.exec(line);
+    if (match) {
+      existingExclusions.add(match[1]!);
+    }
+  }
+
+  for (const exclusion of exclusions) {
+    if (existingExclusions.has(exclusion)) {
+      continue;
+    }
+
+    existingExclusions.add(exclusion);
+    lines.push(`minimum-release-age-exclude[]=${exclusion}`);
+  }
+}
+
+async function readWorkspacePackageManager(
+  repoRoot: string,
+): Promise<string | null> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as WorkspacePackageManifest;
+
+    return typeof manifest.packageManager === "string" &&
+      manifest.packageManager.length > 0
+      ? manifest.packageManager
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildWorkspaceTarballReleaseAgeExclusions(
+  repoRoot: string,
+  workspacePackageNames: readonly string[],
+): Promise<readonly string[]> {
+  const workspacePackageVersions = await readWorkspacePackageVersions(repoRoot);
+
+  return [...new Set(workspacePackageNames)]
+    .map((packageName) => {
+      const packageVersion = workspacePackageVersions.get(packageName);
+      if (!packageVersion) {
+        throw new Error(
+          `Could not resolve a workspace package version for ${packageName}.`,
+        );
+      }
+
+      return `${packageName}@${packageVersion}`;
+    })
+    .sort();
 }
 
 async function readWorkspacePnpmInstallPolicy(

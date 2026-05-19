@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertInstalledRunnerHealthCommonsRuntimeImport,
   assertRunnerBundleLockfileUsesCommittedResolutions,
+  installPackedRunnerDependencies,
   pinInstalledDependencyVersions,
   writeRunnerBundlePnpmInstallConfig,
 } from "../scripts/runner-bundle/dependency-install.js";
@@ -68,6 +69,174 @@ describe("runner bundle dependency pinning", () => {
 });
 
 describe("runner bundle pnpm install config", () => {
+  it("installs packed runner dependencies with the repo package manager and local tarball release-age exclusions", async () => {
+    const repoRoot = await createRuntimePackageRoot();
+    const bundleDir = await createRuntimePackageRoot();
+    const runtimePackageRoot = await createRuntimePackageRoot();
+    const binDir = path.join(repoRoot, "bin");
+    const pnpmLogPath = path.join(repoRoot, "pnpm.log");
+    const tarballsDir = path.join(repoRoot, "tarballs");
+
+    await Promise.all([
+      mkdir(path.join(repoRoot, "apps"), { recursive: true }),
+      mkdir(path.join(repoRoot, "packages", "assistant-runtime"), {
+        recursive: true,
+      }),
+      mkdir(path.join(repoRoot, "packages", "runtime-state"), { recursive: true }),
+      mkdir(binDir, { recursive: true }),
+      mkdir(tarballsDir, { recursive: true }),
+    ]);
+    await writeFile(
+      path.join(repoRoot, "package.json"),
+      `${JSON.stringify({
+        packageManager: "pnpm@10.22.0",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      [
+        "packages:",
+        "  - apps/*",
+        "  - packages/*",
+        "minimumReleaseAge: 1440",
+        "minimumReleaseAgeExclude:",
+        "  - incur@0.4.4",
+        "overrides:",
+        "  jose: 6.2.2",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(repoRoot, "pnpm-lock.yaml"),
+      [
+        "lockfileVersion: '9.0'",
+        "",
+        "packages:",
+        "",
+        "  'jose@6.2.2':",
+        "    resolution: {integrity: sha512-root}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(repoRoot, "packages", "assistant-runtime", "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/assistant-runtime",
+        version: "1.2.3",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(repoRoot, "packages", "runtime-state", "package.json"),
+      `${JSON.stringify({
+        name: "@murphai/runtime-state",
+        version: "2.3.4",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(bundleDir, "package.json"),
+      `${JSON.stringify(
+        {
+          dependencies: {
+            "@murphai/assistant-runtime": "workspace:*",
+            jose: "^6.0.0",
+          },
+          optionalDependencies: {
+            "@murphai/runtime-state": "workspace:*",
+            "optional-external": "^1.0.0",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await writeInstalledPackage(runtimePackageRoot, "jose", "6.2.2");
+    await writeFile(
+      path.join(binDir, "pnpm"),
+      [
+        "#!/usr/bin/env node",
+        "import { appendFileSync } from 'node:fs';",
+        `const logPath = ${JSON.stringify(pnpmLogPath)};`,
+        "appendFileSync(logPath, `${process.argv.slice(2).join(' ')}\\n`, 'utf8');",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(path.join(binDir, "pnpm"), 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+    try {
+      await installPackedRunnerDependencies(
+        bundleDir,
+        new Map([
+          [
+            "@murphai/assistant-runtime",
+            path.join(tarballsDir, "assistant-runtime.tgz"),
+          ],
+          ["@murphai/runtime-state", path.join(tarballsDir, "runtime-state.tgz")],
+        ]),
+        ["@murphai/runtime-state", "@murphai/assistant-runtime"],
+        {
+          repoRoot,
+          runtimePackageRoot,
+        },
+      );
+    } finally {
+      process.env.PATH = previousPath;
+    }
+
+    await expect(readFile(pnpmLogPath, "utf8")).resolves.toBe(
+      "install --prod --lockfile-only\ninstall --prod --frozen-lockfile\n",
+    );
+    await expect(readFile(path.join(bundleDir, ".npmrc"), "utf8")).resolves.toBe(
+      [
+        "minimum-release-age=1440",
+        "minimum-release-age-exclude[]=incur@0.4.4",
+        "minimum-release-age-exclude[]=@murphai/assistant-runtime@1.2.3",
+        "minimum-release-age-exclude[]=@murphai/runtime-state@2.3.4",
+        "",
+      ].join("\n"),
+    );
+
+    const packageJson = JSON.parse(
+      await readFile(path.join(bundleDir, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+      packageManager?: string;
+      pnpm?: {
+        overrides?: Record<string, string>;
+      };
+    };
+    const assistantRuntimeSpecifier = `file:${path.relative(
+      bundleDir,
+      path.join(tarballsDir, "assistant-runtime.tgz"),
+    ).replaceAll(path.sep, "/")}`;
+    const runtimeStateSpecifier = `file:${path.relative(
+      bundleDir,
+      path.join(tarballsDir, "runtime-state.tgz"),
+    ).replaceAll(path.sep, "/")}`;
+
+    expect(packageJson.packageManager).toBe("pnpm@10.22.0");
+    expect(packageJson.dependencies).toEqual({
+      "@murphai/assistant-runtime": assistantRuntimeSpecifier,
+      jose: "6.2.2",
+    });
+    expect(packageJson.optionalDependencies).toEqual({
+      "@murphai/runtime-state": runtimeStateSpecifier,
+    });
+    expect(packageJson.pnpm?.overrides).toEqual({
+      "@murphai/assistant-runtime": assistantRuntimeSpecifier,
+      "@murphai/runtime-state": runtimeStateSpecifier,
+      jose: "6.2.2",
+    });
+  });
+
   it("mirrors root dependency policy into the isolated bundle install", async () => {
     const repoRoot = await createRuntimePackageRoot();
     const installRoot = await createRuntimePackageRoot();
@@ -116,6 +285,44 @@ describe("runner bundle pnpm install config", () => {
         "save-prefix=",
         "trust-policy=no-downgrade",
         "trust-policy-ignore-after=259200",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("adds local workspace tarballs to minimum release age exclusions", async () => {
+    const repoRoot = await createRuntimePackageRoot();
+    const installRoot = await createRuntimePackageRoot();
+
+    await writeFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      [
+        "packages:",
+        "  - packages/*",
+        "minimumReleaseAge: 1440",
+        "minimumReleaseAgeExclude:",
+        "  - incur@0.4.4",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await writeRunnerBundlePnpmInstallConfig(installRoot, repoRoot, {
+      minimumReleaseAgeExclusions: [
+        "incur@0.4.4",
+        "@murphai/assistant-runtime@1.0.0",
+        "@murphai/runtime-state@1.0.0",
+      ],
+    });
+
+    await expect(
+      readFile(path.join(installRoot, ".npmrc"), "utf8"),
+    ).resolves.toBe(
+      [
+        "minimum-release-age=1440",
+        "minimum-release-age-exclude[]=incur@0.4.4",
+        "minimum-release-age-exclude[]=@murphai/assistant-runtime@1.0.0",
+        "minimum-release-age-exclude[]=@murphai/runtime-state@1.0.0",
         "",
       ].join("\n"),
     );
