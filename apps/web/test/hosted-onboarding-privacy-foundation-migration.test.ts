@@ -222,6 +222,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceConnectionDueReconcileSweepIndexMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026051900_device_connection_due_reconcile_sweep_idx/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -251,6 +258,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026050802_device_connect_intent",
       "2026050900_hosted_web_session_row_cap_index",
       "2026051000_hosted_ai_usage_stripe_meter_skipped",
+      "2026051900_device_connection_due_reconcile_sweep_idx",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -362,6 +370,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceConnectionCredentialsMigrationSql).toContain(
       'CREATE INDEX "device_connection_setup_phase_setup_expires_at_idx"',
     );
+    expect(deviceConnectionDueReconcileSweepIndexMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "device_connection_due_reconcile_sweep_idx"',
+    );
+    expect(deviceConnectionDueReconcileSweepIndexMigrationSql).toContain(
+      'ON "device_connection"("status", "next_reconcile_at", "updated_at", "id")',
+    );
+    expect(deviceConnectionDueReconcileSweepIndexMigrationSql).not.toContain("CREATE TABLE");
+    expect(deviceConnectionDueReconcileSweepIndexMigrationSql).not.toContain("ALTER TABLE");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');

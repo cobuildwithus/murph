@@ -42,6 +42,7 @@ model DeviceConnection {
   dirtyState                 DeviceSyncDirtyConnection?
 
   @@unique([provider, providerAccountBlindIndex])
+  @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
   @@index([userId, provider])
   @@index([setupPhase, setupExpiresAt])
   @@map("device_connection")

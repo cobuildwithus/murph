@@ -23,7 +23,10 @@ import type {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  type AppendHostedMailboxItemResult,
+} from "../hosted-mailbox/store";
 import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
 import type { HostedWebhookNudgeWorkflowInput } from "../hosted-onboarding/webhook-workflow-types";
 import {
@@ -341,10 +344,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 }
 
 export async function appendHostedDeviceSyncWake(input: {
+  createdAt?: string | null;
   connectionId: string;
+  eventId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
+  signalCreateMode?: "always" | "inserted";
   source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
   userId: string;
@@ -356,34 +362,78 @@ export async function appendHostedDeviceSyncWake(input: {
   });
   const wake = buildHostedDeviceSyncWake({
     ...input,
+    eventId: input.eventId ?? null,
     hint,
   });
+  const persistSignal = async (tx: HostedPrismaTransactionClient) => {
+    await store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: input.provider,
+      kind: mapHostedDeviceSyncSignalKind(input.source),
+      occurredAt: hint.occurredAt ?? null,
+      traceId: normalizeNullableString(hint.traceId),
+      eventType: normalizeNullableString(hint.eventType),
+      resourceCategory: normalizeNullableString(hint.resourceCategory),
+      reason: normalizeNullableString(hint.reason),
+      nextReconcileAt: hint.nextReconcileAt ?? null,
+      revokeWarning: hint.revokeWarning ?? null,
+      createdAt: input.createdAt ?? input.occurredAt,
+      tx,
+    });
+  };
+  const signalCreateMode = input.signalCreateMode ?? "always";
 
-  await persistHostedDeviceSyncWake({
+  const appendResult = await persistHostedDeviceSyncWake({
+    ...(input.source === "scheduled-reconcile"
+      ? { runnerNudgeIntent: "device-sync-reconcile-recovery" }
+      : {}),
     wake,
     store,
-    persist: async (tx) => {
-      await store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: mapHostedDeviceSyncSignalKind(input.source),
-        occurredAt: hint.occurredAt ?? null,
-        traceId: normalizeNullableString(hint.traceId),
-        eventType: normalizeNullableString(hint.eventType),
-        resourceCategory: normalizeNullableString(hint.resourceCategory),
-        reason: normalizeNullableString(hint.reason),
-        nextReconcileAt: hint.nextReconcileAt ?? null,
-        revokeWarning: hint.revokeWarning ?? null,
-        createdAt: input.occurredAt,
-        tx,
-      });
-    },
+    persist: signalCreateMode === "always" ? persistSignal : async () => {},
+    ...(signalCreateMode === "inserted"
+      ? {
+          persistAfterAppend: async (
+            tx: HostedPrismaTransactionClient,
+            mailboxAppend: AppendHostedMailboxItemResult,
+          ) => {
+            if (mailboxAppend.inserted) {
+              await persistSignal(tx);
+            }
+          },
+        }
+      : {}),
   });
 
   return {
-    wakeAppended: true,
+    wakeAppended: appendResult.inserted || appendResult.duplicate,
   };
+}
+
+export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
+  connectionId: string;
+  createdAt: string;
+  eventId: string;
+  nextReconcileAt: string;
+  provider: string;
+  traceId?: string | null;
+  userId: string;
+}): Promise<{ wakeAppended: boolean; reason?: string }> {
+  return appendHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    createdAt: input.createdAt,
+    eventId: input.eventId,
+    hint: {
+      nextReconcileAt: input.nextReconcileAt,
+      occurredAt: input.nextReconcileAt,
+    },
+    occurredAt: input.nextReconcileAt,
+    provider: input.provider,
+    signalCreateMode: "inserted",
+    source: "scheduled-reconcile",
+    traceId: input.traceId ?? null,
+    userId: input.userId,
+  });
 }
 
 export async function appendHostedDeviceSyncDirtyWake(input: {
@@ -436,11 +486,16 @@ async function persistHostedDeviceSyncWake(input: {
   runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
+  persistAfterAppend?(
+    tx: HostedPrismaTransactionClient,
+    mailboxAppend: AppendHostedMailboxItemResult,
+  ): Promise<void>;
   complete?(): Promise<void>;
-}): Promise<void> {
+}): Promise<AppendHostedMailboxItemResult> {
   // Webhook retries rebuild fresh signal rows, so the canonical wake identity must stay
   // tied to the stable wake event id instead of the transient signal primary key.
   let mailboxItemId: string | null = null;
+  let mailboxAppendResult: AppendHostedMailboxItemResult | null = null;
 
   await input.store.prisma.$transaction(async (tx) => {
     await input.persist(tx);
@@ -449,9 +504,11 @@ async function persistHostedDeviceSyncWake(input: {
       tx,
     });
     mailboxItemId = mailboxAppend.item.id;
+    mailboxAppendResult = mailboxAppend;
+    await input.persistAfterAppend?.(tx, mailboxAppend);
   });
 
-  if (!mailboxItemId) {
+  if (!mailboxItemId || !mailboxAppendResult) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_SYNC_WAKE_MAILBOX_APPEND_MISSING",
       httpStatus: 503,
@@ -465,6 +522,8 @@ async function persistHostedDeviceSyncWake(input: {
   });
 
   await input.complete?.();
+
+  return mailboxAppendResult;
 }
 
 async function startHostedDeviceSyncWakeWorkflowBestEffort(

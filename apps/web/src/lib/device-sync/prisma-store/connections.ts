@@ -1,4 +1,4 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   deviceSyncError,
   toRedactedPublicDeviceSyncAccount,
@@ -18,12 +18,16 @@ import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
 import {
   maybeDate,
+  toIsoTimestamp,
   normalizeNullableString,
   omitHostedSqlErrorText,
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
-import type { HostedPrismaTransactionClient } from "./types";
+import type {
+  HostedDeviceSyncDueReconcileConnectionRecord,
+  HostedPrismaTransactionClient,
+} from "./types";
 import {
   hostedConnectionRecordArgs,
   mapHostedConnectionRecord,
@@ -502,6 +506,47 @@ export class PrismaHostedConnectionStore {
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       ...hostedConnectionRecordArgs,
     });
+  }
+
+  async listDueReconcileConnectionsForSweep(input: {
+    dueAt: Date;
+    limit: number;
+  }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
+    const limit = Math.max(1, Math.min(input.limit, 251));
+    const rows = await this.prisma.$queryRaw<Array<{
+      id: string;
+      next_reconcile_at: Date;
+      provider: string;
+      user_id: string;
+    }>>(Prisma.sql`
+      select
+        "connection"."id",
+        "connection"."next_reconcile_at",
+        "connection"."provider",
+        "connection"."user_id"
+      from "device_connection" as "connection"
+      where "connection"."status" = 'active'
+        and "connection"."next_reconcile_at" is not null
+        and "connection"."next_reconcile_at" <= ${input.dueAt}
+        and not exists (
+          select 1
+          from "device_sync_dirty_connection" as "dirty"
+          where "dirty"."connection_id" = "connection"."id"
+            and "dirty"."dirty_revision" > "dirty"."processed_revision"
+        )
+      order by
+        "connection"."next_reconcile_at" asc,
+        "connection"."updated_at" asc,
+        "connection"."id" asc
+      limit ${limit}
+    `);
+
+    return rows.map((row) => ({
+      connectionId: row.id,
+      nextReconcileAt: toIsoTimestamp(row.next_reconcile_at),
+      provider: row.provider,
+      userId: row.user_id,
+    }));
   }
 
   async getConnectionRecordForUser(
