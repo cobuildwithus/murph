@@ -184,32 +184,40 @@ describe("hosted web production migration guard", () => {
     ]);
   });
 
-  test("keeps the production migration hook before next build", async () => {
+  test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
     ) as {
       scripts?: Record<string, string>;
     };
+    const vercelJson = JSON.parse(
+      await readFile(path.join(appRoot, "vercel.json"), "utf8"),
+    ) as {
+      buildCommand?: string;
+    };
 
     const scripts = packageJson.scripts ?? {};
     const buildScript = scripts.build ?? "";
-    const hookScript = scripts["migrate:production:prebuild"] ?? "";
+    const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
 
-    assert.match(buildScript, /pnpm migrate:production:prebuild/u);
     assert.match(buildScript, /pnpm prisma:generate/u);
     assert.match(buildScript, /next build/u);
+    assert.doesNotMatch(buildScript, /migrate:production/u);
+    assert.doesNotMatch(buildScript, /release:production:migrate/u);
+    assert.doesNotMatch(buildScript, /run-production-migrations/u);
     assert.ok(
-      buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("pnpm migrate:production:prebuild"),
-      "non-mutating build prep must finish before production migrations run",
-    );
-    assert.ok(
-      buildScript.indexOf("pnpm migrate:production:prebuild") < buildScript.indexOf("next build"),
-      "production migration hook must run before next build",
+      buildScript.indexOf("pnpm prisma:generate") < buildScript.indexOf("next build"),
+      "non-mutating build prep must finish before next build",
     );
     assert.equal(
-      hookScript,
+      releaseMigrationScript,
       "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     );
+    assert.equal(
+      vercelJson.buildCommand,
+      "pnpm release:production:migrate && pnpm build",
+    );
+    assert.equal(scripts["migrate:production:prebuild"], undefined);
     assert.equal(
       scripts["prisma:migrate:deploy"],
       "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
