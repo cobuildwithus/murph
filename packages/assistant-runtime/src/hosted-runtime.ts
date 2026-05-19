@@ -345,13 +345,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "workspace.read",
       status: "start",
     });
-    const workspaceRead = await raceHostedRuntimeCancellation(
-      workspacePort.read(),
-      runtimeAbortController.signal,
-    );
+    const workspaceRead = Object.hasOwn(input.request, "workspace")
+      ? {
+          fetchedAt: new Date().toISOString(),
+          workspace: input.request.workspace ?? null,
+        }
+      : await raceHostedRuntimeCancellation(
+          workspacePort.read(),
+          runtimeAbortController.signal,
+        );
     emitPhaseLog({
       details: {
         actualWorkspaceVersion: workspaceRead.workspace?.version ?? null,
+        workspaceReadSource: Object.hasOwn(input.request, "workspace")
+          ? "invocation_request"
+          : "workspace_port",
         workspacePresent: workspaceRead.workspace !== null,
       },
       input,

@@ -953,6 +953,13 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
     ),
     reason,
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
+    ...(record.workspace === undefined
+      ? {}
+      : {
+          workspace: record.workspace === null
+            ? null
+            : parseHostedWorkspaceState(record.workspace),
+        }),
     workspaceVersion: requireNonNegativeBigIntString(
       record.workspaceVersion,
       "Hosted workspace invocation request workspaceVersion",

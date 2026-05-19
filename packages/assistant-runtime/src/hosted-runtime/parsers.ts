@@ -1,6 +1,9 @@
 import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
+import {
+  parseHostedWorkspaceState,
+} from "@murphai/hosted-execution/parsers";
 
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -116,6 +119,13 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       record.userId,
       "Hosted assistant workspace runtime job request.userId",
     ),
+    ...(record.workspace === undefined
+      ? {}
+      : {
+          workspace: record.workspace === null
+            ? null
+            : parseHostedWorkspaceState(record.workspace),
+        }),
     workspaceVersion: requireNonNegativeBigIntString(
       record.workspaceVersion,
       "Hosted assistant workspace runtime job request.workspaceVersion",

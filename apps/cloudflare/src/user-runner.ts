@@ -1515,6 +1515,7 @@ export class HostedUserRunner {
         token,
         reason: input.reason,
         userId: initialRecord.userId,
+        workspace: workspaceRead.workspace,
         workspaceVersion,
       });
       const completed = await this.stateStore.clearWriteFenceAfterCompletion({
@@ -1748,6 +1749,7 @@ export class HostedUserRunner {
     token: RunnerWriteFenceToken;
     reason: HostedWorkspaceInvocationReason;
     userId: string;
+    workspace: HostedWorkspaceState | null;
     workspaceVersion: string;
   }): Promise<HostedWorkspaceInvocationResult> {
     if (!this.runnerContainerNamespace) {
@@ -1777,6 +1779,7 @@ export class HostedUserRunner {
         leaseGeneration: input.token.generation,
         reason: input.reason,
         userId: input.userId,
+        workspace: input.workspace,
         workspaceVersion: input.workspaceVersion,
       },
       runtime: runtimeConfig,

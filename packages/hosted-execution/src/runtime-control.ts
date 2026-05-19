@@ -831,6 +831,7 @@ export interface HostedWorkspaceInvocationRequest {
   leaseGeneration: string;
   reason: HostedWorkspaceInvocationReason;
   userId: string;
+  workspace?: HostedWorkspaceState | null;
   workspaceVersion: string;
 }
 

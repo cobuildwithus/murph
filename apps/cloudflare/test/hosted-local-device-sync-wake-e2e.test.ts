@@ -50,7 +50,7 @@ describe("hosted local device-sync wake e2e", () => {
     scenario = null;
   }, 120_000);
 
-  it("runs a device-sync system wake through the real workspace read path without a control-plane 404", async () => {
+  it("runs a device-sync system wake without a child startup workspace-read 404", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
     await requireScenario().runWake(buildDeviceSyncWake(), userId);
 
@@ -73,21 +73,22 @@ describe("hosted local device-sync wake e2e", () => {
       record.message === "Hosted execution container failed."
       && record.userId === userId
     );
-    const forwardedWorkspaceRead = logs.find((record) =>
-      record.message === "Hosted runner web-control request forwarding."
-      && readDetails(record).operation === "workspace_read"
-    );
-    const receivedWorkspaceReadResponse = logs.find((record) => {
+    const workspaceReadForwards = logs.filter((record) => {
       const details = readDetails(record);
-      return record.message === "Hosted runner web-control response received."
-        && details.operation === "workspace_read"
-        && details.responseStatus === 200;
+      return record.message === "Hosted runner web-control request forwarding."
+        && details.operation === "workspace_read";
+    });
+    const runnerWorkspaceRead = logs.find((record) => {
+      const details = readDetails(record);
+      return record.message === "Hosted runner workspace read completed."
+        && record.userId === userId
+        && details.workspacePresent === true;
     });
 
     expect(workspaceRead404).toBeUndefined();
     expect(containerFailure).toBeUndefined();
-    expect(forwardedWorkspaceRead).toBeDefined();
-    expect(receivedWorkspaceReadResponse).toBeDefined();
+    expect(workspaceReadForwards).toHaveLength(1);
+    expect(runnerWorkspaceRead).toBeDefined();
   }, 300_000);
 });
 
