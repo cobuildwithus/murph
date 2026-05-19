@@ -29,6 +29,8 @@ accounting is wrong.
 - `apps/web/test/hosted-workspace-store.test.ts`
 - `apps/cloudflare/README.md`
 - `apps/cloudflare/DEPLOY.md`
+- `apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts`
+- hosted-local E2E harness/test helpers for offline provider diagnostics
 - hosted runtime log event contract/tests
 - hosted Codex/OpenAI config surfaces if evidence points there
 - focused provider usage and prompt-cache tests
@@ -77,6 +79,13 @@ accounting is wrong.
 - Session-resolution diagnostics live on the assistant session lookup result
   and emit only lookup source, key counts, indexed-candidate counts, matched
   scope, and indexed booleans. Raw lookup keys and session ids are not logged.
+- The manual `codex-long-thread` hosted-local scenario exercises the real
+  hosted Linq wake/runtime/Codex request-construction path against a local
+  Responses API recorder, so it can reproduce prompt growth and compaction
+  without real provider credits. Because the model provider base URL points to
+  loopback in this scenario, Worker OpenAI egress diagnostics are not expected
+  there; the scenario records metadata-only provider body sizes, keyed fingerprints,
+  compact request counts, usage-token checkpoints, and post-compaction drops.
 
 ## Verification
 
@@ -102,3 +111,19 @@ accounting is wrong.
 - `pnpm typecheck` was attempted after the prompt-size/session-lookup
   diagnostics update, but it blocked behind an unrelated long-running
   Cloudflare runner-bundle workspace lock before package checks could start.
+- `pnpm exec vitest run --config scripts/vitest.config.ts scripts/hosted-local.test.ts` passed after wiring the manual `codex-long-thread` scenario.
+- `pnpm --dir apps/cloudflare typecheck` passed after the hosted-local long-thread harness additions.
+- `pnpm --dir apps/web typecheck:prepared` passed after the hosted test diagnostic helper additions.
+- `MURPH_HOSTED_LOCAL_ARTIFACT_DIR=.artifacts/codex-long-thread MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT=75 pnpm hosted-local e2e codex-long-thread --profile e2e:live` passed. Metadata-only diagnostic summary: 75 completed turns, 75 usage rows, 79 provider requests, 4 compact requests, max estimated body tokens 50,488, max usage input tokens 50,487, and post-compaction request body drops instead of unbounded growth. No real OpenAI credits were used because the provider base URL was a local recorder.
+- `MURPH_DEV_SKIP_RUNNER_BUNDLE=1 MURPH_HOSTED_LOCAL_ARTIFACT_DIR=.artifacts/codex-long-thread-final MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT=12 pnpm hosted-local e2e codex-long-thread --profile e2e:live` passed after adding explicit summary fields. Metadata-only diagnostic summary: first usage row over target at ordinal 11, max usage input tokens 50,111, one compact request, and one usage-token drop from 50,111 to 12,751 on the next assistant turn.
+- `git diff --check -- agent-docs/exec-plans/active/2026-05-13-prompt-cache-debugging.md apps/cloudflare/test/helpers/hosted-local-e2e-support.ts apps/cloudflare/test/helpers/hosted-local-full-stack-scenario.ts apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts apps/web/src/lib/hosted-onboarding/hosted-member-test-seed.ts apps/web/src/testing.ts packages/hosted-local-harness/src/e2e.ts scripts/hosted-local.test.ts` passed.
+- `pnpm logs:guard` passed.
+- `bash scripts/workspace-verify.sh test:diff agent-docs/exec-plans/active/2026-05-13-prompt-cache-debugging.md apps/cloudflare/test/helpers/hosted-local-e2e-support.ts apps/cloudflare/test/helpers/hosted-local-full-stack-scenario.ts apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts apps/web/src/lib/hosted-onboarding/hosted-member-test-seed.ts apps/web/src/testing.ts packages/hosted-local-harness/src/e2e.ts scripts/hosted-local.test.ts` passed, including repo tools tests, hosted-local-harness typecheck, `apps/cloudflare verify`, and `apps/web verify`. The web lane still emitted existing lint warnings in `device-sync/agent-session-service.ts` plus the known Turbopack trace warning.
+- Post-audit fixes added explicit compaction/drop assertions, stable usage-row ordering by provider request ordinal, and per-run local HMAC keys for provider request body fingerprints.
+- `pnpm exec vitest run --config scripts/vitest.config.ts scripts/hosted-local.test.ts` passed after post-audit fixes.
+- `pnpm --dir apps/cloudflare typecheck` passed after post-audit fixes.
+- `pnpm --dir apps/web typecheck:prepared` passed after post-audit fixes.
+- `MURPH_HOSTED_LOCAL_ARTIFACT_DIR=.artifacts/codex-long-thread-assertions MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT=12 pnpm hosted-local e2e codex-long-thread --profile e2e:live` passed with the explicit compaction/drop assertions enabled. Metadata-only diagnostic summary: first usage row over target at ordinal 11, max usage input tokens 50,111, one compact request, one request-body drop from 200,444 bytes to 51,004 bytes, and one usage-token drop from 50,111 to 12,751.
+- Final review narrowed request-body drop detection to compare normal `/v1/responses` calls only, so the E2E proves the post-compact assistant turn shrinks instead of counting the compact call itself.
+- `MURPH_HOSTED_LOCAL_ARTIFACT_DIR=.artifacts/codex-long-thread-final-proof MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT=12 pnpm hosted-local e2e codex-long-thread --profile e2e:live` passed after that narrowing. Metadata-only diagnostic summary: 12 completed turns, first usage row over target at ordinal 11, max usage input tokens 50,111, one compact request, normal response body drop from 200,442 bytes to 51,004 bytes, and usage-token drop from 50,111 to 12,751.
+- Final scoped `git diff --check` passed, the untracked long-thread E2E file passed `git diff --no-index --check`, and `pnpm logs:guard` passed.

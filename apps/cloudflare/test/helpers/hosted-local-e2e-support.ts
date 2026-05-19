@@ -12,6 +12,8 @@ import {
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedLocalE2eRunnerTimeoutMs = "600000";
+const hostedLocalContextCompactionSummary = "local-offline-context-compaction-summary";
+const hostedLocalResponsesCompactionSummary = "local-offline-compaction-summary";
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -60,6 +62,22 @@ export interface HostedLocalAssistantProviderStubRequest {
   url: string;
 }
 
+export type HostedLocalAssistantProviderStubUsageMode =
+  | "fixed"
+  | "request-body-estimate";
+
+interface HostedLocalAssistantProviderUsage {
+  input_tokens: number;
+  input_tokens_details: {
+    cached_tokens: number;
+  };
+  output_tokens: number;
+  output_tokens_details: {
+    reasoning_tokens: number;
+  };
+  total_tokens: number;
+}
+
 export function buildHostedAssistantNotificationDecisionResponse(input: {
   privateSummary?: string;
   subject?: string | null;
@@ -96,6 +114,7 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
   modelId: string;
   responseId?: string;
   responseText: string;
+  usage: HostedLocalAssistantProviderUsage;
 }): Record<string, unknown> {
   return {
     created_at: Math.floor(Date.now() / 1000),
@@ -115,11 +134,7 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
         type: "message",
       },
     ],
-    usage: {
-      input_tokens: 24,
-      output_tokens: 11,
-      total_tokens: 35,
-    },
+    usage: input.usage,
   };
 }
 
@@ -128,6 +143,7 @@ function writeAssistantProviderResponsesApiStubStream(input: {
   response: ServerResponse;
   responseId: string;
   responseText: string;
+  usage: HostedLocalAssistantProviderUsage;
 }): void {
   const messageId = `msg_${input.responseId}`;
   const content = {
@@ -147,6 +163,7 @@ function writeAssistantProviderResponsesApiStubStream(input: {
       modelId: input.modelId,
       responseId: input.responseId,
       responseText: input.responseText,
+      usage: input.usage,
     }),
     output: [outputItem],
     status: "completed",
@@ -217,6 +234,49 @@ function writeAssistantProviderResponsesApiStubStream(input: {
   input.response.end();
 }
 
+function writeAssistantProviderContextCompactionStubStream(input: {
+  modelId: string;
+  response: ServerResponse;
+  responseId: string;
+  usage: HostedLocalAssistantProviderUsage;
+}): void {
+  const outputItem = {
+    encrypted_content: hostedLocalContextCompactionSummary,
+    type: "context_compaction",
+  };
+  const completedResponse = {
+    created_at: Math.floor(Date.now() / 1000),
+    id: input.responseId,
+    model: input.modelId,
+    output: [outputItem],
+    status: "completed",
+    usage: input.usage,
+  };
+
+  input.response.statusCode = 200;
+  input.response.setHeader("cache-control", "no-cache");
+  input.response.setHeader("content-type", "text/event-stream; charset=utf-8");
+  writeAssistantProviderSseEvent(input.response, "response.created", {
+    response: {
+      ...completedResponse,
+      output: [],
+      status: "in_progress",
+    },
+    type: "response.created",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.output_item.done", {
+    item: outputItem,
+    output_index: 0,
+    type: "response.output_item.done",
+  });
+  writeAssistantProviderSseEvent(input.response, "response.completed", {
+    response: completedResponse,
+    type: "response.completed",
+  });
+  input.response.write("data: [DONE]\n\n");
+  input.response.end();
+}
+
 function writeAssistantProviderSseEvent(
   response: ServerResponse,
   event: string,
@@ -232,6 +292,7 @@ export async function startAssistantProviderStubServer(input: {
   modelId?: string;
   onRequest?: (request: HostedLocalAssistantProviderStubRequest) => void;
   responseState?: HostedLocalAssistantProviderStubState;
+  usageMode?: HostedLocalAssistantProviderStubUsageMode;
 } = {}): Promise<ReturnType<typeof createServer>> {
   const modelId = input.modelId ?? "gpt-5.5";
   let responseSequence = 0;
@@ -278,12 +339,67 @@ export async function startAssistantProviderStubServer(input: {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/v1/responses/compact") {
+      const bodyJson = parseJsonObject(body);
+      if (!bodyJson || typeof bodyJson !== "object") {
+        writeJsonResponse(response, 400, {
+          error: "Assistant provider stub requires a compact request with a JSON object body.",
+        });
+        return;
+      }
+
+      writeJsonResponse(response, 200, {
+        output: [
+          {
+            encrypted_content: hostedLocalResponsesCompactionSummary,
+            type: "compaction_summary",
+          },
+        ],
+      });
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/v1/responses") {
       responsesApiRequestBodyCount += 1;
       const bodyJson = parseJsonObject(body);
       if (!bodyJson || typeof bodyJson !== "object") {
         writeJsonResponse(response, 400, {
           error: "Assistant provider stub requires a responses request with a JSON object body.",
+        });
+        return;
+      }
+
+      responseSequence += 1;
+      const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
+      if (isContextCompactionResponsesRequest(bodyJson)) {
+        const usage = buildAssistantProviderStubUsage({
+          body,
+          responseText: hostedLocalContextCompactionSummary,
+          usageMode: input.usageMode ?? "fixed",
+        });
+        if (bodyJson.stream === true) {
+          writeAssistantProviderContextCompactionStubStream({
+            modelId,
+            response,
+            responseId,
+            usage,
+          });
+          return;
+        }
+
+        writeJsonResponse(response, 200, {
+          ...buildAssistantProviderResponsesApiStubResponse({
+            modelId,
+            responseId,
+            responseText: hostedLocalContextCompactionSummary,
+            usage,
+          }),
+          output: [
+            {
+              encrypted_content: hostedLocalContextCompactionSummary,
+              type: "context_compaction",
+            },
+          ],
         });
         return;
       }
@@ -299,14 +415,19 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      responseSequence += 1;
-      const responseId = `resp_stub_hosted_local_e2e_${responseSequence}`;
+      const usage = buildAssistantProviderStubUsage({
+        body,
+        responseText,
+        usageMode: input.usageMode ?? "fixed",
+      });
+
       if (bodyJson.stream === true) {
         writeAssistantProviderResponsesApiStubStream({
           modelId,
           response,
           responseId,
           responseText,
+          usage,
         });
         return;
       }
@@ -315,6 +436,7 @@ export async function startAssistantProviderStubServer(input: {
         modelId,
         responseId,
         responseText,
+        usage,
       }));
       return;
     }
@@ -402,6 +524,45 @@ export function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function buildAssistantProviderStubUsage(input: {
+  body: string;
+  responseText: string;
+  usageMode: HostedLocalAssistantProviderStubUsageMode;
+}): HostedLocalAssistantProviderUsage {
+  if (input.usageMode === "fixed") {
+    return {
+      input_tokens: 24,
+      input_tokens_details: {
+        cached_tokens: 0,
+      },
+      output_tokens: 11,
+      output_tokens_details: {
+        reasoning_tokens: 0,
+      },
+      total_tokens: 35,
+    };
+  }
+
+  const inputTokens = estimateTokensFromUtf8Bytes(input.body);
+  const outputTokens = estimateTokensFromUtf8Bytes(input.responseText);
+
+  return {
+    input_tokens: inputTokens,
+    input_tokens_details: {
+      cached_tokens: 0,
+    },
+    output_tokens: outputTokens,
+    output_tokens_details: {
+      reasoning_tokens: 0,
+    },
+    total_tokens: inputTokens + outputTokens,
+  };
+}
+
+function estimateTokensFromUtf8Bytes(value: string): number {
+  return Math.max(1, Math.ceil(Buffer.byteLength(value, "utf8") / 4));
 }
 
 export function resolveHostedAssistantLocalDevEnv(
@@ -606,6 +767,27 @@ function parseJsonObject(body: string): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+function isContextCompactionResponsesRequest(value: Record<string, unknown>): boolean {
+  return containsContextCompactionTrigger(value);
+}
+
+function containsContextCompactionTrigger(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(containsContextCompactionTrigger);
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.type === "context_compaction" && record.encrypted_content === undefined) {
+    return true;
+  }
+
+  return Object.values(record).some(containsContextCompactionTrigger);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
