@@ -93,6 +93,9 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("codex-gateway-prefix")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("codex-long-thread")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("codex-container-continuity")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
     );
@@ -109,6 +112,9 @@ describe("hosted-local harness", () => {
       "codex-gateway-prefix",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
+      "codex-long-thread",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
       "codex-container-continuity",
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).not.toContain(
@@ -122,6 +128,9 @@ describe("hosted-local harness", () => {
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "codex-gateway-prefix",
+    );
+    expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
+      "codex-long-thread",
     );
     expect(listHostedLocalE2eScenarios().map((scenario) => scenario.name)).toContain(
       "codex-container-continuity",

@@ -20,6 +20,7 @@ export type HostedLocalE2eScenarioName =
   | "checkpoint-baseline"
   | "codex-container-continuity"
   | "codex-gateway-prefix"
+  | "codex-long-thread"
   | "container-continuity"
   | "device-connect"
   | "device-sync-wake"
@@ -68,6 +69,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-codex-gateway-prefix-e2e.test.ts",
     manualOnly: true,
     name: "codex-gateway-prefix",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-codex-long-thread-e2e.test.ts",
+    manualOnly: true,
+    name: "codex-long-thread",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",

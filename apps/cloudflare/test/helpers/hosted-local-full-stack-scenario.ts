@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
 import { promisify } from "node:util";
 
@@ -38,6 +38,7 @@ import {
   type HostedLocalAssistantProviderMode,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderStubState,
+  type HostedLocalAssistantProviderStubUsageMode,
 } from "./hosted-local-e2e-support.js";
 import {
   appendHostedWake,
@@ -60,6 +61,7 @@ const reuseExplicitDatabaseUrlEnv = "MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL";
 const preparedRunnerBundleCacheKeys = new Set<string>();
 
 interface HostedActiveMemberSeedArgs {
+  billingPlanCode?: "launch_monthly" | "launch_edge_monthly";
   environment?: NodeJS.ProcessEnv;
   memberId: string;
 }
@@ -118,6 +120,7 @@ export async function startHostedLocalFullStackScenario(input: {
   assistantProviderRecorder?: boolean;
   assistantProviderResponses?: readonly string[];
   assistantProviderStubModelId?: string;
+  assistantProviderStubUsageMode?: HostedLocalAssistantProviderStubUsageMode;
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -130,6 +133,7 @@ export async function startHostedLocalFullStackScenario(input: {
   streamLogs?: boolean;
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
+  const providerRequestBodyFingerprintSecret = randomUUID();
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
     queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
   };
@@ -160,6 +164,7 @@ export async function startHostedLocalFullStackScenario(input: {
           assistantProviderRequests.push(request);
         },
         responseState: assistantProviderStubState,
+        usageMode: input.assistantProviderStubUsageMode,
       });
       assistantProviderBaseUrl =
         `${buildHostLoopbackStubBaseUrl(assistantProviderServer, "assistant provider stub")}/v1`;
@@ -263,7 +268,10 @@ export async function startHostedLocalFullStackScenario(input: {
         const status = await scenarioHarness.readUserStatus(userId).catch(() => null);
         const assistantProviderRequestLog = assistantProviderRequests.map((request) => ({
           bodyBytes: Buffer.byteLength(request.body, "utf8"),
-          bodySha256: createHash("sha256").update(request.body).digest("hex").slice(0, 16),
+          bodyFingerprint: fingerprintProviderRequestBody(
+            request.body,
+            providerRequestBodyFingerprintSecret,
+          ),
           method: request.method,
           url: request.url,
         }));
@@ -313,6 +321,7 @@ export async function startHostedLocalFullStackScenario(input: {
       harness: scenarioHarness,
       seedActiveHostedLinqMember: async (seedInput) => {
         await seedHostedActiveLinqMember({
+          billingPlanCode: seedInput.billingPlanCode,
           environment: {
             ...seedEnvironment,
             DATABASE_URL: localDatabaseUrl,
@@ -327,6 +336,7 @@ export async function startHostedLocalFullStackScenario(input: {
       },
       seedActiveHostedMember: async (seedInput) => {
         await seedHostedActiveMember({
+          billingPlanCode: seedInput.billingPlanCode,
           environment: {
             ...seedEnvironment,
             DATABASE_URL: localDatabaseUrl,
@@ -363,6 +373,13 @@ export async function startHostedLocalFullStackScenario(input: {
     await localDatabase.cleanup().catch(() => {});
     throw error;
   }
+}
+
+function fingerprintProviderRequestBody(value: string, secret: string): string {
+  return createHmac("sha256", secret)
+    .update(value)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 interface HostedLocalScenarioDatabaseLease {

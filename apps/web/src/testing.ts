@@ -27,7 +27,8 @@ interface HostedMailboxAppendForTestPrismaClient {
 
 type HostedTestPrismaClient =
   & HostedMailboxAppendForTestPrismaClient
-  & HostedWorkspaceSeedForTestPrismaClient;
+  & HostedWorkspaceSeedForTestPrismaClient
+  & HostedUsageDiagnosticsForTestPrismaClient;
 
 interface HostedTestPrismaClientConstructor {
   new (options: {
@@ -60,6 +61,32 @@ interface HostedMailboxAppendForTestStoreModule {
 
 interface HostedWorkspaceSeedForTestPrismaClient {
   $disconnect(): Promise<void>;
+}
+
+interface HostedUsageDiagnosticsForTestPrismaClient {
+  hostedAiUsage: {
+    findMany(input: {
+      orderBy: Array<
+        | { occurredAt: "asc" }
+        | { providerRequestOrdinal: "asc" }
+      >;
+      take: number;
+      where: {
+        memberId: string;
+      };
+    }): Promise<HostedAiUsageForTestPrismaRow[]>;
+  };
+  hostedRuntimeLog: {
+    findMany(input: {
+      orderBy: {
+        at: "asc";
+      };
+      take: number;
+      where: {
+        userId: string;
+      };
+    }): Promise<HostedRuntimeLogForTestPrismaRow[]>;
+  };
 }
 
 interface HostedWorkspaceSeedForTestStoreModule {
@@ -104,6 +131,54 @@ export interface HostedMailboxAppendForTestResponse {
     id: string;
     seq: string;
   };
+}
+
+interface HostedAiUsageForTestPrismaRow {
+  allowanceCostUsdMicros: bigint | number;
+  attemptCount: number;
+  cacheWriteTokens: number | null;
+  cachedInputTokens: number | null;
+  inputTokens: number | null;
+  occurredAt: Date;
+  outputTokens: number | null;
+  providerRequestOrdinal: number;
+  reasoningTokens: number | null;
+  requestedModel: string | null;
+  servedModel: string | null;
+  totalTokens: number | null;
+}
+
+export interface HostedAiUsageForTestRow {
+  allowanceCostUsdMicros: string;
+  attemptCount: number;
+  cacheWriteTokens: number | null;
+  cachedInputTokens: number | null;
+  inputTokens: number | null;
+  occurredAt: string;
+  outputTokens: number | null;
+  providerRequestOrdinal: number;
+  reasoningTokens: number | null;
+  requestedModel: string | null;
+  servedModel: string | null;
+  totalTokens: number | null;
+}
+
+interface HostedRuntimeLogForTestPrismaRow {
+  at: Date;
+  component: string;
+  eventCode: string;
+  level: string;
+  phase: string;
+  redactedJson: unknown;
+}
+
+export interface HostedRuntimeLogForTestRow {
+  at: string;
+  component: string;
+  eventCode: string;
+  level: string;
+  phase: string;
+  redactedJson: Record<string, unknown> | null;
 }
 
 export async function appendHostedExecutionWakeForTest(input: {
@@ -180,6 +255,77 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
       status: checkpoint.status,
       version: checkpoint.workspace?.version ?? workspace.version,
     };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function listHostedAiUsageForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  limit?: number;
+  memberId: string;
+}): Promise<HostedAiUsageForTestRow[]> {
+  const environment = applyHostedMailboxAppendForTestEnvironment(input.environment);
+  const prisma = await createHostedTestPrisma(environment);
+
+  try {
+    const rows = await prisma.hostedAiUsage.findMany({
+      orderBy: [
+        { providerRequestOrdinal: "asc" },
+        { occurredAt: "asc" },
+      ],
+      take: normalizeHostedTestingLimit(input.limit ?? 500),
+      where: {
+        memberId: input.memberId,
+      },
+    });
+
+    return rows.map((row) => ({
+      allowanceCostUsdMicros: row.allowanceCostUsdMicros.toString(),
+      attemptCount: row.attemptCount,
+      cacheWriteTokens: row.cacheWriteTokens,
+      cachedInputTokens: row.cachedInputTokens,
+      inputTokens: row.inputTokens,
+      occurredAt: row.occurredAt.toISOString(),
+      outputTokens: row.outputTokens,
+      providerRequestOrdinal: row.providerRequestOrdinal,
+      reasoningTokens: row.reasoningTokens,
+      requestedModel: row.requestedModel,
+      servedModel: row.servedModel,
+      totalTokens: row.totalTokens,
+    }));
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function listHostedRuntimeLogsForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  limit?: number;
+  userId: string;
+}): Promise<HostedRuntimeLogForTestRow[]> {
+  const environment = applyHostedMailboxAppendForTestEnvironment(input.environment);
+  const prisma = await createHostedTestPrisma(environment);
+
+  try {
+    const rows = await prisma.hostedRuntimeLog.findMany({
+      orderBy: {
+        at: "asc",
+      },
+      take: normalizeHostedTestingLimit(input.limit ?? 1_000),
+      where: {
+        userId: input.userId,
+      },
+    });
+
+    return rows.map((row) => ({
+      at: row.at.toISOString(),
+      component: row.component,
+      eventCode: row.eventCode,
+      level: row.level,
+      phase: row.phase,
+      redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
+    }));
   } finally {
     await prisma.$disconnect();
   }
@@ -288,4 +434,20 @@ function normalizeTestPrismaConnectionString(databaseUrl: string): string {
   }
 
   return changed ? parsed.toString() : databaseUrl;
+}
+
+function normalizeHostedTestingLimit(value: number): number {
+  if (!Number.isInteger(value) || value < 1) {
+    return 1;
+  }
+
+  return Math.min(value, 2_000);
+}
+
+function normalizeHostedTestingRedactedJson(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
 }

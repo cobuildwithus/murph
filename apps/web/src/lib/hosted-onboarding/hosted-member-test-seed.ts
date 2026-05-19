@@ -12,12 +12,21 @@ const hostedMemberRoutingStoreModuleSpecifier = new URL(
 ).href;
 const hostedMemberStoreModuleSpecifier = new URL("./hosted-member-store.ts", import.meta.url)
   .href;
+const hostedMemberBillingStoreModuleSpecifier = new URL(
+  "./hosted-member-billing-store.ts",
+  import.meta.url,
+).href;
 const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
 
+type HostedMemberTestSeedBillingPlanCode =
+  | "launch_monthly"
+  | "launch_edge_monthly";
+
 interface HostedActiveMemberSeedInput {
+  billingPlanCode?: HostedMemberTestSeedBillingPlanCode;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
 }
@@ -41,6 +50,16 @@ interface HostedMemberStoreModule {
     billingStatus: "active";
     memberId: string;
     prisma: unknown;
+  }): Promise<unknown>;
+}
+
+interface HostedMemberBillingStoreModule {
+  writeHostedMemberStripeBillingRefTx(input: {
+    currentBillingPhase: "paid";
+    currentBillingPlanCode: HostedMemberTestSeedBillingPlanCode;
+    currentCheckoutOffer: "standard";
+    memberId: string;
+    tx: unknown;
   }): Promise<unknown>;
 }
 
@@ -105,6 +124,8 @@ interface HostedMemberSeedModules {
   upsertHostedMemberHomeLinqRecipientPhoneTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqRecipientPhoneTx"];
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
+  writeHostedMemberStripeBillingRefTx:
+    HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
 }
 
 export async function seedHostedActiveMember(
@@ -125,6 +146,12 @@ export async function seedHostedActiveMember(
         billingStatus: "active",
         memberId: input.memberId,
         prisma: tx,
+      });
+      await seedHostedMemberBillingRefTx({
+        billingPlanCode: input.billingPlanCode,
+        memberId: input.memberId,
+        modules,
+        tx,
       });
       await modules.provisionHostedCryptoDomainRootsForUserTx({
         reason: "hosted-member.test-seed",
@@ -160,6 +187,12 @@ export async function seedHostedActiveLinqMember(
         billingStatus: "active",
         memberId: input.memberId,
         prisma: tx,
+      });
+      await seedHostedMemberBillingRefTx({
+        billingPlanCode: input.billingPlanCode,
+        memberId: input.memberId,
+        modules,
+        tx,
       });
       await modules.provisionHostedCryptoDomainRootsForUserTx({
         reason: "hosted-member.test-seed",
@@ -246,6 +279,7 @@ async function loadHostedMemberSeedModules(
     hostedMemberIdentityStoreModule,
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
+    hostedMemberBillingStoreModule,
   ] = await Promise.all([
     import(prismaModuleSpecifier),
     import(contactPrivacyModuleSpecifier),
@@ -253,6 +287,7 @@ async function loadHostedMemberSeedModules(
     import(hostedMemberIdentityStoreModuleSpecifier),
     import(hostedMemberRoutingStoreModuleSpecifier),
     import(hostedMemberStoreModuleSpecifier),
+    import(hostedMemberBillingStoreModuleSpecifier),
   ]);
 
   if (environment.DATABASE_URL) {
@@ -268,6 +303,8 @@ async function loadHostedMemberSeedModules(
   const typedHostedMemberRoutingStoreModule =
     hostedMemberRoutingStoreModule as HostedMemberRoutingStoreModule;
   const typedHostedMemberStoreModule = hostedMemberStoreModule as HostedMemberStoreModule;
+  const typedHostedMemberBillingStoreModule =
+    hostedMemberBillingStoreModule as HostedMemberBillingStoreModule;
 
   return {
     createHostedMember: typedHostedMemberStoreModule.createHostedMember,
@@ -281,7 +318,28 @@ async function loadHostedMemberSeedModules(
     upsertHostedMemberHomeLinqRecipientPhoneTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqRecipientPhoneTx,
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
+    writeHostedMemberStripeBillingRefTx:
+      typedHostedMemberBillingStoreModule.writeHostedMemberStripeBillingRefTx,
   };
+}
+
+async function seedHostedMemberBillingRefTx(input: {
+  billingPlanCode?: HostedMemberTestSeedBillingPlanCode;
+  memberId: string;
+  modules: HostedMemberSeedModules;
+  tx: unknown;
+}): Promise<void> {
+  if (!input.billingPlanCode) {
+    return;
+  }
+
+  await input.modules.writeHostedMemberStripeBillingRefTx({
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: input.billingPlanCode,
+    currentCheckoutOffer: "standard",
+    memberId: input.memberId,
+    tx: input.tx,
+  });
 }
 
 function clearHostedMemberSeedGlobals(): void {
