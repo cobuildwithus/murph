@@ -24,13 +24,15 @@ Done:
 - Added hosted-local E2E proof that provider cleanup DELETE occurs without a runner nudge before any early idle snapshot.
 - Addressed simplify audit findings by preserving the projected-wake serviced marker across unrelated external wakes and improving the E2E timeout failure message.
 - Security/privacy audit reported no findings.
+- Coverage audit reported coverage sufficient and made no edits.
+- Final completion review reported no findings.
 - Verification passed after post-audit fixes: `packages/assistant-runtime` typecheck; focused hosted-runtime entrypoint tests; hosted-local active-turn E2E no-snapshot/cleanup probe; `apps/cloudflare` typecheck; scoped `workspace-verify test:diff`; `pnpm test:smoke`; `git diff --check`; scoped privacy scan.
 
 Now:
-- Run coverage/final completion audits.
+- Commit scoped changes.
 
 Next:
-- Address audit findings if any, then commit scoped changes.
+- Hand off with commit id and deployment note.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -40,3 +42,6 @@ Working set (files/ids/commands):
 - `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`
 - `apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts`
 - `agent-docs/exec-plans/active/2026-05-19-hosted-projected-wake-hot-pass.md`
+Status: completed
+Updated: 2026-05-19
+Completed: 2026-05-19
