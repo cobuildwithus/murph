@@ -10,6 +10,7 @@ import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
@@ -22,6 +23,7 @@ import {
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
+  buildMurphAgePublicCalculatorView,
   buildMurphAgeIncrementEvaluationCard,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
@@ -4367,8 +4369,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     false,
   );
   const productDefaultReport = toPublicMurphAgeCalculatorReport(productDefault);
+  const productDefaultView = buildMurphAgePublicCalculatorView(productDefaultReport);
   assert.equal(productDefaultReport.status, "abstain");
   assert.equal(productDefaultReport.result, null);
+  assert.equal(productDefaultView.displayCategory, "abstain");
+  assert.equal(productDefaultView.selectedCardId, null);
+  assert.equal(productDefaultView.ageEstimate, null);
+  assert.equal(productDefaultView.risk.probability, null);
+  assert.equal(productDefaultView.featureContributions.length, 0);
+  assert.equal(productDefaultView.domainContributions.length, 0);
   assert.equal(productDefaultReport.inputReadiness.bundle.bundleId, "lab9-bp-body");
   assert.equal(productDefaultReport.inputReadiness.bundle.availableFeatureKeys.includes("glycemia"), true);
   assert.equal(productDefaultReport.inputReadiness.bundle.selectedMetricKeys.includes("hba1c"), true);
@@ -4427,6 +4436,30 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productRiskOnlySummary.displayBlockedReason, "risk-to-age-not-authorized");
   assert.equal(productRiskOnlySummary.productRiskDisplayReady, true);
   assert.equal(productRiskOnlySummary.productAgeDisplayReady, false);
+  const productRiskOnlyReport = toPublicMurphAgeCalculatorReport({
+    ...research,
+    authorization: {
+      ...research.authorization,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: false,
+    },
+    mode: "product",
+    result: research.result ? {
+      ...research.result,
+      authorization: {
+        ...research.result.authorization,
+        productAuthorized: true,
+        riskToAgeDisplayAuthorized: false,
+      },
+    } : null,
+  });
+  const productRiskOnlyView = buildMurphAgePublicCalculatorView(productRiskOnlyReport);
+  assert.equal(productRiskOnlyView.displayCategory, "product-risk-only");
+  assert.equal(productRiskOnlyView.risk.probability, productRiskOnlyReport.result?.risk?.probability);
+  assert.equal(productRiskOnlyView.ageEstimate, null);
+  assert.equal(productRiskOnlyView.featureContributions.length, 0);
+  assert.equal(productRiskOnlyView.domainContributions.length, 0);
+  assert.equal(productRiskOnlyView.selectedCardId, productRiskOnlyReport.authorization.cardId);
 
   const productAgeReadySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
@@ -4452,6 +4485,29 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productAgeReadySummary.productAgeDisplayReady, true);
   assert.equal(productAgeReadySummary.researchEstimateAvailable, false);
   assert.equal(productAgeReadySummary.selectedScoreBearingPointIds.includes("metric-point:hba1c:2026-05-01:lab:0"), true);
+  const productAgeReadyReport = toPublicMurphAgeCalculatorReport({
+    ...research,
+    authorization: {
+      ...research.authorization,
+      productAuthorized: true,
+      riskToAgeDisplayAuthorized: true,
+    },
+    mode: "product",
+    result: research.result ? {
+      ...research.result,
+      authorization: {
+        ...research.result.authorization,
+        productAuthorized: true,
+        riskToAgeDisplayAuthorized: true,
+      },
+    } : null,
+  });
+  const productAgeReadyView = buildMurphAgePublicCalculatorView(productAgeReadyReport);
+  assert.equal(productAgeReadyView.displayCategory, "product-age-ready");
+  assert.equal(productAgeReadyView.ageEstimate?.biologicalAgeYears, productAgeReadyReport.result?.biologicalAgeYears);
+  assert.equal(productAgeReadyView.risk.probability, productAgeReadyReport.result?.risk?.probability);
+  assert.equal(productAgeReadyView.featureContributions.some((feature) => feature.metricKey === "hba1c"), true);
+  assert.equal(productAgeReadyView.domainContributions.some((module) => module.moduleId === "metabolic"), true);
   if (research.cardPolicy) {
     (research.cardPolicy.scoreBearingSourceKinds as string[]).push("wearable-summary");
   }
@@ -4803,6 +4859,47 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(JSON.stringify(submittedLab5Report).includes("private metric"), false);
   assert.equal(JSON.stringify(submittedLab5Report).includes("metric-point:"), false);
   assert.equal(JSON.stringify(submittedLab5Report).includes("\"value\""), false);
+  const submittedLab5View = buildMurphAgePublicCalculatorView(submittedLab5Report);
+  assert.equal(submittedLab5View.schemaVersion, MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION);
+  assert.equal(submittedLab5View.status, "ready");
+  assert.equal(submittedLab5View.mode, "research");
+  assert.equal(submittedLab5View.displayCategory, "research-preview");
+  assert.equal(submittedLab5View.displayStatus, "research-only");
+  assert.equal(submittedLab5View.displayBlockedReason, "product-not-authorized");
+  assert.equal(submittedLab5View.selectedCardId, null);
+  assert.equal(submittedLab5View.product.ageDisplayReady, false);
+  assert.equal(submittedLab5View.product.riskDisplayReady, false);
+  assert.equal(
+    submittedLab5View.product.promotionBlockers.includes("PRODUCT_PROMOTION_EVIDENCE_MISSING"),
+    true,
+  );
+  assert.equal(submittedLab5View.ageEstimate, null);
+  assert.equal(submittedLab5View.risk.probability, null);
+  assert.equal(submittedLab5View.risk.horizonYears, 10);
+  assert.equal(submittedLab5View.risk.riskEndpoint, "all-cause-mortality");
+  assert.deepEqual(submittedLab5View.selectedScoreBearingMetricKeys, []);
+  assert.equal(submittedLab5View.wearable.scoreBearing, false);
+  assert.equal(submittedLab5View.wearable.scoreContributionAuthorized, false);
+  assert.equal(submittedLab5View.wearable.quality, "usable-context");
+  assert.equal(submittedLab5View.wearable.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(submittedLab5View.wearable.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(submittedLab5View.featureContributions.length, 0);
+  assert.equal(submittedLab5View.domainContributions.length, 0);
+  const submittedLab5ViewJson = JSON.stringify(submittedLab5View);
+  for (const forbidden of [
+    "private metric",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"label\"",
+    "\"message\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "prediction",
+  ]) {
+    assert.equal(submittedLab5ViewJson.includes(forbidden), false, forbidden);
+  }
 
   const submittedReportWithFutureInputs = calculateMurphAgeFromSubmittedInputs({
     asOf,
@@ -4935,6 +5032,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
   assert.equal(wearableOnlySummary.wearableBridge.readyFeatureKeys.includes("sleep-duration-regularity"), true);
   assert.equal(wearableOnlySummary.wearableBridge.missingFeatureKeys.includes("hrv-rmssd"), true);
+  const wearableOnlyView = buildMurphAgePublicCalculatorView(toPublicMurphAgeCalculatorReport(wearableOnly));
+  assert.equal(wearableOnlyView.displayCategory, "context-only");
+  assert.equal(wearableOnlyView.selectedCardId, null);
+  assert.equal(wearableOnlyView.ageEstimate, null);
+  assert.equal(wearableOnlyView.risk.probability, null);
+  assert.equal(wearableOnlyView.risk.riskEndpoint, "none");
+  assert.equal(wearableOnlyView.wearable.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(wearableOnlyView.featureContributions.length, 0);
+  assert.equal(wearableOnlyView.domainContributions.length, 0);
 
   const functionOnly = calculateMurphAgeFromInputBundle({
     asOf,
