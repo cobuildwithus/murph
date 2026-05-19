@@ -193,6 +193,39 @@ describe("ConnectTelegram", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
+  it("maps Privy Telegram link failures to safe user-facing copy", async () => {
+    const { ConnectTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(ConnectTelegram, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Connect Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.(
+        "linked_to_another_user",
+        { linkMethod: "telegram" },
+      );
+    });
+
+    expect(container.textContent).toContain("That Telegram account is already linked to a different Murph account.");
+    expect(container.textContent).toContain("Contact support");
+  });
+
   it("uses a sanitized initial Telegram account when Privy user state has not loaded", async () => {
     const { ConnectTelegram } = await import(
       "@/src/components/settings/hosted-telegram-settings"
@@ -569,7 +602,7 @@ describe("HostedTelegramCardSettings", () => {
     });
   });
 
-  it("does not auto-link Telegram before Privy is ready", async () => {
+  it("keeps the Telegram link button disabled before Privy is ready", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
     );
@@ -581,7 +614,6 @@ describe("HostedTelegramCardSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedTelegramCardSettings, {
         authenticated: true,
-        autoLink: true,
         initialTelegramAccount: null,
       }),
     );
@@ -590,6 +622,7 @@ describe("HostedTelegramCardSettings", () => {
     const linkButton = Array.from(container.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.includes("Link Telegram"),
     );
+    expect(linkButton).toBeTruthy();
 
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
     expect(linkButton?.disabled).toBe(true);
@@ -625,7 +658,7 @@ describe("HostedTelegramCardSettings", () => {
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
   });
 
-  it("auto-links Telegram once Privy becomes ready and authenticated", async () => {
+  it("waits for a manual click when Privy becomes ready and authenticated", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
     );
@@ -646,13 +679,12 @@ describe("HostedTelegramCardSettings", () => {
 
       return createElement(HostedTelegramCardSettings, {
         authenticated: true,
-        autoLink: true,
         initialTelegramAccount: null,
       });
     }
     mocks.usePrivy.mockImplementation(() => privyState);
 
-    const { cleanup } = await renderClientComponent(createElement(PrivyReadyHarness));
+    const { cleanup, container } = await renderClientComponent(createElement(PrivyReadyHarness));
     cleanupRender = cleanup;
 
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
@@ -663,8 +695,51 @@ describe("HostedTelegramCardSettings", () => {
       forceRender?.();
     });
 
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
     expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  it("does not render arbitrary Privy Telegram link failure text from the settings card callback", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: null,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link Telegram"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onError?.(
+        new Error("Sensitive provider detail for <PRIVY_APP_ID> and redirect <CALLBACK_URL>"),
+        { linkMethod: "telegram" },
+      );
+    });
+
+    expect(container.textContent).toContain("Could not link Telegram right now.");
+    expect(container.textContent).not.toContain("Sensitive provider detail");
+    expect(container.textContent).not.toContain("<PRIVY_APP_ID>");
   });
 
   it("does not notify its parent for quiet background Telegram resync", async () => {

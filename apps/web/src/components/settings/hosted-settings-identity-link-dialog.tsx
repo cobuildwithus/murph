@@ -70,7 +70,6 @@ export function HostedSettingsIdentityLinkDialog({
             {initialMode === "telegram" ? (
               <HostedTelegramCardSettings
                 authenticated
-                autoLink={!hasExisting}
                 initialTelegramAccount={account.telegram.telegramUserId
                   ? {
                       telegramUserId: account.telegram.telegramUserId,
