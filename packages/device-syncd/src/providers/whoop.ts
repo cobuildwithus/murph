@@ -356,6 +356,41 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
+function readOAuthErrorCode(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const error = (parsed as { error?: unknown }).error;
+    if (typeof error !== "string") {
+      return null;
+    }
+
+    return error.trim().toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWhoopTokenRequestAccountStatus(input: {
+  body: string;
+  grantType?: string;
+  response: Response;
+}): "reauthorization_required" | null {
+  if (input.grantType !== "refresh_token") {
+    return null;
+  }
+
+  const oauthErrorCode = readOAuthErrorCode(input.body);
+  if ((input.response.status === 400 || input.response.status === 401) && oauthErrorCode === "invalid_grant") {
+    return "reauthorization_required";
+  }
+
+  return null;
+}
+
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = whoopBaseUrl(config);
@@ -389,8 +424,12 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       parameters,
       buildError: (response, body) =>
         buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
-          retryable: response.status >= 500,
-          accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          retryable: response.status === 429 || response.status >= 500,
+          accountStatus: resolveWhoopTokenRequestAccountStatus({
+            body,
+            grantType: parameters.grant_type,
+            response,
+          }),
         }),
     });
   }
