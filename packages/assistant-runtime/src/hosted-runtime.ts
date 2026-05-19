@@ -762,7 +762,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     let result: HostedWorkspaceRunnerResult;
     let runtimeStateDirty = false;
+    let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
+    const markIdleCheckpointDeadlineAfterDirtyWork = () => {
+      idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
+    };
     try {
       result = await runForegroundPass({
         initialMailboxImport,
@@ -770,6 +774,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       runtimeStateDirty ||= result.runtimeStateDirty;
+      if (result.runtimeStateDirty) {
+        markIdleCheckpointDeadlineAfterDirtyWork();
+      }
       let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         result,
@@ -779,6 +786,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       while (runtimeStateDirty) {
         let checkpointStartedForHostDeadline = false;
         if (accumulatedProjection.status !== "budget_exhausted") {
+          if (idleCheckpointStartByMs === null) {
+            throw new Error("Dirty hosted runtime is missing an idle checkpoint deadline.");
+          }
           const projectedRuntimeWakeKey = buildHostedRuntimeWakeKey({
             nextWakeAt: accumulatedProjection.nextWakeAt,
             nextWakeReason: accumulatedProjection.nextWakeReason,
@@ -788,8 +798,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ? accumulatedProjection.nextWakeAt
               : null;
           const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-            checkpointStartByMs: hostDeadlineCheckpointStartByMs,
-            idleCheckpointDelayMs,
+            hostDeadlineCheckpointStartByMs,
+            idleCheckpointStartByMs,
             projectedRuntimeWakeAt,
             runtimeAbortSignal: runtimeAbortController.signal,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -811,6 +821,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
                 workspace: result.latestWorkspace ?? workspaceRead.workspace,
               });
+              if (result.runtimeStateDirty) {
+                markIdleCheckpointDeadlineAfterDirtyWork();
+              }
               const nextProjection = buildHostedWorkspaceInvocationProjection({
                 mailboxBudgetExhausted: mailboxBudgetExhausted(),
                 result,
@@ -842,6 +855,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         emitPhaseLog({
           details: {
             checkpointStartByMs: hostDeadlineCheckpointStartByMs,
+            idleCheckpointStartByMs,
             nextWakeAtPresent: accumulatedProjection.nextWakeAt !== null,
             nextWakeReasonPresent: accumulatedProjection.nextWakeReason !== null,
           },
@@ -878,6 +892,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         checkpointMetadata.nextWakeReason = checkpoint.workspace.nextWakeReason ?? null;
         servicedProjectedRuntimeWakeKey = null;
         const shouldDrainCheckpointWake = !checkpointStartedForHostDeadline
+          && !isHostedRuntimeCheckpointStartDue(hostDeadlineCheckpointStartByMs)
           && consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
         if (shouldDrainCheckpointWake) {
           idleWakeOrdinal += 1;
@@ -886,6 +901,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestId: `${requestId}:checkpoint-wake:${idleWakeOrdinal}`,
             workspace: checkpoint.workspace,
           });
+          idleCheckpointStartByMs = result.runtimeStateDirty
+            ? Date.now() + idleCheckpointDelayMs
+            : null;
           const nextProjection = buildHostedWorkspaceInvocationProjection({
             mailboxBudgetExhausted: mailboxBudgetExhausted(),
             result,
@@ -1372,28 +1390,35 @@ function buildHostedRuntimeWakeKey(input: {
 }
 
 async function waitForHostedRuntimeDirtyWindow(input: {
-  checkpointStartByMs: number | null;
-  idleCheckpointDelayMs: number;
+  hostDeadlineCheckpointStartByMs: number | null;
+  idleCheckpointStartByMs: number;
   projectedRuntimeWakeAt: string | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedRuntimeDirtyWaitResult> {
   const nowMs = Date.now();
-  if (input.checkpointStartByMs !== null && input.checkpointStartByMs <= nowMs) {
+  if (
+    input.hostDeadlineCheckpointStartByMs !== null
+    && input.hostDeadlineCheckpointStartByMs <= nowMs
+  ) {
     return "host_deadline_checkpoint";
   }
+  if (input.idleCheckpointStartByMs <= nowMs) {
+    return "idle_checkpoint";
+  }
 
-  const deadlineDelayMs = input.checkpointStartByMs === null
+  const hostDeadlineDelayMs = input.hostDeadlineCheckpointStartByMs === null
     ? null
-    : Math.max(0, input.checkpointStartByMs - nowMs);
+    : Math.max(0, input.hostDeadlineCheckpointStartByMs - nowMs);
+  const idleCheckpointDelayMs = Math.max(0, input.idleCheckpointStartByMs - nowMs);
   const projectedWakeDelayMs = resolveHostedProjectedRuntimeWakeDelayMs(
     input.projectedRuntimeWakeAt,
     nowMs,
   );
-  let timeoutDelayMs = input.idleCheckpointDelayMs;
+  let timeoutDelayMs = idleCheckpointDelayMs;
   let timeoutResult: HostedRuntimeDirtyWaitResult = "idle_checkpoint";
-  if (deadlineDelayMs !== null && deadlineDelayMs <= timeoutDelayMs) {
-    timeoutDelayMs = deadlineDelayMs;
+  if (hostDeadlineDelayMs !== null && hostDeadlineDelayMs <= timeoutDelayMs) {
+    timeoutDelayMs = hostDeadlineDelayMs;
     timeoutResult = "host_deadline_checkpoint";
   }
   if (projectedWakeDelayMs !== null && projectedWakeDelayMs < timeoutDelayMs) {
