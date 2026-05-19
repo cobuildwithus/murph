@@ -602,7 +602,7 @@ describe("HostedTelegramCardSettings", () => {
     });
   });
 
-  it("keeps the Telegram link button disabled before Privy is ready", async () => {
+  it("does not auto-link Telegram before Privy is ready", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
     );
@@ -614,6 +614,7 @@ describe("HostedTelegramCardSettings", () => {
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedTelegramCardSettings, {
         authenticated: true,
+        autoLink: true,
         initialTelegramAccount: null,
       }),
     );
@@ -658,7 +659,7 @@ describe("HostedTelegramCardSettings", () => {
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
   });
 
-  it("waits for a manual click when Privy becomes ready and authenticated", async () => {
+  it("auto-links Telegram once Privy becomes ready and authenticated", async () => {
     const { HostedTelegramCardSettings } = await import(
       "@/src/components/settings/hosted-telegram-card-settings"
     );
@@ -679,6 +680,7 @@ describe("HostedTelegramCardSettings", () => {
 
       return createElement(HostedTelegramCardSettings, {
         authenticated: true,
+        autoLink: true,
         initialTelegramAccount: null,
       });
     }
@@ -695,17 +697,227 @@ describe("HostedTelegramCardSettings", () => {
       forceRender?.();
     });
 
+    await vi.waitFor(() => {
+      expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Opening Telegram");
+  });
+
+  it("syncs an existing Privy Telegram account during auto-link instead of relinking", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const onSynced = vi.fn();
+    const autoLinkSync = createDeferredTelegramSync();
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(autoLinkSync.promise);
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 67890,
+            type: "telegram",
+            username: "new_user",
+          },
+        ],
+      },
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        autoLink: true,
+        initialTelegramAccount: null,
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("Link Telegram");
+    expect(container.textContent).not.toContain("@new_user");
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "67890",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
+
     expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+    await act(async () => {
+      autoLinkSync.resolveSync({
+        botLink: "https://t.me/murph_bot?start=connect",
+        runTriggered: true,
+        telegramUserId: "67890",
+        telegramUsername: "new_user",
+      });
+      await autoLinkSync.promise;
+    });
+
+    expect(onSynced).toHaveBeenCalledWith({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "67890",
+      telegramUsername: "new_user",
+    });
+  });
+
+  it("syncs an existing Privy Telegram account from the manual retry button", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const onSynced = vi.fn();
+    const manualSync = createDeferredTelegramSync();
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(manualSync.promise);
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            id: 67890,
+            type: "telegram",
+            username: "new_user",
+          },
+        ],
+      },
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        initialTelegramAccount: null,
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
 
     const linkButton = Array.from(container.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.includes("Link Telegram"),
     );
+    expect(linkButton).toBeTruthy();
+
     await act(async () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+        payload: {
+          expectedTelegramUserId: "67890",
+        },
+        url: "/api/settings/telegram/sync",
+      });
+    });
+    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+    await act(async () => {
+      manualSync.resolveSync({
+        botLink: "https://t.me/murph_bot?start=connect",
+        runTriggered: true,
+        telegramUserId: "67890",
+        telegramUsername: "new_user",
+      });
+      await manualSync.promise;
+    });
+
+    expect(onSynced).toHaveBeenCalledWith({
+      botLink: "https://t.me/murph_bot?start=connect",
+      runTriggered: true,
+      telegramUserId: "67890",
+      telegramUsername: "new_user",
+    });
+  });
+
+  it("does not consume auto-link when Privy Telegram arrives before the scheduled link starts", async () => {
+    const { HostedTelegramCardSettings } = await import(
+      "@/src/components/settings/hosted-telegram-card-settings"
+    );
+    const onSynced = vi.fn();
+    const autoLinkSync = createDeferredTelegramSync();
+    const privyUserState: { linkedAccounts: unknown[] } = {
+      linkedAccounts: [],
+    };
+    let forceRender: (() => void) | null = null;
+
+    vi.useFakeTimers();
+    mocks.requestHostedOnboardingJson.mockReturnValueOnce(autoLinkSync.promise);
+    mocks.useUser.mockImplementation(() => ({
+      refreshUser: mocks.refreshUser,
+      user: privyUserState,
+    }));
+
+    function PrivyUserArrivalHarness() {
+      const [, setRenderCount] = useState(0);
+
+      useEffect(() => {
+        forceRender = () => setRenderCount((value) => value + 1);
+        return () => {
+          forceRender = null;
+        };
+      }, []);
+
+      return createElement(HostedTelegramCardSettings, {
+        authenticated: true,
+        autoLink: true,
+        initialTelegramAccount: null,
+        onSynced,
+      });
+    }
+
+    try {
+      const { cleanup } = await renderClientComponent(createElement(PrivyUserArrivalHarness));
+      cleanupRender = cleanup;
+
+      expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+      await act(async () => {
+        privyUserState.linkedAccounts = [
+          {
+            id: 67890,
+            type: "telegram",
+            username: "new_user",
+          },
+        ];
+        forceRender?.();
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      await vi.waitFor(() => {
+        expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+          payload: {
+            expectedTelegramUserId: "67890",
+          },
+          url: "/api/settings/telegram/sync",
+        });
+      });
+      expect(mocks.linkTelegram).not.toHaveBeenCalled();
+
+      await act(async () => {
+        autoLinkSync.resolveSync({
+          botLink: "https://t.me/murph_bot?start=connect",
+          runTriggered: true,
+          telegramUserId: "67890",
+          telegramUsername: "new_user",
+        });
+        await autoLinkSync.promise;
+      });
+
+      expect(onSynced).toHaveBeenCalledWith({
+        botLink: "https://t.me/murph_bot?start=connect",
+        runTriggered: true,
+        telegramUserId: "67890",
+        telegramUsername: "new_user",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not render arbitrary Privy Telegram link failure text from the settings card callback", async () => {
