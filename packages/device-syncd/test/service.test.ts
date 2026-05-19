@@ -307,6 +307,11 @@ test("device sync service facade does not expose privileged store or control met
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn() {
+          // Expected failures are asserted through the diagnostics API below.
+        },
+      },
     },
     providers: [createFakeProvider()],
   });
@@ -354,6 +359,11 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn() {
+          // Expected failures are asserted through the diagnostics API below.
+        },
+      },
     },
     providers: [createFakeProvider()],
     importer,
@@ -1074,6 +1084,63 @@ test("device sync service worker handles missing providers, disconnected jobs, a
   await service.runWorkerOnce();
   assert.equal(store.getJobById(reauthJob.id)?.status, "dead");
   assert.equal(store.getJobById(reauthJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
+
+  close();
+});
+
+test("device sync service preserves scheduler-owned reconcile cursor when job result omits it", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-preserve-reconcile");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(_context, job) {
+          if (job.payload.clearNextReconcileAt === true) {
+            return {
+              nextReconcileAt: null,
+            };
+          }
+
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "preserve-reconcile",
+  });
+
+  const initialNextReconcileAt = "2026-03-17T12:00:00.000Z";
+  assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, initialNextReconcileAt);
+
+  const processedBackfill = await service.runWorkerOnce();
+  assert.equal(processedBackfill?.kind, "backfill");
+  assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, initialNextReconcileAt);
+
+  store.enqueueJob({
+    accountId: connected.account.id,
+    provider: "demo",
+    kind: "manual-clear",
+    payload: {
+      clearNextReconcileAt: true,
+    },
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  const processedClear = await service.runWorkerOnce();
+  assert.equal(processedClear?.kind, "manual-clear");
+  assert.equal(store.getAccountById(connected.account.id)?.nextReconcileAt, null);
 
   close();
 });
@@ -2608,6 +2675,282 @@ test("device sync service string job failures still produce deterministic dead-j
   assert.equal(storedAccount?.lastErrorMessage, "plain failure");
   assert.equal(jobStatus.status, "dead");
   assert.equal(jobStatus.last_error_message, "plain failure");
+
+  close();
+});
+
+test("device sync service exposes safe structured diagnostics for provider failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-provider-failure-diagnostics");
+  const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn(message, context) {
+          warnEvents.push({
+            message,
+            context: context as Record<string, unknown> | undefined,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw deviceSyncError({
+            code: "WHOOP_TOKEN_REQUEST_FAILED",
+            message: "WHOOP token request failed.",
+            retryable: false,
+            httpStatus: 400,
+            details: {
+              status: 400,
+              retryable: false,
+              accountStatus: null,
+              oauthErrorCode: "invalid_request",
+              oauthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+              oauthGrantType: "refresh_token",
+              responseBody: "access_token=secret",
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "provider-failure-diagnostics",
+  });
+
+  await service.runWorkerOnce();
+
+  const diagnostics = service.listJobFailureDiagnostics();
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0]?.accountId, connected.account.id);
+  assert.equal(diagnostics[0]?.code, "WHOOP_TOKEN_REQUEST_FAILED");
+  assert.equal(diagnostics[0]?.retryable, false);
+  assert.deepEqual(diagnostics[0]?.details, {
+    providerHttpStatus: 400,
+    providerOAuthErrorCode: "invalid_request",
+    providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+    providerOAuthGrantType: "refresh_token",
+  });
+
+  diagnostics[0]!.details.providerOAuthErrorCode = "mutated";
+  assert.equal(service.listJobFailureDiagnostics()[0]?.details.providerOAuthErrorCode, "invalid_request");
+
+  assert.equal(warnEvents.length, 1);
+  const { jobId, ...warnContext } = warnEvents[0]?.context ?? {};
+  assert.equal(typeof jobId, "string");
+  assert.deepEqual(warnContext, {
+    provider: "demo",
+    code: "WHOOP_TOKEN_REQUEST_FAILED",
+    failureSummary: "WHOOP token request failed.",
+    retryable: false,
+    accountStatus: null,
+    providerHttpStatus: 400,
+    providerOAuthErrorCode: "invalid_request",
+    providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+    providerOAuthGrantType: "refresh_token",
+  });
+  assert.equal(JSON.stringify(warnEvents).includes(connected.account.id), false);
+
+  close();
+});
+
+test("device sync service omits unsafe free-form provider diagnostic reasons", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-unsafe-provider-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw deviceSyncError({
+            code: "WHOOP_TOKEN_REQUEST_FAILED",
+            message: "WHOOP token request failed.",
+            retryable: false,
+            httpStatus: 400,
+            details: {
+              oauthErrorCode: "invalid_grant",
+              oauthErrorDescription: '{"access_token":"fixture-secret","account_id":"account-sensitive"}',
+              oauthGrantType: "refresh_token",
+            },
+          });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "unsafe-provider-diagnostics",
+  });
+
+  await service.runWorkerOnce();
+
+  assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
+    providerHttpStatus: 400,
+    providerOAuthErrorCode: "invalid_grant",
+    providerOAuthGrantType: "refresh_token",
+  });
+
+  close();
+});
+
+test("device sync service exposes sanitized cause details for transport failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-transport-failure-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          const cause = new Error(
+            "Connect Timeout Error for https://api.prod.whoop.com/oauth/oauth2/token?access_token=secret",
+          ) as Error & { code: string };
+          cause.name = "ConnectTimeoutError";
+          cause.code = "UND_ERR_CONNECT_TIMEOUT";
+          throw new TypeError("fetch failed", { cause });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "transport-failure-diagnostics",
+  });
+
+  await service.runWorkerOnce();
+
+  assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
+    failureErrorName: "TypeError",
+    failureCauseName: "ConnectTimeoutError",
+    failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
+    failureErrorCause: "Connect Timeout Error for <redacted-url>",
+  });
+
+  close();
+});
+
+test("device sync service omits unsafe free-form transport causes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-unsafe-transport-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          const cause = new Error("refresh token abc123 leaked") as Error & { code: string };
+          cause.name = "ProviderTransportError";
+          cause.code = "UND_ERR_SOCKET";
+          throw new TypeError("fetch failed", { cause });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "unsafe-transport-diagnostics",
+  });
+
+  await service.runWorkerOnce();
+
+  assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
+    failureErrorName: "TypeError",
+    failureCauseName: "ProviderTransportError",
+    failureCauseCode: "UND_ERR_SOCKET",
+  });
+
+  close();
+});
+
+test("device sync service bounds in-memory job failure diagnostics to recent failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-bounded-failure-diagnostics");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(_context, job) {
+          const index = typeof job.payload.failureIndex === "number" ? job.payload.failureIndex : -1;
+          throw deviceSyncError({
+            code: `BOUNDED_FAILURE_${index}`,
+            message: `Bounded failure ${index}.`,
+            retryable: false,
+            httpStatus: 500,
+          });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "bounded-failure-diagnostics",
+  });
+
+  const processedBackfill = await service.runWorkerOnce();
+  assert.equal(processedBackfill?.kind, "backfill");
+
+  for (let index = 0; index < 55; index += 1) {
+    store.enqueueJob({
+      accountId: connected.account.id,
+      provider: "demo",
+      kind: "bounded-failure",
+      payload: {
+        failureIndex: index,
+      },
+      availableAt: new Date(Date.parse("2026-03-17T10:00:00.000Z") + index * 1000).toISOString(),
+    });
+  }
+
+  assert.equal(await service.drainWorker(60), 55);
+  const diagnostics = service.listJobFailureDiagnostics();
+  assert.equal(diagnostics.length, 50);
+  assert.equal(diagnostics[0]?.code, "BOUNDED_FAILURE_5");
+  assert.equal(diagnostics.at(-1)?.code, "BOUNDED_FAILURE_54");
 
   close();
 });

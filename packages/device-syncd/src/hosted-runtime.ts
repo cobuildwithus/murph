@@ -12,6 +12,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
 
 const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 2048;
+const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
@@ -21,6 +22,14 @@ const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
 const HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN =
   /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
+  /[{}\[\]]|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
+  /\b(?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?[A-Za-z0-9._:-]{6,}/iu;
+const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
+  /\b(?:access|id|refresh|session)\s+token\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/iu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
+  /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/u;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
   "secret",
   "authorization",
@@ -1631,6 +1640,32 @@ export function sanitizeHostedRuntimeErrorCode(value: string | null): string | n
 
 export function sanitizeHostedRuntimeErrorText(value: string | null): string | null {
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
+}
+
+export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
+  const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH)
+    ?.replace(/\bfile:\/\/[^\s)"']+/giu, "<redacted-path>")
+    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
+    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>")
+    .replace(/\bhttps?:\/\/[^\s)"']+/giu, "<redacted-url>")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
+    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
+    .trim();
+
+  if (!sanitized) {
+    return null;
+  }
+
+  return isHostedRuntimeSafeDiagnosticText(sanitized) ? sanitized : null;
+}
+
+function isHostedRuntimeSafeDiagnosticText(value: string): boolean {
+  return !(
+    HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(value)
+    || HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN.test(value)
+    || HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN.test(value)
+    || HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN.test(value)
+  );
 }
 
 function requireNumber(value: unknown, label: string): number {

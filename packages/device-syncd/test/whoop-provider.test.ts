@@ -347,12 +347,22 @@ test("WHOOP provider marks invalid refresh-token grants as reauthorization requi
         refreshToken: "persisted-refresh-token",
       }),
     ),
-    (error) =>
-      error instanceof DeviceSyncError &&
-      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
-      error.httpStatus === 400 &&
-      error.retryable === false &&
-      error.accountStatus === "reauthorization_required",
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 400);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, "reauthorization_required");
+      assert.deepEqual(error.details, {
+        status: 400,
+        retryable: false,
+        accountStatus: "reauthorization_required",
+        oauthErrorCode: "invalid_grant",
+        oauthErrorDescription: "The refresh token is invalid.",
+        oauthGrantType: "refresh_token",
+      });
+      return true;
+    },
   );
   assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("refresh_token"), "persisted-refresh-token");
@@ -383,12 +393,22 @@ test("WHOOP provider does not mark other refresh-token OAuth errors as reauthori
         refreshToken: "persisted-refresh-token",
       }),
     ),
-    (error) =>
-      error instanceof DeviceSyncError &&
-      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
-      error.httpStatus === 400 &&
-      error.retryable === false &&
-      error.accountStatus === null,
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 400);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, null);
+      assert.deepEqual(error.details, {
+        status: 400,
+        retryable: false,
+        accountStatus: null,
+        oauthErrorCode: "invalid_request",
+        oauthErrorDescription: "The token request is malformed.",
+        oauthGrantType: "refresh_token",
+      });
+      return true;
+    },
   );
 });
 
@@ -416,12 +436,22 @@ test("WHOOP provider does not mark client credential token failures as reauthori
         refreshToken: "persisted-refresh-token",
       }),
     ),
-    (error) =>
-      error instanceof DeviceSyncError &&
-      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
-      error.httpStatus === 401 &&
-      error.retryable === false &&
-      error.accountStatus === null,
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 401);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, null);
+      assert.deepEqual(error.details, {
+        status: 401,
+        retryable: false,
+        accountStatus: null,
+        oauthErrorCode: "invalid_client",
+        oauthErrorDescription: "The OAuth client credentials are invalid.",
+        oauthGrantType: "refresh_token",
+      });
+      return true;
+    },
   );
 });
 
@@ -446,12 +476,20 @@ test("WHOOP provider does not mark opaque token endpoint authorization failures 
         refreshToken: "persisted-refresh-token",
       }),
     ),
-    (error) =>
-      error instanceof DeviceSyncError &&
-      error.code === "WHOOP_TOKEN_REQUEST_FAILED" &&
-      error.httpStatus === 401 &&
-      error.retryable === false &&
-      error.accountStatus === null,
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 401);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, null);
+      assert.deepEqual(error.details, {
+        status: 401,
+        retryable: false,
+        accountStatus: null,
+        oauthGrantType: "refresh_token",
+      });
+      return true;
+    },
   );
 });
 

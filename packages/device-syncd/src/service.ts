@@ -6,7 +6,10 @@ import {
 } from "./config/provider-manifests.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
-import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import {
+  sanitizeHostedRuntimeDiagnosticText,
+  sanitizeHostedRuntimeErrorText,
+} from "./hosted-runtime.ts";
 import { registerDeviceSyncServiceInternals } from "./service-internals.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
@@ -27,6 +30,7 @@ import {
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
 } from "./types.ts";
 
+import type { DeviceSyncError } from "./errors.ts";
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
@@ -42,6 +46,7 @@ import type {
   DeviceSyncRegistry,
   DeviceSyncServiceConfig,
   DeviceSyncServiceSummary,
+  DeviceSyncJobFailureDiagnostic,
   DisconnectAccountResult,
   DeviceAccountCredential,
   HandleConnectionCallbackInput,
@@ -80,6 +85,10 @@ class DeviceSyncJobExecutionCancelledError extends Error {
   }
 }
 
+type DeviceSyncJobFailureDiagnosticInput = {
+  [Key in keyof DeviceSyncJobFailureDiagnostic["details"]]?: DeviceSyncJobFailureDiagnostic["details"][Key] | null;
+};
+
 export interface CreateDeviceSyncServiceInput {
   secret: string;
   config: DeviceSyncServiceConfig;
@@ -100,6 +109,7 @@ export interface DeviceSyncService {
   summarize(): DeviceSyncServiceSummary;
   listAccounts(input?: ListDeviceSyncAccountsInput): PublicDeviceSyncAccount[];
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
+  listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[];
   start(): void;
   stop(): void;
   close(): void;
@@ -134,6 +144,7 @@ class DeviceSyncServiceController {
   private schedulerTimer: NodeJS.Timeout | null = null;
   workerTickInFlight = false;
   schedulerTickInFlight = false;
+  private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
 
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
@@ -247,6 +258,13 @@ class DeviceSyncServiceController {
   getAccount(accountId: string): PublicDeviceSyncAccount | null {
     const account = this.store.getAccountById(accountId);
     return account ? this.toPublicAccount(account) : null;
+  }
+
+  listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[] {
+    return this.jobFailureDiagnostics.map((entry) => ({
+      ...entry,
+      details: { ...entry.details },
+    }));
   }
 
   start(): void {
@@ -626,10 +644,25 @@ class DeviceSyncServiceController {
         return job;
       }
 
-      const markedSucceeded = this.store.markSyncSucceeded(storedAccount.id, now, disconnectGeneration, {
-        metadataPatch: result.metadataPatch,
-        nextReconcileAt: result.nextReconcileAt,
-      });
+      const successOptions: {
+        metadataPatch?: Record<string, unknown>;
+        nextReconcileAt?: string | null;
+      } = {};
+
+      if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
+        successOptions.metadataPatch = result.metadataPatch;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(result, "nextReconcileAt")) {
+        successOptions.nextReconcileAt = result.nextReconcileAt ?? null;
+      }
+
+      const markedSucceeded = this.store.markSyncSucceeded(
+        storedAccount.id,
+        now,
+        disconnectGeneration,
+        successOptions,
+      );
 
       if (!markedSucceeded) {
         return job;
@@ -656,14 +689,22 @@ class DeviceSyncServiceController {
         return job;
       }
 
+      this.recordJobFailureDiagnostic({
+        accountId: storedAccount.id,
+        accountStatus: failure.accountStatus ?? null,
+        code: failure.code,
+        details: failure.details,
+        retryable: failure.retryable,
+      });
       this.store.markSyncFailed(storedAccount.id, now, failure.code, failure.message, failure.accountStatus);
       this.logger.warn?.("Device sync job failed.", {
         provider: provider.provider,
-        accountId: storedAccount.id,
         jobId: job.id,
         code: failure.code,
         failureSummary: failure.message,
         retryable: failure.retryable,
+        accountStatus: failure.accountStatus ?? null,
+        ...failure.details,
       });
       return job;
     }
@@ -716,6 +757,17 @@ class DeviceSyncServiceController {
     }
 
     return provider;
+  }
+
+  private recordJobFailureDiagnostic(entry: DeviceSyncJobFailureDiagnostic): void {
+    this.jobFailureDiagnostics.push({
+      ...entry,
+      details: { ...entry.details },
+    });
+
+    if (this.jobFailureDiagnostics.length > 50) {
+      this.jobFailureDiagnostics.splice(0, this.jobFailureDiagnostics.length - 50);
+    }
   }
 
   private requireStoredAccount(accountId: string): StoredDeviceSyncAccount {
@@ -943,6 +995,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     summarize: () => controller.summarize(),
     listAccounts: (input) => controller.listAccounts(input),
     getAccount: (accountId) => controller.getAccount(accountId),
+    listJobFailureDiagnostics: () => controller.listJobFailureDiagnostics(),
     start: () => controller.start(),
     stop: () => controller.stop(),
     close: () => controller.close(),
@@ -977,6 +1030,7 @@ function resolveProviderTokenRefresher(
 
 function normalizeExecutionError(error: unknown): {
   code: string;
+  details: DeviceSyncJobFailureDiagnostic["details"];
   message: string;
   retryable: boolean;
   accountStatus?: "reauthorization_required" | "disconnected" | null;
@@ -984,6 +1038,7 @@ function normalizeExecutionError(error: unknown): {
   if (isDeviceSyncError(error)) {
     return {
       code: error.code,
+      details: buildDeviceSyncErrorFailureDiagnostics(error),
       message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
       retryable: error.retryable,
       accountStatus: error.accountStatus,
@@ -993,6 +1048,7 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof Error) {
     return {
       code: "SYNC_JOB_FAILED",
+      details: buildUnexpectedErrorFailureDiagnostics(error),
       message: summarizeExecutionErrorMessage(error),
       retryable: false,
     };
@@ -1000,9 +1056,82 @@ function normalizeExecutionError(error: unknown): {
 
   return {
     code: "SYNC_JOB_FAILED",
+    details: {},
     message: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
     retryable: false,
   };
+}
+
+function buildDeviceSyncErrorFailureDiagnostics(
+  error: DeviceSyncError,
+): DeviceSyncJobFailureDiagnostic["details"] {
+  return compactFailureDiagnostics({
+    providerHttpStatus: error.httpStatus,
+    providerHttpStatusText: readSafeDiagnosticText(error.details?.httpStatusText),
+    providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
+    providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
+    providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),
+  });
+}
+
+function buildUnexpectedErrorFailureDiagnostics(
+  error: Error,
+): DeviceSyncJobFailureDiagnostic["details"] {
+  const cause = toPlainRecord(error.cause);
+
+  return compactFailureDiagnostics({
+    failureErrorName: readSafeDiagnosticToken(error.name),
+    failureCauseName: readSafeDiagnosticToken(cause?.name),
+    failureCauseCode: readSafeDiagnosticToken(cause?.code),
+    failureErrorCause: readSafeDiagnosticText(cause?.message),
+  });
+}
+
+function compactFailureDiagnostics(
+  input: DeviceSyncJobFailureDiagnosticInput,
+): DeviceSyncJobFailureDiagnostic["details"] {
+  const output: DeviceSyncJobFailureDiagnostic["details"] = {};
+
+  setFailureDiagnosticDetail(output, "failureCauseCode", input.failureCauseCode);
+  setFailureDiagnosticDetail(output, "failureCauseName", input.failureCauseName);
+  setFailureDiagnosticDetail(output, "failureErrorCause", input.failureErrorCause);
+  setFailureDiagnosticDetail(output, "failureErrorName", input.failureErrorName);
+  setFailureDiagnosticDetail(output, "providerHttpStatus", input.providerHttpStatus);
+  setFailureDiagnosticDetail(output, "providerHttpStatusText", input.providerHttpStatusText);
+  setFailureDiagnosticDetail(output, "providerOAuthErrorCode", input.providerOAuthErrorCode);
+  setFailureDiagnosticDetail(output, "providerOAuthErrorDescription", input.providerOAuthErrorDescription);
+  setFailureDiagnosticDetail(output, "providerOAuthGrantType", input.providerOAuthGrantType);
+
+  return output;
+}
+
+function setFailureDiagnosticDetail<Key extends keyof DeviceSyncJobFailureDiagnostic["details"]>(
+  output: DeviceSyncJobFailureDiagnostic["details"],
+  key: Key,
+  value: DeviceSyncJobFailureDiagnostic["details"][Key] | null | undefined,
+): void {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+
+  output[key] = value;
+}
+
+function readSafeDiagnosticToken(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const token = value.trim();
+  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
+}
+
+function readSafeDiagnosticText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return sanitizeHostedRuntimeDiagnosticText(value);
 }
 
 function summarizeExecutionErrorMessage(error: Error): string {

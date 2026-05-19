@@ -1,4 +1,5 @@
 import { deviceSyncError } from "../errors.ts";
+import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
 import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, splitScopeList, subtractDays } from "../shared.ts";
 import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
@@ -20,6 +21,8 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+
+type ProviderApiErrorDiagnosticValue = boolean | number | string | null | undefined;
 
 interface DeviceSyncOAuthProviderDefinition
   extends Omit<DeviceSyncProvider, "connectionHandler" | "webhookHandler" | "jobExecutor"> {
@@ -48,18 +51,70 @@ export function buildProviderApiError(
   options: {
     retryable?: boolean;
     accountStatus?: DeviceSyncErrorOptions["accountStatus"];
+    diagnostics?: Record<string, ProviderApiErrorDiagnosticValue>;
   } = {},
 ) {
+  const retryable = options.retryable ?? (response.status === 429 || response.status >= 500);
+  const accountStatus = options.accountStatus ?? null;
+
   return deviceSyncError({
     code,
     message,
-    retryable: options.retryable ?? (response.status === 429 || response.status >= 500),
+    retryable,
     httpStatus: response.status,
-    accountStatus: options.accountStatus ?? null,
-    details: {
+    accountStatus,
+    details: sanitizeProviderApiErrorDiagnostics({
       status: response.status,
-    },
+      httpStatusText: response.statusText,
+      retryable,
+      accountStatus,
+      ...options.diagnostics,
+    }),
   });
+}
+
+function sanitizeProviderApiErrorDiagnostics(
+  input: Record<string, ProviderApiErrorDiagnosticValue>,
+): Record<string, boolean | number | string | null> {
+  const output: Record<string, boolean | number | string | null> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,80}$/u.test(key) || value === undefined) {
+      continue;
+    }
+
+    if (typeof value === "string") {
+      const token = value.trim();
+      if (/^[A-Za-z0-9_.:-]{1,128}$/u.test(token)) {
+        output[key] = token;
+      } else if (isProviderApiErrorReasonKey(key)) {
+        const reason = sanitizeProviderApiErrorReasonText(token);
+        if (reason) {
+          output[key] = reason;
+        }
+      }
+      continue;
+    }
+
+    if (typeof value === "number") {
+      if (Number.isFinite(value)) {
+        output[key] = value;
+      }
+      continue;
+    }
+
+    output[key] = value;
+  }
+
+  return output;
+}
+
+function isProviderApiErrorReasonKey(key: string): boolean {
+  return key.endsWith("Description") || key.endsWith("Reason") || key.endsWith("StatusText");
+}
+
+function sanitizeProviderApiErrorReasonText(value: string): string | null {
+  return sanitizeHostedRuntimeDiagnosticText(value);
 }
 
 export function extractRetryMetadata(error: unknown): {

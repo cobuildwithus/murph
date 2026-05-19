@@ -96,6 +96,11 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
   );
   assert.equal(rateLimited.retryable, true);
   assert.equal(rateLimited.httpStatus, 429);
+  assert.deepEqual(rateLimited.details, {
+    accountStatus: null,
+    retryable: true,
+    status: 429,
+  });
 
   const unauthorized = buildProviderApiError(
     "UNAUTHORIZED",
@@ -109,6 +114,53 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
   );
   assert.equal(unauthorized.retryable, false);
   assert.equal(unauthorized.accountStatus, "reauthorization_required");
+  assert.deepEqual(unauthorized.details, {
+    accountStatus: "reauthorization_required",
+    retryable: false,
+    status: 401,
+  });
+
+  const withDiagnostics = buildProviderApiError(
+    "TOKEN_FAILED",
+    "Token failed",
+    new Response("{}", { status: 400 }),
+    "{}",
+    {
+      diagnostics: {
+        oauthErrorDescription: "Refresh token expired at https://api.example.test/token?access_token=secret",
+        oauthErrorCode: "invalid_grant",
+        oauthGrantType: "refresh_token",
+        unsafeText: "contains spaces",
+      },
+    },
+  );
+  assert.deepEqual(withDiagnostics.details, {
+    accountStatus: null,
+    oauthErrorDescription: "Refresh token expired at <redacted-url>",
+    oauthErrorCode: "invalid_grant",
+    oauthGrantType: "refresh_token",
+    retryable: false,
+    status: 400,
+  });
+
+  const withUnsafeDiagnostics = buildProviderApiError(
+    "TOKEN_FAILED",
+    "Token failed",
+    new Response("{}", { status: 400 }),
+    "{}",
+    {
+      diagnostics: {
+        oauthErrorDescription: '{"refresh_token":"fixture-secret","user_id":"user-sensitive"}',
+        oauthErrorCode: "invalid_grant",
+      },
+    },
+  );
+  assert.deepEqual(withUnsafeDiagnostics.details, {
+    accountStatus: null,
+    oauthErrorCode: "invalid_grant",
+    retryable: false,
+    status: 400,
+  });
 
   assert.deepEqual(extractRetryMetadata({ retryable: true, httpStatus: "503" }), {
     retryable: true,
