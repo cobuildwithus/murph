@@ -29,6 +29,13 @@ const HOSTED_CONTEXT_DIAGNOSTIC_SOURCES = new Set([
   "assistant-notification",
 ]);
 
+const HOSTED_CONTEXT_DIAGNOSTIC_SESSION_LOOKUP_SOURCES = new Set([
+  "alias",
+  "conversation-key",
+  "created",
+  "session-id",
+]);
+
 const HOSTED_CONTEXT_DIAGNOSTIC_STAGES = new Set([
   "assistant-session-resolved",
 ]);
@@ -44,20 +51,26 @@ type HostedContextDiagnosticDetailReader = (
 
 const hostedContextDiagnosticDetailReaders = {
   actorFallbackConversationFingerprint: readHostedContextFingerprint,
+  actorFallbackConversationIndexed: readHostedContextBoolean,
   actorFallbackConversationScope: readHostedContextScope,
   actorFingerprint: readHostedContextFingerprint,
   actorPresent: readHostedContextBoolean,
   channel: readHostedContextChannel,
+  conversationLookupIndexedCandidateCount: readHostedContextNonnegativeNumber,
+  conversationLookupKeyCount: readHostedContextNonnegativeNumber,
+  conversationLookupMatchedScope: readHostedContextScope,
   existingTranscriptEntryCount: readHostedContextNonnegativeNumber,
   existingTranscriptWelcomeVisible: readHostedContextBoolean,
   fingerprintReady: readHostedContextBoolean,
   identityFingerprint: readHostedContextFingerprint,
   identityPresent: readHostedContextBoolean,
   primaryConversationFingerprint: readHostedContextFingerprint,
+  primaryConversationIndexed: readHostedContextBoolean,
   primaryConversationScope: readHostedContextScope,
   sessionFingerprint: readHostedContextFingerprint,
   sessionPresent: readHostedContextBoolean,
   sessionResolutionCreated: readHostedContextBoolean,
+  sessionResolutionLookupSource: readHostedContextSessionLookupSource,
   sessionTurnCount: readHostedContextNonnegativeNumber,
   source: readHostedContextSource,
   stage: readHostedContextStage,
@@ -149,6 +162,17 @@ function readHostedContextSource(
     debug,
     key,
     HOSTED_CONTEXT_DIAGNOSTIC_SOURCES,
+  );
+}
+
+function readHostedContextSessionLookupSource(
+  debug: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  return readHostedContextAllowedString(
+    debug,
+    key,
+    HOSTED_CONTEXT_DIAGNOSTIC_SESSION_LOOKUP_SOURCES,
   );
 }
 

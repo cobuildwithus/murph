@@ -70,6 +70,13 @@ accounting is wrong.
   runtime log is still persisted.
 - Full-body JSON parsing and full-body fingerprints are capped; prefix
   fingerprints remain bounded to fixed windows.
+- Provider prompt-size diagnostics live at the Codex provider prompt
+  composition boundary and emit only byte counts, presence booleans, and
+  prompt-plan enums. Prompt text, developer instructions, message bodies,
+  route ids, and provider session ids are not logged.
+- Session-resolution diagnostics live on the assistant session lookup result
+  and emit only lookup source, key counts, indexed-candidate counts, matched
+  scope, and indexed booleans. Raw lookup keys and session ids are not logged.
 
 ## Verification
 
@@ -86,3 +93,12 @@ accounting is wrong.
 - `pnpm --dir packages/hosted-execution typecheck` passed.
 - `pnpm --dir apps/web typecheck` passed.
 - `pnpm logs:guard` passed.
+- `pnpm exec vitest run packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/assistant-engine/test/assistant-hosted-context-diagnostics.test.ts packages/cli/test/assistant-state.test.ts` passed.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-events.test.ts` passed.
+- `pnpm --dir packages/assistant-engine typecheck` passed.
+- `pnpm --dir packages/cli typecheck` passed.
+- `pnpm exec tsc --noEmit --pretty false --project packages/assistant-runtime/tsconfig.json` passed.
+- `pnpm logs:guard` passed after the prompt-size/session-lookup diagnostics update.
+- `pnpm typecheck` was attempted after the prompt-size/session-lookup
+  diagnostics update, but it blocked behind an unrelated long-running
+  Cloudflare runner-bundle workspace lock before package checks could start.

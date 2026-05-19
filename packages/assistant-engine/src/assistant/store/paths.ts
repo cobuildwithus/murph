@@ -21,6 +21,11 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
 
+export interface AssistantConversationLookupKeyEntry {
+  key: string
+  scope: 'actor' | 'thread'
+}
+
 export function redactAssistantDisplayPath(filePath: string): string {
   const absolutePath = path.resolve(filePath)
   const homeDirectory = normalizeNullableString(process.env.HOME)
@@ -62,19 +67,61 @@ export function resolveAssistantConversationLookupKey(
 export function resolveAssistantConversationLookupKeys(
   input: AssistantSessionLocator,
 ): string[] {
+  return resolveAssistantConversationLookupKeyEntries(input).map((entry) => entry.key)
+}
+
+export function resolveAssistantConversationLookupKeyEntries(
+  input: AssistantSessionLocator,
+): AssistantConversationLookupKeyEntry[] {
   const primary = bindingInputFromLocator(input)
-  const keys = [
-    resolveAssistantConversationKey(primary),
+  const entries = [
+    createAssistantConversationLookupKeyEntry(primary),
   ]
 
   if (primary.threadId !== null && primary.threadId !== undefined) {
-    keys.push(resolveAssistantConversationKey({
+    entries.push(createAssistantConversationLookupKeyEntry({
       ...primary,
       threadId: null,
     }))
   }
 
-  return [...new Set(keys.filter((key): key is string => key !== null))]
+  const uniqueEntries: AssistantConversationLookupKeyEntry[] = []
+  const seenKeys = new Set<string>()
+  for (const entry of entries) {
+    if (!entry || seenKeys.has(entry.key)) {
+      continue
+    }
+    seenKeys.add(entry.key)
+    uniqueEntries.push(entry)
+  }
+
+  return uniqueEntries
+}
+
+function createAssistantConversationLookupKeyEntry(
+  input: AssistantBindingPatch,
+): AssistantConversationLookupKeyEntry | null {
+  const key = resolveAssistantConversationKey(input)
+  const scope = resolveAssistantConversationLookupScope(input)
+  return key && scope ? { key, scope } : null
+}
+
+function resolveAssistantConversationLookupScope(
+  input: AssistantBindingPatch,
+): AssistantConversationLookupKeyEntry['scope'] | null {
+  if (normalizeNullableString(input.threadId)) {
+    return 'thread'
+  }
+
+  if (
+    normalizeNullableString(input.actorId) &&
+    normalizeNullableString(input.channel) &&
+    input.threadIsDirect !== false
+  ) {
+    return 'actor'
+  }
+
+  return null
 }
 
 export function bindingInputFromLocator(

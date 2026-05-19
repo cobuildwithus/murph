@@ -103,6 +103,73 @@ test('resolveAssistantAliasKey only derives actor-scoped fallback keys when the 
   )
 })
 
+test('resolveAssistantSession reports metadata-only lookup diagnostics', async () => {
+  const { vaultRoot } = await createAssistantStateVault('murph-assistant-resolution-diagnostics-')
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    actorId: 'contact:alpha',
+    channel: 'linq',
+    identityId: 'assistant:primary',
+    threadId: 'thread:one',
+    threadIsDirect: true,
+  })
+  assert.deepEqual(created.resolutionDiagnostics, {
+    actorFallbackConversationIndexed: false,
+    conversationLookupIndexedCandidateCount: 0,
+    conversationLookupKeyCount: 2,
+    conversationLookupMatchedScope: 'none',
+    primaryConversationIndexed: false,
+    sessionResolutionLookupSource: 'created',
+  })
+
+  const threadMatch = await resolveAssistantSession({
+    vault: vaultRoot,
+    actorId: 'contact:alpha',
+    channel: 'linq',
+    identityId: 'assistant:primary',
+    threadId: 'thread:one',
+    threadIsDirect: true,
+  })
+  assert.equal(threadMatch.session.sessionId, created.session.sessionId)
+  assert.deepEqual(threadMatch.resolutionDiagnostics, {
+    actorFallbackConversationIndexed: false,
+    conversationLookupIndexedCandidateCount: 1,
+    conversationLookupKeyCount: 2,
+    conversationLookupMatchedScope: 'thread',
+    primaryConversationIndexed: true,
+    sessionResolutionLookupSource: 'conversation-key',
+  })
+
+  const { vaultRoot: fallbackVault } = await createAssistantStateVault(
+    'murph-assistant-resolution-fallback-diagnostics-',
+  )
+  const actorScoped = await resolveAssistantSession({
+    vault: fallbackVault,
+    actorId: 'contact:beta',
+    channel: 'linq',
+    identityId: 'assistant:primary',
+    threadIsDirect: true,
+  })
+  const fallbackMatch = await resolveAssistantSession({
+    vault: fallbackVault,
+    actorId: 'contact:beta',
+    channel: 'linq',
+    identityId: 'assistant:primary',
+    threadId: 'thread:later',
+    threadIsDirect: true,
+  })
+  assert.equal(fallbackMatch.session.sessionId, actorScoped.session.sessionId)
+  assert.deepEqual(fallbackMatch.resolutionDiagnostics, {
+    actorFallbackConversationIndexed: true,
+    conversationLookupIndexedCandidateCount: 1,
+    conversationLookupKeyCount: 2,
+    conversationLookupMatchedScope: 'actor',
+    primaryConversationIndexed: false,
+    sessionResolutionLookupSource: 'conversation-key',
+  })
+})
+
 test('resolveAssistantSession does not auto-reuse actor-scoped conversation keys for explicit group conversations without thread ids', async () => {
   const { vaultRoot } = await createAssistantStateVault('murph-assistant-group-routing-scope-')
 
@@ -1018,13 +1085,16 @@ test('getAssistantSession explains vault-scoped session drift when only a transc
       assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
       assert.match(String(error.message), /vault-scoped/u)
       assert.match(String(error.message), /local transcript exists/u)
-      assert.equal(error.context?.sessionId, sessionId)
+      assert.equal(error.context?.sessionIdPresent, true)
       assert.equal(error.context?.sessionExists, false)
       assert.equal(error.context?.transcriptExists, true)
-      assert.equal(
-        error.context?.stateRoot,
-        path.join(path.resolve(vaultRoot), '.runtime', 'operations', 'assistant'),
-      )
+      assert.equal(error.context?.sessionId, undefined)
+      assert.equal(error.context?.stateRoot, undefined)
+      assert.equal(error.context?.sessionPath, undefined)
+      assert.equal(error.context?.transcriptPath, undefined)
+      assert.doesNotMatch(String(error.message), new RegExp(sessionId, 'u'))
+      assert.doesNotMatch(String(error.message), /\.runtime/u)
+      assert.doesNotMatch(String(error.message), /operations/u)
       return true
     },
   )

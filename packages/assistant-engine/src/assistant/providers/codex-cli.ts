@@ -20,6 +20,9 @@ import {
   DEFAULT_CODEX_MODELS,
 } from './catalog.js'
 import {
+  getAssistantBindingContextLines,
+} from '../bindings.js'
+import {
   extractCodexAssistantProviderUsage,
   mergeCodexConfigOverrides,
   resolveAssistantProviderPrompt,
@@ -59,6 +62,10 @@ const CODEX_RESUME_FAILURE_TRACE_SCHEMA =
   'murph.assistant-codex-resume-failure-diagnostics.v1'
 const CODEX_RESUME_FAILURE_TRACE_TYPE =
   'assistant.codex.resume_failure'
+const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA =
+  'murph.assistant-provider-prompt-size-diagnostics.v1'
+const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE =
+  'assistant.provider.prompt_size'
 const CODEX_INVALID_OUTPUT_RECENT_EVENT_LIMIT = 12
 const CODEX_INVALID_OUTPUT_DETAIL_ARRAY_LIMIT = 12
 const CODEX_DIAGNOSTIC_ERROR_MESSAGE_MAX_LENGTH = 2048
@@ -237,6 +244,12 @@ export async function executeCodexAssistantTurnAttempt(
       resumeCodexThreadId: null,
     }
     const prompt = resolveAssistantProviderPrompt(fallbackInput)
+    emitAssistantProviderPromptSizeTraceEvent({
+      diagnosticKind: 'fresh-thread-fallback',
+      input: fallbackInput,
+      prompt,
+      refreshThreadInstructions: true,
+    })
     const appServerResult = await executeCodexAppServerTurn({
       ...baseAppServerInput,
       developerInstructions: normalizeNullableString(
@@ -250,14 +263,19 @@ export async function executeCodexAssistantTurnAttempt(
   }
 
   try {
-    const prompt = resolveAssistantProviderPrompt(
+    const primaryInput =
       input.resumeCodexThreadId
         ? {
             ...input,
             activeTurnMessages: undefined,
           }
-        : input,
-    )
+        : input
+    const prompt = resolveAssistantProviderPrompt(primaryInput)
+    emitAssistantProviderPromptSizeTraceEvent({
+      diagnosticKind: 'primary',
+      input: primaryInput,
+      prompt,
+    })
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
       prompt,
@@ -401,6 +419,60 @@ export async function executeCodexAssistantTurnAttempt(
     },
   }
   return attemptResult
+}
+
+function emitAssistantProviderPromptSizeTraceEvent(input: {
+  diagnosticKind: 'fresh-thread-fallback' | 'primary'
+  input: AssistantProviderTurnExecutionInput
+  prompt: string
+  refreshThreadInstructions?: boolean | null
+}): void {
+  const onTraceEvent = input.input.onTraceEvent
+  if (!onTraceEvent) {
+    return
+  }
+
+  const developerInstructions = normalizeNullableString(
+    input.input.developerInstructions,
+  )
+  const userPrompt = normalizeNullableString(input.input.userPrompt)
+  const turnContextPrompt = normalizeNullableString(input.input.turnContextPrompt)
+  const activeTurnHistoryCount = input.input.activeTurnMessages?.length ?? 0
+  const conversationContextPresent =
+    input.input.sessionContext?.binding
+      ? getAssistantBindingContextLines(input.input.sessionContext.binding).length > 0
+      : false
+
+  try {
+    onTraceEvent({
+      codexThreadId: null,
+      rawEvent: {
+        schema: ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA,
+        type: ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE,
+        providerTraceKind: 'provider.prompt_size',
+        providerPromptDiagnosticKind: input.diagnosticKind,
+        providerPromptBytes: byteLength(input.prompt),
+        userPromptBytes: byteLength(userPrompt),
+        turnContextPromptBytes: byteLength(turnContextPrompt),
+        developerInstructionsBytes: byteLength(developerInstructions),
+        developerInstructionsPresent: developerInstructions !== null,
+        activeTurnHistoryCount,
+        activeTurnHistoryPresent: activeTurnHistoryCount > 0,
+        conversationContextPresent,
+        refreshThreadInstructions:
+          input.refreshThreadInstructions ?? input.input.refreshThreadInstructions === true,
+        resumeCodexThreadIdPresent:
+          normalizeNullableString(input.input.resumeCodexThreadId) !== null,
+      },
+      updates: [],
+    })
+  } catch {
+    // Diagnostic traces are best-effort and must not affect assistant turns.
+  }
+}
+
+function byteLength(value: string | null): number {
+  return value ? Buffer.byteLength(value, 'utf8') : 0
 }
 
 function addCodexModelProviderFailureHint(input: {

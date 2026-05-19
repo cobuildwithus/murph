@@ -45,10 +45,10 @@ import {
   bindingPatchFromLocator,
   normalizeProviderOptions,
   createAssistantSessionId,
-  redactAssistantDisplayPath,
-  resolveAssistantConversationLookupKeys,
+  resolveAssistantConversationLookupKeyEntries,
   resolveAssistantStatePaths,
   type AssistantStatePaths,
+  type AssistantConversationLookupKeyEntry,
 } from './store/paths.js'
 import {
   assistantBackendTargetToProviderConfigInput,
@@ -61,6 +61,7 @@ export {
   resolveAssistantStatePaths,
 } from './store/paths.js'
 export type {
+  AssistantSessionResolutionDiagnostics,
   AssistantSessionLocator,
   CreateAssistantSessionInput,
   ResolveAssistantSessionInput,
@@ -72,6 +73,8 @@ import type {
   AssistantSessionLocator,
   ResolveAssistantSessionInput,
   ResolvedAssistantSession,
+  AssistantSessionResolutionDiagnostics,
+  AssistantSessionResolutionLookupSource,
   AssistantTranscriptEntryInput,
   AssistantTranscriptEntryRef,
 } from './store/types.js'
@@ -107,7 +110,8 @@ export async function resolveAssistantSession(
       bindingPatch,
       lookupSource: 'session-id' as const,
     }
-    const conversationKeys = resolveAssistantConversationLookupKeys(input)
+    const conversationLookupEntries =
+      resolveAssistantConversationLookupKeyEntries(input)
 
     if (sessionId) {
       const resolved = await loadAndPersistResolvedSession({
@@ -121,10 +125,20 @@ export async function resolveAssistantSession(
           sessionId,
         })
       }
-      return resolved
+      return withAssistantSessionResolutionDiagnostics(
+        resolved,
+        buildAssistantSessionResolutionDiagnostics({
+          conversationLookupEntries,
+          lookupSource: 'session-id',
+        }),
+      )
     }
 
     const indexes = await readAssistantIndexStore(paths)
+    const conversationLookupDiagnosticsInput = {
+      conversationLookupEntries,
+      indexes,
+    } as const
 
     if (manualAlias) {
       const sessionId = indexes.aliases[manualAlias]
@@ -138,13 +152,19 @@ export async function resolveAssistantSession(
           },
         })
         if (resolved) {
-          return resolved
+          return withAssistantSessionResolutionDiagnostics(
+            resolved,
+            buildAssistantSessionResolutionDiagnostics({
+              ...conversationLookupDiagnosticsInput,
+              lookupSource: 'alias',
+            }),
+          )
         }
       }
     }
 
-    for (const conversationKey of conversationKeys) {
-      const sessionId = indexes.conversationKeys[conversationKey]
+    for (const conversationLookupEntry of conversationLookupEntries) {
+      const sessionId = indexes.conversationKeys[conversationLookupEntry.key]
       if (sessionId) {
         const resolved = await loadAndPersistResolvedSession({
           paths,
@@ -159,7 +179,14 @@ export async function resolveAssistantSession(
           now: input.now,
         })
         if (resolved) {
-          return resolved
+          return withAssistantSessionResolutionDiagnostics(
+            resolved,
+            buildAssistantSessionResolutionDiagnostics({
+              ...conversationLookupDiagnosticsInput,
+              lookupSource: 'conversation-key',
+              matchedEntry: conversationLookupEntry,
+            }),
+          )
         }
       }
     }
@@ -198,9 +225,63 @@ export async function resolveAssistantSession(
     return {
       created: true,
       paths,
+      resolutionDiagnostics: buildAssistantSessionResolutionDiagnostics({
+        ...conversationLookupDiagnosticsInput,
+        lookupSource: 'created',
+      }),
       session: savedSession,
     }
   })
+}
+
+function withAssistantSessionResolutionDiagnostics(
+  resolved: ResolvedAssistantSession,
+  resolutionDiagnostics: AssistantSessionResolutionDiagnostics,
+): ResolvedAssistantSession {
+  return {
+    ...resolved,
+    resolutionDiagnostics,
+  }
+}
+
+function buildAssistantSessionResolutionDiagnostics(input: {
+  conversationLookupEntries: readonly AssistantConversationLookupKeyEntry[]
+  indexes?: {
+    conversationKeys: Readonly<Record<string, string>>
+  }
+  lookupSource: AssistantSessionResolutionLookupSource
+  matchedEntry?: AssistantConversationLookupKeyEntry | null
+}): AssistantSessionResolutionDiagnostics {
+  const primaryEntry = input.conversationLookupEntries[0] ?? null
+  const actorFallbackEntry =
+    input.conversationLookupEntries.find(
+      (entry, index) => index > 0 && entry.scope === 'actor',
+    ) ?? null
+  const indexedSessionIds =
+    input.indexes
+      ? new Set(
+          input.conversationLookupEntries.flatMap((entry) => {
+            const sessionId = input.indexes?.conversationKeys[entry.key]
+            return sessionId ? [sessionId] : []
+          }),
+        )
+      : null
+
+  return {
+    actorFallbackConversationIndexed: input.indexes && actorFallbackEntry
+      ? input.indexes.conversationKeys[actorFallbackEntry.key] !== undefined
+      : null,
+    conversationLookupIndexedCandidateCount:
+      indexedSessionIds === null ? null : indexedSessionIds.size,
+    conversationLookupKeyCount: input.conversationLookupEntries.length,
+    conversationLookupMatchedScope: input.matchedEntry?.scope ?? (
+      input.lookupSource === 'created' ? 'none' : null
+    ),
+    primaryConversationIndexed: input.indexes && primaryEntry
+      ? input.indexes.conversationKeys[primaryEntry.key] !== undefined
+      : null,
+    sessionResolutionLookupSource: input.lookupSource,
+  }
 }
 
 function resolveAssistantSessionRequestedProviderOptions(
@@ -408,9 +489,8 @@ async function createAssistantSessionNotFoundError(input: {
   sessionId: string
 }): Promise<VaultCliError> {
   const diagnosis = await inspectAssistantSessionStorage(input)
-  const stateRoot = redactAssistantDisplayPath(input.paths.assistantStateRoot)
   const message = [
-    `Assistant session "${input.sessionId}" was not found in ${stateRoot}.`,
+    'Assistant session was not found in the current vault assistant state.',
     diagnosis.transcriptExists
       ? 'A local transcript exists for that id, but the matching session record is missing, so local assistant state is out of sync.'
       : null,
@@ -421,11 +501,8 @@ async function createAssistantSessionNotFoundError(input: {
     .join(' ')
 
   return new VaultCliError('ASSISTANT_SESSION_NOT_FOUND', message, {
-    sessionId: input.sessionId,
-    stateRoot,
-    sessionPath: redactAssistantDisplayPath(diagnosis.sessionPath),
+    sessionIdPresent: true,
     sessionExists: diagnosis.sessionExists,
-    transcriptPath: redactAssistantDisplayPath(diagnosis.transcriptPath),
     transcriptExists: diagnosis.transcriptExists,
   })
 }
