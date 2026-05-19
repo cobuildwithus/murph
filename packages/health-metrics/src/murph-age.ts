@@ -3718,6 +3718,7 @@ function buildMurphAgeSubmittedMetricPoint(input: {
   });
   if (!observedAt) return null;
   const effectiveDate = parseSubmittedMetricEffectiveDate({
+    asOf: input.asOf,
     effectiveDate: input.submittedMetric.effectiveDate,
     metricKey,
     observedAt,
@@ -3793,13 +3794,25 @@ function parseSubmittedMetricObservedAt(input: {
   observedAt?: string;
   warnings: MurphAgeWarning[];
 }): string | null {
+  const asOf = normalizeSubmittedDateTime(input.asOf);
+  if (!asOf) {
+    input.warnings.push(submittedMetricWarning("Submitted Murph Age calculation requires a valid asOf timestamp.", input.metricKey));
+    return null;
+  }
   const observedAt = normalizeSubmittedDateTime(input.observedAt ?? input.asOf);
-  if (observedAt) return observedAt;
-  input.warnings.push(submittedMetricWarning("Submitted Murph Age metric requires a valid observedAt or asOf timestamp.", input.metricKey));
-  return null;
+  if (!observedAt) {
+    input.warnings.push(submittedMetricWarning("Submitted Murph Age metric requires a valid observedAt or asOf timestamp.", input.metricKey));
+    return null;
+  }
+  if (observedAt > asOf) {
+    input.warnings.push(submittedMetricWarning("Submitted Murph Age metric observedAt is after the calculation asOf timestamp.", input.metricKey));
+    return null;
+  }
+  return observedAt;
 }
 
 function parseSubmittedMetricEffectiveDate(input: {
+  asOf: string;
   effectiveDate?: string;
   metricKey: string;
   observedAt: string;
@@ -3807,7 +3820,12 @@ function parseSubmittedMetricEffectiveDate(input: {
 }): string | null {
   if (!input.effectiveDate) return input.observedAt.slice(0, 10);
   const normalized = normalizeSubmittedDateTime(input.effectiveDate);
-  if (normalized) return normalized.slice(0, 10);
+  const asOf = normalizeSubmittedDateTime(input.asOf);
+  if (normalized && asOf && normalized.slice(0, 10) <= asOf.slice(0, 10)) return normalized.slice(0, 10);
+  if (normalized && asOf && normalized.slice(0, 10) > asOf.slice(0, 10)) {
+    input.warnings.push(submittedMetricWarning("Submitted Murph Age metric effectiveDate is after the calculation asOf date.", input.metricKey));
+    return null;
+  }
   input.warnings.push(submittedMetricWarning("Submitted Murph Age metric effectiveDate is not valid.", input.metricKey));
   return null;
 }

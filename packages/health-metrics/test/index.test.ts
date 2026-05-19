@@ -25,6 +25,7 @@ import {
   buildMurphAgeIncrementEvaluationCard,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
+  calculateMurphAgeFromSubmittedInputs,
   calculateMurphAgePublicReportFromInputBundle,
   calculateMurphAgePublicReportFromSubmittedInputs,
   createCustomMetricDefinition,
@@ -4585,34 +4586,63 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5Report.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
   assert.equal(submittedLab5Report.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
   assert.equal(submittedLab5Report.warnings.some((warning) => warning.code === "INVALID_INPUT"), true);
-	  assert.equal(JSON.stringify(submittedLab5Report).includes("private metric"), false);
-	  assert.equal(JSON.stringify(submittedLab5Report).includes("metric-point:"), false);
-	  assert.equal(JSON.stringify(submittedLab5Report).includes("\"value\""), false);
+  assert.equal(JSON.stringify(submittedLab5Report).includes("private metric"), false);
+  assert.equal(JSON.stringify(submittedLab5Report).includes("metric-point:"), false);
+  assert.equal(JSON.stringify(submittedLab5Report).includes("\"value\""), false);
 
-	  const rejectedSubmittedReport = calculateMurphAgePublicReportFromSubmittedInputs({
-	    asOf,
-	    chronologicalAgeYears: 45,
-	    mode: "research",
-	    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
-	    sex: "female",
-	    submittedMetrics: [
-	      { metricKey: "HbA1c", sourceKind: "space-lab", unit: "%", value: 5.4 },
-	      { metricKey: "steps", sourceKind: "test-result", unit: "count", value: 9_800 },
-	      { metricKey: "glucose", observedAt: "not-a-date", unit: "mg/dL", value: 92 },
-	      { metricKey: "creatinine", effectiveDate: "not-a-date", unit: "mg/dL", value: 0.82 },
-	      { metricKey: "egfr", unit: "mL/min/1.73m^2", value: Number.NaN },
-	    ],
-	  });
+  const submittedReportWithFutureInputs = calculateMurphAgeFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [
+      { metricKey: "HbA1c", observedAt: "2026-05-11T00:00:00.000Z", unit: "%", value: 9.9 },
+      { metricKey: "HbA1c", observedAt: "2026-05-09T00:00:00.000Z", unit: "%", value: 5.4 },
+      { effectiveDate: "2026-05-11", metricKey: "glucose", unit: "mg/dL", value: 300 },
+      { metricKey: "glucose", observedAt: "2026-05-09T00:00:00.000Z", unit: "mg/dL", value: 92 },
+      { metricKey: "egfr", observedAt: "2026-05-09T00:00:00.000Z", unit: "mL/min/1.73m^2", value: 95 },
+      { metricKey: "HDL_C", unit: "mg/dL", value: 58 },
+      { metricKey: "Triglycerides", unit: "mg/dL", value: 95 },
+      { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+    ],
+  });
 
-	  assert.equal(rejectedSubmittedReport.status, "abstain");
-	  assert.equal(rejectedSubmittedReport.warnings.filter((warning) => warning.code === "INVALID_INPUT").length, 5);
-	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("space-lab"), false);
-	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("not-a-date"), false);
-	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("metric-point:"), false);
-	  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("\"value\""), false);
+  assert.equal(submittedReportWithFutureInputs.status, "ready");
+  assert.equal(submittedReportWithFutureInputs.warnings.filter((warning) => warning.code === "INVALID_INPUT").length, 2);
+  const selectedSubmittedPointIds = submittedReportWithFutureInputs.bundleAssessment.featureStatuses.flatMap((feature) =>
+    feature.selectedPointIds
+  );
+  assert.equal(selectedSubmittedPointIds.includes("metric-point:murph-age-submitted:hba1c:0"), false);
+  assert.equal(selectedSubmittedPointIds.includes("metric-point:murph-age-submitted:glucose:2"), false);
+  assert.equal(selectedSubmittedPointIds.includes("metric-point:murph-age-submitted:hba1c:1"), true);
+  assert.equal(JSON.stringify(submittedReportWithFutureInputs).includes("9.9"), false);
+  assert.equal(JSON.stringify(submittedReportWithFutureInputs).includes("300"), false);
 
-	  const explicitLab9WithLab5OnlyInputs = calculateMurphAgeFromInputBundle({
-	    asOf,
+  const rejectedSubmittedReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [
+      { metricKey: "HbA1c", sourceKind: "space-lab", unit: "%", value: 5.4 },
+      { metricKey: "steps", sourceKind: "test-result", unit: "count", value: 9_800 },
+      { metricKey: "glucose", observedAt: "not-a-date", unit: "mg/dL", value: 92 },
+      { metricKey: "creatinine", effectiveDate: "not-a-date", unit: "mg/dL", value: 0.82 },
+      { metricKey: "egfr", unit: "mL/min/1.73m^2", value: Number.NaN },
+    ],
+  });
+
+  assert.equal(rejectedSubmittedReport.status, "abstain");
+  assert.equal(rejectedSubmittedReport.warnings.filter((warning) => warning.code === "INVALID_INPUT").length, 5);
+  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("space-lab"), false);
+  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("not-a-date"), false);
+  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("metric-point:"), false);
+  assert.equal(JSON.stringify(rejectedSubmittedReport).includes("\"value\""), false);
+
+  const explicitLab9WithLab5OnlyInputs = calculateMurphAgeFromInputBundle({
+    asOf,
     cardId: "lab9_bp_body_10y_acm_research",
     chronologicalAgeYears: 45,
     mode: "research",
