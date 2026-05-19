@@ -127,7 +127,7 @@ describe("hosted runner log categories", () => {
 });
 
 describe("buildHostedWorkerSecretsPayload", () => {
-  it("keeps only the Codex OpenAI provider secret in the worker payload", () => {
+  it("keeps only worker-owned hosted secrets and the Codex OpenAI provider secret in the worker payload", () => {
     const payload = buildHostedWorkerSecretsPayload({
       ...requiredWorkerSecrets,
       OLLAMA_API_KEY: "ollama-secret",
@@ -135,6 +135,7 @@ describe("buildHostedWorkerSecretsPayload", () => {
     });
 
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
+    expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");
     expect(payload.OPENAI_API_KEY).toBe("openai-secret");
     expect(payload.VERCEL_AI_API_KEY).toBeUndefined();
   });
