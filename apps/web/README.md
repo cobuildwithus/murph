@@ -437,10 +437,14 @@ Generate the client and apply migrations with Prisma:
 ```bash
 pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
+pnpm --dir apps/web release:production:migrate
 ```
 
-Production Vercel builds from `main` run `prisma migrate deploy` before
-`next build` through `pnpm --dir apps/web build`. The migration wrapper uses
+The checked-in Vercel build command runs
+`pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
+the guarded production migration wrapper automatically before building. The
+generic `pnpm --dir apps/web build` script is intentionally non-mutating and
+only generates artifacts plus validation output. The migration wrapper uses
 `DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
 rejects known pooled Postgres ports such as `6432` and `6543`; keep
 `DATABASE_URL` available for app runtime traffic. Because a successful
