@@ -25,6 +25,7 @@ import {
   buildMurphAgeIncrementEvaluationCard,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
+  calculateMurphAgePublicReportFromInputBundle,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   formatTargetValue,
@@ -4041,6 +4042,15 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT.blocked,
   );
   const publicResearchReport = toPublicMurphAgeCalculatorReport(research);
+  const directPublicResearchReport = calculateMurphAgePublicReportFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithWearableContextPoints,
+    sex: "female",
+  });
+  assert.deepEqual(directPublicResearchReport, publicResearchReport);
   assert.equal(publicResearchReport.schemaVersion, MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION);
   assert.equal(publicResearchReport.status, "ready");
   assert.equal(publicResearchReport.mode, "research");

@@ -3509,6 +3509,12 @@ export function summarizeMurphAgeCalculatorPublicOutput(
   return toPublicMurphAgeDisplaySummary(summarizeMurphAgeCalculatorOutput(output));
 }
 
+export function calculateMurphAgePublicReportFromInputBundle(
+  input: MurphAgeCalculatorInput,
+): MurphAgePublicCalculatorReport {
+  return toPublicMurphAgeCalculatorReport(calculateMurphAgeFromInputBundle(input));
+}
+
 export function toPublicMurphAgeCalculatorReport(
   output: MurphAgeCalculatorOutput,
 ): MurphAgePublicCalculatorReport {
