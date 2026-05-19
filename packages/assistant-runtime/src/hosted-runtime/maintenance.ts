@@ -3,6 +3,7 @@ import {
   readConfiguredJunctionDeviceSyncProviderConfig,
 } from "@murphai/device-syncd/config";
 import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
+import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
@@ -1000,6 +1001,9 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   const baselineByHostedConnectionId = new Map(
     input.state.snapshot.connections.map((entry) => [entry.connection.id, entry]),
   );
+  const failureDiagnosticsByLocalAccountId = new Map(
+    input.service.listJobFailureDiagnostics().map((entry) => [entry.accountId, entry]),
+  );
 
   for (const account of input.service.listAccounts()) {
     const hostedConnectionId = input.state.localToHostedAccountIds.get(account.id) ?? null;
@@ -1024,6 +1028,7 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
         redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
           account,
           baseline,
+          failureDiagnostic: failureDiagnosticsByLocalAccountId.get(account.id) ?? null,
           hostedConnectionKnown: Boolean(hostedConnectionId),
           processedJobs: input.processedJobs,
           wake: input.wake,
@@ -1070,6 +1075,7 @@ type HostedDeviceSyncRuntimeSnapshotEntry = NonNullable<HostedDeviceSyncRuntimeS
 function buildHostedDeviceSyncFailureLogRedactedJson(input: {
   account: ReturnType<HostedDeviceSyncRuntimeService["listAccounts"]>[number];
   baseline: HostedDeviceSyncRuntimeSnapshotEntry | null;
+  failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionKnown: boolean;
   processedJobs: number;
   wake: HostedRuntimeEvent;
@@ -1080,6 +1086,7 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
   return {
     failureCode: toHostedRuntimeLogCode(input.account.lastErrorCode),
     ...(summary ? { failureSummary: summary } : {}),
+    ...buildHostedDeviceSyncFailureDiagnosticRedactedJson(input.failureDiagnostic),
     hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
     hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),
     hostedConnectionKnown: input.hostedConnectionKnown,
@@ -1096,6 +1103,77 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
       ? toHostedRuntimeLogCode(input.wake.reason)
       : "runtime_timer",
   };
+}
+
+function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
+  diagnostic: DeviceSyncJobFailureDiagnostic | null,
+): Record<string, boolean | number | string | null> {
+  if (!diagnostic) {
+    return {};
+  }
+
+  const redacted: Record<string, boolean | number | string | null> = {
+    failureRetryable: diagnostic.retryable,
+  };
+
+  if (diagnostic.accountStatus) {
+    redacted.providerAccountStatus = toHostedRuntimeLogCode(diagnostic.accountStatus);
+  }
+
+  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureCauseCode", diagnostic.details.failureCauseCode);
+  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureCauseName", diagnostic.details.failureCauseName);
+  appendHostedDeviceSyncFailureDiagnosticReason(redacted, "failureErrorCause", diagnostic.details.failureErrorCause);
+  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureErrorName", diagnostic.details.failureErrorName);
+  appendHostedDeviceSyncFailureDiagnosticNumber(redacted, "providerHttpStatus", diagnostic.details.providerHttpStatus);
+  appendHostedDeviceSyncFailureDiagnosticReason(redacted, "providerHttpStatusText", diagnostic.details.providerHttpStatusText);
+  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "providerOAuthErrorCode", diagnostic.details.providerOAuthErrorCode);
+  appendHostedDeviceSyncFailureDiagnosticReason(
+    redacted,
+    "providerOAuthErrorDescription",
+    diagnostic.details.providerOAuthErrorDescription,
+  );
+  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "providerOAuthGrantType", diagnostic.details.providerOAuthGrantType);
+
+  return redacted;
+}
+
+function appendHostedDeviceSyncFailureDiagnosticNumber(
+  redacted: Record<string, boolean | number | string | null>,
+  key: string,
+  value: number | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  redacted[key] = value;
+}
+
+function appendHostedDeviceSyncFailureDiagnosticCode(
+  redacted: Record<string, boolean | number | string | null>,
+  key: string,
+  value: string | undefined,
+): void {
+  if (!value) {
+    return;
+  }
+
+  redacted[key] = toHostedRuntimeLogCode(value);
+}
+
+function appendHostedDeviceSyncFailureDiagnosticReason(
+  redacted: Record<string, boolean | number | string | null>,
+  key: string,
+  value: string | undefined,
+): void {
+  if (!value) {
+    return;
+  }
+
+  const reason = sanitizeHostedDeviceSyncFailureSummary(value);
+  if (reason) {
+    redacted[key] = reason;
+  }
 }
 
 function sanitizeHostedDeviceSyncFailureSummary(value: string | null): string | null {

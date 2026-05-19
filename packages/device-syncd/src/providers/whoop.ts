@@ -351,24 +351,33 @@ function buildWhoopApiError(
   options: {
     retryable?: boolean;
     accountStatus?: "reauthorization_required" | "disconnected" | null;
+    diagnostics?: Record<string, boolean | number | string | null | undefined>;
   } = {},
 ) {
   return buildProviderApiError(code, message, response, body, options);
 }
 
 function readOAuthErrorCode(body: string): string | null {
+  return readOAuthStringField(body, "error")?.toLowerCase() ?? null;
+}
+
+function readOAuthErrorDescription(body: string): string | null {
+  return readOAuthStringField(body, "error_description");
+}
+
+function readOAuthStringField(body: string, key: "error" | "error_description"): string | null {
   try {
     const parsed: unknown = JSON.parse(body);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
 
-    const error = (parsed as { error?: unknown }).error;
-    if (typeof error !== "string") {
+    const value = (parsed as Record<string, unknown>)[key];
+    if (typeof value !== "string") {
       return null;
     }
 
-    return error.trim().toLowerCase() || null;
+    return value.trim() || null;
   } catch {
     return null;
   }
@@ -422,15 +431,24 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       url: `${baseUrl}${WHOOP_TOKEN_PATH}`,
       timeoutMs,
       parameters,
-      buildError: (response, body) =>
-        buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
+      buildError: (response, body) => {
+        const oauthErrorCode = readOAuthErrorCode(body);
+        const oauthErrorDescription = readOAuthErrorDescription(body);
+
+        return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: resolveWhoopTokenRequestAccountStatus({
             body,
             grantType: parameters.grant_type,
             response,
           }),
-        }),
+          diagnostics: {
+            ...(oauthErrorCode ? { oauthErrorCode } : {}),
+            ...(oauthErrorDescription ? { oauthErrorDescription } : {}),
+            oauthGrantType: parameters.grant_type,
+          },
+        });
+      },
     });
   }
 

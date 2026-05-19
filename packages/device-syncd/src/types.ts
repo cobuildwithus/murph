@@ -51,6 +51,26 @@ export interface DeviceSyncServiceConfig {
   log?: DeviceSyncLogger;
 }
 
+export interface DeviceSyncJobFailureDiagnosticDetails {
+  failureCauseCode?: string;
+  failureCauseName?: string;
+  failureErrorCause?: string;
+  failureErrorName?: string;
+  providerHttpStatus?: number;
+  providerHttpStatusText?: string;
+  providerOAuthErrorCode?: string;
+  providerOAuthErrorDescription?: string;
+  providerOAuthGrantType?: string;
+}
+
+export interface DeviceSyncJobFailureDiagnostic {
+  accountId: string;
+  accountStatus: DeviceSyncAccountStatus | null;
+  code: string;
+  details: DeviceSyncJobFailureDiagnosticDetails;
+  retryable: boolean;
+}
+
 export interface DeviceSyncHttpConfig {
   host?: string;
   port?: number;

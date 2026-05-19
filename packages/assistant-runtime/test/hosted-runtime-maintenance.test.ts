@@ -1255,6 +1255,21 @@ describe("runHostedDeviceSyncPass", () => {
       close,
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => [
+        {
+          accountId: "local_account_sensitive",
+          accountStatus: null,
+          code: "SYNC_JOB_FAILED",
+          details: {
+            failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
+            failureErrorCause: "Connect Timeout Error",
+            failureErrorName: "TypeError",
+            providerHttpStatus: 503,
+            providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+          },
+          retryable: true,
+        },
+      ]),
       listAccounts: vi.fn(() => [
         {
           id: "local_account_sensitive",
@@ -1343,11 +1358,17 @@ describe("runHostedDeviceSyncPass", () => {
       failureCode: "SYNC_JOB_FAILED",
       failureSummary:
         "Importer failed reading <redacted-path> for <redacted-email> with <redacted-secret>",
+      failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
+      failureErrorCause: "Connect Timeout Error",
+      failureErrorName: "TypeError",
+      failureRetryable: true,
       hadPriorFailure: false,
       hadPriorSuccess: false,
       hostedConnectionKnown: true,
       nextReconcileAt: "2026-04-08T02:00:00.000Z",
       processedJobs: 1,
+      providerHttpStatus: 503,
+      providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
       provider: "whoop",
       setupPhase: null,
       status: "active",
