@@ -1395,6 +1395,226 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("checkpoint wake pass can clear previously checkpointed wake metadata", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const assistantWakeAt = "2099-04-27T00:05:00.000Z";
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_clear_projection",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
+                key: `users/bundles/member-synthetic/runtime-idle-checkpoint-clear-${checkpointRequests.length}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                checkpointRequests.push(request);
+                events.push(`workspace.checkpoint:${checkpointRequests.length}`);
+                if (checkpointRequests.length === 1) {
+                  runtimeWakeSignal.notify();
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: `${4 + checkpointRequests.length}`,
+                  }),
+                };
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: assistantWakeAt,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantNextWakeAt: assistantWakeAt,
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: null,
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+        "assistant.phase:2",
+      ]);
+      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, assistantWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedAssistantNextWakeAt,
+        null,
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.redactedStatus?.hostedAssistantNextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("near-deadline wake pass can clear projected wake metadata before checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const assistantWakeAt = "2099-04-27T00:05:00.000Z";
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_near_deadline_clear",
+            deadlineAt: new Date(Date.now() + 35_100).toISOString(),
+            idleCheckpointDelayMs: 10_000,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-near-deadline-clear.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => runtimeWakeSignal.notify(), 10);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: assistantWakeAt,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantNextWakeAt: assistantWakeAt,
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: null,
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+        "assistant.phase:2",
+      ]);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedAssistantNextWakeAt,
+        null,
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.redactedStatus?.hostedAssistantNextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime deadline forces a dirty checkpoint without waiting for the idle delay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
@@ -1450,11 +1670,12 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("projected runtime wake forces a dirty checkpoint before the idle delay", async () => {
+  test("projected runtime wake does not shorten the full idle checkpoint delay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const projectedWakeAt = new Date(Date.now() + 1_000).toISOString();
+    const idleCheckpointDelayMs = 250;
+    const projectedWakeAt = new Date(Date.now()).toISOString();
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -1463,7 +1684,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_projected_wake",
-            idleCheckpointDelayMs: 10_000,
+            idleCheckpointDelayMs,
             leaseGeneration: "9",
             reason: "nudge",
             userId: TEST_USER_ID,
@@ -1509,7 +1730,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.ok(performance.now() - startedAt < 2_000);
+      const elapsedMs = performance.now() - startedAt;
+      assert.ok(elapsedMs >= idleCheckpointDelayMs - 50);
+      assert.ok(elapsedMs < 2_000);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
