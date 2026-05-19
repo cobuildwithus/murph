@@ -74,6 +74,13 @@ export interface HostedDeviceSyncDirtyConnectionRecord {
   updatedAt: string;
 }
 
+export interface HostedDeviceSyncDueReconcileConnectionRecord {
+  connectionId: string;
+  userId: string;
+  provider: string;
+  nextReconcileAt: string;
+}
+
 export interface UpsertHostedDeviceSyncDirtyConnectionInput {
   connectionId: string;
   userId: string;

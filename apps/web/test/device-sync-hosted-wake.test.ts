@@ -291,6 +291,9 @@ import {
   HostedDeviceSyncControlPlane,
   appendHostedDeviceSyncWake,
 } from "@/src/lib/device-sync/control-plane";
+import {
+  appendHostedDeviceSyncScheduledReconcileWake,
+} from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 
 function buildPublicConnectionId(connectionId: string): string {
@@ -529,6 +532,77 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
+      source: "device-sync",
+    });
+  });
+
+  it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {
+    await appendHostedDeviceSyncScheduledReconcileWake({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:abc123",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    });
+
+    expect(mocks.createSignal).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventType: null,
+      kind: "reconcile_due",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      reason: null,
+      resourceCategory: null,
+      revokeWarning: null,
+      traceId: null,
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    });
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "device-sync:scheduled-reconcile:abc123",
+          reason: "reconcile_due",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+      runnerNudgeIntent: "device-sync-reconcile-recovery",
+      source: "device-sync",
+    });
+  });
+
+  it("re-nudges duplicate due-reconcile wakes without writing duplicate signals", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_existing",
+        userId: "user-123",
+      },
+    });
+
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:abc123",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    })).resolves.toEqual({
+      wakeAppended: true,
+    });
+
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_existing",
+      runnerNudgeIntent: "device-sync-reconcile-recovery",
       source: "device-sync",
     });
   });

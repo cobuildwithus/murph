@@ -352,6 +352,23 @@ describe("hosted onboarding webhook workflows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
+  it("nudges reconcile recovery even when the mailbox pointer is already checkpointed", async () => {
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      runnerNudgeIntent: "device-sync-reconcile-recovery",
+      source: "device-sync",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "device-sync.reconcile-recovery:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
   it("uses the mailbox item's lane for nudge preflight checks", async () => {
     mocks.readHostedMailboxItemCheckpointById.mockResolvedValue(buildHostedMailboxItemCheckpoint({
       lane: "system",

@@ -28,6 +28,7 @@ import type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionRecord,
+  HostedDeviceSyncDueReconcileConnectionRecord,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
@@ -59,6 +60,7 @@ export type {
   CreateHostedSignalInput,
   CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionRecord,
+  HostedDeviceSyncDueReconcileConnectionRecord,
   HostedDeviceSyncDirtyResource,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
@@ -258,6 +260,13 @@ export class PrismaDeviceSyncControlPlaneStore
     staleBefore: Date;
   }) {
     return this.dirtyConnections.listDirtyConnectionsForSweep(input);
+  }
+
+  async listDueReconcileConnectionsForSweep(input: {
+    dueAt: Date;
+    limit: number;
+  }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
+    return this.connections.listDueReconcileConnectionsForSweep(input);
   }
 
   async markDirtyConnectionProcessed(input: {
