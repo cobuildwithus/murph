@@ -128,7 +128,7 @@ describe("hosted local stuck invocation recovery e2e", () => {
       reason: "manual",
     });
     expect(stuckInvocation.ok).toBe(true);
-    expect(stuckInvocation.attemptId).toMatch(/^workspace-invocation-/u);
+    expect(stuckInvocation.attemptId).toMatch(/^runtime-write-/u);
 
     const recoveryWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
