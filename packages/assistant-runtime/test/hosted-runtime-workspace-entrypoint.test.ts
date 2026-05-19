@@ -975,6 +975,94 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("no-progress runtime wakes do not postpone the dirty idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 50;
+    let wakeInterval: ReturnType<typeof setInterval> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const startedAt = performance.now();
+      wakeInterval = setInterval(() => runtimeWakeSignal.notify(), 2);
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_wakes",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            if (wakeInterval) {
+              clearInterval(wakeInterval);
+              wakeInterval = null;
+            }
+            return {
+              snapshotRef: createBundleRef({
+                hash: "4".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-no-progress-wakes.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_no_progress_wake_001",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+      const elapsedMs = performance.now() - startedAt;
+
+      assert.ok(elapsedMs >= idleCheckpointDelayMs - 20);
+      assert.ok(elapsedMs < 1_000);
+      assert.ok(fetchRequests.length > 1);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_no_progress_wake_001",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+    } finally {
+      if (wakeInterval) {
+        clearInterval(wakeInterval);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("foreground runtime wake imports conversation input after initial mailbox budget exhaustion", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-budget-"));
     const events: string[] = [];
@@ -1295,6 +1383,113 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
     } finally {
       firstCheckpointResponse.resolve({
+        checkpointed: true,
+        workspace: createWorkspaceState({ version: "5" }),
+      });
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("runtime wakes pending after checkpoint are not drained once the host checkpoint deadline is due", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_checkpoint_deadline_001",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          commitTimeoutMs: 1,
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_deadline",
+            deadlineAt: new Date(Date.now() + 5_700).toISOString(),
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-pending-deadline.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push(`workspace.checkpoint:${request.expectedWorkspaceVersion}`);
+                checkpointRequests.push(request);
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_checkpoint_deadline_002",
+                  laneSeq: "2",
+                }));
+                runtimeWakeSignal.notify();
+                return await checkpointResponse.promise;
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(checkpointRequests.length, 1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      checkpointResponse.resolve({
+        checkpointed: true,
+        workspace: createWorkspaceState({
+          snapshotRef: checkpointRequests[0]!.snapshotRef,
+          version: "5",
+        }),
+      });
+
+      const result = await resultPromise;
+
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0"]);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_checkpoint_deadline_001",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
+        "4",
+      ]);
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+      assert.equal(result.status, "idle");
+    } finally {
+      checkpointResponse.resolve({
         checkpointed: true,
         workspace: createWorkspaceState({ version: "5" }),
       });
@@ -5771,6 +5966,7 @@ function createWorkspaceRunRequest(
 }
 
 function createWorkspaceRuntimeJobInput(input: {
+  commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   request?: Partial<HostedWorkspaceInvocationRequest>;
@@ -5778,6 +5974,7 @@ function createWorkspaceRuntimeJobInput(input: {
   return {
     request: createWorkspaceRunRequest(input.request),
     runtime: {
+      ...(input.commitTimeoutMs === undefined ? {} : { commitTimeoutMs: input.commitTimeoutMs }),
       forwardedEnv: {
         ...TEST_HOSTED_CODEX_FORWARDED_ENV,
         ...(input.forwardedEnv ?? {}),

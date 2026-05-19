@@ -18,6 +18,7 @@ import {
 
 const requiredWorkerSecrets = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
+  HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
   OPENAI_API_KEY: "openai-secret",
 } satisfies Record<string, string>;

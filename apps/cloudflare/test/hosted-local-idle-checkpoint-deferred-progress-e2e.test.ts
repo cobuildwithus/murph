@@ -111,22 +111,29 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectWorkspaceBaseOnly(firstCompletionStatus);
     expectMailboxLagDrained(firstCompletionStatus);
-    expectDeferredMailboxImportLog(firstCompletionStatus, {
-      expectedConversationSeqEnd: firstSeq,
-      expectedConversationSeqStart: "0",
-      expectedWorkspaceVersion: activationWorkspaceVersion,
-    });
+    const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
+    if (firstCompletionWorkspaceVersion === activationWorkspaceVersion) {
+      expectForegroundDeferredMailboxProgressEvidence(firstCompletionStatus, {
+        expectedConversationSeqEnd: firstSeq,
+        expectedConversationSeqStart: "0",
+        expectedWorkspaceVersion: activationWorkspaceVersion,
+      });
+    }
 
     const idleCheckpointStatus =
-      requireWorkspaceVersion(firstCompletionStatus) === activationWorkspaceVersion
+      firstCompletionWorkspaceVersion === activationWorkspaceVersion
         ? await waitForIdleShutdownCheckpoint({
+            expectedConversationSeqEnd: firstSeq,
             previousWorkspaceVersion: activationWorkspaceVersion,
           })
         : firstCompletionStatus;
     expectWorkspaceBaseOnly(idleCheckpointStatus);
     const idleWorkspaceVersion = requireWorkspaceVersion(idleCheckpointStatus);
     expect(idleWorkspaceVersion).not.toBe(activationWorkspaceVersion);
-    expectIdleShutdownSnapshotLog(idleCheckpointStatus);
+    expectCommittedIdleCheckpointProgressEvidence(idleCheckpointStatus, {
+      expectedConversationSeqEnd: firstSeq,
+      expectedWorkspaceVersion: activationWorkspaceVersion,
+    });
 
     const secondWake = await requireScenario().runWake(
       buildInboundLinqWake({
@@ -148,9 +155,23 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     const finalStatus = await waitForHostedInvocationIdleWithLogs();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expectMailboxLagDrained(finalStatus);
-    expectDeferredMailboxImportLog(finalStatus, {
+    const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
+    if (finalWorkspaceVersion === idleWorkspaceVersion) {
+      expectForegroundDeferredMailboxProgressEvidence(finalStatus, {
+        expectedConversationSeqEnd: secondSeq,
+        expectedConversationSeqStart: firstSeq,
+        expectedWorkspaceVersion: idleWorkspaceVersion,
+      });
+    }
+    const secondIdleCheckpointStatus =
+      finalWorkspaceVersion === idleWorkspaceVersion
+        ? await waitForIdleShutdownCheckpoint({
+            expectedConversationSeqEnd: secondSeq,
+            previousWorkspaceVersion: idleWorkspaceVersion,
+          })
+        : finalStatus;
+    expectCommittedIdleCheckpointProgressEvidence(secondIdleCheckpointStatus, {
       expectedConversationSeqEnd: secondSeq,
-      expectedConversationSeqStart: firstSeq,
       expectedWorkspaceVersion: idleWorkspaceVersion,
     });
   }, 600_000);
@@ -221,6 +242,7 @@ function buildInboundLinqWake(input: {
 }
 
 async function waitForIdleShutdownCheckpoint(input: {
+  expectedConversationSeqEnd?: string;
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -247,7 +269,12 @@ async function waitForIdleShutdownCheckpoint(input: {
       && isWorkspaceBaseOnly(status)
       && !status.inFlight
       && !status.lastErrorCode
-      && hasIdleShutdownSnapshotLog(status.recentLogs ?? [])
+      && (input.expectedConversationSeqEnd === undefined
+        ? hasIdleShutdownSnapshotLog(status.recentLogs ?? [])
+        : hasCommittedIdleCheckpointProgressEvidence(status, {
+            expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          }))
     ) {
       return status;
     }
@@ -378,7 +405,7 @@ function compareMailboxSeq(left: string, right: string): number {
   }
 }
 
-function expectDeferredMailboxImportLog(
+function expectForegroundDeferredMailboxProgressEvidence(
   status: Pick<HostedRunnerStatusResponse, "recentLogs">,
   input: {
     expectedConversationSeqEnd: string;
@@ -406,6 +433,65 @@ function expectDeferredMailboxImportLog(
     conversationSeqStart: input.expectedConversationSeqStart,
     stateChanged: true,
   });
+}
+
+function expectCommittedIdleCheckpointProgressEvidence(
+  status: Pick<HostedRunnerStatusResponse, "recentLogs" | "workspace">,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedWorkspaceVersion?: string;
+  },
+): void {
+  if (hasCommittedIdleCheckpointProgressEvidence(status, input)) {
+    return;
+  }
+
+  throw new Error([
+    "Expected committed idle-checkpoint mailbox progress evidence.",
+    `expected: ${JSON.stringify(input)}`,
+    `workspace progress: ${JSON.stringify(summarizeWorkspaceCheckpointProgress(status))}`,
+    `snapshot logs: ${JSON.stringify((status.recentLogs ?? []).filter((log) =>
+      log.eventCode === "checkpoint.snapshot_finished"
+      && log.redactedJson?.checkpointReason === "idle_shutdown"
+    ))}`,
+  ].join("\n"));
+}
+
+function summarizeWorkspaceCheckpointProgress(
+  status: Pick<HostedRunnerStatusResponse, "workspace">,
+): {
+  conversationImportedSeq: string | null;
+  workspaceVersion: string | null;
+} {
+  const conversationImportedSeq =
+    status.workspace?.redactedStatus?.hostedMailboxConversationImportedSeq;
+  return {
+    conversationImportedSeq: typeof conversationImportedSeq === "string"
+      ? conversationImportedSeq
+      : null,
+    workspaceVersion: status.workspace?.version ?? null,
+  };
+}
+
+function hasCommittedIdleCheckpointProgressEvidence(
+  status: Pick<HostedRunnerStatusResponse, "recentLogs" | "workspace">,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
+  if (
+    input.expectedWorkspaceVersion !== undefined
+    && status.workspace?.version === input.expectedWorkspaceVersion
+  ) {
+    return false;
+  }
+
+  const workspaceImportedSeq =
+    status.workspace?.redactedStatus?.hostedMailboxConversationImportedSeq;
+  return typeof workspaceImportedSeq === "string"
+    && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0
+    && hasIdleShutdownSnapshotLog(status.recentLogs ?? []);
 }
 
 function findDeferredMailboxImportLog(
@@ -469,10 +555,6 @@ function summarizeMailboxImportLogs(
       phase: entry.phase,
       stateChanged: entry.redactedJson?.stateChanged,
     }));
-}
-
-function expectIdleShutdownSnapshotLog(status: HostedRunnerStatusResponse): void {
-  expect(hasIdleShutdownSnapshotLog(status.recentLogs ?? [])).toBe(true);
 }
 
 function hasIdleShutdownSnapshotLog(logs: readonly HostedRuntimeLogEntry[]): boolean {
