@@ -4530,6 +4530,122 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(lab5ResearchWithWearables.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
 
+  const submittedScoreSnapshot = (report: ReturnType<typeof calculateMurphAgePublicReportFromSubmittedInputs>) => ({
+    ageDeltaYears: report.result?.ageDeltaYears,
+    biologicalAgeYears: report.result?.biologicalAgeYears,
+    cardId: report.result?.authorization.cardId,
+    displayStatus: report.displaySummary.displayStatus,
+    featureAttributions: report.result?.featureAttributions.map((feature) => ({
+      contributionYears: feature.contributionYears,
+      featureKey: feature.featureKey,
+      metricKey: feature.metricKey,
+      moduleId: feature.moduleId,
+      status: feature.status,
+      warnings: feature.warnings,
+    })),
+    moduleAttributions: report.result?.moduleAttributions,
+    riskProbability: report.result?.risk?.probability,
+    selectedScoreBearingFeatureKeys: report.displaySummary.selectedScoreBearingFeatureKeys,
+    selectedScoreBearingMetricKeys: report.displaySummary.selectedScoreBearingMetricKeys,
+    status: report.status,
+  });
+  const submittedLab5Metrics = [
+    { metricKey: "HbA1c", unit: "%", value: 5.4 },
+    { metricKey: "glucose", unit: "mg/dL", value: 92 },
+    { metricKey: "HDL_C", unit: "mg/dL", value: 58 },
+    { metricKey: "Triglycerides", unit: "mg/dL", value: 95 },
+    { metricKey: "creatinine", unit: "mg/dL", value: 0.82 },
+    { metricKey: "egfr", unit: "mL/min/1.73m^2", value: 95 },
+    { metricKey: "body_mass_index", sourceKind: "measurement", unit: "kg/m2", value: 23.2 },
+  ];
+  const submittedWearableMetrics = [
+    { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 9_800 },
+    { metricKey: "activity-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 56 },
+    { metricKey: "mvpa-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 34 },
+    { metricKey: "sedentary-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 490 },
+    { metricKey: "resting-heart-rate", sourceKind: "wearable-summary", unit: "bpm", value: 58 },
+    { metricKey: "hrv-rmssd", sourceKind: "wearable-summary", unit: "ms", value: 62 },
+    { metricKey: "total-sleep-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 455 },
+    { metricKey: "sleep-efficiency", sourceKind: "wearable-summary", unit: "percent", value: 88 },
+    { metricKey: "sleep-regularity-score", sourceKind: "wearable-summary", unit: "score", value: 84 },
+    { metricKey: "sleep-duration-variability-minutes", sourceKind: "wearable-summary", unit: "minutes", value: 39 },
+    { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 24 },
+    { metricKey: "wearable_valid_night_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
+    { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.86 },
+  ];
+  const submittedLab5OnlyReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: submittedLab5Metrics,
+  });
+  const submittedLab5WithWearablesReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [...submittedLab5Metrics, ...submittedWearableMetrics],
+  });
+
+  assert.equal(submittedLab5OnlyReport.status, "ready");
+  assert.equal(submittedLab5WithWearablesReport.status, "ready");
+  assert.deepEqual(submittedScoreSnapshot(submittedLab5WithWearablesReport), submittedScoreSnapshot(submittedLab5OnlyReport));
+  assert.equal(submittedLab5OnlyReport.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), false);
+  assert.equal(submittedLab5WithWearablesReport.displaySummary.wearableBridge.readyFeatureKeys.includes("activity-volume"), true);
+  assert.equal(
+    submittedLab5WithWearablesReport.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes("steps"),
+    true,
+  );
+  assert.equal(
+    submittedLab5WithWearablesReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"),
+    false,
+  );
+
+  const submittedLab9Metrics = [
+    { metricKey: "albumin", unit: "g/dL", value: 4.4 },
+    { metricKey: "egfr", unit: "mL/min/1.73m^2", value: 96 },
+    { metricKey: "hba1c", unit: "%", value: 5.2 },
+    { metricKey: "alkaline-phosphatase", unit: "U/L", value: 65 },
+    { metricKey: "white-blood-cell-count", unit: "10^3/uL", value: 5.5 },
+    { metricKey: "lymphocyte-percentage", unit: "%", value: 32 },
+    { metricKey: "red-cell-distribution-width", unit: "%", value: 12.5 },
+    { metricKey: "hdl-c", unit: "mg/dL", value: 58 },
+    { metricKey: "triglycerides", unit: "mg/dL", value: 95 },
+    { metricKey: "systolic-blood-pressure", sourceKind: "measurement", unit: "mmHg", value: 118 },
+    { metricKey: "diastolic-blood-pressure", sourceKind: "measurement", unit: "mmHg", value: 72 },
+    { metricKey: "bmi", sourceKind: "measurement", unit: "kg/m^2", value: 23.2 },
+  ];
+  const submittedLab9OnlyReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    submittedMetrics: submittedLab9Metrics,
+  });
+  const submittedLab9WithWearablesReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    submittedMetrics: [...submittedLab9Metrics, ...submittedWearableMetrics],
+  });
+
+  assert.equal(submittedLab9OnlyReport.status, "ready");
+  assert.equal(submittedLab9WithWearablesReport.status, "ready");
+  assert.deepEqual(submittedScoreSnapshot(submittedLab9WithWearablesReport), submittedScoreSnapshot(submittedLab9OnlyReport));
+  assert.equal(submittedLab9WithWearablesReport.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(
+    submittedLab9WithWearablesReport.result?.featureAttributions.some((feature) =>
+      feature.metricKey === "resting-heart-rate"
+    ),
+    false,
+  );
+
   const explicitLab5SensitivityWithFullLab9Inputs = calculateMurphAgeFromInputBundle({
     asOf,
     cardId: "lab5_bp_bmi_transport_research",
