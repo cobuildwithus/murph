@@ -4,6 +4,7 @@ import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/d
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
+  DeviceSyncJobFailureDiagnostic,
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
@@ -21,6 +22,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as HostedDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
+  HostedExecutionDeviceSyncRuntimeFailureDiagnostic as HostedDeviceSyncRuntimeFailureDiagnostic,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as HostedDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeLocalStateUpdate as HostedDeviceSyncRuntimeLocalStateUpdate,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
@@ -167,6 +169,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   const snapshotByConnectionId = new Map(
     input.state.snapshot.connections.map((entry) => [entry.connection.id, entry]),
   );
+  const failureDiagnosticByLocalAccountId = new Map(
+    input.service.listJobFailureDiagnostics().map((entry) => [entry.accountId, entry]),
+  );
 
   for (const [localAccountId, hostedConnectionId] of input.state.localToHostedAccountIds.entries()) {
     const account = store.getAccountById(localAccountId);
@@ -179,6 +184,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       account,
       baseline: snapshotByConnectionId.get(hostedConnectionId) ?? null,
       codec,
+      failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
     });
@@ -501,6 +507,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
   observedTokenVersion: number | null;
 }): HostedDeviceSyncRuntimeConnectionUpdate | null {
@@ -556,6 +563,12 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     }
 
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
+    assignFailureDiagnosticUpdate(
+      update,
+      input.account.lastSyncErrorAt ?? null,
+      baselineLocalState?.lastSyncErrorAt ?? null,
+      input.failureDiagnostic,
+    );
 
     return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
   }
@@ -628,7 +641,12 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   assignMonotonicTimestampUpdate(update, "lastWebhookAt", input.account.lastWebhookAt, baselineLocalState?.lastWebhookAt ?? null);
   assignMonotonicTimestampUpdate(update, "lastSyncStartedAt", input.account.lastSyncStartedAt, baselineLocalState?.lastSyncStartedAt ?? null);
   assignMonotonicTimestampUpdate(update, "lastSyncCompletedAt", input.account.lastSyncCompletedAt, baselineLocalState?.lastSyncCompletedAt ?? null);
-  assignMonotonicTimestampUpdate(update, "lastSyncErrorAt", input.account.lastSyncErrorAt, baselineLocalState?.lastSyncErrorAt ?? null);
+  assignFailureDiagnosticUpdate(
+    update,
+    input.account.lastSyncErrorAt ?? null,
+    baselineLocalState?.lastSyncErrorAt ?? null,
+    input.failureDiagnostic,
+  );
 
   return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
 }
@@ -639,6 +657,7 @@ function hasHostedDeviceSyncRuntimeConnectionUpdateChanges(
   return update.connection !== undefined
     || update.localState !== undefined
     || update.credential !== undefined
+    || update.failureDiagnostic !== undefined
     || update.observedTokenVersion !== undefined;
 }
 
@@ -1324,6 +1343,62 @@ function resolveHydratedNextReconcileAt(input: {
 function parseIsoMs(value: string): number | null {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function assignFailureDiagnosticUpdate(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+  localLastSyncErrorAt: string | null,
+  baselineLastSyncErrorAt: string | null,
+  diagnostic: DeviceSyncJobFailureDiagnostic | null,
+): void {
+  assignMonotonicTimestampUpdate(
+    update,
+    "lastSyncErrorAt",
+    localLastSyncErrorAt,
+    baselineLastSyncErrorAt,
+  );
+
+  if (!didHostedRuntimeFailureTimestampAdvance(localLastSyncErrorAt, baselineLastSyncErrorAt)) {
+    return;
+  }
+
+  const failureDiagnostic = toHostedRuntimeFailureDiagnostic(diagnostic);
+  if (failureDiagnostic) {
+    update.failureDiagnostic = failureDiagnostic;
+  }
+}
+
+function didHostedRuntimeFailureTimestampAdvance(
+  localValue: string | null,
+  baselineValue: string | null,
+): boolean {
+  if (!localValue) {
+    return false;
+  }
+
+  if (!baselineValue) {
+    return true;
+  }
+
+  const localMs = parseIsoMs(localValue);
+  const baselineMs = parseIsoMs(baselineValue);
+
+  return localMs !== null && (baselineMs === null || localMs > baselineMs);
+}
+
+function toHostedRuntimeFailureDiagnostic(
+  diagnostic: DeviceSyncJobFailureDiagnostic | null,
+): HostedDeviceSyncRuntimeFailureDiagnostic | null {
+  if (!diagnostic) {
+    return null;
+  }
+
+  return {
+    accountStatus: diagnostic.accountStatus,
+    code: diagnostic.code,
+    details: { ...diagnostic.details },
+    retryable: diagnostic.retryable,
+  };
 }
 
 function resolveHostedWakeNextReconcileAt(

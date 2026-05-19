@@ -855,12 +855,14 @@ describe("hosted runtime control contracts", () => {
         assistantNotificationErrorMessage: "Hosted assistant notification failed.",
         customProviderErrorDetail: "Provider rejected the request after resume.",
         failureAssistantProviderErrorBodyMessage: "provider rejected the request",
+        providerHttpStatusText: "Bad Request",
         safeErrorMessage: "Codex app-server failed before producing a reply.",
       },
     }).redactedJson).toEqual({
       assistantNotificationErrorMessage: "Hosted assistant notification failed.",
       customProviderErrorDetail: "Provider rejected the request after resume.",
       failureAssistantProviderErrorBodyMessage: "provider rejected the request",
+      providerHttpStatusText: "Bad Request",
       safeErrorMessage: "Codex app-server failed before producing a reply.",
     });
     expect(() => parseHostedRuntimeLogEntry({

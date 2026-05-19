@@ -409,6 +409,51 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("parses sanitized provider failure diagnostics on apply updates", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "conn_123",
+          failureDiagnostic: {
+            accountStatus: "reauthorization_required",
+            code: "WHOOP_TOKEN_REQUEST_FAILED",
+            details: {
+              providerHttpStatus: 400,
+              providerHttpStatusText: "Bad Request",
+              providerOAuthErrorCode: "invalid_grant",
+              providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+              providerOAuthGrantType: "refresh_token",
+            },
+            retryable: false,
+          },
+          localState: {
+            lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+            lastErrorMessage: "WHOOP token request failed.",
+            lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+          },
+          observedUpdatedAt: "2026-05-19T22:00:44.000Z",
+        },
+      ],
+      userId: "user_123",
+    });
+
+    expect(parsed.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      failureDiagnostic: {
+        accountStatus: "reauthorization_required",
+        code: "WHOOP_TOKEN_REQUEST_FAILED",
+        details: {
+          providerHttpStatus: 400,
+          providerHttpStatusText: "Bad Request",
+          providerOAuthErrorCode: "invalid_grant",
+          providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+          providerOAuthGrantType: "refresh_token",
+        },
+        retryable: false,
+      },
+    });
+  });
+
   it("normalizes timestamps and sanitizes secret-bearing local-state fields", () => {
     expect(
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
