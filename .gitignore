@@ -35,6 +35,7 @@ apps/web/next-env.d.ts
 .codex-simplify-audit.txt
 .codex-worktrees/
 .codex-worker-prompts/
+**/.clawpatch/
 assistant-state/
 audit-packages/
 output-packages/
