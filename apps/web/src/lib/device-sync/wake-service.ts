@@ -507,6 +507,17 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   let mailboxItemId: string | null = null;
 
   await input.store.prisma.$transaction(async (tx) => {
+    const dirtyUpdate = await input.store.upsertDirtyConnection({
+      connectionId: input.connectionId,
+      dirtyAt: input.occurredAt,
+      eventType: input.eventType,
+      provider: input.provider,
+      resourceCategory: input.resourceCategory ?? null,
+      resources: input.dirtyResources,
+      traceId: input.traceId,
+      tx,
+      userId: input.userId,
+    });
     await input.store.createSignal({
       userId: input.userId,
       connectionId: input.connectionId,
@@ -518,17 +529,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       resourceCategory: input.resourceCategory ?? null,
       createdAt: input.acceptedAt,
       tx,
-    });
-    const dirtyUpdate = await input.store.upsertDirtyConnection({
-      connectionId: input.connectionId,
-      dirtyAt: input.occurredAt,
-      eventType: input.eventType,
-      provider: input.provider,
-      resourceCategory: input.resourceCategory ?? null,
-      resources: input.dirtyResources,
-      traceId: input.traceId,
-      tx,
-      userId: input.userId,
     });
 
     if (input.traceId) {

@@ -43,11 +43,15 @@ type DirtyConnectionUpdate = {
   };
   where: {
     connectionId: string;
+    dirtyRevision?: bigint;
+    processedRevision?: bigint;
+    userId?: string;
   };
 };
 
-type DirtyConnectionCreate = {
+type DirtyConnectionCreateMany = {
   data: Omit<DirtyConnectionRecord, "createdAt" | "updatedAt">;
+  skipDuplicates?: boolean;
 };
 
 describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
@@ -59,17 +63,24 @@ describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
     const updateCalls: DirtyConnectionUpdate[] = [];
     let current = cloneDirtyConnectionRecord(existing);
     const prisma = {
-      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
       deviceSyncDirtyConnection: {
         findFirst: vi.fn(async () => cloneDirtyConnectionRecord(current)),
-        update: vi.fn(async (input: DirtyConnectionUpdate) => {
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
           updateCalls.push(input);
+          if (
+            input.where.connectionId !== current.connectionId ||
+            input.where.dirtyRevision !== current.dirtyRevision ||
+            input.where.processedRevision !== current.processedRevision ||
+            input.where.userId !== current.userId
+          ) {
+            return { count: 0 };
+          }
           current = cloneDirtyConnectionRecord({
             ...current,
             ...input.data,
           });
-          return cloneDirtyConnectionRecord(current);
+          return { count: 1 };
         }),
       },
     };
@@ -104,30 +115,42 @@ describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
       processedRevision: 1n,
     });
     let current: DirtyConnectionRecord | null = null;
-    const createCalls: DirtyConnectionCreate[] = [];
+    const createCalls: DirtyConnectionCreateMany[] = [];
     const updateCalls: DirtyConnectionUpdate[] = [];
     const prisma = {
-      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
       deviceSyncDirtyConnection: {
-        create: vi.fn(async (input: DirtyConnectionCreate) => {
+        createMany: vi.fn(async (input: DirtyConnectionCreateMany) => {
           createCalls.push(input);
+          if (current) {
+            return { count: 0 };
+          }
           current = cloneDirtyConnectionRecord({
             ...input.data,
             createdAt: existing.createdAt,
             updatedAt: existing.updatedAt,
           });
-          return cloneDirtyConnectionRecord(current);
+          return { count: 1 };
         }),
         findUnique: vi.fn(async () => current ? cloneDirtyConnectionRecord(current) : null),
-        update: vi.fn(async (input: DirtyConnectionUpdate) => {
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
           updateCalls.push(input);
-          expect(current).not.toBeNull();
+          if (!current) {
+            return { count: 0 };
+          }
+          if (
+            input.where.connectionId !== current.connectionId ||
+            input.where.dirtyRevision !== current.dirtyRevision ||
+            input.where.processedRevision !== current.processedRevision
+          ) {
+            return { count: 0 };
+          }
           current = cloneDirtyConnectionRecord({
             ...(current as DirtyConnectionRecord),
             ...input.data,
             updatedAt: new Date("2026-03-26T12:01:00.000Z"),
           });
-          return cloneDirtyConnectionRecord(current);
+          return { count: 1 };
         }),
       },
     };
@@ -246,6 +269,243 @@ describe("PrismaDeviceSyncControlPlaneStore dirty connection state", () => {
     expect(dirtyResources[1]?.payload?.note).toHaveLength(512);
     expect(dirtyResources.some((resource) => resource.resource === "delete")).toBe(false);
     expect(dirtyResources.some((resource) => resource.resourceCategory === "delete")).toBe(false);
+  });
+
+  it("retries dirty writes when another writer advances the dirty revision first", async () => {
+    let current = buildDirtyConnectionRecord({
+      dirtyRevision: 1n,
+      processedRevision: 0n,
+    });
+    let simulateConcurrentWrite = true;
+    const updateCalls: DirtyConnectionUpdate[] = [];
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async () => ({ count: 0 })),
+        findUnique: vi.fn(async () => cloneDirtyConnectionRecord(current)),
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
+          updateCalls.push(input);
+          if (simulateConcurrentWrite) {
+            simulateConcurrentWrite = false;
+            current = cloneDirtyConnectionRecord({
+              ...current,
+              dirtyRevision: current.dirtyRevision + 1n,
+              eventCount: current.eventCount + 1n,
+              latestTraceId: "trace_concurrent",
+            });
+            return { count: 0 };
+          }
+          if (
+            input.where.connectionId !== current.connectionId ||
+            input.where.dirtyRevision !== current.dirtyRevision ||
+            input.where.processedRevision !== current.processedRevision
+          ) {
+            return { count: 0 };
+          }
+          current = cloneDirtyConnectionRecord({
+            ...current,
+            ...input.data,
+          });
+          return { count: 1 };
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: prisma as never,
+    });
+
+    const result = await store.upsertDirtyConnection({
+      connectionId: current.connectionId,
+      dirtyAt: "2026-03-26T12:02:00.000Z",
+      eventType: "workout.updated",
+      provider: "junction",
+      resourceCategory: "workout",
+      traceId: "trace_after_retry",
+      userId: current.userId,
+    });
+
+    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls[0]?.where.dirtyRevision).toBe(1n);
+    expect(updateCalls[1]?.where.dirtyRevision).toBe(2n);
+    expect(result.dirty.dirtyRevision).toBe(3n);
+    expect(result.dirty.latestTraceId).toBe("trace_after_retry");
+  });
+
+  it("retries dirty writes after createMany skipDuplicates loses an insert race", async () => {
+    let current: DirtyConnectionRecord | null = null;
+    const createdByOtherWriter = buildDirtyConnectionRecord({
+      dirtyRevision: 1n,
+      processedRevision: 0n,
+    });
+    const createCalls: DirtyConnectionCreateMany[] = [];
+    const updateCalls: DirtyConnectionUpdate[] = [];
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async (input: DirtyConnectionCreateMany) => {
+          createCalls.push(input);
+          current = cloneDirtyConnectionRecord(createdByOtherWriter);
+          return { count: 0 };
+        }),
+        findUnique: vi.fn(async () => current ? cloneDirtyConnectionRecord(current) : null),
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
+          updateCalls.push(input);
+          if (!current) {
+            return { count: 0 };
+          }
+          if (
+            input.where.connectionId !== current.connectionId ||
+            input.where.dirtyRevision !== current.dirtyRevision ||
+            input.where.processedRevision !== current.processedRevision
+          ) {
+            return { count: 0 };
+          }
+          current = cloneDirtyConnectionRecord({
+            ...current,
+            ...input.data,
+          });
+          return { count: 1 };
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: prisma as never,
+    });
+
+    const result = await store.upsertDirtyConnection({
+      connectionId: createdByOtherWriter.connectionId,
+      dirtyAt: "2026-03-26T12:02:00.000Z",
+      eventType: "workout.updated",
+      provider: "junction",
+      resourceCategory: "workout",
+      traceId: "trace_after_create_race",
+      userId: createdByOtherWriter.userId,
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0]?.skipDuplicates).toBe(true);
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0]?.where.dirtyRevision).toBe(1n);
+    expect(updateCalls[0]?.where.processedRevision).toBe(0n);
+    expect(result.shouldRequestWake).toBe(false);
+    expect(result.dirty.dirtyRevision).toBe(2n);
+    expect(result.dirty.latestTraceId).toBe("trace_after_create_race");
+  });
+
+  it("fails dirty writes after bounded optimistic retries are exhausted", async () => {
+    let current = buildDirtyConnectionRecord({
+      dirtyRevision: 1n,
+      processedRevision: 0n,
+    });
+    const updateCalls: DirtyConnectionUpdate[] = [];
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        createMany: vi.fn(async () => ({ count: 0 })),
+        findUnique: vi.fn(async () => cloneDirtyConnectionRecord(current)),
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
+          updateCalls.push(input);
+          current = cloneDirtyConnectionRecord({
+            ...current,
+            dirtyRevision: current.dirtyRevision + 1n,
+          });
+          return { count: 0 };
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: prisma as never,
+    });
+
+    await expect(store.upsertDirtyConnection({
+      connectionId: current.connectionId,
+      dirtyAt: "2026-03-26T12:02:00.000Z",
+      eventType: "workout.updated",
+      provider: "junction",
+      resourceCategory: "workout",
+      traceId: "trace_retry_exhausted",
+      userId: current.userId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_DIRTY_STATE_CONTENTION",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(updateCalls).toHaveLength(12);
+    expect(updateCalls.map((call) => call.where.dirtyRevision)).toEqual([
+      1n,
+      2n,
+      3n,
+      4n,
+      5n,
+      6n,
+      7n,
+      8n,
+      9n,
+      10n,
+      11n,
+      12n,
+    ]);
+  });
+
+  it("retries processed markers when a dirty write races ahead", async () => {
+    let current = buildDirtyConnectionRecord({
+      dirtyRevision: 3n,
+      processedRevision: 0n,
+    });
+    let simulateConcurrentWrite = true;
+    const updateCalls: DirtyConnectionUpdate[] = [];
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+      deviceSyncDirtyConnection: {
+        findFirst: vi.fn(async () => cloneDirtyConnectionRecord(current)),
+        updateMany: vi.fn(async (input: DirtyConnectionUpdate) => {
+          updateCalls.push(input);
+          if (simulateConcurrentWrite) {
+            simulateConcurrentWrite = false;
+            current = cloneDirtyConnectionRecord({
+              ...current,
+              dirtyRevision: current.dirtyRevision + 1n,
+              eventCount: current.eventCount + 1n,
+            });
+            return { count: 0 };
+          }
+          if (
+            input.where.connectionId !== current.connectionId ||
+            input.where.dirtyRevision !== current.dirtyRevision ||
+            input.where.processedRevision !== current.processedRevision ||
+            input.where.userId !== current.userId
+          ) {
+            return { count: 0 };
+          }
+          current = cloneDirtyConnectionRecord({
+            ...current,
+            ...input.data,
+          });
+          return { count: 1 };
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: prisma as never,
+    });
+
+    const result = await store.markDirtyConnectionProcessed({
+      connectionId: current.connectionId,
+      processedRevision: 3n,
+      userId: current.userId,
+    });
+
+    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls[0]?.where.dirtyRevision).toBe(3n);
+    expect(updateCalls[1]?.where.dirtyRevision).toBe(4n);
+    expect(result?.dirtyRevision).toBe(4n);
+    expect(result?.processedRevision).toBe(3n);
+    expect(result?.dirtyResources).not.toEqual({});
   });
 });
 

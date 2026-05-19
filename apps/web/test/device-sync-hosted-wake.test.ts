@@ -1200,7 +1200,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
-  it("stores sparse webhook audit and nudges the runner only for dirty transitions", async () => {
+  it("persists dirty state before sparse webhook audit and nudges the runner only for dirty transitions", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -1258,10 +1258,10 @@ describe("appendHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
-    expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.upsertDirtyConnection.mock.invocationCallOrder[0],
-    );
     expect(mocks.upsertDirtyConnection.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createSignal.mock.invocationCallOrder[0],
+    );
+    expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
     expect(mocks.completeWebhookTrace.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1550,7 +1550,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     await expect(controlPlane.handleWebhook("oura")).rejects.toThrow("dirty upsert failed");
 
-    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
