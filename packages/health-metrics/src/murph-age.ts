@@ -3250,8 +3250,8 @@ const MURPH_AGE_EXPLICIT_PRIMARY_BUNDLE_RESOLVERS: Partial<Record<
 >> = MURPH_AGE_SCORE_BEARING_CARD_BUNDLE_RESOLVERS;
 
 const MURPH_AGE_SCORE_BEARING_CARD_IDS = [
-  "lab5_bp_bmi_transport_research",
   "lab9_bp_body_10y_acm_research",
+  "lab5_bp_bmi_transport_research",
   "r399_nhis_proxy_10y_acm_research",
 ] as const satisfies readonly MurphAgeScoreBearingCardId[];
 
@@ -3299,8 +3299,11 @@ function assessMurphAgeResearchCandidateCards(input: MurphAgeInputBundleAssessme
 
 export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput): MurphAgeCalculatorOutput {
   const mode = input.mode ?? "product";
+  const models = input.models ?? {};
   const primaryBundle = resolveMurphAgePrimaryBundle({
     asOf: input.asOf,
+    mode,
+    models,
     points: input.points,
     requestedCardId: input.cardId ?? null,
   });
@@ -3308,7 +3311,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
   const researchCandidateCards = assessMurphAgeResearchCandidateCards({
     asOf: input.asOf,
     mode,
-    models: input.models ?? {},
+    models,
     points: input.points,
     selectedCardId: isScoreBearingCardId(primaryBundle.cardId) ? primaryBundle.cardId : null,
   });
@@ -3483,6 +3486,8 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
 }
 
 function resolveMurphAgePrimaryBundle(input: MurphAgeInputBundleAssessmentInput & {
+  mode: MurphAgeCalculatorMode;
+  models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
   requestedCardId: MurphAgeModelCardId | null;
 }): MurphAgePrimaryBundleResolution {
   const explicitResolver = input.requestedCardId
@@ -3497,10 +3502,102 @@ function resolveMurphAgePrimaryBundle(input: MurphAgeInputBundleAssessmentInput 
       asOf: input.asOf,
       points: input.points,
     });
+
+  if (input.requestedCardId || input.mode !== "research") {
+    return {
+      bundleAssessment,
+      cardId: input.requestedCardId ?? bundleAssessment.recommendedCardId,
+    };
+  }
+
+  const runnableResearchBundle = selectRunnableMurphAgeResearchBundle({
+    asOf: input.asOf,
+    models: input.models,
+    points: input.points,
+  });
+  if (runnableResearchBundle) return runnableResearchBundle;
+
   return {
     bundleAssessment,
-    cardId: input.requestedCardId ?? bundleAssessment.recommendedCardId,
+    cardId: bundleAssessment.recommendedCardId,
   };
+}
+
+function selectRunnableMurphAgeResearchBundle(input: MurphAgeInputBundleAssessmentInput & {
+  models: Partial<Record<MurphAgeScoreBearingCardId, MurphAgeRiskModel>>;
+}): MurphAgePrimaryBundleResolution | null {
+  for (const cardId of MURPH_AGE_SCORE_BEARING_CARD_IDS) {
+    const model = input.models[cardId];
+    if (!model) continue;
+    if (cardId === "r399_nhis_proxy_10y_acm_research" && hasMurphAgeScoreBearingLabIntent(input)) continue;
+    const bundleAssessment = MURPH_AGE_SCORE_BEARING_CARD_BUNDLE_RESOLVERS[cardId]({
+      asOf: input.asOf,
+      points: input.points,
+    });
+    if (bundleAssessment.status !== "ready") continue;
+    if (!canMurphAgeResearchCardRunWithCurrentInputs({
+      asOf: input.asOf,
+      cardId,
+      model,
+      points: input.points,
+    })) continue;
+    return {
+      bundleAssessment,
+      cardId,
+    };
+  }
+
+  return null;
+}
+
+function canMurphAgeResearchCardRunWithCurrentInputs(input: MurphAgeInputBundleAssessmentInput & {
+  cardId: MurphAgeScoreBearingCardId;
+  model: MurphAgeRiskModel;
+}): boolean {
+  const cardPolicy = resolveMurphAgeModelCardPolicy(input.cardId);
+  if (!cardPolicy?.scoreBearing) return false;
+  if (findModelCardPolicyViolation({
+    asOf: input.asOf,
+    cardPolicy,
+    model: input.model,
+    points: input.points,
+  })) {
+    return false;
+  }
+
+  const blockedIdentifiers = normalizedBlockedIdentifiers(input.model);
+  for (const feature of input.model.features) {
+    if (feature.kind !== "metric" || !isModelFeatureRequired(feature)) continue;
+    if (feature.missingValue !== undefined) continue;
+    const metricKey = resolveMetricInputKey(feature.metricKey);
+    const selection = selectMetricValue({
+      biomarkerKey: feature.biomarkerKey,
+      metricKey,
+      now: input.asOf,
+      points: input.points,
+      policyOverride: feature.selectionPolicy,
+    });
+    if (isBlockedMetricFeature({
+      biomarkerKey: selection.biomarkerKey,
+      blockedIdentifiers,
+      metricKey: selection.metricKey,
+    })) {
+      return false;
+    }
+    if (selection.status !== "ready" || selection.value === null || !Number.isFinite(selection.value)) {
+      return false;
+    }
+    if (selection.warnings.some((warning) =>
+      warning.code === "COMPARATOR_VALUE" || warning.code === "UNIT_NOT_NORMALIZED"
+    )) {
+      return false;
+    }
+    const metricDefinition = resolveMetricDefinition(metricKey);
+    const expectedUnit = feature.expectedUnit ?? metricDefinition?.canonicalUnit ?? null;
+    if (expectedUnit && !unitsEquivalent(selection.unit, expectedUnit)) return false;
+  }
+
+  return true;
 }
 
 export function calculateMurphAge(input: MurphAgeCalculationInput): MurphAgeResult {

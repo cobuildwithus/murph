@@ -4646,6 +4646,104 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     false,
   );
 
+  const submittedLab9InputsWithBothResearchCardsReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: {
+      lab5_bp_bmi_transport_research: fixtureLab5ResearchModel(),
+      lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel(),
+    },
+    sex: "female",
+    submittedMetrics: [
+      ...submittedLab9Metrics,
+      { metricKey: "glucose", unit: "mg/dL", value: 92 },
+      ...submittedWearableMetrics,
+    ],
+  });
+
+  assert.equal(submittedLab9InputsWithBothResearchCardsReport.status, "ready");
+  assert.equal(
+    submittedLab9InputsWithBothResearchCardsReport.result?.authorization.cardId,
+    "lab9_bp_body_10y_acm_research",
+  );
+
+  const submittedLab9InputsWithOnlyLab5RunnableReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab5_bp_bmi_transport_research: fixtureLab5ResearchModel() },
+    sex: "female",
+    submittedMetrics: [
+      ...submittedLab9Metrics,
+      { metricKey: "glucose", unit: "mg/dL", value: 92 },
+      ...submittedWearableMetrics,
+    ],
+  });
+
+  assert.equal(submittedLab9InputsWithOnlyLab5RunnableReport.status, "ready");
+  assert.equal(submittedLab9InputsWithOnlyLab5RunnableReport.inputReadiness.bundle.bundleId, "lab5-bp-bmi");
+  assert.equal(
+    submittedLab9InputsWithOnlyLab5RunnableReport.result?.authorization.cardId,
+    "lab5_bp_bmi_transport_research",
+  );
+  assert.equal(
+    submittedLab9InputsWithOnlyLab5RunnableReport.researchCandidateCards.find((candidate) =>
+      candidate.cardId === "lab9_bp_body_10y_acm_research"
+    )?.selected,
+    false,
+  );
+  const runnableFallbackLab5Candidate = submittedLab9InputsWithOnlyLab5RunnableReport.researchCandidateCards.find(
+    (candidate) => candidate.cardId === "lab5_bp_bmi_transport_research",
+  );
+  assert.ok(runnableFallbackLab5Candidate);
+  assert.equal(runnableFallbackLab5Candidate.selected, true);
+  assert.equal(runnableFallbackLab5Candidate.modelLoaded, true);
+
+  const lab9ModelWithMissingRequiredFeature: MurphAgeRiskModel = {
+    ...fixtureLab9ResearchModel(),
+    features: [
+      ...fixtureLab9ResearchModel().features,
+      {
+        coefficient: 0.03,
+        expectedUnit: "ng/mL",
+        key: "ferritin",
+        kind: "metric",
+        label: "Ferritin",
+        metricKey: "ferritin",
+        moduleId: "inflammatory",
+        transform: { clamp: { max: 3, min: -3 }, kind: "z-score", mean: 80, standardDeviation: 40 },
+      },
+    ],
+  };
+  const submittedLab9InputsWithUnrunnableLab9ModelReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: {
+      lab5_bp_bmi_transport_research: fixtureLab5ResearchModel(),
+      lab9_bp_body_10y_acm_research: lab9ModelWithMissingRequiredFeature,
+    },
+    sex: "female",
+    submittedMetrics: [
+      ...submittedLab9Metrics,
+      { metricKey: "glucose", unit: "mg/dL", value: 92 },
+      ...submittedWearableMetrics,
+    ],
+  });
+
+  assert.equal(submittedLab9InputsWithUnrunnableLab9ModelReport.status, "ready");
+  assert.equal(
+    submittedLab9InputsWithUnrunnableLab9ModelReport.result?.authorization.cardId,
+    "lab5_bp_bmi_transport_research",
+  );
+  const unrunnableLab9Candidate = submittedLab9InputsWithUnrunnableLab9ModelReport.researchCandidateCards.find(
+    (candidate) => candidate.cardId === "lab9_bp_body_10y_acm_research",
+  );
+  assert.ok(unrunnableLab9Candidate);
+  assert.equal(unrunnableLab9Candidate.modelLoaded, true);
+  assert.equal(unrunnableLab9Candidate.selected, false);
+
   const explicitLab5SensitivityWithFullLab9Inputs = calculateMurphAgeFromInputBundle({
     asOf,
     cardId: "lab5_bp_bmi_transport_research",
