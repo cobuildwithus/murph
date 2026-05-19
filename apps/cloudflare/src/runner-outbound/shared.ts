@@ -12,17 +12,8 @@ import type {
   WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
 
-interface RunnerOutboundUserRunnerStubLike extends WorkerUserRunnerStubLike {
-  validateRuntimeWriteFence?(input: {
-    attemptId: string;
-    generation: string;
-    userId: string;
-    workspaceVersion?: string | null;
-  }): Promise<boolean>;
-}
-
 export interface RunnerOutboundEnvironmentSource
-  extends WorkerEnvironmentContract<RunnerOutboundUserRunnerStubLike> {}
+  extends WorkerEnvironmentContract {}
 
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_MAX_ENTRIES = 1_024;
 const RUNNER_OUTBOUND_CRYPTO_CONTEXT_PENDING_TTL_MS = 30_000;
@@ -93,21 +84,21 @@ export function resetRunnerOutboundSharedCachesForTest(): void {
 export async function resolveRunnerOutboundUserRunnerStub(
   env: RunnerOutboundEnvironmentSource,
   userId: string,
-): Promise<RunnerOutboundUserRunnerStubLike> {
+): Promise<WorkerUserRunnerStubLike> {
   return env.USER_RUNNER.getByName(userId);
 }
 
-export function requireRunnerOutboundUserStubMethod<TKey extends keyof RunnerOutboundUserRunnerStubLike>(
-  stub: RunnerOutboundUserRunnerStubLike,
+export function requireRunnerOutboundUserStubMethod<TKey extends keyof WorkerUserRunnerStubLike>(
+  stub: WorkerUserRunnerStubLike,
   key: TKey,
-): Exclude<RunnerOutboundUserRunnerStubLike[TKey], undefined> {
+): Exclude<WorkerUserRunnerStubLike[TKey], undefined> {
   const method = stub[key];
 
   if (typeof method !== "function") {
     throw new TypeError(`User runner stub does not implement ${String(key)}.`);
   }
 
-  return method as Exclude<RunnerOutboundUserRunnerStubLike[TKey], undefined>;
+  return method as Exclude<WorkerUserRunnerStubLike[TKey], undefined>;
 }
 
 function cryptoContextCacheKey(input: {

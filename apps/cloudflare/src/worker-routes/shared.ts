@@ -40,7 +40,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<boolean>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runUntilIdleForTest?(input: {

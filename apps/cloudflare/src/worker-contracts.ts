@@ -27,7 +27,6 @@ export interface WorkerUserRunnerStubLike {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<boolean>;
 }
 

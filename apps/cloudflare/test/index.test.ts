@@ -43,6 +43,7 @@ import {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
@@ -657,6 +658,31 @@ describe("cloudflare worker routes", () => {
     await expect(stuckInvocationResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
+
+    const checkpointArtifactResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/checkpoint-artifact-write-fence",
+        {
+          body: JSON.stringify({
+            artifactText: "checkpoint artifact payload",
+            expectedWorkspaceVersion: "4",
+            snapshotRef: null,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(checkpointArtifactResponse.status).toBe(401);
+    await expect(checkpointArtifactResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
   });
 
   it("stores and reads hosted-local test artifacts for correctly bound callers", async () => {
@@ -824,6 +850,79 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("runs the hosted-local checkpoint artifact write-fence regression route for correctly bound callers", async () => {
+    const artifactText = "checkpoint artifact payload";
+    const artifactSha256 = createHash("sha256").update(artifactText).digest("hex");
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const stub = createUserRunnerStub({
+      validateRuntimeWriteFence,
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const request = await signControlRequest(new Request(
+      "https://runner.example.test/__test/users/member_123/checkpoint-artifact-write-fence",
+      {
+        body: JSON.stringify({
+          artifactText,
+          expectedWorkspaceVersion: "4",
+          snapshotRef: null,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    ), {
+      boundUserId: "member_123",
+    });
+    installOidcJwksFetch(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname !== HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH) {
+        throw new Error(`Unexpected checkpoint artifact write-fence fetch: ${String(input)}`);
+      }
+      return Response.json({
+        checkpointed: true,
+        workspace: {
+          browserVaultReplicaRef: null,
+          checkpointedAt: "2026-05-19T00:00:00.000Z",
+          createdAt: "2026-05-19T00:00:00.000Z",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-19T00:00:01.000Z",
+          userId: "member_123",
+          version: "5",
+        },
+      });
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      artifact: {
+        sha256: artifactSha256,
+        size: Buffer.byteLength(artifactText, "utf8"),
+        status: 200,
+      },
+      checkpoint: {
+        checkpointed: true,
+        previousWorkspaceVersion: "4",
+        status: 200,
+        workspaceVersion: "5",
+      },
+      ok: true,
+    });
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "smoke_attempt_1",
+      generation: "1",
+      userId: "member_123",
+    });
   });
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {

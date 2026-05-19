@@ -27,8 +27,9 @@ import {
 } from "../runtime-mailbox-payload-decode-contract.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
-  requireRunnerRuntimeWriteFenceWriteHeaders,
+  requireRunnerRuntimeWriteFenceWorkspaceWrite,
   RunnerRuntimeWriteFenceError,
+  type RunnerRuntimeWriteFenceWriteAuthority,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./write-fence.ts";
 import {
@@ -44,6 +45,10 @@ import {
 import {
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import {
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+} from "./headers.ts";
 
 const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
@@ -114,15 +119,23 @@ export async function handleRunnerWebControlRequest(input: {
   const isBrowserVaultReplicaPublishRequest =
     input.url.pathname === HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH
     && input.request.method === "POST";
-  let checkpointHeaders: ReturnType<typeof requireRunnerRuntimeWriteFenceWriteHeaders> | null =
+  let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (isCheckpointRequest || isBrowserVaultReplicaPublishRequest) {
     try {
-      checkpointHeaders = await requireRunnerRuntimeWriteFenceWrite({
-        env: input.env,
-        request: input.request,
-        userId: input.userId,
-      });
+      writeAuthority = await (
+        isBrowserVaultReplicaPublishRequest
+          ? requireRunnerRuntimeWriteFenceWorkspaceWrite({
+            env: input.env,
+            request: input.request,
+            userId: input.userId,
+          })
+          : requireRunnerRuntimeWriteFenceWrite({
+            env: input.env,
+            request: input.request,
+            userId: input.userId,
+          })
+      );
     } catch (error) {
       if (error instanceof RunnerRuntimeWriteFenceError) {
         return unauthorized();
@@ -152,12 +165,15 @@ export async function handleRunnerWebControlRequest(input: {
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
     : null;
   if (
-    checkpointHeaders
+    writeAuthority
     && checkpointRequest
     && (
-      checkpointHeaders.attemptId !== checkpointRequest.attemptId
-      || checkpointHeaders.generation !== checkpointRequest.leaseGeneration
-      || checkpointHeaders.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
+      writeAuthority.attemptId !== checkpointRequest.attemptId
+      || writeAuthority.generation !== checkpointRequest.leaseGeneration
+      || (
+        writeAuthority.workspaceVersion !== null
+        && writeAuthority.workspaceVersion !== checkpointRequest.expectedWorkspaceVersion
+      )
     )
   ) {
     return unauthorized();
@@ -189,8 +205,11 @@ export async function handleRunnerWebControlRequest(input: {
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
-    headers: checkpointHeaders
-      ? createRunnerRuntimeWriteFenceForwardHeaders(checkpointHeaders)
+    headers: writeAuthority
+      ? createRunnerRuntimeWriteFenceForwardHeaders(
+        writeAuthority,
+        checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
+      )
       : undefined,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
@@ -214,6 +233,9 @@ export async function handleRunnerWebControlRequest(input: {
     phase: "wake.running",
   });
   if (checkpointRequest && response.ok) {
+    if (!writeAuthority) {
+      return unauthorized();
+    }
     try {
       parseHostedWorkspaceCheckpointResponse(await response.clone().json());
     } catch {
@@ -225,14 +247,20 @@ export async function handleRunnerWebControlRequest(input: {
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(
-  checkpointHeaders: ReturnType<typeof requireRunnerRuntimeWriteFenceWriteHeaders>,
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority,
+  workspaceVersion: string | null,
 ): Headers {
   const headers = new Headers();
-  writeRunnerRuntimeWriteFenceHeaders(headers, {
-    attemptId: checkpointHeaders.attemptId,
-    generation: checkpointHeaders.generation,
-    workspaceVersion: checkpointHeaders.workspaceVersion,
-  });
+  if (workspaceVersion) {
+    writeRunnerRuntimeWriteFenceHeaders(headers, {
+      attemptId: writeAuthority.attemptId,
+      generation: writeAuthority.generation,
+      workspaceVersion,
+    });
+    return headers;
+  }
+  headers.set(HOSTED_RUNTIME_ATTEMPT_ID_HEADER, writeAuthority.attemptId);
+  headers.set(HOSTED_RUNTIME_LEASE_GENERATION_HEADER, writeAuthority.generation);
   return headers;
 }
 
