@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -40,14 +41,17 @@ export default async function SecurityPage() {
   ]);
 
   return (
-    <main className="isolate min-h-dvh bg-[#f5f0e8] antialiased">
-      <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
-      <HeroSection />
-      <PromisesSection />
-      <HostedOverviewSection />
-      <EncryptionSection />
-      <LocalSection />
-    </main>
+    <>
+      <main className="isolate min-h-dvh bg-[#f5f0e8] antialiased">
+        <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
+        <HeroSection />
+        <PromisesSection />
+        <HostedOverviewSection />
+        <EncryptionSection />
+        <LocalSection />
+      </main>
+      <SiteFooter />
+    </>
   );
 }
 

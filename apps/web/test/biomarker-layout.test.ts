@@ -40,7 +40,7 @@ test("the dashboard layout is the single shell owner for biomarker pages", async
     }),
   );
 
-  assert.match(markup, /#site-footer \{ display: none; \}/);
+  assert.doesNotMatch(markup, /site-footer/);
   assert.doesNotMatch(markup, /data-hosted-privy-boundary="true"/);
   assert.match(markup, /data-dashboard-sidebar="true"/);
   assert.match(markup, /data-biomarker-page="true"/);

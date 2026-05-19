@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -45,7 +46,7 @@ vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => 
 
 import RootLayout, { metadata } from "../app/layout";
 
-test("RootLayout renders the site footer with legal and social links", async () => {
+test("RootLayout renders global providers without route-owned footer chrome", async () => {
   const markup = renderToStaticMarkup(
     await RootLayout({
       children: "hosted-shell",
@@ -60,25 +61,62 @@ test("RootLayout renders the site footer with legal and social links", async () 
   assert.match(markup, /<html lang="en" class="[^"]*--font-serif[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-sans[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);
-  assert.match(markup, /Murph provides educational health information/);
-  assert.match(markup, /Consumer Health Data/);
-  assert.match(
-    markup,
-    /href="\/consumer-health-data-privacy-policy"/u,
+  assert.doesNotMatch(markup, /id="site-footer"/u);
+  assert.doesNotMatch(markup, /Murph provides educational health information/u);
+});
+
+test("footer ownership stays on explicit public surfaces", () => {
+  const readAppFile = (path: string) =>
+    readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  const assertOwnsFooter = (path: string) => {
+    const source = readAppFile(path);
+
+    assert.match(
+      source,
+      /import \{ SiteFooter \} from "@\/src\/components\/homepage\/site-footer";/u,
+      `${path} should import SiteFooter directly`,
+    );
+    assert.match(
+      source,
+      /<SiteFooter \/>/u,
+      `${path} should render SiteFooter directly`,
+    );
+  };
+
+  assertOwnsFooter("app/page.tsx");
+  assertOwnsFooter("app/security/page.tsx");
+  assertOwnsFooter("app/subprocessors/page.tsx");
+  assertOwnsFooter("app/design/page.tsx");
+  assertOwnsFooter("app/not-found.tsx");
+  assertOwnsFooter("src/components/legal/legal-policy-page.tsx");
+
+  const rootLayoutSource = readAppFile("app/layout.tsx");
+  assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
+  assert.equal(
+    existsSync(
+      new URL("../src/components/homepage/site-footer-slot.tsx", import.meta.url),
+    ),
+    false,
   );
-  assert.match(markup, /Privacy Policy/);
-  assert.match(markup, /\/legal\/privacy/u);
-  assert.match(markup, /Terms of Use/);
-  assert.match(markup, /\/legal\/terms/u);
-  assert.match(markup, /Subprocessors/);
-  assert.match(markup, /\/subprocessors/u);
-  assert.match(markup, /Security/);
-  assert.match(markup, /\/security/u);
-  assert.match(markup, /Murph . 2025.2026/);
-  assert.doesNotMatch(markup, /rounded-full/u);
-  assert.match(markup, /aria-label="Murph on GitHub"/);
-  assert.match(markup, /aria-label="Murph on X"/);
-  assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
+  assert.equal(
+    existsSync(
+      new URL(
+        "../app/join/[inviteCode]/success/layout.tsx",
+        import.meta.url,
+      ),
+    ),
+    false,
+  );
+
+  for (const path of [
+    "src/components/dashboard/dashboard-shell.tsx",
+    "src/components/hosted-onboarding/join-invite-shell.tsx",
+  ]) {
+    const source = readAppFile(path);
+    assert.doesNotMatch(source, /#site-footer/u);
+    assert.doesNotMatch(source, /display: none/u);
+    assert.doesNotMatch(source, /SiteFooter/u);
+  }
 });
 
 test("RootLayout provides default title, description, and preview image metadata", () => {
