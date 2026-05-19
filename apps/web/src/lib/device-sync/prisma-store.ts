@@ -265,6 +265,7 @@ export class PrismaDeviceSyncControlPlaneStore
   async listDueReconcileConnectionsForSweep(input: {
     dueAt: Date;
     limit: number;
+    recoveryBucketStartedAt: Date;
   }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
     return this.connections.listDueReconcileConnectionsForSweep(input);
   }

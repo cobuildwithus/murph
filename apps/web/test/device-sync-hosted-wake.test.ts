@@ -577,7 +577,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
   });
 
-  it("re-nudges duplicate due-reconcile wakes without writing duplicate signals", async () => {
+  it("accepts duplicate due-reconcile wakes without writing duplicate signals or nudge workflows", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
       dedupeConflict: false,
       duplicate: true,
@@ -596,15 +596,44 @@ describe("appendHostedDeviceSyncWake", () => {
       provider: "oura",
       userId: "user-123",
     })).resolves.toEqual({
-      wakeAppended: true,
+      wakeAccepted: true,
+      wakeAppended: false,
+      wakeDuplicate: true,
+      wakeInserted: false,
     });
 
     expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_existing",
-      runnerNudgeIntent: "device-sync-reconcile-recovery",
-      source: "device-sync",
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("surfaces duplicate due-reconcile dedupe conflicts without writing signals or nudge workflows", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox_existing",
+        userId: "user-123",
+      },
     });
+
+    await expect(appendHostedDeviceSyncScheduledReconcileWake({
+      connectionId: "dsc_123",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:abc123",
+      nextReconcileAt: "2026-03-26T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    })).resolves.toEqual({
+      reason: "dedupe_conflict",
+      wakeAccepted: true,
+      wakeAppended: false,
+      wakeDuplicate: true,
+      wakeInserted: false,
+    });
+
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
   });
 
   it("keeps committed wakes when the post-commit nudge workflow start fails", async () => {

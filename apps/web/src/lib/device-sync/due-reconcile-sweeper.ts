@@ -14,6 +14,8 @@ export interface HostedDeviceSyncDueReconcileSweeperResult {
   skippedDueConnections: number;
   wakeAppended: number;
   wakeAttempted: number;
+  wakeDuplicate: number;
+  wakeFailed: number;
   wakeLimit: number;
   wakeNotAppended: number;
 }
@@ -33,7 +35,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   const nowIso = now.toISOString();
   const recoveryBucketStartedAt = new Date(
     Math.floor(now.getTime() / DUE_RECONCILE_WAKE_BUCKET_MS) * DUE_RECONCILE_WAKE_BUCKET_MS,
-  ).toISOString();
+  );
+  const recoveryBucketStartedAtIso = recoveryBucketStartedAt.toISOString();
   const wakeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_WAKE_LIMIT, MAX_WAKE_LIMIT);
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({
     prisma: getPrisma(),
@@ -42,18 +45,22 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   const dueConnections = await store.listDueReconcileConnectionsForSweep({
     dueAt: now,
     limit: wakeLimit + 1,
+    recoveryBucketStartedAt,
   });
   const selectedDueConnections = dueConnections.slice(0, wakeLimit);
 
   logger.info("Hosted device-sync due reconcile sweeper scanned due connections.", {
     dueAt: nowIso,
     dueConnections: dueConnections.length,
+    recoveryBucketStartedAt: recoveryBucketStartedAtIso,
     selectedDueConnections: selectedDueConnections.length,
     wakeLimit,
   });
 
   let wakeAppended = 0;
   let wakeAttempted = 0;
+  let wakeDuplicate = 0;
+  let wakeFailed = 0;
   let wakeNotAppended = 0;
 
   await runWithConcurrency(
@@ -61,14 +68,6 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     WAKE_CONCURRENCY,
     async (dueConnection) => {
       wakeAttempted += 1;
-      const connectionFingerprint = fingerprintHostedDeviceSyncDueReconcileValue(dueConnection.connectionId);
-      const userFingerprint = fingerprintHostedDeviceSyncDueReconcileValue(dueConnection.userId);
-      logger.info("Hosted device-sync due reconcile sweeper appending scheduled device-sync wake.", {
-        connectionFingerprint,
-        nextReconcileAt: dueConnection.nextReconcileAt,
-        provider: dueConnection.provider,
-        userFingerprint,
-      });
 
       let wake;
       try {
@@ -77,7 +76,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
           createdAt: nowIso,
           eventId: buildHostedDeviceSyncDueReconcileEventId({
             ...dueConnection,
-            recoveryBucketStartedAt,
+            recoveryBucketStartedAt: recoveryBucketStartedAtIso,
           }),
           nextReconcileAt: dueConnection.nextReconcileAt,
           provider: dueConnection.provider,
@@ -85,29 +84,28 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
           userId: dueConnection.userId,
         });
       } catch (error) {
+        wakeFailed += 1;
         wakeNotAppended += 1;
         logger.warn("Hosted device-sync due reconcile sweeper device-sync wake append failed.", {
-          connectionFingerprint,
           errorName: error instanceof Error ? error.name : "unknown",
-          userFingerprint,
         });
         return;
       }
 
-      if (wake.wakeAppended) {
+      if (wake.wakeInserted) {
         wakeAppended += 1;
-        logger.info("Hosted device-sync due reconcile sweeper device-sync wake appended.", {
-          connectionFingerprint,
-          userFingerprint,
-        });
         return;
       }
 
+      if (wake.wakeDuplicate) {
+        wakeDuplicate += 1;
+        return;
+      }
+
+      wakeFailed += 1;
       wakeNotAppended += 1;
       logger.warn("Hosted device-sync due reconcile sweeper device-sync wake was not appended.", {
-        connectionFingerprint,
         reason: wake.reason ?? null,
-        userFingerprint,
       });
     },
   );
@@ -120,11 +118,24 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     });
   }
 
+  logger.info("Hosted device-sync due reconcile sweeper finished.", {
+    dueConnections: dueConnections.length,
+    skippedDueConnections,
+    wakeAppended,
+    wakeAttempted,
+    wakeDuplicate,
+    wakeFailed,
+    wakeLimit,
+    wakeNotAppended,
+  });
+
   return {
     dueConnections: dueConnections.length,
     skippedDueConnections,
     wakeAppended,
     wakeAttempted,
+    wakeDuplicate,
+    wakeFailed,
     wakeLimit,
     wakeNotAppended,
   };
@@ -179,11 +190,4 @@ async function runWithConcurrency<T>(
       await worker(item);
     }
   }));
-}
-
-function fingerprintHostedDeviceSyncDueReconcileValue(value: string): string {
-  return createHash("sha256")
-    .update(value)
-    .digest("hex")
-    .slice(0, 16);
 }
