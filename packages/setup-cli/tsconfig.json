@@ -18,9 +18,6 @@
     },
     {
       "path": "../vault-usecases"
-    },
-    {
-      "path": "../assistant-cli"
     }
   ],
   "include": [

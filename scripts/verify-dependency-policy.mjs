@@ -17,11 +17,32 @@ const dependencySections = [
   "peerDependencies",
 ];
 const errors = [];
+const blockedLockfileEntries = [
+  {
+    name: "axios",
+    reason: "malicious March 2026 npm supply-chain compromise release",
+    version: "1.14.1",
+  },
+  {
+    name: "axios",
+    reason: "malicious March 2026 npm supply-chain compromise release",
+    version: "0.30.4",
+  },
+  {
+    name: "plain-crypto-js",
+    reason: "malicious Axios compromise dropper package",
+    version: null,
+  },
+];
 
-if (!existsSync(path.join(repoRoot, "pnpm-lock.yaml"))) {
+const lockfilePath = path.join(repoRoot, "pnpm-lock.yaml");
+
+if (!existsSync(lockfilePath)) {
   errors.push(
     "Missing pnpm-lock.yaml. Commit the lockfile with every dependency change and install with --frozen-lockfile outside intentional dependency-edit flows.",
   );
+} else {
+  verifyBlockedLockfileEntries(readFileSync(lockfilePath, "utf8"));
 }
 
 const rootPackageJson = readJson(path.join(repoRoot, "package.json"));
@@ -201,4 +222,21 @@ function classifyForbiddenSpec(spec) {
   }
 
   return null;
+}
+
+function verifyBlockedLockfileEntries(lockfileText) {
+  for (const blocked of blockedLockfileEntries) {
+    const lockfileKeyPattern = blocked.version
+      ? new RegExp(`^\\s{2}${escapeRegex(blocked.name)}@${escapeRegex(blocked.version)}:\\s*$`, "mu")
+      : new RegExp(`^\\s{2}${escapeRegex(blocked.name)}@[^:\\n]+:\\s*$`, "mu");
+
+    if (!lockfileKeyPattern.test(lockfileText)) {
+      continue;
+    }
+
+    const entryLabel = blocked.version ? `${blocked.name}@${blocked.version}` : blocked.name;
+    errors.push(
+      `pnpm-lock.yaml must not contain ${entryLabel} (${blocked.reason}).`,
+    );
+  }
 }

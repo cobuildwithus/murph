@@ -46,7 +46,7 @@
     "@murphai/health-metrics": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^25.6.2",
+    "@types/node": "^24.12.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.1.6"
