@@ -309,9 +309,13 @@ async function readRunnerContainerSmoke(input: {
   });
 
   if (!response.ok) {
-    throw response.status >= 500
-      ? new RunnerContainerSmokeRetryableError(`runner container smoke failed with HTTP ${response.status}.`)
-      : new Error(`runner container smoke failed with HTTP ${response.status}.`);
+    const failureBody = await readSmokeFailureBody(response);
+    const message = `runner container smoke failed with HTTP ${response.status}${
+      failureBody ? `: ${failureBody}` : "."
+    }`;
+    throw response.status === 400 || response.status >= 500
+      ? new RunnerContainerSmokeRetryableError(message)
+      : new Error(message);
   }
 
   const responsePayload = await response.json() as {
@@ -341,6 +345,30 @@ async function readRunnerContainerSmoke(input: {
   }
 
   return responsePayload.runnerContainer.runnerBundle ?? null;
+}
+
+async function readSmokeFailureBody(response: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return null;
+  }
+
+  const redacted = redactSmokeFailureBody(text)
+    .replace(/\s+/gu, " ")
+    .trim();
+  return redacted.length > 0 ? redacted.slice(0, 512) : null;
+}
+
+function redactSmokeFailureBody(value: string): string {
+  return value
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"',}]+/giu, "$1<REDACTED>")
+    .replace(/(X-Amz-(?:Credential|Signature|Security-Token)=)[^&\s"',}]+/giu, "$1<REDACTED>")
+    .replace(
+      /("?(?:api|auth|access|refresh|id)?[_-]?(?:token|secret|password|private[_-]?jwk|key)"?\s*[:=]\s*["']?)[^"',\s}]+/giu,
+      "$1<REDACTED>",
+    );
 }
 
 function buildRunnerContainerSmokeUrl(input: {
