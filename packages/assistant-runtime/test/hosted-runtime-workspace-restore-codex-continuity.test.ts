@@ -1323,7 +1323,7 @@ function createWorkspaceSnapshotV2Ref(): HostedWorkspaceSnapshotV2Ref {
     "users/hsn_abcdef0123456789abcdef01/workspace-snapshots/snapshot_restore_v2.snapshot.enc";
   return {
     archive: {
-      compression: "gzip",
+      compression: "zstd",
       encryptedByteSize: 128,
       encryptedObjectSha256: "a".repeat(64),
       fileCount: 1,

@@ -311,7 +311,7 @@ runtime-owned idle/deadline workspace checkpoint.
 
 The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a
-legacy layered `{base, hot}` ref. Live v2 snapshots are one encrypted compressed
+legacy layered `{base, hot}` ref. Live v2 snapshots are one encrypted zstd-compressed
 tar object uploaded directly from the container to R2 through a short-lived
 presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
@@ -337,7 +337,7 @@ executable-selector config, quarantine payloads, locks, pid/socket files, global
 cache/tmp, and rebuildable projections. Codex provider continuity is the exact
 active rollout JSONL referenced by live assistant session resume state, not the
 whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
-by `objectKey`, decrypts the encrypted tar, and extracts into a fresh durable
+by `objectKey`, decrypts the encrypted `tar.zst`, and extracts into a fresh durable
 root. For legacy refs, restore applies the base bundle when present, then
 applies either the working delta or the legacy hot bundle according to the
 snapshot ref shape, and treats any local restore cache as a performance cache

@@ -20,15 +20,21 @@ import { pipeline } from "node:stream/promises";
 
 import {
   decodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   serializeHostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
+const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
+  "--fast=1",
+  "--no-progress",
+  "-T1",
+] as const;
 
 export interface EncryptedWorkspaceSnapshotFile {
-  compression: "gzip";
+  compression: typeof HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION;
   encryptedByteSize: number;
   encryptedFilePath: string;
   encryptedObjectSha256: string;
@@ -71,33 +77,47 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       hash: encryptedObjectHash,
       maxBytes: input.maxEncryptedBytes,
     });
+    await assertHostedWorkspaceSnapshotZstdCliAvailable();
     const tar = spawn("tar", [
       "-C",
       durableRoot,
-      "-czf",
+      "-cf",
       "-",
       ".",
     ], {
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const zstd = spawn("zstd", [...HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     tar.stderr?.resume();
-    const tarExit = waitForTarArchiveProcess(tar);
+    zstd.stderr?.resume();
+    const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
 
     try {
       if (!tar.stdout) {
         throw new Error("Hosted workspace snapshot tar stdout is unavailable.");
       }
-      await pipeline(
-        tar.stdout,
-        createHashTransform(plaintextArchiveHash),
-        cipher,
-        encryptedCounter,
-        createWriteStream(encryptedFilePath, { mode: 0o600 }),
-      );
-      await tarExit;
+      if (!zstd.stdin || !zstd.stdout) {
+        throw new Error("Hosted workspace snapshot zstd streams are unavailable.");
+      }
+      await Promise.all([
+        pipeline(tar.stdout, zstd.stdin),
+        pipeline(
+          zstd.stdout,
+          createHashTransform(plaintextArchiveHash),
+          cipher,
+          encryptedCounter,
+          createWriteStream(encryptedFilePath, { mode: 0o600 }),
+        ),
+        tarExit,
+        zstdExit,
+      ]);
     } catch (error) {
       tar.kill("SIGTERM");
-      await tarExit.catch(() => {});
+      zstd.kill("SIGTERM");
+      await Promise.allSettled([tarExit, zstdExit]);
       throw error;
     }
 
@@ -118,7 +138,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
 
     completed = true;
     return {
-      compression: "gzip",
+      compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
       encryptedByteSize,
       encryptedFilePath,
       encryptedObjectSha256: encryptedObjectHash.digest("hex"),
@@ -148,8 +168,8 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   ref: HostedWorkspaceSnapshotV2Ref;
   scratchRoot?: string | null;
 }): Promise<void> {
-  if (input.ref.archive.compression !== "gzip") {
-    throw new Error("Hosted workspace snapshot restore only supports gzip archives.");
+  if (input.ref.archive.compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
+    throw new Error("Hosted workspace snapshot restore only supports zstd archives.");
   }
   const encryptedFilePath = path.resolve(input.encryptedFilePath);
   const encryptedStat = await stat(encryptedFilePath);
@@ -174,6 +194,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   if (scratchRoot) {
     await mkdir(scratchRoot, { mode: 0o700, recursive: true });
   }
+  await assertHostedWorkspaceSnapshotZstdCliAvailable();
   const restoreTempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
   const scratchTempDir = scratchRoot
     ? await mkdtemp(path.join(scratchRoot, "workspace-snapshot-restore-"))
@@ -198,7 +219,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     decipher.setAuthTag(authTag);
 
     const plaintextArchiveHash = createHash("sha256");
-    const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.gz");
+    const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.zst");
     await pipeline(
       createReadStream(encryptedFilePath, {
         end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
@@ -224,18 +245,42 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
       throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
     }
 
+    const zstd = spawn("zstd", [
+      "-d",
+      "--stdout",
+      plaintextArchivePath,
+    ], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     const tar = spawn("tar", [
       "-C",
       restoreRoot,
       "--no-same-owner",
       "--no-same-permissions",
-      "-xzf",
-      plaintextArchivePath,
+      "-xf",
+      "-",
     ], {
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["pipe", "ignore", "pipe"],
     });
+    zstd.stderr?.resume();
     tar.stderr?.resume();
-    await waitForTarArchiveProcess(tar);
+    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+    const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    try {
+      if (!zstd.stdout || !tar.stdin) {
+        throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
+      }
+      await Promise.all([
+        pipeline(zstd.stdout, tar.stdin),
+        zstdExit,
+        tarExit,
+      ]);
+    } catch (error) {
+      zstd.kill("SIGTERM");
+      tar.kill("SIGTERM");
+      await Promise.allSettled([zstdExit, tarExit]);
+      throw error;
+    }
 
     const restoredState = await preflightHostedWorkspaceSnapshotDurableRoot(restoreRoot);
     if (
@@ -392,16 +437,30 @@ async function listHostedWorkspaceSnapshotTarEntries(
   verbose = false,
 ): Promise<string[]> {
   const tar = spawn("tar", [
-    verbose ? "-tzvf" : "-tzf",
+    verbose ? "-tvf" : "-tf",
+    "-",
+  ], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const zstd = spawn("zstd", [
+    "-d",
+    "--stdout",
     archivePath,
   ], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (!zstd.stdout || !tar.stdin) {
+    throw new Error("Hosted workspace snapshot tar list streams are unavailable.");
+  }
   if (!tar.stdout) {
     throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
   }
+  zstd.stderr?.resume();
   tar.stderr?.resume();
   tar.stdout.setEncoding("utf8");
+  const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+  const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+  const archivePipe = pipeline(zstd.stdout, tar.stdin);
   const lines = createInterface({
     crlfDelay: Number.POSITIVE_INFINITY,
     input: tar.stdout,
@@ -418,12 +477,14 @@ async function listHostedWorkspaceSnapshotTarEntries(
         throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
       }
     }
+    await archivePipe;
   } catch (error) {
+    zstd.kill("SIGTERM");
     tar.kill("SIGTERM");
-    await waitForTarArchiveProcess(tar).catch(() => {});
+    await Promise.allSettled([archivePipe, zstdExit, tarExit]);
     throw error;
   }
-  await waitForTarArchiveProcess(tar);
+  await Promise.all([zstdExit, tarExit]);
   return entries;
 }
 
@@ -434,24 +495,42 @@ async function countHostedWorkspaceSnapshotTarPlainBytes(
   if (!Number.isSafeInteger(maxTotalPlainBytes) || maxTotalPlainBytes < 0) {
     throw new Error("Hosted workspace snapshot archive manifest is unsafe.");
   }
-  const tar = spawn("tar", [
-    "-xOzf",
+  const zstd = spawn("zstd", [
+    "-d",
+    "--stdout",
     archivePath,
   ], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const tar = spawn("tar", [
+    "-xOf",
+    "-",
+  ], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (!zstd.stdout || !tar.stdin) {
+    throw new Error("Hosted workspace snapshot tar output streams are unavailable.");
+  }
   if (!tar.stdout) {
     throw new Error("Hosted workspace snapshot tar output stdout is unavailable.");
   }
+  zstd.stderr?.resume();
   tar.stderr?.resume();
   const counter = createPlainByteCountTransform(maxTotalPlainBytes);
-  const tarExit = waitForTarArchiveProcess(tar);
+  const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+  const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+  const archivePipe = pipeline(zstd.stdout, tar.stdin);
   try {
-    await pipeline(tar.stdout, counter);
-    await tarExit;
+    await Promise.all([
+      archivePipe,
+      pipeline(tar.stdout, counter),
+      zstdExit,
+      tarExit,
+    ]);
   } catch (error) {
+    zstd.kill("SIGTERM");
     tar.kill("SIGTERM");
-    await tarExit.catch(() => {});
+    await Promise.allSettled([archivePipe, zstdExit, tarExit]);
     throw error;
   }
   return counter.byteCount;
@@ -576,7 +655,18 @@ function createBoundedHashTransform(input: {
   return transform;
 }
 
-function waitForTarArchiveProcess(process: ReturnType<typeof spawn>): Promise<void> {
+async function assertHostedWorkspaceSnapshotZstdCliAvailable(): Promise<void> {
+  const zstd = spawn("zstd", ["--version"], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  zstd.stderr?.resume();
+  await waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+}
+
+function waitForHostedWorkspaceSnapshotProcess(
+  process: ReturnType<typeof spawn>,
+  label: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     process.once("error", reject);
     process.once("close", (code, signal) => {
@@ -585,7 +675,7 @@ function waitForTarArchiveProcess(process: ReturnType<typeof spawn>): Promise<vo
         return;
       }
       const status = signal ?? `exit code ${code ?? "unknown"}`;
-      reject(new Error(`Hosted workspace snapshot archive command failed with ${status}.`));
+      reject(new Error(`Hosted workspace snapshot ${label} command failed with ${status}.`));
     });
   });
 }

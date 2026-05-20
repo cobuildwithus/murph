@@ -44,8 +44,9 @@ export const POST = withJsonError(async (
 });
 
 function resolveHostedConnectSourceTarget(sourceId: string) {
+  const configs = readHostedConnectSourceTargetConfigs();
   const target = resolveConfiguredDeviceSyncConnectTargetBySourceId(
-    readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+    configs,
     sourceId,
   );
 
@@ -59,4 +60,25 @@ function resolveHostedConnectSourceTarget(sourceId: string) {
   }
 
   return target;
+}
+
+function readHostedConnectSourceTargetConfigs() {
+  try {
+    return readConfiguredDeviceSyncConnectTargetConfigs(process.env);
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof RangeError) {
+      throw deviceSyncError({
+        cause: {
+          errorObservabilityClass: "configuration",
+          errorPhase: "connect_target_config",
+        },
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_CONFIGURATION_UNAVAILABLE",
+        httpStatus: 503,
+        message: "Hosted device connect source configuration is temporarily unavailable.",
+        retryable: true,
+      });
+    }
+
+    throw error;
+  }
 }

@@ -50,7 +50,8 @@ function OverviewPageContent() {
   );
   const overview = useMemo(() => client ? selectBrowserVaultOverview(client) : null, [client]);
   const metrics = overview?.metrics ?? [];
-  const experiments = overview?.trackedExperiments.slice(0, 8) ?? [];
+  const allExperiments = overview?.trackedExperiments ?? [];
+  const experiments = allExperiments.slice(0, 8);
   const recentJournals = overview?.recentJournals ?? [];
   const weeklyStats = useMemo(
     () => buildOverviewWeeklyStatsFromDailySampleSummaries(
@@ -62,8 +63,8 @@ function OverviewPageContent() {
       .slice(0, 8),
     [client, overview, timeZone],
   );
-  const activeExperiments = experiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status));
-  const completedExperiments = experiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status));
+  const activeExperiments = allExperiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status));
+  const completedExperiments = allExperiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status));
   const canRenderContent = status === "empty" || client !== null;
   const isEmpty =
     metrics.every((metric) => metric.value === 0) &&

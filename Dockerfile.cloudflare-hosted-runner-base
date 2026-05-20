@@ -79,6 +79,7 @@ RUN apt-get update \
     python3 \
     qpdf \
     tini \
+    zstd \
   && useradd --create-home --home-dir /home/runner --shell /usr/sbin/nologin runner \
   && mkdir -p \
     /home/runner/.cache/huggingface \
@@ -105,6 +106,7 @@ USER runner
 
 RUN python3 --version \
   && python --version \
+  && zstd --version \
   && codex --version \
   && codex app-server --help >/dev/null
 

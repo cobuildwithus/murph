@@ -8,6 +8,7 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
+  type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
 
 const mocks = vi.hoisted(() => ({
@@ -99,6 +100,51 @@ test("OverviewPage renders the dashboard overview", () => {
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
   assert.match(markup, /Weekly sample deltas/);
+});
+
+test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
+  const activeExperiments = Array.from({ length: 6 }, (_, index) => {
+    const day = String(20 - index).padStart(2, "0");
+    return createEntity("experiment", `active_extra_${index}`, {
+      body: `Active experiment ${index}.\n`,
+      date: `2026-04-${day}`,
+      experimentSlug: `active-extra-${index}`,
+      occurredAt: `2026-04-${day}T08:00:00.000Z`,
+      status: "active",
+      title: `Active extra ${index}`,
+    });
+  });
+  const overviewClient = await createFixtureClient({
+    extraEntities: [
+      ...activeExperiments,
+      createEntity("experiment", "finished_old", {
+        body: "Finished hydration experiment.\n",
+        date: "2026-04-01",
+        experimentSlug: "finished-hydration",
+        occurredAt: "2026-04-01T08:00:00.000Z",
+        status: "completed",
+        title: "Finished hydration",
+      }),
+    ],
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: overviewClient,
+    dataVersion: overviewClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(OverviewPage));
+
+  assert.match(markup, /Active now[\s\S]*>8<\/div>/);
+  assert.match(markup, /Recently finished[\s\S]*>1<\/div>/);
+  assert.match(markup, /Finished hydration started/);
+  const recentExperimentsMarkup =
+    markup.match(/Recent experiments[\s\S]*?Weekly sample deltas/)?.[0] ?? "";
+  assert.match(recentExperimentsMarkup, /Active extra 0/);
+  assert.doesNotMatch(recentExperimentsMarkup, /Finished hydration/);
 });
 
 test("HistoryPage renders recent timeline entries", () => {
@@ -228,6 +274,54 @@ test("SignalsPage renders the empty signals state", () => {
   assert.match(markup, /Connect a source or sync more recent data/i);
 });
 
+test("SignalsPage renders secondary-only signal days and body-state history", async () => {
+  const signalClient = await createFixtureClient({
+    metricRows: [
+      createMetricRow({
+        confidence: "high",
+        date: "2026-04-20",
+        id: "metric-row:sleep-score:2026-04-20",
+        metricKey: "sleep-score",
+        observedAt: "2026-04-20T08:00:00.000Z",
+        unit: null,
+        value: 86,
+      }),
+      createMetricRow({
+        confidence: "medium",
+        date: "2026-04-20",
+        id: "metric-row:body-weight:2026-04-20",
+        metricKey: "body-weight",
+        observedAt: "2026-04-20T08:00:00.000Z",
+        unit: "lb",
+        value: 170,
+      }),
+      createMetricRow({
+        confidence: "medium",
+        date: "2026-04-20",
+        id: "metric-row:body-fat-percentage:2026-04-20",
+        metricKey: "body-fat-percentage",
+        observedAt: "2026-04-20T08:00:00.000Z",
+        unit: "%",
+        value: 18,
+      }),
+    ],
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: signalClient,
+    dataVersion: signalClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(createElement(SignalsPage));
+
+  assert.match(markup, /Recent sleep[\s\S]*86/);
+  assert.match(markup, /Recent body state[\s\S]*170 lb/);
+  assert.match(markup, /Body fat 18 %/);
+});
+
 test("OverviewPage renders an error state instead of an empty state when the hosted snapshot is unavailable", () => {
   mocks.useBrowserVault.mockReturnValue({
     client: null,
@@ -280,6 +374,8 @@ function createEntity(
 
 async function createFixtureClient(input: {
   experimentSlug?: string;
+  extraEntities?: BrowserVaultEntity[];
+  metricRows?: BrowserVaultMetricRow[];
 } = {}) {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-04-20T12:00:00.000Z",
@@ -334,6 +430,7 @@ async function createFixtureClient(input: {
           stream: "sleep_duration_minutes",
           title: "Sleep duration",
         }),
+        ...(input.extraEntities ?? []),
       ],
       metadata: {
         title: "Browser vault fixture",
@@ -342,7 +439,39 @@ async function createFixtureClient(input: {
     }),
   });
 
-  return createBrowserVaultQueryClient(replica);
+  return createBrowserVaultQueryClient({
+    ...replica,
+    metricRows: [
+      ...replica.metricRows,
+      ...(input.metricRows ?? []),
+    ],
+  });
+}
+
+function createMetricRow(
+  input: Pick<BrowserVaultMetricRow, "date" | "id" | "metricKey" | "observedAt" | "unit" | "value">
+    & Partial<BrowserVaultMetricRow>,
+): BrowserVaultMetricRow {
+  return {
+    biomarkerKey: input.biomarkerKey ?? null,
+    confidence: input.confidence ?? "none",
+    context: input.context ?? {},
+    date: input.date,
+    grain: input.grain ?? "day",
+    id: input.id,
+    metricKey: input.metricKey,
+    observedAt: input.observedAt,
+    pointIds: input.pointIds ?? [],
+    recordIds: input.recordIds ?? [],
+    rowSchema: "murph.browser-vault.metric-row.v1",
+    sourceFamily: input.sourceFamily ?? null,
+    sourceKind: input.sourceKind ?? null,
+    sourceLabel: input.sourceLabel ?? null,
+    statistic: input.statistic ?? "value",
+    unit: input.unit,
+    value: input.value,
+    valueLabel: input.valueLabel ?? null,
+  };
 }
 
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {

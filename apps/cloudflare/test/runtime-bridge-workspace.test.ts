@@ -1,8 +1,8 @@
 import { createDecipheriv } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1887,10 +1887,15 @@ function listEncryptedWorkspaceSnapshotTarEntries(
     );
     decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(snapshotRef.encryption.aad)));
     decipher.setAuthTag(authTag);
-    const archive = gunzipSync(Buffer.concat([
-      decipher.update(encryptedBody),
-      decipher.final(),
-    ]));
+    const archive = execFileSync("zstd", [
+      "-d",
+      "--stdout",
+    ], {
+      input: Buffer.concat([
+        decipher.update(encryptedBody),
+        decipher.final(),
+      ]),
+    });
     return listTarArchiveEntries(archive);
   } finally {
     dataKey.fill(0);

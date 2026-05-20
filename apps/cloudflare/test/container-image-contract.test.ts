@@ -428,9 +428,11 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("python-is-python3 \\");
     expect(baseDockerfile).toContain("python3 \\");
     expect(baseDockerfile).toContain("qpdf \\");
+    expect(baseDockerfile).toContain("zstd \\");
     expect(baseDockerfile).toContain("RUN ldconfig");
     expect(baseDockerfile).toContain("python3 --version");
     expect(baseDockerfile).toContain("python --version");
+    expect(baseDockerfile).toContain("zstd --version");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("tini");

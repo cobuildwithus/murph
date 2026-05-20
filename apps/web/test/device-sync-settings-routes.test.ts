@@ -331,6 +331,33 @@ describe("device sync settings routes", () => {
     );
   });
 
+  it("reports malformed hosted connect provider config as a server configuration failure", async () => {
+    vi.stubEnv("OURA_CLIENT_SECRET", "");
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/oura/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "oura" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_CONFIGURATION_UNAVAILABLE",
+        message: "Hosted device connect source configuration is temporarily unavailable.",
+        retryable: true,
+      },
+    });
+  });
+
   it("requires hosted auth before starting a connect source flow", async () => {
     mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
@@ -443,6 +470,86 @@ describe("device sync settings routes", () => {
         provider: "oura",
         statusLabel: "Connected",
         tone: "calm",
+      },
+    });
+  });
+
+  it("keeps upstream source context on connection status lookups", async () => {
+    const junctionConnection = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-04-01T08:00:00.000Z",
+      createdAt: "2026-04-01T08:00:00.000Z",
+      displayName: "Junction",
+      id: "dspc_junction_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
+      lastWebhookAt: "2026-04-03T07:01:00.000Z",
+      metadata: {},
+      nextReconcileAt: "2026-04-03T16:00:00.000Z",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+      updatedAt: "2026-04-03T08:00:00.000Z",
+    };
+    mocks.getConnectionStatus.mockResolvedValueOnce({
+      connection: junctionConnection,
+    });
+    mocks.listConnections.mockResolvedValueOnce({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_123",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-04-03T07:01:00.000Z",
+          resourceCount: 3,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+      connections: [
+        {
+          ...junctionConnection,
+          updatedAt: "2026-04-03T07:05:00.000Z",
+        },
+      ],
+      providers: [
+        {
+          callbackPath: "/connect/junction/callback",
+          callbackUrl: "https://join.example.test/connect/junction/callback",
+          defaultScopes: [],
+          provider: "junction",
+          supportsWebhooks: true,
+          webhookPath: "/webhooks/junction",
+          webhookUrl: "https://join.example.test/webhooks/junction",
+        },
+      ],
+    });
+
+    const response = await settingsDeviceSyncStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_junction_123/status"),
+      createRouteContext({ connectionId: "dspc_junction_123" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      source: {
+        connectionId: "dspc_junction_123",
+        provider: "junction",
+        providerLabel: "Garmin",
+        statusLabel: "Connected",
+        tone: "calm",
+        updatedAt: "2026-04-03T08:00:00.000Z",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 3,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
       },
     });
   });

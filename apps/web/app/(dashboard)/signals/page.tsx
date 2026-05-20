@@ -122,38 +122,30 @@ function SignalsPageContent() {
           <div className="grid gap-4 xl:grid-cols-4">
             <SignalSummaryCard
               description="Latest cross-provider sleep summary"
-              extra={sleep[0] && sleep[0].secondary.selection.value !== null
-                ? `Score ${formatMetricValue(sleep[0].secondary)}`
-                : null}
+              extra={formatSecondarySignal(sleep[0], (value) => `Score ${value}`)}
               title="Sleep"
-              value={sleep[0] ? formatMetricValue(sleep[0].primary) : "—"}
+              value={sleep[0] ? formatMetricValue(selectDisplayMetric(sleep[0])) : "—"}
               confidence={sleep[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest recovery and readiness summary"
-              extra={recovery[0] && recovery[0].secondary.selection.value !== null
-                ? `HRV ${formatMetricValue(recovery[0].secondary)}`
-                : null}
+              extra={formatSecondarySignal(recovery[0], (value) => `HRV ${value}`)}
               title="Recovery"
-              value={recovery[0] ? formatMetricValue(recovery[0].primary) : "—"}
+              value={recovery[0] ? formatMetricValue(selectDisplayMetric(recovery[0])) : "—"}
               confidence={recovery[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest activity aggregate"
-              extra={activity[0] && activity[0].secondary.selection.value !== null
-                ? `${formatMetricValue(activity[0].secondary)} tracked`
-                : null}
+              extra={formatSecondarySignal(activity[0], (value) => `${value} tracked`)}
               title="Activity"
-              value={activity[0] ? formatMetricValue(activity[0].primary) : "—"}
+              value={activity[0] ? formatMetricValue(selectDisplayMetric(activity[0])) : "—"}
               confidence={activity[0]?.confidence ?? null}
             />
             <SignalSummaryCard
               description="Latest body-state summary"
-              extra={bodyState[0] && bodyState[0].secondary.selection.value !== null
-                ? `Body fat ${formatMetricValue(bodyState[0].secondary)}`
-                : null}
+              extra={formatSecondarySignal(bodyState[0], (value) => `Body fat ${value}`)}
               title="Body state"
-              value={bodyState[0] ? formatMetricValue(bodyState[0].primary) : "—"}
+              value={bodyState[0] ? formatMetricValue(selectDisplayMetric(bodyState[0])) : "—"}
               confidence={bodyState[0]?.confidence ?? null}
             />
           </div>
@@ -174,13 +166,13 @@ function SignalsPageContent() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="grid gap-4 xl:grid-cols-4">
             <SignalListCard
               items={sleep.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.primary),
+                detail: formatMetricValue(selectDisplayMetric(entry)),
                 note: entry.note,
-                secondary: entry.secondary.selection.value !== null ? `Score ${formatMetricValue(entry.secondary)}` : null,
+                secondary: formatSecondarySignal(entry, (value) => `Score ${value}`),
                 title: entry.title,
               }))}
               title="Recent sleep"
@@ -188,9 +180,9 @@ function SignalsPageContent() {
             <SignalListCard
               items={recovery.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.primary),
+                detail: formatMetricValue(selectDisplayMetric(entry)),
                 note: entry.note,
-                secondary: entry.secondary.selection.value !== null ? `HRV ${formatMetricValue(entry.secondary)}` : null,
+                secondary: formatSecondarySignal(entry, (value) => `HRV ${value}`),
                 title: entry.title,
               }))}
               title="Recent recovery"
@@ -198,14 +190,22 @@ function SignalsPageContent() {
             <SignalListCard
               items={activity.map((entry) => ({
                 date: entry.date,
-                detail: formatMetricValue(entry.primary),
+                detail: formatMetricValue(selectDisplayMetric(entry)),
                 note: entry.note,
-                secondary: entry.secondary.selection.value !== null
-                  ? `Tracked ${formatMetricValue(entry.secondary)}`
-                  : null,
+                secondary: formatSecondarySignal(entry, (value) => `Tracked ${value}`),
                 title: entry.title,
               }))}
               title="Recent activity"
+            />
+            <SignalListCard
+              items={bodyState.map((entry) => ({
+                date: entry.date,
+                detail: formatMetricValue(selectDisplayMetric(entry)),
+                note: entry.note,
+                secondary: formatSecondarySignal(entry, (value) => `Body fat ${value}`),
+                title: entry.title,
+              }))}
+              title="Recent body state"
             />
           </div>
 
@@ -362,7 +362,26 @@ function metricForRow(row: BrowserVaultMetricRow | null): SignalMetric {
 }
 
 function hasSignalData(summary: SignalDaySummary): boolean {
-  return summary.primary.selection.value !== null || summary.secondary.selection.value !== null;
+  return hasMetricValue(summary.primary) || hasMetricValue(summary.secondary);
+}
+
+function selectDisplayMetric(summary: SignalDaySummary): SignalMetric {
+  return hasMetricValue(summary.primary) ? summary.primary : summary.secondary;
+}
+
+function formatSecondarySignal(
+  summary: SignalDaySummary | undefined,
+  format: (value: string) => string,
+): string | null {
+  if (!summary || !hasMetricValue(summary.primary) || !hasMetricValue(summary.secondary)) {
+    return null;
+  }
+
+  return format(formatMetricValue(summary.secondary));
+}
+
+function hasMetricValue(metric: SignalMetric): boolean {
+  return metric.selection.value !== null;
 }
 
 function SignalSummaryCard({

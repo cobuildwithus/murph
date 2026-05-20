@@ -2883,7 +2883,7 @@ function createWorkspaceSnapshotV2RefForTest(input: {
 }): HostedWorkspaceSnapshotV2Ref {
   return {
     archive: {
-      compression: "gzip",
+      compression: "zstd",
       encryptedByteSize: 128,
       encryptedObjectSha256: "b".repeat(64),
       fileCount: 1,

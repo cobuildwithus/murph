@@ -1,8 +1,8 @@
 import { createCipheriv, createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { writeFile, mkdtemp, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
@@ -96,7 +96,7 @@ async function expectUnsafeTarArchive(input: {
   });
   const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
   const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 10);
-  const plaintextArchive = gzipSync(createTarArchive(input.entries));
+  const plaintextArchive = zstdCompress(createTarArchive(input.entries));
   const fileCount = input.entries
     .filter((entry) => entry.typeFlag === undefined || entry.typeFlag === "" || entry.typeFlag === "0")
     .length;
@@ -113,7 +113,7 @@ async function expectUnsafeTarArchive(input: {
     await writeFile(encryptedFilePath, encryptedObject, { mode: 0o600 });
     const ref: HostedWorkspaceSnapshotV2Ref = {
       archive: {
-        compression: "gzip",
+        compression: "zstd",
         encryptedByteSize: encryptedObject.byteLength,
         encryptedObjectSha256: sha256Hex(encryptedObject),
         fileCount,
@@ -220,4 +220,14 @@ function writeTarOctal(buffer: Buffer, offset: number, length: number, value: nu
 
 function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function zstdCompress(bytes: Buffer): Buffer {
+  return execFileSync("zstd", [
+    "--fast=1",
+    "--no-progress",
+    "--stdout",
+  ], {
+    input: bytes,
+  });
 }
