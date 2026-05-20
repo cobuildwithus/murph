@@ -10,6 +10,8 @@ export const HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_CONTROL
 export const HOSTED_R2_PRESIGN_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_ENDPOINT";
 export const HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV = "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY";
 export const MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
+export const HOSTED_R2_CHECKSUM_MODE_HEADER = "x-amz-checksum-mode";
+export const HOSTED_R2_CHECKSUM_MODE_ENABLED = "ENABLED";
 
 const AWS4_ALGORITHM = "AWS4-HMAC-SHA256";
 const AWS4_REQUEST = "aws4_request";
@@ -163,6 +165,7 @@ export async function createHostedR2PresignedGetUrl(input: {
 }
 
 export async function createHostedR2PresignedHeadUrl(input: {
+  checksumMode?: typeof HOSTED_R2_CHECKSUM_MODE_ENABLED;
   environment: HostedR2PresignEnvironment;
   expiresSeconds?: number;
   key: string;
@@ -171,12 +174,16 @@ export async function createHostedR2PresignedHeadUrl(input: {
   expiresAt: string;
   url: string;
 }> {
+  const signedHeaderValues = input.checksumMode === undefined
+    ? []
+    : [[HOSTED_R2_CHECKSUM_MODE_HEADER, input.checksumMode] as const];
   return createHostedR2PresignedReadLikeUrl({
     environment: input.environment,
     expiresSeconds: input.expiresSeconds,
     key: input.key,
     method: "HEAD",
     now: input.now,
+    signedHeaderValues,
   });
 }
 
@@ -428,6 +435,7 @@ async function createHostedR2PresignedReadLikeUrl(input: {
   key: string;
   method: "DELETE" | "GET" | "HEAD";
   now?: Date;
+  signedHeaderValues?: ReadonlyArray<readonly [string, string]>;
 }): Promise<{
   expiresAt: string;
   url: string;
@@ -436,9 +444,15 @@ async function createHostedR2PresignedReadLikeUrl(input: {
   const now = input.now ?? new Date();
   const endpoint = new URL(input.environment.endpoint);
   const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
-  const signedHeaders = "host";
+  const signedHeaderValues = [...(input.signedHeaderValues ?? [])]
+    .sort(([left], [right]) => left.localeCompare(right));
+  const signedHeaders = [
+    "host",
+    ...signedHeaderValues.map(([key]) => key),
+  ].join(";");
   const canonicalHeaders = [
     `host:${endpoint.host}`,
+    ...signedHeaderValues.map(([key, value]) => `${key}:${value}`),
     "",
   ].join("\n");
   return createHostedR2PresignedObjectUrl({

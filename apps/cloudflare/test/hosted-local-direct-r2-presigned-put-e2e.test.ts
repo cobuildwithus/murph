@@ -6,6 +6,8 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HOSTED_R2_CHECKSUM_MODE_ENABLED,
+  HOSTED_R2_CHECKSUM_MODE_HEADER,
   createHostedR2PresignedDeleteUrl,
   createHostedR2PresignedHeadUrl,
   createHostedR2PresignedPutUrl,
@@ -104,11 +106,15 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       expect(putResponse.status).toBeLessThan(300);
 
       const headUrl = await createHostedR2PresignedHeadUrl({
+        checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
         environment,
         expiresSeconds: 300,
         key: objectKey,
       });
       const headResponse = await fetch(headUrl.url, {
+        headers: {
+          [HOSTED_R2_CHECKSUM_MODE_HEADER]: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+        },
         method: "HEAD",
         signal: AbortSignal.timeout(directR2PresignedPutTimeoutMs),
       });
@@ -116,6 +122,7 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       expect(headResponse.status).toBe(200);
       expect(headResponse.headers.get("content-length")).toBe(String(payload.bytes.byteLength));
       expect(headResponse.headers.get("content-type")).toContain(directR2ContentType);
+      expect(headResponse.headers.get("x-amz-checksum-sha256")).toBe(payload.sha256Base64);
       expect(headResponse.headers.get("x-amz-meta-encryptedsha256")).toBe(payload.sha256Hex);
       expect(headResponse.headers.get("x-amz-meta-schema")).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
       expect(headResponse.headers.get("x-amz-meta-snapshotid")).toBe(snapshotId);

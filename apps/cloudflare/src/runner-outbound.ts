@@ -76,6 +76,8 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "./storage-paths.ts";
 import {
+  HOSTED_R2_CHECKSUM_MODE_ENABLED,
+  HOSTED_R2_CHECKSUM_MODE_HEADER,
   createHostedR2PresignedDeleteUrl,
   createHostedR2PresignedGetUrl,
   createHostedR2PresignedHeadUrl,
@@ -1324,11 +1326,15 @@ async function headWorkspaceSnapshotLocalS3Object(input: {
   key: string;
 }): Promise<WorkspaceSnapshotR2ObjectLike | null> {
   const presigned = await createHostedR2PresignedHeadUrl({
+    checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
     environment: input.environment,
     expiresSeconds: 60,
     key: input.key,
   });
   const response = await fetch(presigned.url, {
+    headers: {
+      [HOSTED_R2_CHECKSUM_MODE_HEADER]: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+    },
     method: "HEAD",
   });
   if (response.status === 404) {
