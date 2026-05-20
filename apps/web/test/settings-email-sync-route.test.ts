@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   createHostedMemberReplyAliasRoute: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -16,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
+  signalHostedManualRunRuntime: vi.fn(),
   upsertHostedMemberEmailAuthorization: vi.fn(),
   upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
 }));
@@ -37,8 +37,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   upsertHostedMemberReplyAliasLookupKeyTx: mocks.upsertHostedMemberReplyAliasLookupKeyTx,
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedManualRunRuntime: mocks.signalHostedManualRunRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -141,7 +141,10 @@ describe("settings email sync route", () => {
     mocks.upsertHostedMemberEmailAuthorization.mockResolvedValue({});
     mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({});
-    mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
+    mocks.signalHostedManualRunRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
     mocks.sendHostedSignupWelcomeEmailForRecentMember.mockResolvedValue({
       providerMessageId: "resend_email_123",
       status: "sent",
@@ -202,8 +205,9 @@ describe("settings email sync route", () => {
       memberId: "member_123",
       prisma: mocks.prismaClient,
     });
-    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
-      context: "settings.email.sync",
+    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
+      eventSource: "settings.email.sync",
+      source: "user",
       userId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({
@@ -250,7 +254,7 @@ describe("settings email sync route", () => {
       replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
       ok: true,
@@ -301,8 +305,9 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
-      context: "settings.email.sync",
+    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
+      eventSource: "settings.email.sync",
+      source: "user",
       userId: "member_123",
     });
     expect(warnSpy).toHaveBeenCalledWith(

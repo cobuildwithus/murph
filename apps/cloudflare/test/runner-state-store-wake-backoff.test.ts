@@ -14,98 +14,95 @@ import type {
 } from "../src/user-runner/types.js";
 
 const NOW = "2026-04-27T00:00:00.000Z";
-const RETRY_AT = "2026-04-27T00:00:05.000Z";
 const LATER_WAKE = "2026-04-27T00:00:30.000Z";
 
-describe("RunnerStateStore wake/backoff authority", () => {
+describe("RunnerStateStore execution lease authority", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("gates pending runtime work behind the retry backoff", async () => {
+  it("records transport failures without scheduling wake or backoff work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
     await store.bindUser("member_123");
-    await store.markWakePending({ preferredWakeAt: NOW });
 
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "nudge",
       userId: "member_123",
     });
-    const failed = await store.clearWriteFenceAfterFailure({
+    const failed = await store.clearWriteFenceAfterTransportFailure({
       error: new Error("runner failed"),
       finishedAt: NOW,
-      retryAt: RETRY_AT,
       token,
     });
 
     expect(failed.record).toMatchObject({
-      backoffUntil: RETRY_AT,
+      backoffUntil: null,
       failureCount: 1,
-      wakeAt: NOW,
-    });
-    await expect(store.readDueWork(Date.parse(NOW))).resolves.toMatchObject({
-      kind: "idle",
-    });
-    await expect(store.readDueWork(Date.parse(RETRY_AT))).resolves.toMatchObject({
-      kind: "runtime",
-      reason: "retry",
+      lastErrorAt: NOW,
+      wakeAt: null,
+      writeFence: null,
     });
   });
 
-  it("replaces a nudge recorded while a runtime write fence is active with the next runtime wake", async () => {
+  it("clears completed write fences without writing wake or backoff work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
     await store.bindUser("member_123");
-    await store.markWakePending({ preferredWakeAt: NOW });
     const token = await store.beginWriteFence({
       expiresAt: LATER_WAKE,
       reason: "nudge",
       userId: "member_123",
     });
-    await store.markWakePending({ preferredWakeAt: RETRY_AT });
 
     const completed = await store.clearWriteFenceAfterCompletion({
       finishedAt: NOW,
       token,
     });
-    const scheduled = await store.scheduleNextWake({
-      nextWakeAt: LATER_WAKE,
-    });
 
     expect(completed.completed).toBe(true);
-    expect(scheduled).toMatchObject({
+    expect(completed.record).toMatchObject({
       backoffUntil: null,
       failureCount: 0,
-      wakeAt: LATER_WAKE,
-    });
-    await expect(store.readDueWork(Date.parse(RETRY_AT))).resolves.toMatchObject({
-      kind: "idle",
-    });
-    await expect(store.readDueWork(Date.parse(LATER_WAKE))).resolves.toMatchObject({
-      kind: "runtime",
-      reason: "wake",
+      lastInvocationAt: NOW,
+      wakeAt: null,
+      writeFence: null,
     });
   });
 
-  it("does not clamp stale scheduled runtime wakes into new due work", async () => {
+  it("clears replacement fences by identity without scheduling retry work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
     const { store } = createHarness();
     await store.bindUser("member_123");
-
-    const scheduled = await store.scheduleNextWake({
-      nextWakeAt: "2026-04-26T23:59:59.000Z",
+    const token = await store.beginWriteFence({
+      expiresAt: LATER_WAKE,
+      reason: "nudge",
+      userId: "member_123",
     });
 
-    expect(scheduled).toMatchObject({
+    const cleared = await store.clearWriteFenceForReplacement({
+      attemptId: token.attemptId,
+      error: new Error("no active child"),
+      finishedAt: NOW,
+      generation: token.generation,
+      userId: "member_123",
+    });
+
+    expect(cleared).toMatchObject({
+      cleared: true,
+      record: {
+        backoffUntil: null,
+        failureCount: 1,
+        lastErrorAt: NOW,
+        writeFence: null,
+      },
+    });
+    expect(cleared.record).toMatchObject({
       wakeAt: null,
-    });
-    await expect(store.readDueWork(Date.parse(NOW))).resolves.toMatchObject({
-      kind: "idle",
     });
   });
 
@@ -137,7 +134,7 @@ describe("RunnerStateStore wake/backoff authority", () => {
     } satisfies Partial<RunnerWriteFenceToken>);
   });
 
-  it("migrates legacy pending_nudge-only state into runtime due work", async () => {
+  it("keeps legacy pending_nudge-only state inert after migration", async () => {
     const { store } = createHarness((db) => {
       db.exec(`
         CREATE TABLE runner_meta (
@@ -153,10 +150,12 @@ describe("RunnerStateStore wake/backoff authority", () => {
     });
 
     const state = await store.readState();
-    expect(state.wakeAt).not.toBeNull();
-    await expect(store.readDueWork(Date.now() + 60_000)).resolves.toMatchObject({
-      kind: "runtime",
-      reason: "wake",
+    expect(state).toMatchObject({
+      nextWakeAt: null,
+      pendingNudge: false,
+      pendingWork: false,
+      wakeAt: null,
+      wakePending: false,
     });
   });
 });

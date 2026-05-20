@@ -23,6 +23,17 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import worker from "../src/index.ts";
 import {
+  HostedUserRunner,
+} from "../src/user-runner.ts";
+import type {
+  HostedExecutionContainerNamespaceLike,
+  HostedExecutionContainerStubLike,
+} from "../src/runner-container.ts";
+import type {
+  DurableObjectStateLike,
+  DurableObjectStorageLike,
+} from "../src/user-runner/types.ts";
+import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
 } from "../src/storage-paths.ts";
@@ -43,8 +54,13 @@ import {
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
 } from "@murphai/hosted-execution/routes";
+import type {
+  HostedWorkspaceInvocationResult,
+  HostedWorkspaceState,
+} from "@murphai/hosted-execution/runtime-control";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
@@ -53,6 +69,7 @@ import {
   getTestHostedRuntimeRootKey,
 } from "./hosted-runtime-crypto-fixtures";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
+import { createTestSqlStorage } from "./sql-storage.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -1465,16 +1482,8 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([]);
   });
 
-  it("nudges the hosted runner without enqueuing a normal-path wake", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRunnerForUser: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: true,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: "2026-04-26T00:00:00.000Z",
-      })),
-    });
+  it("does not expose the removed runner nudge route", async () => {
+    const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
@@ -1488,17 +1497,11 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      alarmScheduled: true,
-      kind: "processing-ensured",
-      inFlight: false,
-      nextAlarmAt: "2026-04-26T00:00:00.000Z",
-    });
+    expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
@@ -1558,67 +1561,293 @@ describe("cloudflare worker routes", () => {
     expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
   });
 
-  it("passes signed AI usage allow decisions from runner nudge requests to the Durable Object", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRunnerForUser: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: false,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: null,
-      })),
+  describe("hosted runtime control", () => {
+    it("maps runtime ensure-execution route calls to the Durable Object adapter", async () => {
+      const stub = createUserRunnerStub({
+        ensureRuntimeExecutionForUser: vi.fn(async () => ({
+          action: "started" as const,
+          kind: "runtime_completed" as const,
+          runtimeAttemptId: "runtime-attempt-test",
+          runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
+          runtimeStatus: "idle" as const,
+        })),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+          body: JSON.stringify({
+            orchestrationAttemptId: "orchestration-attempt-test",
+            reason: "nudge",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        })),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        action: "started",
+        kind: "runtime_completed",
+        runtimeAttemptId: "runtime-attempt-test",
+        runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
+        runtimeStatus: "idle",
+      });
+      expect(stub.ensureRuntimeExecutionForUser).toHaveBeenCalledWith({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+      expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
+      expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
     });
-    const env = createWorkerEnv(stub);
-    const aiUsageAllowDecision = {
-      allowed: true,
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      nonce: "0123456789abcdef0123456789abcdef",
-      schema: "murph.hosted-ai-usage-allow-decision.v1",
-      signature: {
-        alg: "HMAC-SHA256",
-        keyId: "test",
-        signature: "signature",
-      },
-      userId: "member_123",
-    };
 
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
-        body: JSON.stringify({ aiUsageAllowDecision }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+    it("accepts signed Temporal runtime ensure-execution route calls", async () => {
+      const stub = createUserRunnerStub({
+        ensureRuntimeExecutionForUser: vi.fn(async () => ({
+          action: "started" as const,
+          kind: "runtime_completed" as const,
+          runtimeAttemptId: "runtime-attempt-test",
+          runtimeResultNextWakeAt: null,
+          runtimeStatus: "idle" as const,
+        })),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        kind: "runtime_completed",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+      expect(stub.ensureRuntimeExecutionForUser).toHaveBeenCalledWith({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+    });
+
+    it("starts the container without an active fence and returns runtime_completed", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
+      const { alarms, invoke, runner, sql, waitUntil } = createRuntimeControlRunnerHarness({
+        invocationResults: [{ nextWakeAt: runtimeNextWakeAt, status: "idle" }],
+      });
+
+      const response = await runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+
+      expect(response).toEqual({
+        action: "started",
+        kind: "runtime_completed",
+        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+        runtimeResultNextWakeAt: runtimeNextWakeAt,
+        runtimeStatus: "idle",
+      });
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+        reason: "nudge",
+        userId: "test-user",
+        workspaceVersion: "7",
+      });
+      expect(waitUntil).not.toHaveBeenCalled();
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: null,
+        backoff_until: null,
+        failure_count: 0,
+        wake_at: null,
+      });
+      expect(alarms).toContain("2026-04-27T00:01:00.000Z");
+      expect(alarms).toContain("deleted");
+      expect(alarms).not.toContain(runtimeNextWakeAt);
+    });
+
+    it("sends a payloadless wake for an active fence and returns runtime_wake_sent", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
+        ensureProcessing: vi.fn(async () => ({
+          action: "woken" as const,
+          kind: "accepted" as const,
+        })),
+      });
+      const token = await runner.beginRuntimeWriteFenceForSmoke({
+        userId: "test-user",
+        workspaceVersion: "7",
+      });
+      expect(token).not.toBeNull();
+
+      const response = await runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+
+      expect(response).toEqual({
+        kind: "runtime_wake_sent",
+        recommendedRecheckAt: "2026-04-27T00:03:05.000Z",
+        runtimeAttemptId: token?.attemptId,
+      });
+      expect(ensureProcessing).toHaveBeenCalledWith({
+        activeRuntime: {
+          attemptId: token?.attemptId,
+          leaseGeneration: token?.generation,
+          userId: "test-user",
         },
-        method: "POST",
-      })),
-      env,
-    );
+        reason: "nudge",
+        userId: "test-user",
+      });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: token?.attemptId,
+        backoff_until: null,
+        wake_at: null,
+      });
+    });
 
-    expect(response.status).toBe(202);
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123", {
-      aiUsageAllowDecision,
+    it("clears a no-active-child fence by identity and starts a replacement", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
+        ensureProcessing: vi.fn(async () => ({
+          kind: "start-required" as const,
+          reason: "no-active-child" as const,
+        })),
+        invocationResults: [{ nextWakeAt: null, status: "idle" }],
+      });
+      const oldToken = await runner.beginRuntimeWriteFenceForSmoke({
+        userId: "test-user",
+        workspaceVersion: "7",
+      });
+      expect(oldToken).not.toBeNull();
+
+      const response = await runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+
+      expect(response).toMatchObject({
+        action: "replaced",
+        kind: "runtime_completed",
+        runtimeResultNextWakeAt: null,
+        runtimeStatus: "idle",
+      });
+      expect(response.kind === "runtime_completed" ? response.runtimeAttemptId : null)
+        .not.toBe(oldToken?.attemptId);
+      expect(ensureProcessing).toHaveBeenCalledTimes(2);
+      expect(ensureProcessing).toHaveBeenNthCalledWith(1, {
+        activeRuntime: {
+          attemptId: oldToken?.attemptId,
+          leaseGeneration: oldToken?.generation,
+          userId: "test-user",
+        },
+        reason: "nudge",
+        userId: "test-user",
+      });
+      expect(ensureProcessing).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        invoke: expect.any(Object),
+        reason: "nudge",
+        userId: "test-user",
+      }));
+      expect(invoke).toHaveBeenCalledOnce();
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: null,
+        backoff_until: null,
+        wake_at: null,
+      });
+    });
+
+    it("throws retryable errors for unknown active wakes and preserves the fence", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const { invoke, runner, sql } = createRuntimeControlRunnerHarness({
+        ensureProcessing: vi.fn(async () => ({
+          kind: "retry-scheduled" as const,
+          reason: "container-rpc-timeout" as const,
+        })),
+      });
+      const token = await runner.beginRuntimeWriteFenceForSmoke({
+        userId: "test-user",
+        workspaceVersion: "7",
+      });
+      expect(token).not.toBeNull();
+
+      await expect(runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      })).rejects.toMatchObject({
+        name: "HostedRuntimeExecutionRetryableError",
+        reason: "container-rpc-timeout",
+        retryable: true,
+      });
+
+      expect(invoke).not.toHaveBeenCalled();
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: token?.attemptId,
+        backoff_until: null,
+        wake_at: null,
+      });
+    });
+
+    it("clears transport-failed fences without writing wake_at or backoff_until", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const transportError = new Error("container transport failed");
+      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
+        invocationResults: [transportError],
+      });
+
+      await expect(runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      })).rejects.toThrow("container transport failed");
+
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: null,
+        backoff_until: null,
+        failure_count: 1,
+        wake_at: null,
+      });
+      expect(alarms).toContain("2026-04-27T00:01:00.000Z");
+      expect(alarms).toContain("deleted");
     });
   });
 
-  it("falls back to the live usage gate path when a runner nudge allow decision is malformed", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRunnerForUser: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: true,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: null,
-      })),
-    });
+  it("rejects malformed runtime ensure-execution requests before calling the Durable Object", async () => {
+    const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
         body: JSON.stringify({
-          aiUsageAllowDecision: {
-            allowed: false,
-            schema: "murph.hosted-ai-usage-allow-decision.v1",
-          },
+          orchestrationAttemptId: "orchestration-attempt-test",
+          reason: "unsupported",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -1628,11 +1857,41 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(202);
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
+    });
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
   });
 
-  it("schedules browser-vault refreshes through the direct Durable Object path", async () => {
+  it("requires the bound-user auth header on runtime ensure-execution requests", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-execution", {
+        body: JSON.stringify({
+          orchestrationAttemptId: "orchestration-attempt-test",
+          reason: "nudge",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }), {
+        boundUserId: "other-test-user",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+  });
+
+  it("does not expose the removed browser-vault refresh route", async () => {
     const stub = createUserRunnerStub({
       scheduleBrowserVaultRefreshForUser: vi.fn(async (input: {
         userId: string;
@@ -1655,82 +1914,11 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
+    expect(response.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(stub.scheduleBrowserVaultRefreshForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-  });
-
-  it("normalizes legacy direct browser-vault refresh responses during rollout", async () => {
-    const scheduleBrowserVaultRefreshForUser = vi.fn(async (_input: {
-      userId: string;
-    }) => undefined);
-    const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser,
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
-    expect(scheduleBrowserVaultRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
-  });
-
-  it("falls back to the legacy dashboard refresh Durable Object method during rollout", async () => {
-    const scheduleDashboardReplicaRefreshForUser = vi.fn(async (_input: {
-      userId: string;
-    }) => undefined);
-    const stub = createUserRunnerStub({
-      scheduleBrowserVaultRefreshForUser: undefined,
-      scheduleDashboardReplicaRefreshForUser,
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      scheduled: true as const,
-      userId: "member_123",
-    });
-    expect(scheduleDashboardReplicaRefreshForUser).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
@@ -1826,90 +2014,6 @@ describe("cloudflare worker routes", () => {
       error: "Invalid request.",
     });
     expect(stub.deleteHostedUserData).not.toHaveBeenCalled();
-  });
-
-  it("does not start another workspace invocation when the nudge is already running", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRunnerForUser: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: true,
-        kind: "processing-ensured",
-        inFlight: true,
-        nextAlarmAt: "2026-04-26T00:00:00.000Z",
-      })),
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({
-      inFlight: true,
-    });
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-  });
-
-  it("accepts runner nudges through the direct Durable Object nudge path", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRunnerForUser: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: true,
-        kind: "processing-ensured",
-        inFlight: false,
-        nextAlarmAt: "2026-04-26T00:00:00.000Z",
-      })),
-    });
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(202);
-    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
-    expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
-  });
-
-  it("rejects runner nudge route/user mismatches before touching the Durable Object", async () => {
-    const stub = createUserRunnerStub();
-
-    const response = await worker.fetch(
-      await signControlRequest(
-        new Request("https://runner.example.test/internal/users/member_123/nudge", {
-          method: "POST",
-        }),
-        { boundUserId: "member_other" },
-      ),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted execution bound user does not match the route user.",
-    });
-    expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
   });
 
   it("does not expose the legacy hosted-run nudge route", async () => {
@@ -2220,6 +2324,155 @@ type WorkerTestEnv = WorkerEnvironmentSource & {
 } & Record<string, unknown>;
 
 type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
+type RuntimeControlMetaRow = {
+  active_attempt_id: string | null;
+  backoff_until: string | null;
+  failure_count: number;
+  wake_at: string | null;
+};
+
+function createRuntimeControlRunnerHarness(input: {
+  ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
+  invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
+  workspace?: HostedWorkspaceState | null;
+} = {}) {
+  installOidcJwksFetch(async (requestInput) => {
+    const url = new URL(String(requestInput));
+    if (url.pathname === HOSTED_RUNTIME_WORKSPACE_PATH) {
+      return Response.json({
+        fetchedAt: "2026-04-27T00:00:00.000Z",
+        workspace: input.workspace ?? createRuntimeControlWorkspaceState("test-user"),
+      });
+    }
+
+    throw new Error(`Unexpected hosted runtime control fetch: ${String(requestInput)}`);
+  });
+
+  const alarms: string[] = [];
+  const values = new Map<string, unknown>();
+  const sql = createTestSqlStorage();
+  const storage: DurableObjectStorageLike = {
+    delete: vi.fn(async (key: string) => values.delete(key)),
+    deleteAlarm: vi.fn(async () => {
+      alarms.push("deleted");
+    }),
+    async get<T>(key: string): Promise<T | undefined> {
+      return values.get(key) as T | undefined;
+    },
+    getAlarm: vi.fn(async () => null),
+    async list<T>(options: { prefix?: string } = {}): Promise<Map<string, T>> {
+      const result = new Map<string, T>();
+      for (const [key, value] of values) {
+        if (!options.prefix || key.startsWith(options.prefix)) {
+          result.set(key, value as T);
+        }
+      }
+      return result;
+    },
+    async put<T>(key: string, value: T): Promise<void> {
+      values.set(key, value);
+    },
+    setAlarm: vi.fn(async (scheduledTime: number | Date) => {
+      const date = scheduledTime instanceof Date
+        ? scheduledTime
+        : new Date(scheduledTime);
+      alarms.push(date.toISOString());
+    }),
+    sql,
+  };
+  const waitUntil = vi.fn();
+  const invocationResults = [...(input.invocationResults ?? [])];
+  const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => {
+    const next = invocationResults.shift() ?? { nextWakeAt: null, status: "idle" };
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next;
+  });
+  const stub: HostedExecutionContainerStubLike = {
+    destroyInstance: vi.fn(async () => undefined),
+    ...(input.ensureProcessing
+      ? {
+          ensureProcessing: vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+            async (ensureInput) => {
+              if (ensureInput.invoke) {
+                return {
+                  action: ensureInput.activeRuntime ? "restarted" : "started",
+                  kind: "accepted",
+                  result: await invoke(ensureInput.invoke),
+                };
+              }
+
+              const result = await input.ensureProcessing?.(ensureInput);
+              return result ?? {
+                kind: "start-required",
+                reason: "no-active-child",
+              };
+            },
+          ),
+        }
+      : {}),
+    invoke,
+    smokeHealth: vi.fn(async () => ({
+      ok: true,
+      runnerBundle: null,
+      service: "runner",
+      status: 200,
+    })),
+  };
+  const namespace: HostedExecutionContainerNamespaceLike = {
+    getByName: vi.fn(() => stub),
+  };
+  const runner = new HostedUserRunner(
+    {
+      storage,
+      waitUntil(promise) {
+        waitUntil(promise);
+      },
+    } satisfies DurableObjectStateLike,
+    readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "60000",
+    })),
+    createBucketStore().api,
+    {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "test-openai-key",
+    },
+    namespace,
+  );
+
+  return {
+    alarms,
+    ensureProcessing: stub.ensureProcessing,
+    invoke,
+    namespace,
+    runner,
+    sql,
+    storage,
+    waitUntil,
+  };
+}
+
+function createRuntimeControlWorkspaceState(userId: string): HostedWorkspaceState {
+  return {
+    createdAt: "2026-04-27T00:00:00.000Z",
+    snapshotRef: null,
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    userId,
+    version: "7",
+  };
+}
+
+function readRunnerMetaForRuntimeControl(
+  sql: ReturnType<typeof createTestSqlStorage>,
+): RuntimeControlMetaRow {
+  return sql.exec<RuntimeControlMetaRow>(
+    `SELECT active_attempt_id, backoff_until, failure_count, wake_at
+     FROM runner_meta
+     WHERE singleton = 1`,
+  ).one();
+}
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
   return {
@@ -2479,6 +2732,11 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     nudgeHostedRunner,
     nudgeHostedRunnerForUser,
+    ensureRuntimeExecutionForUser: vi.fn(async () => ({
+      kind: "runtime_wake_sent" as const,
+      recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    })),
     runUntilIdleOrBudget: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
@@ -2505,7 +2763,8 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: string;
     }) => ({
       accepted: true as const,
-      scheduled: true as const,
+      removed: true,
+      scheduled: false,
       userId: input.userId,
     })),
     finishRuntimeWriteFenceForSmoke: vi.fn(async () => ({ completed: true })),
@@ -2576,6 +2835,39 @@ async function signControlRequest(
 
   if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
     headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
+
+  return new Request(request, { headers });
+}
+
+async function signWebCallbackControlRequest(
+  request: Request,
+  env: WorkerEnvironmentSource,
+  input: { boundUserId?: string | null } = {},
+): Promise<Request> {
+  const url = new URL(request.url);
+  const headers = new Headers(request.headers);
+  const derivedUserId = /^\/internal\/users\/(?<userId>[^/]+)/u.exec(url.pathname)?.groups?.userId;
+
+  if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
+
+  const callbackSigning = readHostedExecutionEnvironment(
+    asWorkerStringEnvironment(env),
+  ).webCallbackSigning;
+  const payload = await request.clone().text();
+  const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+    environment: callbackSigning,
+    method: request.method,
+    path: url.pathname,
+    payload,
+    search: url.search,
+    userId: headers.get(HOSTED_EXECUTION_USER_ID_HEADER),
+  });
+
+  for (const [key, value] of Object.entries(signatureHeaders)) {
+    headers.set(key, value);
   }
 
   return new Request(request, { headers });

@@ -82,11 +82,11 @@ export interface RunnerStateRecord {
   leaseGeneration: number;
   failureCount: number;
   nextWakeAt: string | null;
-  /** Legacy wake-pending projection. Delete after 2026-05-25; live code uses `wakePending`. */
+  /** Legacy inert wake projection retained for response compatibility. */
   pendingNudge: boolean;
-  /** Legacy wake-pending generation projection. Delete after 2026-05-25; live code uses `wakePending`. */
+  /** Legacy inert wake projection retained for response compatibility. */
   pendingNudgeGeneration: number;
-  /** Legacy wake-pending projection. Delete after 2026-05-25; live code uses `wakePending`. */
+  /** Legacy inert wake projection retained for response compatibility. */
   pendingWork: boolean;
   retry: RunnerRetryRecord;
   retryFailureCount: number;
@@ -102,11 +102,4 @@ export interface RunnerStateRecord {
     startedAt: string;
     workspaceVersion: string | null;
   } | null;
-}
-
-export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
-export const RETRY_MAX_DELAY_MS = 5 * 60_000;
-
-export function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
-  return Math.min(RETRY_MAX_DELAY_MS, baseDelayMs * (2 ** Math.max(0, attempts - 1)));
 }

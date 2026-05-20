@@ -27,8 +27,10 @@ import {
   appendHostedMailboxEnvelopeTx,
   type AppendHostedMailboxItemResult,
 } from "../hosted-mailbox/store";
-import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
-import type { HostedWebhookNudgeWorkflowInput } from "../hosted-onboarding/webhook-workflow-types";
+import {
+  signalHostedDeviceSyncMailboxRuntime,
+  type HostedDeviceSyncRecoverySignalIntent,
+} from "../hosted-orchestration/signal-runtime";
 import {
   buildHostedDeviceSyncWake,
   type HostedDeviceSyncWakeSource,
@@ -517,7 +519,7 @@ export async function appendHostedDeviceSyncDirtyWake(input: {
 
 async function persistHostedDeviceSyncWake(input: {
   wake: HostedExecutionWake;
-  runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
+  runnerNudgeIntent?: HostedDeviceSyncRecoverySignalIntent | null;
   startWorkflowOnDuplicate?: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
   persist(tx: HostedPrismaTransactionClient): Promise<void>;
@@ -574,21 +576,18 @@ async function persistHostedDeviceSyncWake(input: {
 async function startHostedDeviceSyncWakeWorkflowBestEffort(
   mailboxItemId: string,
   options: {
-    runnerNudgeIntent?: HostedWebhookNudgeWorkflowInput["runnerNudgeIntent"] | null;
+    runnerNudgeIntent?: HostedDeviceSyncRecoverySignalIntent | null;
   } = {},
 ): Promise<void> {
   try {
-    await startHostedWebhookNudgeWorkflow({
+    await signalHostedDeviceSyncMailboxRuntime({
       mailboxItemId,
-      ...(options.runnerNudgeIntent
-        ? { runnerNudgeIntent: options.runnerNudgeIntent }
-        : {}),
-      source: "device-sync",
+      recoveryIntent: options.runnerNudgeIntent ?? null,
     });
   } catch (error) {
-    console.warn("Hosted device-sync wake workflow start failed after mailbox append.", {
+    console.warn("Hosted device-sync wake Temporal signal failed after mailbox append.", {
       code: sanitizeHostedRuntimeErrorCode(
-        isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_NUDGE_WORKFLOW_START_FAILED",
+        isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
       ),
       mailboxItemIdPresent: mailboxItemId.length > 0,
     });

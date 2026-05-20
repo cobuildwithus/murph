@@ -9,6 +9,9 @@ import { after } from "next/server";
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
+  signalHostedBrowserVaultRefreshRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
   requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
@@ -173,12 +176,8 @@ async function scheduleBrowserVaultRefreshBestEffort(input: {
   userId: string;
 }): Promise<void> {
   try {
-    const client = readHostedExecutionControlClientIfConfigured();
-    if (!client) {
-      return;
-    }
-
-    await client.scheduleBrowserVaultRefresh({
+    await signalHostedBrowserVaultRefreshRuntime({
+      source: "browser-vault-session",
       userId: input.userId,
     });
   } catch {

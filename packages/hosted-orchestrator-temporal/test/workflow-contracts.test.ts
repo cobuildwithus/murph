@@ -1,0 +1,68 @@
+import { readFile } from "node:fs/promises";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  HOSTED_USER_RUNTIME_SIGNAL_NAME,
+  HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
+  HOSTED_USER_RUNTIME_TASK_QUEUE,
+  HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+} from "../src/index.js";
+import {
+  hostedUserRuntimeWorkflow,
+  runtimeSignal,
+  runtimeWorkflowStatus,
+} from "../src/workflows/hosted-user-runtime.js";
+
+describe("hosted runtime workflow contracts", () => {
+  it("exports stable Temporal names without a live server", () => {
+    expect(HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe(
+      "hostedUserRuntimeWorkflow",
+    );
+    expect(HOSTED_USER_RUNTIME_TASK_QUEUE).toBe("murph-hosted-runtime");
+    expect(HOSTED_USER_RUNTIME_SIGNAL_NAME).toBe("runtimeSignal");
+    expect(HOSTED_USER_RUNTIME_STATUS_QUERY_NAME).toBe(
+      "runtimeWorkflowStatus",
+    );
+  });
+
+  it("exposes the workflow, signal, and query definitions", () => {
+    expect(hostedUserRuntimeWorkflow).toEqual(expect.any(Function));
+    expect(HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe(
+      hostedUserRuntimeWorkflow.name,
+    );
+    expect(runtimeSignal).toBeDefined();
+    expect(runtimeWorkflowStatus).toBeDefined();
+  });
+
+  it("registers signal and query handlers before awaited workflow work", async () => {
+    const source = await readFile(
+      new URL("../src/workflows/hosted-user-runtime.ts", import.meta.url),
+      "utf8",
+    );
+
+    const signalHandlerIndex = source.indexOf(
+      "setHandler(runtimeSignal, machine.applySignal);",
+    );
+    const queryHandlerIndex = source.indexOf(
+      "setHandler(runtimeWorkflowStatus, machine.readStatus);",
+    );
+    const runIndex = source.indexOf("await machine.run();");
+
+    expect(signalHandlerIndex).toBeGreaterThanOrEqual(0);
+    expect(queryHandlerIndex).toBeGreaterThanOrEqual(0);
+    expect(runIndex).toBeGreaterThanOrEqual(0);
+    expect(signalHandlerIndex).toBeLessThan(runIndex);
+    expect(queryHandlerIndex).toBeLessThan(runIndex);
+  });
+
+  it("uses sleep for timer-only active wake rechecks", async () => {
+    const source = await readFile(
+      new URL("../src/workflows/hosted-user-runtime.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("await sleep(durationMs);");
+    expect(source).not.toContain("condition(() => false");
+  });
+});

@@ -6,28 +6,27 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import type { PrismaClient } from "@prisma/client";
 
-import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
+import { signalHostedUserRuntimeWorkflow } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
   computeHostedMailboxLaneLag,
   readHostedMailboxRedactedStatusRecord,
 } from "./lag";
 
-const DEFAULT_NUDGE_LIMIT = 25;
-const MAX_NUDGE_LIMIT = 250;
-const FIRST_LAG_NUDGE_AFTER_MS = 20 * 60_000;
-const LAG_NUDGE_REPEAT_MS = 30 * 60_000;
-const LAG_NUDGE_WINDOW_MS = 10 * 60_000;
-const NUDGE_TIMEOUT_MS = 5_000;
-const NUDGE_CONCURRENCY = 5;
+const DEFAULT_SIGNAL_LIMIT = 25;
+const MAX_SIGNAL_LIMIT = 250;
+const FIRST_LAG_SIGNAL_AFTER_MS = 20 * 60_000;
+const LAG_SIGNAL_REPEAT_MS = 30 * 60_000;
+const LAG_SIGNAL_WINDOW_MS = 10 * 60_000;
+const SIGNAL_CONCURRENCY = 5;
 
 export interface HostedMailboxLagSweeperResult {
   highWaterRows: number;
   laggedUsers: number;
-  nudgeAccepted: number;
-  nudgeAttempted: number;
-  nudgeLimit: number;
-  nudgeNotAccepted: number;
+  signalAccepted: number;
+  signalAttempted: number;
+  signalFailed: number;
+  signalLimit: number;
   skippedLaggedUsers: number;
 }
 
@@ -53,13 +52,17 @@ type HostedMailboxLaggedUserEntry = [string, HostedMailboxLaggedUser];
 export async function runHostedMailboxLagSweeper(input: {
   logger?: HostedMailboxLagSweeperLogger;
   now?: Date;
-  nudgeLimit?: number;
+  signalLimit?: number;
   prisma?: HostedMailboxLagSweeperPrisma;
 } = {}): Promise<HostedMailboxLagSweeperResult> {
   const prisma = input.prisma ?? getPrisma();
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
-  const nudgeLimit = normalizeLimit(input.nudgeLimit, DEFAULT_NUDGE_LIMIT, MAX_NUDGE_LIMIT);
+  const signalLimit = normalizeLimit(
+    input.signalLimit,
+    DEFAULT_SIGNAL_LIMIT,
+    MAX_SIGNAL_LIMIT,
+  );
   const highWaterRows = await prisma.hostedMailboxItem.groupBy({
     _max: {
       laneSeq: true,
@@ -132,15 +135,15 @@ export async function runHostedMailboxLagSweeper(input: {
 
   const laggedUsers = Array.from(laggedByUser.entries());
   const eligibleLaggedUsers = laggedUsers.filter(([, lagged]) =>
-    shouldNudgeHostedMailboxLaggedUser({
+    shouldSignalHostedMailboxLaggedUser({
       lagged,
       now,
     })
   );
-  const selectedLaggedUsers = selectRotatingNudgeWindow({
+  const selectedLaggedUsers = selectRotatingSignalWindow({
     laggedUsers: eligibleLaggedUsers,
     now,
-    nudgeLimit,
+    signalLimit,
   });
   const laggedLaneCount = countHostedMailboxLaggedLanes(laggedUsers);
   const eligibleLaggedLaneCount = countHostedMailboxEligibleLaggedLanes({
@@ -160,22 +163,26 @@ export async function runHostedMailboxLagSweeper(input: {
     laggedLaneCount,
     eligibleLaggedUsers: eligibleLaggedUsers.length,
     laggedUsers: laggedByUser.size,
-    nudgeLimit,
+    signalLimit,
     oldestUncheckpointedAgeMs,
     selectedLaggedUsers: selectedLaggedUsers.length,
   });
 
-  let nudgeAccepted = 0;
-  let nudgeAttempted = 0;
-  let nudgeNotAccepted = 0;
+  let signalAccepted = 0;
+  let signalAttempted = 0;
+  let signalFailed = 0;
 
   await runWithConcurrency(
     selectedLaggedUsers,
-    NUDGE_CONCURRENCY,
+    SIGNAL_CONCURRENCY,
     async ([userId, lagged]) => {
-      nudgeAttempted += 1;
+      signalAttempted += 1;
       const userFingerprint = fingerprintHostedMailboxLagUser(userId);
-      logger.warn("Hosted mailbox lag sweeper nudging runner for mailbox lag.", {
+      const eventId = buildHostedMailboxLagObservedEventId({
+        now,
+        userId,
+      });
+      logger.warn("Hosted mailbox lag sweeper signaling Temporal for mailbox lag.", {
         lanes: lagged.lanes.map(formatHostedMailboxLaggedLaneForLog),
         latestMailboxUpdatedAt: lagged.latestMailboxUpdatedAt?.toISOString() ?? null,
         oldestUncheckpointedAt: minHostedMailboxLaneDate(lagged.lanes)
@@ -183,32 +190,28 @@ export async function runHostedMailboxLagSweeper(input: {
         userFingerprint,
         workspaceCheckpointedAt: lagged.workspaceCheckpointedAt?.toISOString() ?? null,
       });
-      const nudgeInput = {
-        context: "hosted-mailbox-lag-sweeper",
-        timeoutMs: NUDGE_TIMEOUT_MS,
-        userId,
-      };
-      const nudge = await nudgeHostedAssistantRunnerUserBestEffortResult(nudgeInput);
 
-      if (nudge.accepted) {
-        nudgeAccepted += 1;
-        logger.info("Hosted mailbox lag sweeper runner nudge accepted.", {
-          alarmScheduled: nudge.alarmScheduled,
-          immediateDriveStarted: nudge.immediateDriveStarted,
-          inFlight: nudge.inFlight,
-          kind: nudge.kind,
-          nextAlarmAtPresent: nudge.nextAlarmAtPresent,
+      try {
+        await signalHostedUserRuntimeWorkflow({
+          signal: {
+            eventId,
+            kind: "mailbox_lag_observed",
+            source: "lag-sweeper",
+          },
+          userId,
+        });
+        signalAccepted += 1;
+        logger.info("Hosted mailbox lag sweeper Temporal signal accepted.", {
           userFingerprint,
         });
         return;
+      } catch (error) {
+        signalFailed += 1;
+        logger.warn("Hosted mailbox lag sweeper Temporal signal failed.", {
+          errorCode: classifyHostedMailboxLagSignalError(error),
+          userFingerprint,
+        });
       }
-
-      nudgeNotAccepted += 1;
-      logger.warn("Hosted mailbox lag sweeper runner nudge was not accepted.", {
-        configured: nudge.configured,
-        errorCode: nudge.errorCode,
-        userFingerprint,
-      });
     },
   );
 
@@ -218,8 +221,8 @@ export async function runHostedMailboxLagSweeper(input: {
       eligibleLaggedUsers: eligibleLaggedUsers.length,
       freshGraceUsers,
       limitSkippedUsers,
-      nudgeLimit,
       oldestUncheckpointedAgeMs,
+      signalLimit,
       skippedLaggedUsers,
     });
   }
@@ -227,27 +230,27 @@ export async function runHostedMailboxLagSweeper(input: {
   return {
     highWaterRows: highWaterRows.length,
     laggedUsers: laggedByUser.size,
-    nudgeAccepted,
-    nudgeAttempted,
-    nudgeLimit,
-    nudgeNotAccepted,
+    signalAccepted,
+    signalAttempted,
+    signalFailed,
+    signalLimit,
     skippedLaggedUsers,
   };
 }
 
-function shouldNudgeHostedMailboxLaggedUser(input: {
+function shouldSignalHostedMailboxLaggedUser(input: {
   lagged: HostedMailboxLaggedUser;
   now: Date;
 }): boolean {
   return input.lagged.lanes.some((lane) =>
-    shouldNudgeHostedMailboxLaggedLane({
+    shouldSignalHostedMailboxLaggedLane({
       lane,
       now: input.now,
     })
   );
 }
 
-function shouldNudgeHostedMailboxLaggedLane(input: {
+function shouldSignalHostedMailboxLaggedLane(input: {
   lane: HostedMailboxLaggedLane;
   now: Date;
 }): boolean {
@@ -261,22 +264,22 @@ function shouldNudgeHostedMailboxLaggedLane(input: {
     return true;
   }
 
-  if (lagAgeMs < FIRST_LAG_NUDGE_AFTER_MS) {
+  if (lagAgeMs < FIRST_LAG_SIGNAL_AFTER_MS) {
     return false;
   }
 
-  return ((lagAgeMs - FIRST_LAG_NUDGE_AFTER_MS) % LAG_NUDGE_REPEAT_MS)
-    < LAG_NUDGE_WINDOW_MS;
+  return ((lagAgeMs - FIRST_LAG_SIGNAL_AFTER_MS) % LAG_SIGNAL_REPEAT_MS)
+    < LAG_SIGNAL_WINDOW_MS;
 }
 
-function selectRotatingNudgeWindow(input: {
+function selectRotatingSignalWindow(input: {
   laggedUsers: HostedMailboxLaggedUserEntry[];
   now: Date;
-  nudgeLimit: number;
+  signalLimit: number;
 }): HostedMailboxLaggedUserEntry[] {
   const laggedUsers = [...input.laggedUsers].sort(([left], [right]) => left.localeCompare(right));
 
-  if (laggedUsers.length <= input.nudgeLimit) {
+  if (laggedUsers.length <= input.signalLimit) {
     return laggedUsers;
   }
 
@@ -284,7 +287,7 @@ function selectRotatingNudgeWindow(input: {
   const offset = minute % laggedUsers.length;
   const rotated = laggedUsers.slice(offset).concat(laggedUsers.slice(0, offset));
 
-  return rotated.slice(0, input.nudgeLimit);
+  return rotated.slice(0, input.signalLimit);
 }
 
 async function runWithConcurrency<T>(
@@ -309,6 +312,27 @@ function fingerprintHostedMailboxLagUser(userId: string): string {
     .update(userId)
     .digest("hex")
     .slice(0, 12);
+}
+
+function buildHostedMailboxLagObservedEventId(input: {
+  now: Date;
+  userId: string;
+}): string {
+  const minute = Math.floor(input.now.getTime() / 60_000);
+  const fingerprint = createHash("sha256")
+    .update(`mailbox-lag:${input.userId}:${minute}`)
+    .digest("hex")
+    .slice(0, 24);
+
+  return `mailbox-lag:${minute}:${fingerprint}`;
+}
+
+function classifyHostedMailboxLagSignalError(error: unknown): string {
+  if (error instanceof Error && error.name.trim()) {
+    return error.name.slice(0, 64);
+  }
+
+  return "UnknownError";
 }
 
 function maxNullableDate(left: Date | null, right: Date | null): Date | null {
@@ -397,7 +421,7 @@ function countHostedMailboxEligibleLaggedLanes(input: {
 }): number {
   return input.laggedUsers.reduce(
     (total, [, lagged]) => total + lagged.lanes.filter((lane) =>
-      shouldNudgeHostedMailboxLaggedLane({
+      shouldSignalHostedMailboxLaggedLane({
         lane,
         now: input.now,
       })

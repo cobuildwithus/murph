@@ -49,8 +49,9 @@ const mocks = vi.hoisted(() => ({
       usageGateDenied: false,
     };
   }),
-  startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
-    runId: "workflow-run-123",
+  signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalAccepted: true,
+    workflowId: "hosted-user-runtime:member_whatsapp_123",
   })),
 }));
 
@@ -74,8 +75,8 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
   nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 import {
@@ -353,18 +354,15 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       }),
       tx: prisma,
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "webhook:whatsapp:direct",
-      timeoutMs: 5000,
-      userId: "member_whatsapp_123",
-    });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
       source: "whatsapp",
     });
   });
 
-  it("falls back to the pointer nudge workflow for opted-in WhatsApp texts", async () => {
+  it("signals the hosted user runtime for opted-in WhatsApp texts", async () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
       alarmScheduled: false,
@@ -393,7 +391,8 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       routedTextCount: 1,
     });
 
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
       source: "whatsapp",
     });

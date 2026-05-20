@@ -16,7 +16,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
-} from "../hosted-runner/control";
+} from "../hosted-execution/user-data-delete";
 import { buildStoredTokenBundle } from "../device-sync/agent-session-token-bundle";
 import { composeHostedRuntimeOAuthDeviceSyncAccount } from "../device-sync/internal-runtime";
 import {

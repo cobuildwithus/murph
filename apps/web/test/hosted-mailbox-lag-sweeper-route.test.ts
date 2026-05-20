@@ -29,10 +29,10 @@ describe("hosted mailbox lag sweeper cron route", () => {
     mocks.runHostedMailboxLagSweeper.mockResolvedValue({
       highWaterRows: 4,
       laggedUsers: 1,
-      nudgeAccepted: 1,
-      nudgeAttempted: 1,
-      nudgeLimit: 50,
-      nudgeNotAccepted: 0,
+      signalAccepted: 1,
+      signalAttempted: 1,
+      signalFailed: 0,
+      signalLimit: 50,
       skippedLaggedUsers: 0,
     });
   });
@@ -50,10 +50,10 @@ describe("hosted mailbox lag sweeper cron route", () => {
       sweeper: {
         highWaterRows: 4,
         laggedUsers: 1,
-        nudgeAccepted: 1,
-        nudgeAttempted: 1,
-        nudgeLimit: 50,
-        nudgeNotAccepted: 0,
+        signalAccepted: 1,
+        signalAttempted: 1,
+        signalFailed: 0,
+        signalLimit: 50,
         skippedLaggedUsers: 0,
       },
     });

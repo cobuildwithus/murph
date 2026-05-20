@@ -1,0 +1,63 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  HostedRuntimeDemand,
+} from "../src/index.js";
+
+const continueAsNewError = new Error("continue-as-new");
+const condition = vi.fn(async () => undefined);
+const continueAsNew = vi.fn(async () => {
+  throw continueAsNewError;
+});
+const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
+const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
+const setHandler = vi.fn();
+const sleep = vi.fn(async () => undefined);
+const uuid4 = vi.fn(() => "orchestration-attempt-test");
+const readRuntimeDemand = vi.fn(async (): Promise<HostedRuntimeDemand> => ({
+  kind: "idle",
+  mailboxLag: [],
+  nextWakeAt: null,
+  workspace: null,
+}));
+const ensureCloudflareExecution = vi.fn();
+
+vi.mock("@temporalio/workflow", () => ({
+  condition,
+  continueAsNew,
+  defineQuery,
+  defineSignal,
+  proxyActivities: vi.fn(() => ({
+    ensureCloudflareExecution,
+    readRuntimeDemand,
+  })),
+  setHandler,
+  sleep,
+  uuid4,
+}));
+
+describe("hostedUserRuntimeWorkflow entrypoint", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("registers handlers before running awaited workflow work", async () => {
+    vi.resetModules();
+    const {
+      hostedUserRuntimeWorkflow,
+    } = await import("../src/workflows/hosted-user-runtime.js");
+
+    await expect(hostedUserRuntimeWorkflow({
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    })).rejects.toBe(continueAsNewError);
+
+    expect(setHandler).toHaveBeenCalledTimes(2);
+    expect(readRuntimeDemand).toHaveBeenCalledTimes(1);
+    const firstDemandOrder = readRuntimeDemand.mock.invocationCallOrder[0];
+    const handlerOrders = setHandler.mock.invocationCallOrder;
+    expect(handlerOrders[0]).toBeLessThan(firstDemandOrder);
+    expect(handlerOrders[1]).toBeLessThan(firstDemandOrder);
+    expect(condition).toHaveBeenCalledWith(expect.any(Function));
+  });
+});

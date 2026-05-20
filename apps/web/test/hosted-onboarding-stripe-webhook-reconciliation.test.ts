@@ -8,8 +8,8 @@ import {
 } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(),
   reconcileHostedStripeEventById: vi.fn(),
+  signalHostedRuntimeManualWakeBestEffortResult: vi.fn(),
   stripeEventsRetrieve: vi.fn(),
 }));
 
@@ -17,8 +17,9 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   reconcileHostedStripeEventById: mocks.reconcileHostedStripeEventById,
 }));
 
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
+  signalHostedRuntimeManualWakeBestEffortResult:
+    mocks.signalHostedRuntimeManualWakeBestEffortResult,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -44,14 +45,13 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       hostedExecutionEventId: "member.activated:member_123:stripe:evt_123",
       status: "completed",
     });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
+    mocks.signalHostedRuntimeManualWakeBestEffortResult.mockResolvedValue({
       accepted: true,
-      alarmScheduled: false,
       configured: true,
       errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      nextAlarmAtPresent: false,
+      signalAccepted: true,
+      usageGateDenied: false,
+      workflowIdPresent: true,
     });
     mocks.stripeEventsRetrieve.mockResolvedValue({
       data: {
@@ -199,8 +199,9 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         kind: "member.activated",
       },
     });
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "stripe.webhook:workflow",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
+      eventSource: "stripe.webhook:workflow",
+      source: "admin",
       timeoutMs: 5_000,
       userId: "member_123",
     });
@@ -218,8 +219,9 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       required: true,
     });
 
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "stripe.webhook:workflow",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
+      eventSource: "stripe.webhook:workflow",
+      source: "admin",
       timeoutMs: 5_000,
       userId: "member_123",
     });
@@ -236,7 +238,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       required: false,
     });
 
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).not.toHaveBeenCalled();
   });
 });
 

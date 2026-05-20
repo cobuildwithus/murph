@@ -4,7 +4,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
+import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -413,8 +413,9 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  await nudgeHostedAssistantRunnerUserBestEffortResult({
-    context: "billing.start-paid-pulse",
+  await signalHostedRuntimeManualWakeBestEffort({
+    eventSource: "billing.start-paid-pulse",
+    source: "user",
     userId: input.memberId,
   });
 }

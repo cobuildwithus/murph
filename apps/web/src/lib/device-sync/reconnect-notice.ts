@@ -19,7 +19,9 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "../hosted-onboarding/messaging-state";
-import { startHostedWebhookNudgeWorkflow } from "../hosted-onboarding/webhook-workflow-start";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import {
   createHostedDeviceConnectIntentTx,
@@ -183,12 +185,12 @@ export async function startHostedDeviceSyncReconnectNoticeWorkflowBestEffort(
   mailboxItemId: string,
 ): Promise<void> {
   try {
-    await startHostedWebhookNudgeWorkflow({
+    await signalHostedMailboxAppendRuntime({
       mailboxItemId,
       source: "device-sync",
     });
   } catch (error) {
-    console.warn("Hosted device-sync reconnect notice workflow start failed after mailbox append.", {
+    console.warn("Hosted device-sync reconnect notice Temporal signal failed after mailbox append.", {
       errorName: error instanceof Error ? error.name : typeof error,
       mailboxItemIdPresent: mailboxItemId.length > 0,
     });

@@ -125,6 +125,13 @@ export {
   parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
+export {
+  parseHostedRuntimeDemand,
+  parseHostedRuntimeDemandRequest,
+  parseHostedRuntimeEnsureExecutionRequest,
+  parseHostedRuntimeEnsureExecutionResponse,
+  parseHostedRuntimeSignal,
+} from "./parsers/orchestration-control.ts";
 
 export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const record = requireObject(value, "Hosted execution wake");

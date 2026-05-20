@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   prismaTx: {
     __tx: true,
   },
-  startHostedWebhookNudgeWorkflow: vi.fn(),
+  signalHostedDeviceSyncMailboxRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -29,8 +29,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedDeviceSyncMailboxRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
 }));
 
 import { appendHostedDeviceSyncDirtyWake } from "@/src/lib/device-sync/wake-service";
@@ -42,6 +42,10 @@ describe("appendHostedDeviceSyncDirtyWake", () => {
       async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
         await callback(mocks.prismaTx),
     );
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_dirty_1",
+    });
   });
 
   it("uses the dedupe key as dirty wake identity across recovery sweep times", async () => {
@@ -72,11 +76,10 @@ describe("appendHostedDeviceSyncDirtyWake", () => {
     );
     expect(eventIds[0]).toBe(eventIds[1]);
     expect(eventIds[2]).not.toBe(eventIds[0]);
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledTimes(3);
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(3);
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: eventIds[0],
-      runnerNudgeIntent: "device-sync-dirty-recovery",
-      source: "device-sync",
+      recoveryIntent: "device-sync-dirty-recovery",
     });
   });
 });

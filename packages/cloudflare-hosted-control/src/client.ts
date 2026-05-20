@@ -11,23 +11,25 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedRunnerNudgeResult,
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
+  parseHostedRuntimeEnsureExecutionRequest,
+  parseHostedRuntimeEnsureExecutionResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
-  HostedAiUsageAllowDecision,
-  HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimeEnsureExecutionRequest,
+  HostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
-  buildCloudflareHostedControlBrowserVaultRefreshPath,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlRuntimeEnsureExecutionPath,
   buildCloudflareHostedControlUserDataDeletionPath,
-  buildCloudflareHostedControlUserRunnerNudgePath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
 import { requireCloudflareHostedControlUserId } from "./user-id.ts";
@@ -68,11 +70,11 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
-export interface CloudflareHostedControlBrowserVaultRefreshResult {
-  accepted: true;
-  scheduled: true;
-  userId: string;
-}
+export type CloudflareHostedControlRuntimeEnsureExecutionRequest =
+  HostedRuntimeEnsureExecutionRequest;
+
+export type CloudflareHostedControlRuntimeEnsureExecutionResponse =
+  HostedRuntimeEnsureExecutionResponse;
 
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
@@ -82,11 +84,10 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  nudgeUserRunner(
+  ensureRuntimeExecution(
     userId: string,
-    input?: { aiUsageAllowDecision?: HostedAiUsageAllowDecision | null },
-  ): Promise<HostedRunnerNudgeResult>;
-  scheduleBrowserVaultRefresh(input: { userId: string }): Promise<CloudflareHostedControlBrowserVaultRefreshResult>;
+    input: CloudflareHostedControlRuntimeEnsureExecutionRequest,
+  ): Promise<CloudflareHostedControlRuntimeEnsureExecutionResponse>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -183,6 +184,29 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    ensureRuntimeExecution(userId, input) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+      const request = parseHostedRuntimeEnsureExecutionRequest(input);
+      const body = JSON.stringify(request);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime ensure execution",
+        parse: parseHostedRuntimeEnsureExecutionResponse,
+        path: buildCloudflareHostedControlRuntimeEnsureExecutionPath(expectedUserId),
+        request: {
+          body,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getRunnerStatus(userId) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
@@ -195,56 +219,6 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    nudgeUserRunner(userId, input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(userId);
-      const body = JSON.stringify({
-        ...(input?.aiUsageAllowDecision
-          ? { aiUsageAllowDecision: input.aiUsageAllowDecision }
-          : {}),
-      });
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "runner nudge",
-        parse: parseHostedRunnerNudgeResult,
-        path: buildCloudflareHostedControlUserRunnerNudgePath(expectedUserId),
-        request: {
-          body,
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    scheduleBrowserVaultRefresh(input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "browser vault refresh",
-        parse: (value) =>
-          parseCloudflareHostedControlBrowserVaultRefreshResult(value, {
-            userId: expectedUserId,
-          }),
-        path: buildCloudflareHostedControlBrowserVaultRefreshPath(expectedUserId),
-        request: {
-          body: "{}",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -407,33 +381,6 @@ function parseCloudflareHostedControlBrowserVaultSession(
     replicaKeyEnvelope,
     replicaRef,
     state,
-  };
-}
-
-function parseCloudflareHostedControlBrowserVaultRefreshResult(
-  value: unknown,
-  expected: {
-    userId: string;
-  },
-): CloudflareHostedControlBrowserVaultRefreshResult {
-  const record = requireRecord(value, "Cloudflare browser-vault refresh result");
-
-  if (record.accepted !== true) {
-    throw new TypeError("Cloudflare browser-vault refresh result accepted must be true.");
-  }
-
-  const userId = requireString(record.userId, "Cloudflare browser-vault refresh result userId");
-  assertMatchingString(
-    userId,
-    expected.userId,
-    "Cloudflare browser-vault refresh result userId",
-    "the requested userId",
-  );
-
-  return {
-    accepted: true,
-    scheduled: requireTrue(record.scheduled, "Cloudflare browser-vault refresh result scheduled"),
-    userId,
   };
 }
 
@@ -819,14 +766,6 @@ function requireBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
-}
-
-function requireTrue(value: unknown, label: string): true {
-  if (value !== true) {
-    throw new TypeError(`${label} must be true.`);
-  }
-
-  return true;
 }
 
 function requireNumber(value: unknown, label: string): number {

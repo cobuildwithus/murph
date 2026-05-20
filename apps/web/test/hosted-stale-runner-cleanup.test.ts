@@ -6,7 +6,7 @@ import {
   type HostedStaleRunnerCleanupDeleteFn,
   type HostedStaleRunnerCleanupPrisma,
 } from "@/src/lib/hosted-execution/stale-runner-cleanup";
-import type { HostedRunnerUserDataDeletionBestEffortResult } from "@/src/lib/hosted-runner/control";
+import type { HostedRunnerUserDataDeletionBestEffortResult } from "@/src/lib/hosted-execution/user-data-delete";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 describe("readHostedStaleRunnerCleanupCandidateIds", () => {

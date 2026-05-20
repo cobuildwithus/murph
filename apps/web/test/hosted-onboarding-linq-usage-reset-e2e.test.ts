@@ -103,8 +103,9 @@ const mocks = vi.hoisted(() => {
       startedAtMs: 0,
       step,
     })),
-    startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
-      runId: "workflow-run-usage-reset",
+    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_usage_reset",
     })),
     upsertHostedMemberHomeLinqBindingTx: vi.fn(async () => undefined),
   };
@@ -179,8 +180,8 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -335,8 +336,9 @@ describe("hosted Linq usage reset e2e", () => {
       ok: true,
       status: 204,
     });
-    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
-      runId: "workflow-run-usage-reset",
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_usage_reset",
     });
   });
 
@@ -390,7 +392,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
       limitNoticeSentAt: new Date("2026-04-30T12:00:00.000Z"),
@@ -455,22 +457,9 @@ describe("hosted Linq usage reset e2e", () => {
       tx: usage.prisma,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      aiUsageAllowDecision: expect.objectContaining({
-        allowed: true,
-        schema: "murph.hosted-ai-usage-allow-decision.v1",
-        signature: expect.objectContaining({
-          alg: "HMAC-SHA256",
-          keyId: "usage-reset-test-key",
-        }),
-        userId: MEMBER_ID,
-      }),
-      context: "webhook:linq:direct",
-      timeoutMs: 5000,
-      userId: MEMBER_ID,
-    });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
       source: "linq",
     });
@@ -525,7 +514,7 @@ describe("hosted Linq usage reset e2e", () => {
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 });

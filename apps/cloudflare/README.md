@@ -2,11 +2,12 @@
 
 Cloudflare-hosted execution plane for the hosted Murph path.
 
-`apps/web` is the canonical owner of onboarding, billing, auth, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated nudge/control requests, restores encrypted runtime state, invokes workspace-runtime work, and writes the next encrypted workspace checkpoint through hosted-runtime callbacks.
+`apps/web` is the canonical owner of onboarding, billing, auth, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated execution/control requests, restores encrypted runtime state, invokes workspace-runtime work, and writes the next encrypted workspace checkpoint through hosted-runtime callbacks.
 
 ## What This App Owns
 
-- Vercel OIDC-authenticated nudge/control requests from `apps/web`
+- signed Temporal ensure-execution requests plus Vercel OIDC-authenticated
+  browser/session/status/deletion control requests from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, legacy encrypted artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
@@ -26,9 +27,9 @@ Public routes:
 
 Internal control routes:
 
-- `POST /internal/users/:userId/nudge` persists a runner nudge for a user, starts an idle Durable Object runner drive immediately, and returns the runner nudge result
+- `POST /internal/users/:userId/runtime/ensure-execution` is the signed
+  Temporal execution adapter; it invokes or wakes only the bound user's runtime
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
-- `POST /internal/users/:userId/browser-vault/refresh` accepts web's after-response stale-replica hint and schedules low-priority `browser_vault_refresh` runtime work; it is not a separate browser-vault worker or queue
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
@@ -108,15 +109,11 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
-invocations for a Durable Object. When the cap is reached, the runner stops the
-fast retry loop and schedules a slow recovery probe instead of deleting the
-alarm. The capped probe runs on a 30-minute cadence. Earlier nudges keep the
-existing capped probe unless web-owned mailbox high-water metadata proves a
-newer mailbox row arrived after the last runner failure; that fresh demand
-clears stale retry state and starts normal processing immediately. A due probe
-may read web-owned mailbox/workspace status before deciding whether durable work
-still exists. Successful invocations, fresh mailbox demand, and caught-up capped
-probes reset the counter.
+invocations for a Durable Object. Temporal decides when durable work is due by
+reading web-owned demand; Cloudflare does not reread web mailbox/workspace
+status as a scheduler. Cloudflare alarms remain watchdogs for active write
+fences and recovery bookkeeping, while successful runtime completion or a
+replacement invocation clears stale execution-failure state.
 
 Optional execution vars and secrets:
 

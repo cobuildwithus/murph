@@ -73,6 +73,9 @@
       "@murphai/hosted-execution/legacy-dashboard-replica": [
         "packages/hosted-execution/src/legacy-dashboard-replica.ts"
       ],
+      "@murphai/hosted-execution/orchestration-control": [
+        "packages/hosted-execution/src/orchestration-control.ts"
+      ],
       "@murphai/hosted-execution/parsers": [
         "packages/hosted-execution/src/parsers.ts"
       ],
@@ -87,6 +90,21 @@
       ],
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
+      ],
+      "@murphai/hosted-orchestrator-temporal": [
+        "packages/hosted-orchestrator-temporal/src/index.ts"
+      ],
+      "@murphai/hosted-orchestrator-temporal/client": [
+        "packages/hosted-orchestrator-temporal/src/client/signal-hosted-user-runtime.ts"
+      ],
+      "@murphai/hosted-orchestrator-temporal/client/temporal-client": [
+        "packages/hosted-orchestrator-temporal/src/client/temporal-client.ts"
+      ],
+      "@murphai/hosted-orchestrator-temporal/worker": [
+        "packages/hosted-orchestrator-temporal/src/worker.ts"
+      ],
+      "@murphai/hosted-orchestrator-temporal/workflows/hosted-user-runtime": [
+        "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts"
       ],
       "@murphai/hosted-local-harness": [
         "packages/hosted-local-harness/src/index.ts"

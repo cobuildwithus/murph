@@ -47,8 +47,9 @@ const mocks = vi.hoisted(() => {
         usageGateDenied: false,
       };
     }),
-    startHostedWebhookNudgeWorkflow: vi.fn(async () => ({
-      runId: "workflow-run-123",
+    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
     })),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
@@ -160,8 +161,8 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
   nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -324,12 +325,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "webhook:telegram:direct",
-      timeoutMs: 5000,
-      userId: "member_telegram_123",
-    });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
       source: "telegram",
     });
@@ -739,14 +737,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:654",
       source: "telegram",
     });
   });
 
-  it("falls back to a pointer workflow for active-member Telegram messages when direct runner nudge is not accepted", async () => {
+  it("signals Temporal for active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
@@ -809,12 +808,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "webhook:telegram:direct",
-      timeoutMs: 5000,
-      userId: "member_telegram_123",
-    });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:655",
       source: "telegram",
     });

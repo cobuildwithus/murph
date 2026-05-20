@@ -1,51 +1,22 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
-interface MockAssistantNudgeResult {
-  accepted: boolean;
-  alarmScheduled: boolean | null;
-  kind: "caught-up" | "processing-ensured" | "retry-scheduled" | null;
-  configured: boolean;
-  errorCode: string | null;
-  immediateDriveStarted: boolean | null;
-  inFlight: boolean | null;
-  nextAlarmAtPresent: boolean | null;
-  usageGateDenied: boolean;
-}
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   groupBy: vi.fn(),
   hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
   mailboxFindFirst: vi.fn(),
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
-  ): Promise<MockAssistantNudgeResult> => {
-    void input;
-    return {
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      kind: "caught-up",
-      nextAlarmAtPresent: false,
-      usageGateDenied: false,
-    };
-  }),
-  nudgeHostedRunnerUserBestEffortResult: vi.fn(),
+  signalHostedUserRuntimeWorkflow: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffortResult,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedUserRuntimeWorkflow: mocks.signalHostedUserRuntimeWorkflow,
 }));
 
 type LagSweeperModule = typeof import("../src/lib/hosted-mailbox/lag-sweeper");
@@ -71,22 +42,13 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.mailboxFindFirst.mockResolvedValue({
       updatedAt: new Date("2026-05-02T00:01:00.000Z"),
     });
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: true,
-      alarmScheduled: true,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: true,
-      inFlight: false,
-      nextAlarmAtPresent: true,
+    mocks.signalHostedUserRuntimeWorkflow.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_lag_1",
     });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => ({
-      ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
-      usageGateDenied: false,
-    }));
   });
 
-  it("nudges lagged users from mailbox item high-water rows", async () => {
+  it("signals lagged users from mailbox item high-water rows", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -124,7 +86,7 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
       now: new Date("1970-01-01T00:00:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
     expect(mocks.groupBy).toHaveBeenCalledWith({
@@ -146,23 +108,29 @@ describe("hosted mailbox lag sweeper", () => {
         },
       },
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "hosted-mailbox-lag-sweeper",
-      timeoutMs: 5000,
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
+      signal: {
+        eventId: expectedLagEventId(
+          "member_lag_1",
+          new Date("1970-01-01T00:00:00.000Z"),
+        ),
+        kind: "mailbox_lag_observed",
+        source: "lag-sweeper",
+      },
       userId: "member_lag_1",
     });
     expect(result).toEqual({
       highWaterRows: 3,
       laggedUsers: 1,
-      nudgeAccepted: 1,
-      nudgeAttempted: 1,
-      nudgeLimit: 5,
-      nudgeNotAccepted: 0,
+      signalAccepted: 1,
+      signalAttempted: 1,
+      signalFailed: 0,
+      signalLimit: 5,
       skippedLaggedUsers: 0,
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted mailbox lag sweeper nudging runner for mailbox lag.",
+      "Hosted mailbox lag sweeper signaling Temporal for mailbox lag.",
       expect.objectContaining({
         userFingerprint: expect.stringMatching(/^[0-9a-f]{12}$/u),
       }),
@@ -170,7 +138,7 @@ describe("hosted mailbox lag sweeper", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_lag_1");
   });
 
-  it("nudges when only foreground import logs reached mailbox high water", async () => {
+  it("signals when only foreground import logs reached mailbox high water", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -195,22 +163,22 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger: buildLogger(),
       now: new Date("2026-05-02T00:21:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       highWaterRows: 2,
       laggedUsers: 1,
-      nudgeAccepted: 1,
-      nudgeAttempted: 1,
-      nudgeLimit: 5,
-      nudgeNotAccepted: 0,
+      signalAccepted: 1,
+      signalAttempted: 1,
+      signalFailed: 0,
+      signalLimit: 5,
       skippedLaggedUsers: 0,
     });
   });
 
-  it("rotates the nudge window when lagged users exceed the per-run limit", async () => {
+  it("rotates the signal window when lagged users exceed the per-run limit", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({ lane: "conversation", maxSeq: 1n, userId: "member_lag_1" }),
       buildHighWater({ lane: "conversation", maxSeq: 1n, userId: "member_lag_2" }),
@@ -226,12 +194,20 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
       now: new Date("1970-01-01T00:01:00.000Z"),
-      nudgeLimit: 1,
+      signalLimit: 1,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith(
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
+        signal: {
+          eventId: expectedLagEventId(
+            "member_lag_2",
+            new Date("1970-01-01T00:01:00.000Z"),
+          ),
+          kind: "mailbox_lag_observed",
+          source: "lag-sweeper",
+        },
         userId: "member_lag_2",
       }),
     );
@@ -242,7 +218,7 @@ describe("hosted mailbox lag sweeper", () => {
         eligibleLaggedUsers: 3,
         freshGraceUsers: 0,
         limitSkippedUsers: 2,
-        nudgeLimit: 1,
+        signalLimit: 1,
         skippedLaggedUsers: 2,
       }),
     );
@@ -272,7 +248,7 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger: buildLogger(),
       now: new Date("2026-05-02T00:25:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
     expect(mocks.mailboxFindFirst).toHaveBeenCalledWith({
@@ -290,11 +266,11 @@ describe("hosted mailbox lag sweeper", () => {
         userId: "member_steady_inbound",
       },
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
     expect(result.skippedLaggedUsers).toBe(0);
   });
 
-  it("keeps lag nudges on a bounded retry cadence after the first wide window", async () => {
+  it("keeps lag signals on a bounded retry cadence after the first wide window", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -319,22 +295,22 @@ describe("hosted mailbox lag sweeper", () => {
     const skipped = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
       now: new Date("2026-05-02T00:35:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedUserRuntimeWorkflow).not.toHaveBeenCalled();
     expect(skipped.skippedLaggedUsers).toBe(1);
 
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockClear();
+    mocks.signalHostedUserRuntimeWorkflow.mockClear();
     logger.warn.mockClear();
 
     const eligible = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
       now: new Date("2026-05-02T00:50:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
     expect(eligible.skippedLaggedUsers).toBe(0);
   });
 
@@ -371,18 +347,18 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger: buildLogger(),
       now: new Date("2026-05-02T00:25:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       laggedUsers: 1,
-      nudgeAttempted: 1,
+      signalAttempted: 1,
       skippedLaggedUsers: 0,
     });
   });
 
-  it("lets fresh mailbox lag reach the normal checkpoint path before nudging", async () => {
+  it("lets fresh mailbox lag reach the normal checkpoint path before signaling", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -405,17 +381,17 @@ describe("hosted mailbox lag sweeper", () => {
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger,
       now: new Date("2026-05-02T00:05:00.000Z"),
-      nudgeLimit: 5,
+      signalLimit: 5,
     });
 
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedUserRuntimeWorkflow).not.toHaveBeenCalled();
     expect(result).toEqual({
       highWaterRows: 1,
       laggedUsers: 1,
-      nudgeAccepted: 0,
-      nudgeAttempted: 0,
-      nudgeLimit: 5,
-      nudgeNotAccepted: 0,
+      signalAccepted: 0,
+      signalAttempted: 0,
+      signalFailed: 0,
+      signalLimit: 5,
       skippedLaggedUsers: 1,
     });
     expect(logger.warn).toHaveBeenCalledWith(
@@ -424,13 +400,13 @@ describe("hosted mailbox lag sweeper", () => {
         eligibleLaggedUsers: 0,
         freshGraceUsers: 1,
         limitSkippedUsers: 0,
-        nudgeLimit: 5,
+        signalLimit: 5,
         skippedLaggedUsers: 1,
       }),
     );
   });
 
-  it("does not nudge the regular runner when assistant usage is capped for conversation-only lag", async () => {
+  it("signals Temporal for conversation-only lag without signed usage decisions", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -446,36 +422,34 @@ describe("hosted mailbox lag sweeper", () => {
         userId: "member_capped_lag",
       }),
     ]);
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: null,
-      kind: null,
-      configured: true,
-      errorCode: "AI_USAGE_GATE_DENIED",
-      immediateDriveStarted: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-      usageGateDenied: true,
-    });
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger: buildLogger(),
       now: new Date("2026-05-02T00:21:00.000Z"),
     });
 
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "hosted-mailbox-lag-sweeper",
-      timeoutMs: 5000,
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
+      signal: {
+        eventId: expectedLagEventId(
+          "member_capped_lag",
+          new Date("2026-05-02T00:21:00.000Z"),
+        ),
+        kind: "mailbox_lag_observed",
+        source: "lag-sweeper",
+      },
       userId: "member_capped_lag",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    const signal = mocks.signalHostedUserRuntimeWorkflow.mock.calls[0]?.[0]
+      ?.signal as Record<string, unknown>;
+    expect(Object.keys(signal).sort()).toEqual(["eventId", "kind", "source"]);
     expect(result).toMatchObject({
-      nudgeAttempted: 1,
-      nudgeNotAccepted: 1,
+      signalAccepted: 1,
+      signalAttempted: 1,
+      signalFailed: 0,
     });
   });
 
-  it("does not nudge the regular runner when capped assistant lag is mixed with system lag", async () => {
+  it("signals Temporal when conversation lag is mixed with system lag", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -497,36 +471,31 @@ describe("hosted mailbox lag sweeper", () => {
         userId: "member_capped_mixed_lag",
       }),
     ]);
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValueOnce({
-      accepted: false,
-      alarmScheduled: null,
-      kind: null,
-      configured: true,
-      errorCode: "AI_USAGE_GATE_DENIED",
-      immediateDriveStarted: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-      usageGateDenied: true,
-    });
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({
       logger: buildLogger(),
       now: new Date("2026-05-02T00:21:00.000Z"),
     });
 
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "hosted-mailbox-lag-sweeper",
-      timeoutMs: 5000,
+    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
+      signal: {
+        eventId: expectedLagEventId(
+          "member_capped_mixed_lag",
+          new Date("2026-05-02T00:21:00.000Z"),
+        ),
+        kind: "mailbox_lag_observed",
+        source: "lag-sweeper",
+      },
       userId: "member_capped_mixed_lag",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      nudgeAttempted: 1,
-      nudgeNotAccepted: 1,
+      signalAccepted: 1,
+      signalAttempted: 1,
+      signalFailed: 0,
     });
   });
 
-  it("logs a warning when a lag nudge is not accepted", async () => {
+  it("logs a warning when a lag signal fails", async () => {
     mocks.groupBy.mockResolvedValue([
       buildHighWater({
         lane: "conversation",
@@ -542,16 +511,9 @@ describe("hosted mailbox lag sweeper", () => {
         userId: "member_lag_1",
       }),
     ]);
-    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
-      accepted: false,
-      alarmScheduled: null,
-      kind: null,
-      configured: true,
-      errorCode: "TimeoutError",
-      immediateDriveStarted: null,
-      inFlight: null,
-      nextAlarmAtPresent: null,
-    });
+    const error = new Error("network details are intentionally not logged");
+    error.name = "TemporalUnavailable";
+    mocks.signalHostedUserRuntimeWorkflow.mockRejectedValueOnce(error);
     const logger = buildLogger();
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({
@@ -559,16 +521,31 @@ describe("hosted mailbox lag sweeper", () => {
       now: new Date("2026-05-02T00:21:00.000Z"),
     });
 
-    expect(result.nudgeNotAccepted).toBe(1);
+    expect(result.signalFailed).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted mailbox lag sweeper runner nudge was not accepted.",
+      "Hosted mailbox lag sweeper Temporal signal failed.",
       {
-        configured: true,
-        errorCode: "TimeoutError",
+        errorCode: "TemporalUnavailable",
         userFingerprint: expect.stringMatching(/^[0-9a-f]{12}$/u),
       },
     );
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_lag_1");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("network details");
+  });
+
+  it("does not import Cloudflare runner nudge helpers", async () => {
+    const source = await readFile(
+      new URL("../src/lib/hosted-mailbox/lag-sweeper.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toContain("hosted-runner/assistant-nudge");
+    expect(source).not.toContain("hosted-runner/control");
+    expect(source).not.toContain([
+      "nudgeHosted",
+      "AssistantRunner",
+      "UserBestEffortResult",
+    ].join(""));
   });
 });
 
@@ -604,4 +581,14 @@ function buildLogger() {
     info: vi.fn(),
     warn: vi.fn(),
   };
+}
+
+function expectedLagEventId(userId: string, now: Date): string {
+  const minute = Math.floor(now.getTime() / 60_000);
+  const fingerprint = createHash("sha256")
+    .update(`mailbox-lag:${userId}:${minute}`)
+    .digest("hex")
+    .slice(0, 24);
+
+  return `mailbox-lag:${minute}:${fingerprint}`;
 }

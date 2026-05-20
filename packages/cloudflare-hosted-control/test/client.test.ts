@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
 
 import {
   type CloudflareHostedControlClientOptions,
@@ -23,9 +22,8 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
       "deleteUserData",
+      "ensureRuntimeExecution",
       "getRunnerStatus",
-      "nudgeUserRunner",
-      "scheduleBrowserVaultRefresh",
     ]);
   });
 
@@ -80,15 +78,13 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => client.getRunnerStatus("  \t")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
-    expect(() => client.nudgeUserRunner("")).toThrow(
-      "Cloudflare hosted control userId must not be blank.",
-    );
     expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
-      client.scheduleBrowserVaultRefresh({
-        userId: "",
+      client.ensureRuntimeExecution("", {
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
       })
     ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
@@ -521,122 +517,76 @@ describe("createCloudflareHostedControlClient", () => {
     );
   });
 
-  it("posts runner nudge requests without run identifiers or committed sequence fields", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const result = createRunnerNudgeResult({
-      accepted: true,
-      inFlight: true,
-      kind: "processing-ensured",
-    });
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse(result);
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.nudgeUserRunner("user_123")).resolves.toEqual(result);
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/nudge");
-    expect(request.init?.method).toBe("POST");
-    expect(request.init?.body).toBe("{}");
-    expectNoRunContractFields(result);
-  });
-
-  it("can attach a signed AI usage allow decision to runner nudge requests", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const result = createRunnerNudgeResult({
-      accepted: true,
-    });
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse(result);
-      }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
-      timeoutMs: 2_500,
-    });
-    const aiUsageAllowDecision: HostedAiUsageAllowDecision = {
-      allowed: true,
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      nonce: "0123456789abcdef0123456789abcdef",
-      schema: "murph.hosted-ai-usage-allow-decision.v1" as const,
-      signature: {
-        alg: "HMAC-SHA256" as const,
-        keyId: "test",
-        signature: "signature",
-      },
-      userId: "user_123",
-    };
-
-    await expect(client.nudgeUserRunner("user_123", {
-      aiUsageAllowDecision,
-    })).resolves.toEqual(result);
-
-    const request = requireObservedRequest(observedRequest);
-    expect(JSON.parse(String(request.init?.body))).toEqual({
-      aiUsageAllowDecision,
-    });
-  });
-
-  it("schedules browser vault refreshes without a workspace source hash", async () => {
+  it("posts runtime ensure-execution requests with the bound user header", async () => {
     let observedRequest: ObservedRequest | null = null;
     const result = {
-      accepted: true,
-      scheduled: true,
-      userId: "user_123",
-    };
+      kind: "runtime_wake_sent",
+      recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    } as const;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
         return createJsonResponse(result);
       }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
+      getBearerToken: async () => "test-token",
       timeoutMs: 2_500,
     });
 
-    await expect(client.scheduleBrowserVaultRefresh({
-      userId: "user_123",
+    await expect(client.ensureRuntimeExecution("test-user", {
+      orchestrationAttemptId: "orchestration-attempt-test",
+      reason: "nudge",
     })).resolves.toEqual(result);
 
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/browser-vault/refresh");
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/test-user/runtime/ensure-execution");
     expect(request.init?.method).toBe("POST");
-    expect(request.init?.body).toBe("{}");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(JSON.parse(String(request.init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration-attempt-test",
+      reason: "nudge",
+    });
+    expect(new Headers(request.init?.headers).has("authorization")).toBe(true);
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("test-user");
   });
 
-  it("rejects browser vault refresh responses without a true scheduled flag", async () => {
-    for (const result of [
-      {
-        accepted: true,
-        userId: "user_123",
-      },
-      {
-        accepted: true,
-        scheduled: false,
-        userId: "user_123",
-      },
-    ]) {
-      const client = createCloudflareHostedControlClient({
-        baseUrl: "https://runner.example.test/root/",
-        fetchImpl: vi.fn(async () => createJsonResponse(result)) as typeof fetch,
-        getBearerToken: async () => "Bearer token-123",
-        timeoutMs: 2_500,
-      });
+  it("parses completed runtime ensure-execution responses", async () => {
+    const result = {
+      action: "started",
+      kind: "runtime_completed",
+      runtimeAttemptId: "runtime-attempt-test",
+      runtimeResultNextWakeAt: null,
+      runtimeStatus: "idle",
+    } as const;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(result)) as typeof fetch,
+      getBearerToken: async () => "test-token",
+      timeoutMs: 2_500,
+    });
 
-      await expect(client.scheduleBrowserVaultRefresh({
-        userId: "user_123",
-      })).rejects.toThrow("Cloudflare browser-vault refresh result scheduled must be true.");
-    }
+    await expect(client.ensureRuntimeExecution("test-user", {
+      aiUsageAllowDecision: null,
+      orchestrationAttemptId: "orchestration-attempt-test",
+      reason: "manual",
+    })).resolves.toEqual(result);
+  });
+
+  it("rejects malformed runtime ensure-execution responses", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse({
+        kind: "caught_up",
+        runtimeAttemptId: "runtime-attempt-test",
+      })) as typeof fetch,
+      getBearerToken: async () => "test-token",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.ensureRuntimeExecution("test-user", {
+      orchestrationAttemptId: "orchestration-attempt-test",
+      reason: "nudge",
+    })).rejects.toThrow("Hosted runtime ensure-execution response kind is not supported.");
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {
@@ -814,24 +764,6 @@ function createReplicaKeyEnvelope() {
     ],
     schema: "murph.hosted-browser-session-key-envelope.v1" as const,
     userId: "user_123",
-  };
-}
-
-function createRunnerNudgeResult(
-  input: Partial<{
-    accepted: boolean;
-    alarmScheduled: boolean;
-    inFlight: boolean;
-    kind: "caught-up" | "processing-ensured" | "retry-scheduled";
-    nextAlarmAt: string | null;
-  }> = {},
-) {
-  return {
-    accepted: input.accepted ?? true,
-    alarmScheduled: input.alarmScheduled ?? false,
-    inFlight: input.inFlight ?? false,
-    kind: input.kind ?? "caught-up",
-    nextAlarmAt: input.nextAlarmAt ?? null,
   };
 }
 

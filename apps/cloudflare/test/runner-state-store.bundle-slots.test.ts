@@ -277,9 +277,9 @@ describe("RunnerStateStore schema guard", () => {
         workspaceVersion: "42",
       },
       leaseGeneration: 3,
-      pendingWork: true,
+      pendingWork: false,
       userId: "user-existing",
-      wakeAt: "2030-04-27T00:20:00.000Z",
+      wakeAt: null,
       writeFence: {
         attemptId: "workspace-invocation-1",
         expiresAt: "2030-04-27T00:01:00.000Z",
@@ -365,7 +365,7 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("expires write fences into retry work", async () => {
+  it("expires write fences without scheduling retry work", async () => {
     const { store } = createRunnerStateStoreHarness();
     await store.beginWriteFence({
       expiresAt: "2030-04-27T00:00:05.000Z",
@@ -373,53 +373,44 @@ describe("RunnerStateStore schema guard", () => {
       userId: "user-expired",
     });
 
-    await expect(store.readDueWork(Date.parse("2030-04-27T00:00:04.000Z")))
+    await expect(store.readState())
       .resolves.toMatchObject({
-        kind: "idle",
-        record: {
-          writeFence: expect.objectContaining({
-            expiresAt: "2030-04-27T00:00:05.000Z",
-          }),
-        },
+        writeFence: expect.objectContaining({
+          expiresAt: "2030-04-27T00:00:05.000Z",
+        }),
       });
     await expect(store.clearExpiredWriteFence(Date.parse("2030-04-27T00:00:10.000Z")))
       .resolves.toMatchObject({
         cleared: true,
         record: {
-          backoffUntil: "2030-04-27T00:00:10.000Z",
+          backoffUntil: null,
           failureCount: 1,
           lastErrorAt: "2030-04-27T00:00:10.000Z",
-          wakeAt: "2030-04-27T00:00:10.000Z",
+          wakeAt: null,
           writeFence: null,
         },
       });
-    await expect(store.readDueWork(Date.parse("2030-04-27T00:00:10.000Z")))
-      .resolves.toMatchObject({
-        kind: "runtime",
-        reason: "retry",
-      });
+    await expect(store.readState()).resolves.toMatchObject({
+      backoffUntil: null,
+      wakeAt: null,
+      writeFence: null,
+    });
   });
 
-  it("uses backoff as the effective runtime wake deadline", async () => {
+  it("keeps legacy wake and backoff columns inert in projected state", async () => {
     const { store } = createRunnerStateStoreHarness();
-    await store.bindUser("user-backoff");
-    await store.markWakePending({
-      preferredWakeAt: "2030-04-27T00:00:05.000Z",
-    });
-    await store.scheduleRetry({
-      error: new Error("retry later"),
-      retryAt: "2030-04-27T00:00:20.000Z",
-    });
+    await store.bindUser("user-inert-legacy");
 
-    await expect(store.readDueWork(Date.parse("2030-04-27T00:00:10.000Z")))
-      .resolves.toMatchObject({
-        kind: "idle",
-      });
-    await expect(store.readDueWork(Date.parse("2030-04-27T00:00:20.000Z")))
-      .resolves.toMatchObject({
-        kind: "runtime",
-        reason: "retry",
-      });
+    await expect(store.readState()).resolves.toMatchObject({
+      backoffUntil: null,
+      browserVaultRefreshRequestedAt: null,
+      nextWakeAt: null,
+      retry: {
+        at: null,
+      },
+      wakeAt: null,
+      wakePending: false,
+    });
   });
 
 });

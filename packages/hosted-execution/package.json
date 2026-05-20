@@ -62,6 +62,10 @@
       "types": "./dist/legacy-dashboard-replica.d.ts",
       "default": "./dist/legacy-dashboard-replica.js"
     },
+    "./orchestration-control": {
+      "types": "./dist/orchestration-control.d.ts",
+      "default": "./dist/orchestration-control.js"
+    },
     "./parsers": {
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"

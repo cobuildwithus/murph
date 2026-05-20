@@ -48,7 +48,7 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("accepts the runner nudge route without relying on legacy local queue state", async () => {
+  it("keeps the removed runner nudge route unavailable", async () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
@@ -92,16 +92,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       env as never,
     );
 
-    expect(runResponse.status).toBe(202);
-    await expect(runResponse.json()).resolves.toEqual({
-      accepted: true,
-      alarmScheduled: false,
-      kind: "processing-ensured",
-      inFlight: false,
-      nextAlarmAt: null,
-    });
+    expect(runResponse.status).toBe(404);
     expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.nudgeHostedRunnerForUser).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunnerForUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
@@ -171,20 +164,20 @@ describe("cloudflare worker queue backpressure routes", () => {
       throw new Error(`Unexpected fetch during Cloudflare backpressure test: ${url.origin}${url.pathname}`);
     });
 
-    const nudge = await harness.durableObject.nudgeHostedRunnerForUser("member_123");
+    await expect(harness.durableObject.ensureRuntimeExecutionForUser({
+      orchestrationAttemptId: "backpressure-active-fence-test",
+      reason: "nudge",
+      userId: "member_123",
+    })).rejects.toMatchObject({
+      name: "HostedRuntimeExecutionRetryableError",
+      retryable: true,
+    });
     const state = await stateStore.readState();
 
-    expect(nudge).toMatchObject({
-      accepted: true,
-      immediateDriveStarted: false,
-      inFlight: true,
-      kind: "retry-scheduled",
-    });
     expect(state.writeFence).toMatchObject({
       expiresAt: "2999-01-01T00:00:00.000Z",
       kind: "runtime",
     });
-    expect(state.wakePending).toBe(true);
   });
 });
 

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   readOptionalJsonObject: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  startHostedWebhookNudgeWorkflow: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -34,8 +34,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 describe("hosted email mailbox ingress route", () => {
@@ -71,8 +71,9 @@ describe("hosted email mailbox ingress route", () => {
       id: "mailbox_item_24",
       userId: "member_123",
     });
-    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
-      runId: "workflow_run_123",
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
     });
   });
 
@@ -165,7 +166,7 @@ describe("hosted email mailbox ingress route", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("starts an email nudge workflow after verifying the mailbox item owner", async () => {
+  it("signals the hosted user runtime after verifying the mailbox item owner", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       mailboxItemId: "mailbox_item_24",
     });
@@ -180,19 +181,21 @@ describe("hosted email mailbox ingress route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      runId: "workflow_run_123",
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
     });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
     expect(mocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_item_24",
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_24",
       source: "email",
     });
   });
 
-  it("does not start an email nudge workflow for a mailbox item owned by another user", async () => {
+  it("does not signal the hosted user runtime for a mailbox item owned by another user", async () => {
     mocks.readOptionalJsonObject.mockResolvedValue({
       mailboxItemId: "mailbox_item_24",
     });
@@ -215,6 +218,6 @@ describe("hosted email mailbox ingress route", () => {
         code: "HOSTED_EMAIL_INGRESS_NUDGE_WORKFLOW_MAILBOX_ITEM_NOT_FOUND",
       }),
     });
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });

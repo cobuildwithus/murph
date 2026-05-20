@@ -5,7 +5,6 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
-  nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -14,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
+  signalHostedManualRunRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -38,8 +38,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedManualRunRuntime: mocks.signalHostedManualRunRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -71,7 +71,10 @@ describe("settings phone sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
     });
-    mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
+    mocks.signalHostedManualRunRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
     mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
       const freshPrivy = await mocks.requirePrivyMemberAuth(...args);
       return {
@@ -132,8 +135,9 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
-      context: "settings.phone.sync",
+    expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
+      eventSource: "settings.phone.sync",
+      source: "user",
       userId: "member_123",
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");
@@ -177,7 +181,7 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
@@ -217,7 +221,7 @@ describe("settings phone sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.phone.sync",
     });
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
@@ -251,7 +255,7 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(403);
     expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedManualRunRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_SUSPENDED",

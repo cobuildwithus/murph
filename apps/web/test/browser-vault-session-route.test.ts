@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readHostedWorkspace: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
+  signalHostedBrowserVaultRefreshRuntime: vi.fn(),
 }));
 
 vi.mock("next/server", async (importOriginal) => {
@@ -38,6 +39,11 @@ vi.mock("next/server", async (importOriginal) => {
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
     mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedBrowserVaultRefreshRuntime:
+    mocks.signalHostedBrowserVaultRefreshRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -75,6 +81,10 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.signalHostedBrowserVaultRefreshRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
     mocks.afterResponse.mockImplementation((callback: () => void | Promise<void>) => {
       void callback();
     });
@@ -128,7 +138,9 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
     });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      source: "browser-vault-session",
       userId: "member_123",
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -523,7 +535,7 @@ describe("browser vault session route", () => {
       replicaRef: createReplicaRef(),
       userId: "member_123",
     });
-    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       freshness: "fresh",
       refreshPending: false,
@@ -571,7 +583,7 @@ describe("browser vault session route", () => {
       replicaRef: createReplicaRef(),
       userId: "member_123",
     });
-    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       freshness: "fresh",
       refreshPending: false,
@@ -584,7 +596,7 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     let releaseSchedule: () => void = () => {};
     const createBrowserVaultSession = vi.fn();
-    const scheduleBrowserVaultRefresh = vi.fn(() =>
+    mocks.signalHostedBrowserVaultRefreshRuntime.mockImplementationOnce(() =>
       new Promise<void>((resolve) => {
         releaseSchedule = resolve;
       }));
@@ -605,7 +617,6 @@ describe("browser vault session route", () => {
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
-      scheduleBrowserVaultRefresh,
     });
 
     const responsePromise = browserVaultSessionRoute.POST(
@@ -615,7 +626,8 @@ describe("browser vault session route", () => {
     );
 
     await vi.waitFor(() => {
-      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+        source: "browser-vault-session",
         userId: "member_123",
       });
     });
@@ -641,7 +653,7 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     let releaseSchedule: () => void = () => {};
     const createBrowserVaultSession = vi.fn();
-    const scheduleBrowserVaultRefresh = vi.fn(() =>
+    mocks.signalHostedBrowserVaultRefreshRuntime.mockImplementationOnce(() =>
       new Promise<void>((resolve) => {
         releaseSchedule = resolve;
       }));
@@ -659,7 +671,6 @@ describe("browser vault session route", () => {
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
-      scheduleBrowserVaultRefresh,
     });
 
     const responsePromise = browserVaultSessionRoute.POST(
@@ -669,7 +680,8 @@ describe("browser vault session route", () => {
     );
 
     await vi.waitFor(() => {
-      expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+      expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+        source: "browser-vault-session",
         userId: "member_123",
       });
     });
@@ -728,7 +740,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       encryptedReplica: null,
       freshness: "fresh",
@@ -748,7 +760,7 @@ describe("browser vault session route", () => {
     });
     let releaseSchedule: () => void = () => {};
     const createBrowserVaultSession = vi.fn();
-    const scheduleBrowserVaultRefresh = vi.fn(() =>
+    mocks.signalHostedBrowserVaultRefreshRuntime.mockImplementationOnce(() =>
       new Promise<void>((resolve) => {
         releaseSchedule = resolve;
       }));
@@ -766,7 +778,6 @@ describe("browser vault session route", () => {
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
-      scheduleBrowserVaultRefresh,
     });
 
     const response = await browserVaultSessionRoute.POST(
@@ -778,7 +789,8 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      source: "browser-vault-session",
       userId: "member_123",
     });
     releaseSchedule();
@@ -1057,10 +1069,8 @@ describe("browser vault session route", () => {
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
       new Error("Hosted execution browser vault replica was not found."),
     );
-    const scheduleBrowserVaultRefresh = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
-      scheduleBrowserVaultRefresh,
     });
 
     const response = await browserVaultSessionRoute.POST(
@@ -1078,7 +1088,8 @@ describe("browser vault session route", () => {
       refreshPending: true,
       state: "empty",
     });
-    expect(scheduleBrowserVaultRefresh).toHaveBeenCalledWith({
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      source: "browser-vault-session",
       userId: "member_123",
     });
   });

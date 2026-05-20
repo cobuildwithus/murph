@@ -42,5 +42,6 @@ export * from "./email-ingress.ts";
 export * from "./env.ts";
 export * from "./hosted-email.ts";
 export * from "./observability.ts";
+export * from "./orchestration-control.ts";
 export * from "./routes.ts";
 export * from "./side-effects.ts";
