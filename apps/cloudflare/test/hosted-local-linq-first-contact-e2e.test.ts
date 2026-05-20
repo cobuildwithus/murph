@@ -22,6 +22,7 @@ import {
   parseHostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
+  HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
@@ -834,6 +835,14 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       const requestCountAfterCleanup = requireLinqStub().observedRequests.length;
       const outboundCountAfterCleanup = requireLinqStub().countObservedSends(expectedReplyPath);
       await seedStaleWorkspaceWakeFromCurrentCheckpoint(typingLoopUserId);
+      const statusAfterStaleWakeSeed = await readHostedRunnerStatusWithLogLimit(
+        typingLoopUserId,
+        20,
+      );
+      const seededWakeMs = Date.parse(statusAfterStaleWakeSeed.workspace?.nextWakeAt ?? "");
+      expect(Number.isFinite(seededWakeMs)).toBe(true);
+      expect(seededWakeMs).toBeLessThanOrEqual(Date.now());
+      expect(hasHostedMailboxBacklog(statusAfterStaleWakeSeed)).toBe(true);
 
       const alarmStartedAtMs = Date.now();
       const alarmOutcome = await runHostedAlarmWithRuntimeWakeProbesForTest(
@@ -861,6 +870,17 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(alarmOutcome.result.nextWakeAt).toBeNull();
       }
       expect(alarmOutcome.probeCount).toBeGreaterThanOrEqual(1);
+      expect(alarmOutcome.probes.some((probe) =>
+        probe.kind === "processing-ensured" && probe.inFlight
+      )).toBe(true);
+      expect(statusAfterAlarm.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+      if (statusAfterAlarm.workspace?.nextWakeAt) {
+        expect(Date.parse(statusAfterAlarm.workspace.nextWakeAt)).toBeGreaterThanOrEqual(
+          alarmStartedAtMs,
+        );
+      } else {
+        expect(statusAfterAlarm.workspace?.nextWakeAt ?? null).toBeNull();
+      }
       expect(canonicalRuntimeDeferralsAfterAlarm).toBe(0);
       expect(postReplyTypingStarts).toHaveLength(0);
       expect(outboundCountAfterAlarm).toBe(outboundCountAfterCleanup);
@@ -1219,7 +1239,11 @@ async function runHostedAlarmUntilIdleForTest(
 
 async function runHostedAlarmWithRuntimeWakeProbesForTest(
   userId: string,
-): Promise<{ probeCount: number; result: HostedWorkspaceInvocationResult }> {
+): Promise<{
+  probeCount: number;
+  probes: HostedRunnerNudgeResult[];
+  result: HostedWorkspaceInvocationResult;
+}> {
   const alarmAbortController = new AbortController();
   const alarmOutcomePromise = runHostedAlarmUntilIdleForTest(
     userId,
@@ -1237,6 +1261,7 @@ async function runHostedAlarmWithRuntimeWakeProbesForTest(
 
   const deadlineMs = Date.now() + 2_750;
   let probeCount = 0;
+  const probes: HostedRunnerNudgeResult[] = [];
   let alarmSettled = false;
   void alarmOutcomePromise.then(
     () => {
@@ -1248,7 +1273,7 @@ async function runHostedAlarmWithRuntimeWakeProbesForTest(
   );
 
   while (!alarmSettled && Date.now() < deadlineMs) {
-    await sendRuntimeWakeProbeForTest(userId);
+    probes.push(await sendRuntimeWakeProbeForTest(userId));
     probeCount += 1;
 
     const remainingMs = deadlineMs - Date.now();
@@ -1271,7 +1296,10 @@ async function runHostedAlarmWithRuntimeWakeProbesForTest(
   }
 
   if (alarmOutcome) {
-    return resolveHostedAlarmProbeOutcome(alarmOutcome, probeCount);
+    return {
+      ...resolveHostedAlarmProbeOutcome(alarmOutcome, probeCount),
+      probes,
+    };
   }
 
   throw new Error("Stale scheduled wake alarm did not settle while runtime wake probes were active.");
@@ -1295,8 +1323,10 @@ function resolveHostedAlarmProbeOutcome(
   );
 }
 
-async function sendRuntimeWakeProbeForTest(userId: string): Promise<void> {
-  await requireScenario().harness.requestJson<{ ok: true }>(
+async function sendRuntimeWakeProbeForTest(
+  userId: string,
+): Promise<HostedRunnerNudgeResult> {
+  return await requireScenario().harness.requestJson<HostedRunnerNudgeResult>(
     `/internal/users/${encodeURIComponent(userId)}/nudge`,
     {
       body: "{}",
@@ -1340,6 +1370,10 @@ function countAssistantCanonicalRuntimeCommitDeferrals(
     && entry.redactedJson?.checkpointPhase === "assistant"
     && entry.redactedJson?.checkpointReason === "canonical_runtime_commit"
   ).length;
+}
+
+function hasHostedMailboxBacklog(status: HostedRunnerStatusResponse): boolean {
+  return status.mailboxLag.some((lane) => lane.lag !== "0");
 }
 
 async function sleep(ms: number): Promise<void> {

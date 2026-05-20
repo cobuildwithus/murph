@@ -820,10 +820,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ? projectedRuntimeWakeKey
                   : servicedProjectedRuntimeWakeKey;
               idleWakeOrdinal += 1;
+              const passWorkspace = projectHostedWorkspaceWakeForForegroundPass({
+                projection: accumulatedProjection,
+                workspace:
+                  result.latestWorkspace
+                  ?? accumulatedProjection.committedWorkspace
+                  ?? workspaceRead.workspace,
+              });
               result = await runForegroundPass({
                 initialMailboxImport: null,
                 requestId: `${requestId}:idle-wake:${idleWakeOrdinal}`,
-                workspace: result.latestWorkspace ?? workspaceRead.workspace,
+                workspace: passWorkspace,
               });
               if (result.runtimeStateDirty) {
                 markIdleCheckpointDeadlineAfterDirtyWork();
@@ -831,7 +838,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               const nextProjection = buildHostedWorkspaceInvocationProjection({
                 mailboxBudgetExhausted: mailboxBudgetExhausted(),
                 result,
-                workspace: accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
+                workspace: passWorkspace,
               });
               accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
                 accumulatedProjection,
@@ -1302,6 +1309,28 @@ function mergeHostedWorkspaceInvocationProjection(
     status: options.replaceWake
       ? next.status
       : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
+  };
+}
+
+function projectHostedWorkspaceWakeForForegroundPass(input: {
+  projection: Pick<HostedWorkspaceInvocationProjection, "nextWakeAt" | "nextWakeReason">;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceState | null {
+  if (!input.workspace) {
+    return null;
+  }
+
+  if (
+    input.workspace.nextWakeAt === input.projection.nextWakeAt
+    && input.workspace.nextWakeReason === input.projection.nextWakeReason
+  ) {
+    return input.workspace;
+  }
+
+  return {
+    ...input.workspace,
+    nextWakeAt: input.projection.nextWakeAt,
+    nextWakeReason: input.projection.nextWakeReason,
   };
 }
 
