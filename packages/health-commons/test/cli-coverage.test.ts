@@ -91,7 +91,7 @@ describe("@murphai/health-commons coverage scaffolding", () => {
     }
   });
 
-  it("checks deterministic generation without requiring generated files", async () => {
+  it("rejects check mode when generated files are missing", async () => {
     const contentRoot = await createTempDir("health-commons-content-");
     const generatedRoot = path.join(contentRoot, "missing-generated");
 
@@ -101,11 +101,13 @@ describe("@murphai/health-commons coverage scaffolding", () => {
         `---\nschemaVersion: murph.commons.page.v1\nentityType: biomarker\nkey: biomarker:example\nslug: biomarkers/example\ntitle: Example biomarker\n---\n\nExample biomarker.\n`,
         "utf8",
       );
-      await writeHealthCommonsGeneratedArtifacts({
-        check: true,
-        contentRoot,
-        generatedRoot,
-      });
+      await expect(
+        writeHealthCommonsGeneratedArtifacts({
+          check: true,
+          contentRoot,
+          generatedRoot,
+        }),
+      ).rejects.toThrow("Health Commons generated artifacts are out of date");
 
       await expect(
         readFile(path.join(generatedRoot, "catalog.json"), "utf8"),
@@ -113,6 +115,15 @@ describe("@murphai/health-commons coverage scaffolding", () => {
     } finally {
       await rm(contentRoot, { recursive: true, force: true });
     }
+  });
+
+  it("keeps package typecheck behind generated artifact refresh", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.typecheck).toBe("pnpm generate && tsc -p tsconfig.typecheck.json --pretty false");
+    expect(packageJson.scripts?.verify).toContain("pnpm typecheck");
   });
 
   it("prints normalized artifact metadata for in-repo files and rejects external defaults", async () => {
@@ -262,7 +273,7 @@ describe("@murphai/health-commons coverage scaffolding", () => {
       );
       await writeFile(
         path.join(contentRoot, "source.md"),
-        `---\nschemaVersion: murph.commons.page.v1\nentityType: source_artifact\nkey: source_artifact:pmid-29849692\nslug: sources/pmid-29849692\ntitle: PMID 29849692\nsource:\n  kind: web_page\n  url: https://example.com/pmid-29849692\nartifacts:\n  -\n    artifactId: art_pmid_29849692_pdf\n    kind: pdf\n    storage: cloudflare-r2\n    objectKey: commons/research/sauna/pmid_29849692/source.pdf\n    localPath: ${artifactRelativePath}\n    rightsStatus: permission_required\n    redistributable: false\n---\n\nSource page.\n`,
+        `---\nschemaVersion: murph.commons.page.v1\nentityType: source_artifact\nkey: source_artifact:pmid-29849692\nslug: sources/pmid-29849692\ntitle: PMID 29849692\nsource:\n  kind: web_page\n  url: https://example.com/pmid-29849692\nartifacts:\n  -\n    artifactId: art_pmid_29849692_pdf\n    kind: pdf\n    storage: cloudflare-r2\n    objectKey: commons/research/sauna/pmid_29849692/source.pdf\n    localPath: ${artifactRelativePath}\n    rightsStatus: permission_required\n    redistributable: false\n    sha256: ${artifactSha256}\n    byteSize: ${artifactBytes.byteLength}\n---\n\nSource page.\n`,
         "utf8",
       );
 

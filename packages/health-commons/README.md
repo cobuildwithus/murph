@@ -27,7 +27,7 @@ pnpm --filter @murphai/health-commons generate:check
 pnpm --filter @murphai/health-commons artifacts:r2:dry-run
 ```
 
-`generate:check` validates that the generator can rebuild the catalog deterministically without requiring generated files to be present in the checkout.
+`generate:check` validates that the generator can rebuild the catalog deterministically and that the current `generated/**` tree exactly matches the intended output, with no missing, changed, or stale files.
 
 ## Adding article PDFs to Cloudflare R2
 

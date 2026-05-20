@@ -2,17 +2,12 @@ import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 import {
-  HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
-  repoRoot,
-} from "../../../scripts/dev-hosted-local/constants.ts";
-import {
-  cleanupHostedRunnerContainers,
-  cleanupHostedRunnerImages,
-} from "../../../scripts/dev-hosted-local/runtime.ts";
-import {
   ForegroundCommandSignalError,
   runForegroundCommand,
 } from "./process.ts";
+import { hostedLocalHarnessRepoRoot } from "./repo.ts";
+
+const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 
 export type HostedLocalE2eScenarioName =
   | "all"
@@ -210,16 +205,7 @@ export async function runHostedLocalE2eSuite(
     }
   } finally {
     try {
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: suiteEnv,
-        ignoreErrors: true,
-      });
-      await cleanupHostedRunnerImages({
-        cwd: repoRoot,
-        env: suiteEnv,
-        ignoreErrors: true,
-      });
+      await cleanupHostedLocalE2eRunnerArtifacts(suiteEnv);
       if (terminationSignal) {
         process.exitCode = terminationSignal === "SIGINT" ? 130 : 143;
       }
@@ -248,7 +234,7 @@ async function prepareHostedLocalRunnerBundle(input: {
   await runForegroundCommand({
     args: ["--dir", "apps/cloudflare", "runner:bundle:hosted-local"],
     command: "pnpm",
-    cwd: repoRoot,
+    cwd: hostedLocalHarnessRepoRoot,
     env,
     forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner bundle preparation",
@@ -261,7 +247,7 @@ async function prepareHostedLocalRunnerBaseImage(input: {
   await runForegroundCommand({
     args: ["--dir", "apps/cloudflare", "runner:docker:base"],
     command: "pnpm",
-    cwd: repoRoot,
+    cwd: hostedLocalHarnessRepoRoot,
     env: input.env,
     forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local runner base image preparation",
@@ -284,7 +270,7 @@ async function runHostedLocalVitest(input: {
       "--no-coverage",
     ],
     command: "pnpm",
-    cwd: repoRoot,
+    cwd: hostedLocalHarnessRepoRoot,
     env: input.env,
     forwardProcessSignals: ["SIGINT", "SIGTERM"],
     label: "Hosted local full-stack e2e suite",
@@ -310,4 +296,22 @@ function buildHostedLocalE2eSuiteEnv(input: {
   }
   delete env.MURPH_DEV_CF_WRANGLER_LOG_LEVEL;
   return env;
+}
+
+async function cleanupHostedLocalE2eRunnerArtifacts(
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const { cleanupHostedRunnerContainers, cleanupHostedRunnerImages } =
+    await import("../../../scripts/dev-hosted-local/runtime.ts");
+
+  await cleanupHostedRunnerContainers({
+    cwd: hostedLocalHarnessRepoRoot,
+    env,
+    ignoreErrors: true,
+  });
+  await cleanupHostedRunnerImages({
+    cwd: hostedLocalHarnessRepoRoot,
+    env,
+    ignoreErrors: true,
+  });
 }

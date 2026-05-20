@@ -31,23 +31,20 @@
       "@murphai/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@murphai/contracts/*": [
-        "packages/contracts/src/*"
+      "@murphai/contracts/generated/*": [
+        "packages/contracts/generated/*"
       ],
       "@murphai/health-commons": [
         "packages/health-commons/src/index.ts"
       ],
+      "@murphai/health-commons/runtime": [
+        "packages/health-commons/src/runtime.ts"
+      ],
       "@murphai/health-commons/generated/*": [
         "packages/health-commons/generated/*"
       ],
-      "@murphai/health-commons/*": [
-        "packages/health-commons/src/*"
-      ],
       "@murphai/gateway-core": [
         "packages/gateway-core/src/index.ts"
-      ],
-      "@murphai/gateway-core/*": [
-        "packages/gateway-core/src/*"
       ],
       "@murphai/cloudflare-hosted-control/client": [
         "packages/cloudflare-hosted-control/src/client.ts"
@@ -58,11 +55,35 @@
       "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
+      "@murphai/hosted-execution/auth": [
+        "packages/hosted-execution/src/auth.ts"
+      ],
+      "@murphai/hosted-execution/assistant-identifiers": [
+        "packages/hosted-execution/src/assistant-identifiers.ts"
+      ],
       "@murphai/hosted-execution/assistant-usage": [
         "packages/hosted-execution/src/assistant-usage.ts"
       ],
-      "@murphai/hosted-execution/*": [
-        "packages/hosted-execution/src/*"
+      "@murphai/hosted-execution/browser-vault": [
+        "packages/hosted-execution/src/browser-vault.ts"
+      ],
+      "@murphai/hosted-execution/bundles": [
+        "packages/hosted-execution/src/bundles.ts"
+      ],
+      "@murphai/hosted-execution/contracts": [
+        "packages/hosted-execution/src/contracts.ts"
+      ],
+      "@murphai/hosted-execution/env": [
+        "packages/hosted-execution/src/env.ts"
+      ],
+      "@murphai/hosted-execution/hosted-email": [
+        "packages/hosted-execution/src/hosted-email.ts"
+      ],
+      "@murphai/hosted-execution/parsers": [
+        "packages/hosted-execution/src/parsers.ts"
+      ],
+      "@murphai/hosted-execution/runtime-control": [
+        "packages/hosted-execution/src/runtime-control.ts"
       ],
       "@murphai/messaging-ingress/linq-webhook": [
         "packages/messaging-ingress/src/linq-webhook.ts"
@@ -82,6 +103,9 @@
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
+      "@murphai/runtime-state/node/assistant-runtime-issues": [
+        "packages/runtime-state/src/node/assistant-runtime-issues.ts"
+      ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "packages/runtime-state/src/node/loopback-control-plane-auth.ts"
       ],
@@ -94,50 +118,80 @@
       "@murphai/runtime-state/node/ulid": [
         "packages/runtime-state/src/node/ulid.ts"
       ],
-      "@murphai/runtime-state/*": [
-        "packages/runtime-state/src/*"
-      ],
       "@murphai/health-metrics": [
         "packages/health-metrics/src/index.ts"
-      ],
-      "@murphai/health-metrics/*": [
-        "packages/health-metrics/src/*"
       ],
       "@murphai/query": [
         "packages/query/src/index.ts"
       ],
-      "@murphai/query/*": [
-        "packages/query/src/*"
+      "@murphai/query/browser": [
+        "packages/query/src/browser.ts"
+      ],
+      "@murphai/query/browser-biomarkers": [
+        "packages/query/src/browser-biomarkers.ts"
+      ],
+      "@murphai/query/browser-experiments": [
+        "packages/query/src/browser-experiments.ts"
+      ],
+      "@murphai/query/browser-overview": [
+        "packages/query/src/browser-overview.ts"
+      ],
+      "@murphai/query/browser-replica-client": [
+        "packages/query/src/browser-replica-client.ts"
       ],
       "@murphai/core": [
         "packages/core/src/index.ts"
       ],
-      "@murphai/core/*": [
-        "packages/core/src/*"
-      ],
       "@murphai/importers": [
         "packages/importers/src/index.ts"
       ],
-      "@murphai/importers/*": [
-        "packages/importers/src/*"
+      "@murphai/importers/device-providers/provider-descriptors": [
+        "packages/importers/src/device-providers/provider-descriptors.ts"
       ],
       "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
-      "@murphai/inboxd/*": [
-        "packages/inboxd/src/*"
-      ],
       "@murphai/parsers": [
         "packages/parsers/src/index.ts"
-      ],
-      "@murphai/parsers/*": [
-        "packages/parsers/src/*"
       ],
       "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@murphai/device-syncd/*": [
-        "packages/device-syncd/src/*"
+      "@murphai/device-syncd/callback-redirect": [
+        "packages/device-syncd/src/callback-redirect.ts"
+      ],
+      "@murphai/device-syncd/client": [
+        "packages/device-syncd/src/client.ts"
+      ],
+      "@murphai/device-syncd/config": [
+        "packages/device-syncd/src/config.ts"
+      ],
+      "@murphai/device-syncd/connect-config": [
+        "packages/device-syncd/src/connect-config.ts"
+      ],
+      "@murphai/device-syncd/errors": [
+        "packages/device-syncd/src/errors.ts"
+      ],
+      "@murphai/device-syncd/hosted-hints": [
+        "packages/device-syncd/src/hosted-hints.ts"
+      ],
+      "@murphai/device-syncd/hosted-runtime": [
+        "packages/device-syncd/src/hosted-runtime.ts"
+      ],
+      "@murphai/device-syncd/http": [
+        "packages/device-syncd/src/http.ts"
+      ],
+      "@murphai/device-syncd/provider-label": [
+        "packages/device-syncd/src/provider-label.ts"
+      ],
+      "@murphai/device-syncd/providers/oura": [
+        "packages/device-syncd/src/providers/oura.ts"
+      ],
+      "@murphai/device-syncd/public-ingress": [
+        "packages/device-syncd/src/public-ingress.ts"
+      ],
+      "@murphai/device-syncd/types": [
+        "packages/device-syncd/src/types.ts"
       ]
     },
     "sourceMap": false,

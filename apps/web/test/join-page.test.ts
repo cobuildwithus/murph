@@ -17,8 +17,15 @@ const mocks = vi.hoisted(() => ({
   getHostedInviteStatus: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
+  buildHostedInvitePageData: vi.fn(),
   getPrisma: vi.fn(),
   joinInvitePageViewProps: null as { model: JoinInvitePageModel } | null,
+  joinInviteSuccessClientProps: null as {
+    initialStatus: HostedInviteStatusPayload;
+    inviteCode: string;
+    preview?: boolean;
+    sessionId: string | null;
+  } | null,
   readHostedConsentStatus: vi.fn(),
   resourceHintOrigins: null as readonly string[] | null,
 }));
@@ -41,10 +48,32 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-page-view", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
+  buildHostedInvitePageData: mocks.buildHostedInvitePageData,
   getHostedInviteStatus: mocks.getHostedInviteStatus,
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/components/hosted-onboarding/join-invite-success-client", () => ({
+  JoinInviteSuccessClient(input: {
+    initialStatus: HostedInviteStatusPayload;
+    inviteCode: string;
+    preview?: boolean;
+    sessionId: string | null;
+  }) {
+    mocks.joinInviteSuccessClientProps = input;
+    return createElement(
+      "div",
+      {
+        "data-invite-code": input.inviteCode,
+        "data-preview": String(input.preview ?? false),
+        "data-session-id": input.sessionId ?? "",
+        "data-stage": input.initialStatus.stage,
+      },
+      "Join invite success",
+    );
+  },
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
@@ -98,6 +127,7 @@ vi.mock("@/src/lib/prisma", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.joinInvitePageViewProps = null;
+  mocks.joinInviteSuccessClientProps = null;
   mocks.resourceHintOrigins = null;
   mocks.getPrisma.mockReturnValue({ prisma: true });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -146,6 +176,9 @@ beforeEach(() => {
       expiresAt: null,
       matchesInvite: false,
     },
+    stage: "verify",
+  }));
+  mocks.buildHostedInvitePageData.mockResolvedValue(createStatus({
     stage: "verify",
   }));
   mocks.readHostedConsentStatus.mockResolvedValue(createConsentStatus({
@@ -410,6 +443,34 @@ test("JoinInviteSuccessPage keeps the shared preview image and setup copy", asyn
       height: 630,
     }),
   ]);
+});
+
+test("JoinInviteSuccessPage tolerates malformed percent-encoded success params", async () => {
+  const { default: JoinInviteSuccessPage } = await import("../app/join/[inviteCode]/success/page");
+
+  const markup = renderToStaticMarkup(
+    await JoinInviteSuccessPage({
+      params: Promise.resolve({ inviteCode: "invite%zz" }),
+      searchParams: Promise.resolve({ session_id: "checkout%zz" }),
+    }),
+  );
+
+  expect(mocks.buildHostedInvitePageData).toHaveBeenCalledWith({
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
+    inviteCode: "invite%zz",
+  });
+  expect(mocks.joinInviteSuccessClientProps).toMatchObject({
+    inviteCode: "invite%zz",
+    sessionId: "checkout%zz",
+  });
+  assert.match(markup, /data-invite-code="invite%zz"/);
+  assert.match(markup, /data-session-id="checkout%zz"/);
 });
 
 test("JoinInviteCancelPage keeps the shared preview image and pause copy", async () => {

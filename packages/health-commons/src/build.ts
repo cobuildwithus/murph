@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,29 +24,75 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
   const files = buildGeneratedFiles(catalog);
 
   if (options.check) {
-    await assertGeneratedArtifactsDeterministic(options.contentRoot, files);
+    await assertGeneratedArtifactsCurrent(options.contentRoot, options.generatedRoot, files);
     return;
   }
 
-  await mkdir(options.generatedRoot, { recursive: true });
+  await replaceGeneratedRoot(options.generatedRoot, files);
+}
 
+async function writeGeneratedFiles(outputRoot: string, files: ReadonlyMap<string, string>): Promise<void> {
   for (const [fileName, nextContent] of files.entries()) {
-    const outputPath = path.join(options.generatedRoot, fileName);
+    const outputPath = resolveGeneratedFilePath(outputRoot, fileName);
     await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFileAtomically(outputPath, nextContent);
+    await writeFile(outputPath, nextContent, "utf8");
   }
 }
 
-async function writeFileAtomically(outputPath: string, content: string): Promise<void> {
-  const temporaryPath = `${outputPath}.${process.pid}.${randomUUID()}.tmp`;
+async function replaceGeneratedRoot(generatedRoot: string, files: ReadonlyMap<string, string>): Promise<void> {
+  const targetRoot = path.resolve(generatedRoot);
+  const targetParent = path.dirname(targetRoot);
+  const targetBaseName = path.basename(targetRoot);
+  if (!targetBaseName || targetRoot === path.parse(targetRoot).root) {
+    throw new Error("Unsafe Health Commons generated root.");
+  }
+  const temporaryRoot = path.join(targetParent, `.${targetBaseName}.${process.pid}.${randomUUID()}.tmp`);
+  const backupRoot = path.join(targetParent, `.${targetBaseName}.${process.pid}.${randomUUID()}.old`);
 
+  await mkdir(targetParent, { recursive: true });
   try {
-    await writeFile(temporaryPath, content, "utf8");
-    await rename(temporaryPath, outputPath);
+    await writeGeneratedFiles(temporaryRoot, files);
   } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => {});
+    await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
     throw error;
   }
+
+  let targetMoved = false;
+  try {
+    await rename(targetRoot, backupRoot).then(
+      () => {
+        targetMoved = true;
+      },
+      (error: unknown) => {
+        if (!isNodeErrorWithCode(error, "ENOENT")) {
+          throw error;
+        }
+      },
+    );
+    await rename(temporaryRoot, targetRoot);
+  } catch (error) {
+    await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
+    if (targetMoved) {
+      await rename(backupRoot, targetRoot).catch(() => {});
+    }
+    throw error;
+  }
+
+  await rm(backupRoot, { force: true, recursive: true });
+}
+
+function resolveGeneratedFilePath(root: string, fileName: string): string {
+  const normalized = fileName.replace(/\\/gu, "/");
+  const segments = normalized.split("/");
+  if (
+    normalized.length === 0
+    || normalized.startsWith("/")
+    || segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new Error(`Unsafe Health Commons generated artifact path: ${fileName}`);
+  }
+
+  return path.join(root, ...segments);
 }
 
 function buildGeneratedFiles(
@@ -82,8 +128,9 @@ function buildGeneratedFiles(
   return files;
 }
 
-async function assertGeneratedArtifactsDeterministic(
+async function assertGeneratedArtifactsCurrent(
   contentRoot: string,
+  generatedRoot: string,
   expectedFiles: ReadonlyMap<string, string>,
 ): Promise<void> {
   const secondCatalog = await buildHealthCommonsCatalog({ contentRoot });
@@ -99,6 +146,86 @@ async function assertGeneratedArtifactsDeterministic(
   if (mismatches.length > 0) {
     throw new Error(`Health Commons generated artifacts are nondeterministic: ${mismatches.join(", ")}.`);
   }
+
+  const actualFiles = await readGeneratedTree(generatedRoot);
+  const missingFiles: string[] = [];
+  const changedFiles: string[] = [];
+  const staleFiles: string[] = [];
+
+  for (const [fileName, expectedContent] of expectedFiles.entries()) {
+    if (!actualFiles.has(fileName)) {
+      missingFiles.push(fileName);
+      continue;
+    }
+    if (actualFiles.get(fileName) !== expectedContent) {
+      changedFiles.push(fileName);
+    }
+  }
+
+  for (const fileName of actualFiles.keys()) {
+    if (!expectedFiles.has(fileName)) {
+      staleFiles.push(fileName);
+    }
+  }
+
+  if (missingFiles.length > 0 || changedFiles.length > 0 || staleFiles.length > 0) {
+    throw new Error(
+      [
+        "Health Commons generated artifacts are out of date",
+        formatGeneratedDiff("missing", missingFiles),
+        formatGeneratedDiff("changed", changedFiles),
+        formatGeneratedDiff("stale", staleFiles),
+      ].filter(Boolean).join("; ") + ". Run pnpm --filter @murphai/health-commons generate.",
+    );
+  }
+}
+
+async function readGeneratedTree(root: string): Promise<Map<string, string | null>> {
+  const files = new Map<string, string | null>();
+
+  await collectGeneratedTreeFiles(path.resolve(root), "", files);
+
+  return files;
+}
+
+async function collectGeneratedTreeFiles(
+  absoluteRoot: string,
+  relativeDir: string,
+  files: Map<string, string | null>,
+): Promise<void> {
+  const entries = await readdir(path.join(absoluteRoot, relativeDir), { withFileTypes: true }).catch((error: unknown) => {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return [];
+    }
+    throw error;
+  });
+
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of entries) {
+    const relativePath = relativeDir ? path.posix.join(relativeDir, entry.name) : entry.name;
+    const absolutePath = path.join(absoluteRoot, relativePath);
+    if (entry.isDirectory()) {
+      await collectGeneratedTreeFiles(absoluteRoot, relativePath, files);
+      continue;
+    }
+
+    files.set(relativePath, entry.isFile() ? await readFile(absolutePath, "utf8") : null);
+  }
+}
+
+function formatGeneratedDiff(label: string, files: readonly string[]): string | null {
+  if (files.length === 0) {
+    return null;
+  }
+
+  const shown = files.slice(0, 8);
+  const suffix = files.length > shown.length ? `, and ${files.length - shown.length} more` : "";
+  return `${label} ${files.length}: ${shown.join(", ")}${suffix}`;
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 export function parseCliOptions(argv: readonly string[]): CliOptions {

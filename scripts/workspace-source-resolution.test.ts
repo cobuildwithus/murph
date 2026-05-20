@@ -76,6 +76,47 @@ describe("workspace source resolution", () => {
       aliases.some((alias) => alias.find.test("@murphai/hosted-execution/private-internal")),
     ).toBe(false);
   });
+
+  it("keeps hosted web tsconfig off broad sibling package source wildcards", () => {
+    const tsconfig = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"),
+    ) as {
+      compilerOptions?: {
+        paths?: Record<string, readonly string[]>;
+      };
+    };
+
+    const broadSourceAliases = Object.entries(tsconfig.compilerOptions?.paths ?? {})
+      .flatMap(([specifier, targets]) =>
+        targets
+          .filter((target) =>
+            specifier.startsWith("@murphai/")
+            && specifier.includes("*")
+            && /^packages\/[^/]+\/src\/.*\*/u.test(target),
+          )
+          .map((target) => `${specifier} -> ${target}`),
+      );
+
+    expect(broadSourceAliases).toEqual([]);
+  });
+
+  it("keeps shared public package aliases on explicit exported subpaths", () => {
+    const tsconfig = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "tsconfig.base.json"), "utf8"),
+    ) as {
+      compilerOptions?: {
+        paths?: Record<string, readonly string[]>;
+      };
+    };
+
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/contracts/*"]).toBeUndefined();
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/runtime-state/*"]).toBeUndefined();
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/contracts/schemas"]).toEqual([
+      "packages/contracts/src/schemas.ts",
+    ]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/runtime-state/node/hosted-bundle-codec"])
+      .toEqual(["packages/runtime-state/src/node/hosted-bundle-codec.ts"]);
+  });
 });
 
 function resolveAliasReplacement(

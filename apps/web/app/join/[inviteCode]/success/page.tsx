@@ -20,9 +20,9 @@ export default async function JoinInviteSuccessPage(input: {
 }) {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
-  const decodedInviteCode = decodeURIComponent(inviteCode);
+  const decodedInviteCode = decodeURIComponentOrRaw(inviteCode);
   const sessionId = typeof searchParams.session_id === "string"
-    ? decodeURIComponent(searchParams.session_id)
+    ? decodeURIComponentOrRaw(searchParams.session_id)
     : null;
 
   const previewStage =
@@ -54,4 +54,12 @@ export default async function JoinInviteSuccessPage(input: {
       sessionId={sessionId}
     />
   );
+}
+
+function decodeURIComponentOrRaw(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

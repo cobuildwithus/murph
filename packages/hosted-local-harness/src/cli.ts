@@ -2,11 +2,8 @@ import process from "node:process";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { repoRoot } from "../../../scripts/dev-hosted-local/constants.ts";
 import type { HostedLocalDevConfig } from "../../../scripts/dev-hosted-local/types.ts";
-import { startHostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
 import type { HostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
-import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
 import {
   listHostedLocalE2eScenarios,
   resolveHostedLocalE2eScenarios,
@@ -19,6 +16,7 @@ import {
   createHostedLocalHarnessState,
   updateHostedLocalHarnessState,
 } from "./state.ts";
+import { hostedLocalHarnessRepoRoot } from "./repo.ts";
 
 interface HostedLocalCliIo {
   env?: NodeJS.ProcessEnv;
@@ -69,6 +67,9 @@ async function runUp(args: readonly string[], io: HostedLocalCliIo): Promise<voi
     printUpHelp(io.stdout ?? process.stdout);
     return;
   }
+  const { startHostedLocalDevStack } = await import(
+    "../../../scripts/dev-hosted-local/stack.ts"
+  );
 
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,
@@ -279,7 +280,7 @@ async function runCommand(args: readonly string[], io: HostedLocalCliIo): Promis
     await runForegroundCommand({
       args: commandRest,
       command: command ?? "",
-      cwd: repoRoot,
+      cwd: hostedLocalHarnessRepoRoot,
       env,
       label: `hosted-local run ${command}`,
     });
@@ -298,6 +299,9 @@ async function runDoctor(args: readonly string[], io: HostedLocalCliIo): Promise
     printDoctorHelp(io.stdout ?? process.stdout);
     return;
   }
+  const { resolveHostedLocalDevConfig } = await import(
+    "../../../scripts/dev-hosted-local/config.ts"
+  );
   const profiled = applyHostedLocalProfile({
     env: io.env ?? process.env,
     profileName: parsed.profileName,
@@ -356,7 +360,7 @@ function redactHostedLocalDoctorCommandResult(
 
 function redactHostedLocalDiagnosticText(value: string): string {
   return value
-    .split(repoRoot).join("<REPO_ROOT>")
+    .split(hostedLocalHarnessRepoRoot).join("<REPO_ROOT>")
     .split(os.homedir()).join("<HOME_DIR>")
     .slice(0, 2_000);
 }

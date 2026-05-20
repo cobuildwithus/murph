@@ -42,7 +42,7 @@ const providerRows = [
     provider: "Deployment-specific Postgres provider",
     service: "Hosted database selected by the deployment through DATABASE_URL.",
     dataCategories:
-      "Hosted member, routing, billing reference, mailbox, workspace checkpoint, and operational records.",
+      "Hosted member, routing, billing reference, mailbox, workspace checkpoint, consent, and operational records.",
     region: "Deployment-specific",
     training: "No",
     retention: "Per Murph retention targets and deployment-specific database backup settings.",

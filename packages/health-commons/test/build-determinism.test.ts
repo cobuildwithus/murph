@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -182,6 +182,56 @@ describe("@murphai/health-commons build determinism", () => {
     );
     expect(buildHealthCommonsSourceIndexMock).toHaveBeenCalledTimes(1);
     expect(buildHealthCommonsSourceArtifactIndexMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces stale generated files with the exact current file set", async () => {
+    const generatedRoot = await pathFromTempDir("health-commons-generated-");
+    buildHealthCommonsCatalogMock.mockResolvedValueOnce(createCatalog("sha256:first"));
+
+    try {
+      await mkdir(path.join(generatedRoot, "web", "stale"), { recursive: true });
+      await writeFile(path.join(generatedRoot, "obsolete.json"), "{}\n", "utf8");
+      await writeFile(path.join(generatedRoot, "web", "stale", "old.json"), "{}\n", "utf8");
+
+      await writeHealthCommonsGeneratedArtifacts({
+        check: false,
+        contentRoot: "health-commons-content",
+        generatedRoot,
+      });
+
+      await expect(readFile(path.join(generatedRoot, "catalog.json"), "utf8")).resolves.toContain(
+        '"catalogHash": "sha256:first"',
+      );
+      await expect(readFile(path.join(generatedRoot, "obsolete.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(path.join(generatedRoot, "web", "stale", "old.json"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(generatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects check mode when generated files are stale", async () => {
+    const generatedRoot = await pathFromTempDir("health-commons-generated-");
+    buildHealthCommonsCatalogMock
+      .mockResolvedValueOnce(createCatalog("sha256:first"))
+      .mockResolvedValueOnce(createCatalog("sha256:first"));
+
+    try {
+      await mkdir(generatedRoot, { recursive: true });
+      await writeFile(path.join(generatedRoot, "catalog.json"), "{}\n", "utf8");
+      await writeFile(path.join(generatedRoot, "obsolete.json"), "{}\n", "utf8");
+
+      await expect(
+        writeHealthCommonsGeneratedArtifacts({
+          check: true,
+          contentRoot: "health-commons-content",
+          generatedRoot,
+        }),
+      ).rejects.toThrow("Health Commons generated artifacts are out of date");
+    } finally {
+      await rm(generatedRoot, { recursive: true, force: true });
+    }
   });
 
   it("rejects duplicate generated web route ids before writing route indexes", () => {

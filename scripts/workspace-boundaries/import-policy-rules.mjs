@@ -55,6 +55,32 @@ export async function verifyTsconfigPathMappings(failures) {
             `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to ${path.relative(repoRoot, resolvedTarget)}, but ${targetMember} does not export "."; keep source path mappings on its declared public subpaths instead of a root alias.`,
           );
         }
+
+        const mapsSiblingSourceWildcard = specifierMapsSiblingSourceWildcard({
+          configMember,
+          resolvedTarget,
+          specifier,
+          target,
+          targetMember,
+        });
+
+        if (tsconfigIsHostedWeb(tsconfigPath) && mapsSiblingSourceWildcard) {
+          failures.push(
+            `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to sibling source wildcard ${path.relative(repoRoot, resolvedTarget)}; hosted web must resolve workspace packages through package names or declared public subpath exports instead of broad src/* aliases.`,
+          );
+        }
+
+        if (
+          specifierMapsProtectedPublicSourceWildcard({
+            specifier,
+            mapsSiblingSourceWildcard,
+            handledByHostedWeb: tsconfigIsHostedWeb(tsconfigPath) && mapsSiblingSourceWildcard,
+          })
+        ) {
+          failures.push(
+            `${path.relative(repoRoot, tsconfigPath)} maps ${specifier} to sibling source wildcard ${path.relative(repoRoot, resolvedTarget)}; contracts and runtime-state must resolve through declared public subpath exports instead of broad src/* aliases.`,
+          );
+        }
       }
     }
   }
@@ -223,6 +249,45 @@ async function specifierUsesUndeclaredRootAlias({
   return (
     specifier === packageJson.name
     && !workspacePackageAllowsRootSpecifier(packageJson)
+  );
+}
+
+function tsconfigIsHostedWeb(tsconfigPath) {
+  return path.relative(repoRoot, tsconfigPath).replace(/\\/g, "/") === "apps/web/tsconfig.json";
+}
+
+function specifierMapsSiblingSourceWildcard({
+  configMember,
+  resolvedTarget,
+  specifier,
+  target,
+  targetMember,
+}) {
+  if (
+    !specifier.includes("*")
+    || !target.includes("*")
+    || targetMember === null
+    || targetMember === configMember
+  ) {
+    return false;
+  }
+
+  const relativeTarget = path.relative(repoRoot, resolvedTarget).replace(/\\/g, "/");
+  return relativeTarget.startsWith(`${targetMember}/src/`);
+}
+
+function specifierMapsProtectedPublicSourceWildcard({
+  handledByHostedWeb,
+  mapsSiblingSourceWildcard,
+  specifier,
+}) {
+  if (handledByHostedWeb || !mapsSiblingSourceWildcard) {
+    return false;
+  }
+
+  return (
+    specifier === "@murphai/contracts/*"
+    || specifier === "@murphai/runtime-state/*"
   );
 }
 
