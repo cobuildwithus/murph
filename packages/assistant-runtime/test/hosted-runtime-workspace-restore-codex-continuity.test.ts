@@ -60,6 +60,9 @@ describe("hosted workspace restore Codex continuity", () => {
           artifactBytesByHash: new Map(),
           artifactGetCalls,
           workspaceSnapshotPort: {
+            async abortUpload() {
+              throw new Error("abortUpload is not used during v2 restore.");
+            },
             async completeUploadedSnapshot() {
               throw new Error("completeUploadedSnapshot is not used during v2 restore.");
             },

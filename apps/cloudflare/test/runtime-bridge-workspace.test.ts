@@ -281,6 +281,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "oversized.txt"), "size guard payload\n");
     const putArtifact = vi.fn(async () => {});
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
     const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
@@ -293,6 +294,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           maxSinglePartEncryptedBytes: 16,
           warnEncryptedBytes: 1,
         },
+        workspaceSnapshotAborts,
         workspaceSnapshotUploads,
       }),
       readCurrentLease: () => ({
@@ -316,6 +318,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .rejects.toThrow(/size limit/u);
 
     expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
@@ -1721,6 +1728,7 @@ function createPlatform(input: {
     maxSinglePartEncryptedBytes: number;
     warnEncryptedBytes: number;
   }>;
+  workspaceSnapshotAborts?: Array<{ objectKey: string; snapshotId: string }>;
   workspaceSnapshotUploads?: Map<string, WorkspaceSnapshotUpload>;
   writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
@@ -1789,6 +1797,18 @@ function createPlatform(input: {
           objectKey: upload.objectKey,
           snapshotId: upload.snapshotId,
         });
+      },
+      abortUpload: async (request: {
+        objectKey: string;
+        snapshotId: string;
+      }) => {
+        input.workspaceSnapshotAborts?.push(request);
+        for (const [putUrl, upload] of workspaceSnapshotUploadByPutUrl.entries()) {
+          if (upload.objectKey === request.objectKey && upload.snapshotId === request.snapshotId) {
+            workspaceSnapshotUploadByPutUrl.delete(putUrl);
+          }
+        }
+        workspaceSnapshotUploads.delete(request.objectKey);
       },
       restoreWorkspaceSnapshot: async () => {
         throw new Error("Workspace snapshot restore is not used by bridge snapshot tests.");

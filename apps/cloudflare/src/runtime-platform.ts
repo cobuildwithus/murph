@@ -1444,6 +1444,28 @@ function createCloudflareWorkspaceSnapshotPort(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
+    async abortUpload(request) {
+      const headers = await requireHostedRuntimeWriteFenceHeaders(
+        input.workspaceCheckpointBridge,
+        "Hosted workspace snapshot upload abort",
+      );
+      await fetchHostedJson({
+        body: {
+          objectKey: request.objectKey,
+          snapshotId: request.snapshotId,
+        },
+        description: "Hosted workspace snapshot upload abort",
+        fetchImpl: input.fetchImpl,
+        headers,
+        method: "DELETE",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          `/workspace-snapshots/${encodeURIComponent(request.snapshotId)}`,
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+        ),
+      });
+    },
+
     async completeUploadedSnapshot(request) {
       const headers = await requireHostedRuntimeWriteFenceHeaders(
         input.workspaceCheckpointBridge,

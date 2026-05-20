@@ -20,11 +20,15 @@ export function redactHostedRuntimeDiagnosticText(value: string): string {
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, "Bearer <redacted>")
     .replace(
-      /\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)=([^\s'"]+)/giu,
+      /\b(X-Amz-(?:Credential|Signature|Security-Token)=)[^&\s"'<>]+/giu,
+      "$1<redacted>",
+    )
+    .replace(
+      /(?<![-A-Za-z0-9_])\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)=([^\s'"]+)/giu,
       "$1=<redacted>",
     )
     .replace(
-      /(["']?)([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)(\1\s*:\s*)(?:"[^"]*"|'[^']+'|[^\s,}\]]+)/giu,
+      /(?<![-A-Za-z0-9_])(["']?)([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|PASSWORD)[A-Z0-9_]*)(\1\s*:\s*)(?:"[^"]*"|'[^']+'|[^\s,}\]]+)/giu,
       "$1$2$3<redacted>",
     )
     .replace(

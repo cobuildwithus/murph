@@ -29,12 +29,12 @@ import {
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
   hostedRunnerSecretsObjectKey,
+  hostedWorkspaceSnapshotUserPrefix,
 } from "./storage-paths.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { hostedEmailRawMessageUserPrefix } from "./hosted-email.ts";
 import { toStringEnvSource } from "./string-env.js";
 import {
-  HostedUserCryptoRepairNeededError,
   isHostedUserCryptoContextExpired,
   requireHostedUserCryptoContextFromEnvironment,
   type HostedUserCryptoContext,
@@ -2169,54 +2169,34 @@ export class HostedUserRunner {
   private async deleteHostedUserR2Data(userId: string): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
     const supportsObjectDeletion = Boolean(this.bucket.delete);
     const supportsPrefixDeletion = Boolean(this.bucket.delete && this.bucket.list);
-    let userCrypto: HostedUserCryptoContext | null = null;
     const userScopedSkipReasons: string[] = [];
-
-    try {
-      userCrypto = await requireHostedUserCryptoContextFromEnvironment({
-        bucket: this.bucket,
-        domain: "runtime",
-        environment: this.env,
-        reason: "account-data-deletion",
-        userId,
-      });
-    } catch (error) {
-      if (!(error instanceof HostedUserCryptoRepairNeededError)) {
-        throw error;
-      }
-      userScopedSkipReasons.push(error instanceof Error && error.name ? error.name : "UnknownError");
-    }
 
     let deletedObjectCount = 0;
     if (supportsPrefixDeletion) {
-      if (userCrypto) {
-        const prefixes = [
-          await hostedBundleUserPrefix({ userId }),
-          await hostedArtifactUserPrefix({ userId }),
-          await hostedBrowserVaultReplicaUserPrefix({ userId }),
-        ];
-        for (const prefix of prefixes) {
-          deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
-        }
-
-        deletedObjectCount += (await deleteR2ObjectIfSupported(
-          this.bucket,
-          await hostedRunnerSecretsObjectKey({ userId }),
-        )).deletedCount;
-      } else {
-        userScopedSkipReasons.push("RuntimeCryptoContextUnavailable");
+      const prefixes = [
+        await hostedBundleUserPrefix({ userId }),
+        await hostedArtifactUserPrefix({ userId }),
+        await hostedBrowserVaultReplicaUserPrefix({ userId }),
+        await hostedWorkspaceSnapshotUserPrefix({ userId }),
+      ];
+      for (const prefix of prefixes) {
+        deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
       }
 
+      deletedObjectCount += (await deleteR2ObjectIfSupported(
+        this.bucket,
+        await hostedRunnerSecretsObjectKey({ userId }),
+      )).deletedCount;
       deletedObjectCount += (await deleteR2ObjectsWithPrefix(
         this.bucket,
         await hostedEmailRawMessageUserPrefix({ userId }),
       )).deletedCount;
-    } else if (userCrypto) {
+    } else {
       userScopedSkipReasons.push("R2PrefixDeletionUnsupported");
     }
 
     const skippedUserScopedPrefixes =
-      !supportsPrefixDeletion || userCrypto === null;
+      !supportsPrefixDeletion;
     return {
       deletedObjectCount,
       skippedUserScopedPrefixes,

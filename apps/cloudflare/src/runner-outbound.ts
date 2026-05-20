@@ -198,6 +198,16 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
+      if (!match.groups.suffix && request.method === "DELETE") {
+        return handleRunnerWorkspaceSnapshotAbortRequest({
+          bucket: env.BUNDLES,
+          env,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
       if (match.groups.suffix || request.method !== "GET") {
         return methodNotAllowed();
       }
@@ -774,6 +784,79 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
   });
 }
 
+async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
+  bucket: WorkspaceSnapshotR2BucketLike;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  const requestedObjectKey = requireSnapshotDataKeyString(body.objectKey, "objectKey");
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot abort snapshotId does not match its route.", 400);
+  }
+
+  const session = await readWorkspaceSnapshotUploadSession({
+    env: input.env,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (!session) {
+    return json({
+      aborted: false,
+      ok: true,
+    });
+  }
+
+  if (
+    session.userId !== input.userId
+    || session.snapshotId !== input.snapshotId
+    || session.objectKey !== requestedObjectKey
+    || session.encryption.aad.objectKey !== requestedObjectKey
+    || session.encryption.aad.snapshotId !== input.snapshotId
+  ) {
+    return jsonError("Hosted workspace snapshot abort target is outside the bound user namespace.", 403);
+  }
+
+  if (
+    Date.parse(session.expiresAt) > Date.now()
+    && (
+      session.attemptId !== writeFence.attemptId
+      || session.leaseGeneration !== writeFence.generation
+      || session.workspaceVersion !== writeFence.workspaceVersion
+    )
+  ) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+
+  await retireWorkspaceSnapshotUploadSession({
+    bucket: input.bucket,
+    deleteObject: true,
+    env: input.env,
+    objectKey: session.objectKey,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+
+  return json({
+    aborted: true,
+    ok: true,
+  });
+}
+
 async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   bucket: WorkspaceSnapshotR2BucketLike;
   env: RunnerOutboundEnvironmentSource;
@@ -807,14 +890,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return notFound();
   }
   if (Date.parse(session.expiresAt) <= Date.now()) {
-    await deleteWorkspaceSnapshotUploadSession({
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
       env: input.env,
+      objectKey: session.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
-    });
-    await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      objectKey: session.objectKey,
     });
     return jsonError("Hosted workspace snapshot upload session expired.", 410);
   }
@@ -823,6 +905,14 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || session.leaseGeneration !== writeFence.generation
     || session.workspaceVersion !== writeFence.workspaceVersion
   ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: session.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
   if (
@@ -832,6 +922,14 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || session.encryption.aad.objectKey !== requestedObjectKey
     || session.encryption.aad.snapshotId !== input.snapshotId
   ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: session.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot ref is outside the bound user namespace.", 403);
   }
   const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
@@ -843,31 +941,57 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     "Hosted workspace snapshot complete snapshotRef",
   );
   if (snapshotRef.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
-    await deleteWorkspaceSnapshotUploadSession({
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
       env: input.env,
+      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
-    });
-    await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      objectKey: snapshotRef.objectKey,
     });
     return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
   }
   if (!input.bucket.head) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await input.bucket.head(snapshotRef.objectKey);
   if (!object) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: false,
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return notFound();
   }
   if (!Number.isSafeInteger(object.size)) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot object size is unavailable.", 503);
   }
   if (object.size !== snapshotRef.archive.encryptedByteSize) {
-    await deleteWorkspaceSnapshotObjectBestEffort({
+    await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
       objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
@@ -880,6 +1004,14 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointRequest.leaseGeneration !== writeFence.generation
     || checkpointRequest.expectedWorkspaceVersion !== writeFence.workspaceVersion
   ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot checkpoint write fence is stale.", 409);
   }
   const checkpointResponse = await fetchHostedExecutionWorkspaceSnapshotCheckpoint({
@@ -889,30 +1021,36 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     userId: input.userId,
   });
   if (!checkpointResponse.ok) {
-    await deleteWorkspaceSnapshotUploadSession({
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
       env: input.env,
+      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
-    });
-    await deleteWorkspaceSnapshotObjectBestEffort({
-      bucket: input.bucket,
-      objectKey: snapshotRef.objectKey,
     });
     return jsonError("Hosted workspace snapshot checkpoint failed.", checkpointResponse.status);
   }
   const checkpoint = parseHostedWorkspaceCheckpointResponse(await checkpointResponse.json());
   if (checkpoint.workspace.userId !== input.userId) {
-    return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
-  }
-  if (!checkpoint.checkpointed) {
-    await deleteWorkspaceSnapshotUploadSession({
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
       env: input.env,
+      objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
-    await deleteWorkspaceSnapshotObjectBestEffort({
+    return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
+  }
+  if (!checkpoint.checkpointed) {
+    await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
       objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
   }
@@ -925,10 +1063,20 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointSnapshotRef.archive.encryptedByteSize !== snapshotRef.archive.encryptedByteSize
     || checkpointSnapshotRef.archive.encryptedObjectSha256 !== snapshotRef.archive.encryptedObjectSha256
   ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
 
-  await deleteWorkspaceSnapshotUploadSession({
+  await retireWorkspaceSnapshotUploadSession({
+    bucket: input.bucket,
+    deleteObject: false,
     env: input.env,
     snapshotId: input.snapshotId,
     userId: input.userId,
@@ -939,6 +1087,27 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     ok: true,
     snapshotRef,
   });
+}
+
+async function retireWorkspaceSnapshotUploadSession(input: {
+  bucket: WorkspaceSnapshotR2BucketLike;
+  deleteObject: boolean;
+  env: RunnerOutboundEnvironmentSource;
+  objectKey?: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<void> {
+  await deleteWorkspaceSnapshotUploadSession({
+    env: input.env,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (input.deleteObject && input.objectKey) {
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: input.objectKey,
+    });
+  }
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
