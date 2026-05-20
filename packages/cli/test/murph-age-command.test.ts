@@ -202,6 +202,16 @@ interface MurphAgeAggregateEvidenceStatusReport {
   missingSourceRouteIds: string[]
   nextExecutionSourceRouteIds: string[]
   nextMissingSourceRouteIds: string[]
+  nsrrDatasetRequests: Array<{
+    datasetId: string
+    includeInLeanRequest: boolean
+    productAuthorized: boolean
+    recommendedDownloadTargets: string[]
+    requestCheckboxLabel: string
+    requestPriorityRank: number
+    rowParsingAuthorized: boolean
+    sourceRouteId: string
+  }>
   readyCardCount: number
   readySourceRouteIds: string[]
   receiptSlots: Array<{
@@ -426,11 +436,12 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     'true',
   ]))
 
-  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v4')
+  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
   murphAgeAggregateEvidenceStatusResultSchema.parse(templateStatus)
   assert.equal(templateStatus.status, 'blocked')
   assert.equal(templateStatus.inputCardCount, 0)
   assert.equal(templateStatus.readyCardCount, 0)
+  assert.deepEqual(templateStatus.nsrrDatasetRequests, [])
   assert.deepEqual(templateStatus.nextExecutionSourceRouteIds, [
     'nhanes-activity-shadow-lmf',
     'all-of-us-fitbit-labs-ehr',
@@ -525,6 +536,35 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
   assert.equal(allOfUsReceiptSlot?.endpoint.acceptedEndpointFamilies.includes('all-cause-mortality'), true)
   assert.equal(allOfUsReceiptSlot?.endpoint.acceptedOutcomeAscertainments.includes('ehr-event'), true)
 
+  const nsrrStatus = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
+    'age',
+    'evidence',
+    '--include-nsrr-requests',
+    'true',
+  ]))
+  assert.equal(nsrrStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
+  murphAgeAggregateEvidenceStatusResultSchema.parse(nsrrStatus)
+  assert.deepEqual(nsrrStatus.nsrrDatasetRequests.map((request) => request.datasetId), [
+    'mesa-sleep',
+    'hchs-sol',
+    'shhs',
+    'mros-sleep',
+    'sof-sleep',
+    'wsc',
+    'haassa',
+  ])
+  assert.deepEqual(
+    nsrrStatus.nsrrDatasetRequests
+      .filter((request) => request.includeInLeanRequest)
+      .map((request) => request.datasetId),
+    ['mesa-sleep', 'hchs-sol', 'shhs', 'mros-sleep', 'sof-sleep'],
+  )
+  assert.equal(nsrrStatus.nsrrDatasetRequests[0]?.requestCheckboxLabel, 'Multi-Ethnic Study of Atherosclerosis')
+  assert.deepEqual(nsrrStatus.nsrrDatasetRequests[0]?.recommendedDownloadTargets, ['mesa/datasets', 'mesa/actigraphy'])
+  assert.equal(nsrrStatus.nsrrDatasetRequests[0]?.sourceRouteId, 'nsrr-mesa-sleep-autonomic')
+  assert.equal(nsrrStatus.nsrrDatasetRequests.every((request) => request.productAuthorized === false), true)
+  assert.equal(nsrrStatus.nsrrDatasetRequests.every((request) => request.rowParsingAuthorized === false), true)
+
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-'))
   try {
     const receiptPath = path.join(payloadRoot, 'receipts.json')
@@ -590,10 +630,11 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
       'true',
     ]))
 
-    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v4')
+    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v5')
     murphAgeAggregateEvidenceStatusResultSchema.parse(status)
     assert.equal(status.status, 'ready')
     assert.deepEqual(status.benchmarkCards, [])
+    assert.deepEqual(status.nsrrDatasetRequests, [])
     assert.equal(status.inputCardCount, 4)
     assert.equal(status.readyCardCount, 2)
     assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity', 'all-of-us-fitbit-labs-ehr'])

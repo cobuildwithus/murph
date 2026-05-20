@@ -2,7 +2,7 @@ declare module 'incur' {
   interface Register {
     commands: {
       'age calculate': { args: {}; options: { input: string; mode: "product" | "research"; modelCardArtifactRoot?: string } }
-      'age evidence': { args: {}; options: { input?: string; includeTemplates: boolean; includeBenchmarkCards: boolean } }
+      'age evidence': { args: {}; options: { input?: string; includeTemplates: boolean; includeBenchmarkCards: boolean; includeNsrrRequests: boolean } }
       'age inputs': { args: {}; options: { vault: string; requestId?: string; asOf: string } }
       'age model-cards': { args: {}; options: { vault: string; requestId?: string; modelCardArtifactRoot?: string } }
       'age preview': { args: {}; options: { input: string; modelCardArtifactRoot?: string } }

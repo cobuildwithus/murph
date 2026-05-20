@@ -10,6 +10,9 @@ export const MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_AGE_BAND_FITS = [
   "primary-16-50",
 ] as const;
 
+export const MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION =
+  "murph.age.nsrr-dataset-request.v1" as const;
+
 export const MURPH_AGE_SOURCE_ROUTE_ORDINARY_SUBMITTER_INPUT_FAMILIES = [
   "age-sex",
   "autonomic",
@@ -227,6 +230,47 @@ export interface MurphAgeOrdinaryLabWearableAutoresearchSourcePriorityValidation
   status: "invalid" | "valid";
 }
 
+export type MurphAgeNsrrDatasetRequestId =
+  | "haassa"
+  | "hchs-sol"
+  | "mesa-sleep"
+  | "mros-sleep"
+  | "shhs"
+  | "sof-sleep"
+  | "wsc";
+
+export type MurphAgeNsrrDatasetRequestTier = "bonus" | "lean-first-five" | "primary";
+
+export interface MurphAgeNsrrDatasetRequest {
+  datasetId: MurphAgeNsrrDatasetRequestId;
+  displayName: string;
+  includeInLeanRequest: boolean;
+  modelUnblockerRoles: string[];
+  nextLocalCheckCommand: string;
+  productAuthorized: false;
+  recommendedDownloadTargets: string[];
+  requestCheckboxLabel: string;
+  requestPriorityRank: number;
+  requestTier: MurphAgeNsrrDatasetRequestTier;
+  rowParsingAuthorized: false;
+  schemaVersion: typeof MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION;
+  sourceRouteId: MurphAgeSourceRouteId;
+  whyRequest: string;
+}
+
+type MurphAgeNsrrDatasetRequestDefinition = {
+  datasetId: MurphAgeNsrrDatasetRequestId;
+  displayName: string;
+  includeInLeanRequest: boolean;
+  modelUnblockerRoles: string[];
+  recommendedDownloadTargets: string[];
+  requestCheckboxLabel: string;
+  requestPriorityRank: number;
+  requestTier: MurphAgeNsrrDatasetRequestTier;
+  sourceRouteId: MurphAgeSourceRouteId;
+  whyRequest: string;
+};
+
 type MurphAgeSourceRouteDefinition = Omit<
   MurphAgeSourceRoute,
   "artifactBoundary" | "ordinarySubmitterFit" | "productAuthorized" | "schemaVersion"
@@ -251,6 +295,128 @@ const MURPH_AGE_SOURCE_ROUTE_ARTIFACT_BOUNDARY = {
   rowValueExportAllowed: false,
   sourceTextStorageAllowed: false,
 } satisfies MurphAgeSourceRouteArtifactBoundary;
+
+const MURPH_AGE_NSRR_DATASET_REQUEST_DEFINITIONS = [
+  {
+    datasetId: "mesa-sleep",
+    displayName: "Multi-Ethnic Study of Atherosclerosis Sleep",
+    includeInLeanRequest: true,
+    modelUnblockerRoles: [
+      "sleep-autonomic-plus-activity validation",
+      "cardiovascular event and risk transport",
+      "older-adult multi-ethnic calibration stress",
+    ],
+    recommendedDownloadTargets: ["mesa/datasets", "mesa/actigraphy"],
+    requestCheckboxLabel: "Multi-Ethnic Study of Atherosclerosis",
+    requestPriorityRank: 1,
+    requestTier: "primary",
+    sourceRouteId: "nsrr-mesa-sleep-autonomic",
+    whyRequest:
+      "Best first NSRR lane because it combines objective sleep or activity context with cardiovascular phenotype and event linkage needed for wearable residual validation.",
+  },
+  {
+    datasetId: "hchs-sol",
+    displayName: "Hispanic Community Health Study / Study of Latinos",
+    includeInLeanRequest: true,
+    modelUnblockerRoles: [
+      "activity and sleep transport outside NHIS/NHANES",
+      "metabolic and cardiometabolic generalization",
+      "source-diversity stress test",
+    ],
+    recommendedDownloadTargets: ["hchs/datasets", "hchs/actigraphy"],
+    requestCheckboxLabel: "Hispanic Community Health Study / Study of Latinos",
+    requestPriorityRank: 2,
+    requestTier: "primary",
+    sourceRouteId: "nsrr-hchs-sol-sleep-actigraphy",
+    whyRequest:
+      "High-value external route for objective activity or sleep signals plus cardiometabolic context in a population not covered by the current frozen NHIS anchor.",
+  },
+  {
+    datasetId: "shhs",
+    displayName: "Sleep Heart Health Study",
+    includeInLeanRequest: true,
+    modelUnblockerRoles: [
+      "sleep-autonomic endpoint validation",
+      "sleep-disordered breathing risk stress",
+      "cardiovascular outcome comparison",
+    ],
+    recommendedDownloadTargets: ["shhs/datasets"],
+    requestCheckboxLabel: "Sleep Heart Health Study",
+    requestPriorityRank: 3,
+    requestTier: "primary",
+    sourceRouteId: "nsrr-shhs-sleep-heart-health",
+    whyRequest:
+      "Strong sleep and cardiovascular outcome lane for testing whether sleep/autonomic features add calibrated signal instead of acting as context-only noise.",
+  },
+  {
+    datasetId: "mros-sleep",
+    displayName: "MrOS Sleep Study",
+    includeInLeanRequest: true,
+    modelUnblockerRoles: [
+      "older-male aging stress",
+      "sleep-autonomic transport",
+      "late-life calibration check",
+    ],
+    recommendedDownloadTargets: ["mros/datasets"],
+    requestCheckboxLabel: "MrOS Sleep Study",
+    requestPriorityRank: 4,
+    requestTier: "lean-first-five",
+    sourceRouteId: "nsrr-mros-sleep-aging",
+    whyRequest:
+      "Useful sex-specific older-adult stress test for sleep/autonomic signals and calibration behavior in late-life risk settings.",
+  },
+  {
+    datasetId: "sof-sleep",
+    displayName: "Study of Osteoporotic Fractures",
+    includeInLeanRequest: true,
+    modelUnblockerRoles: [
+      "older-female aging stress",
+      "sleep and function transport",
+      "late-life calibration check",
+    ],
+    recommendedDownloadTargets: ["sof/datasets"],
+    requestCheckboxLabel: "Study of Osteoporotic Fractures",
+    requestPriorityRank: 5,
+    requestTier: "lean-first-five",
+    sourceRouteId: "nsrr-sof-sleep-aging",
+    whyRequest:
+      "Complements MrOS with an older-female stress test so sleep/autonomic validation is not accidentally male-only.",
+  },
+  {
+    datasetId: "wsc",
+    displayName: "Wisconsin Sleep Cohort",
+    includeInLeanRequest: false,
+    modelUnblockerRoles: [
+      "longitudinal sleep transport",
+      "repeated sleep-study calibration stress",
+      "fallback sleep endpoint lane",
+    ],
+    recommendedDownloadTargets: ["wsc/datasets"],
+    requestCheckboxLabel: "Wisconsin Sleep Cohort",
+    requestPriorityRank: 6,
+    requestTier: "bonus",
+    sourceRouteId: "nsrr-wsc-sleep-longitudinal",
+    whyRequest:
+      "Good broader sleep-cohort fallback after the first five routes, especially for repeated sleep-study and calibration stress questions.",
+  },
+  {
+    datasetId: "haassa",
+    displayName: "Honolulu-Asia Aging Study of Sleep Apnea",
+    includeInLeanRequest: false,
+    modelUnblockerRoles: [
+      "older-adult sleep apnea stress",
+      "single-demographic generalization check",
+      "late-life cognition or function context",
+    ],
+    recommendedDownloadTargets: ["haassa/datasets"],
+    requestCheckboxLabel: "Honolulu-Asia Aging Study of Sleep Apnea",
+    requestPriorityRank: 7,
+    requestTier: "bonus",
+    sourceRouteId: "nsrr-haassa-sleep-aging",
+    whyRequest:
+      "Bonus route because it may require extra owner permission, but it is useful for late-life sleep apnea and generalization stress if accessible.",
+  },
+] satisfies MurphAgeNsrrDatasetRequestDefinition[];
 
 const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS = [
   {
@@ -1385,6 +1551,20 @@ export function listMurphAgePrioritySourceRoutes(): MurphAgeSourceRoute[] {
       route.activationStatus !== "historical-reference" && route.modelUseStatus !== "historical-reference"
     )
     .map(cloneMurphAgeSourceRoute);
+}
+
+export function listMurphAgeNsrrDatasetRequests(): MurphAgeNsrrDatasetRequest[] {
+  return MURPH_AGE_NSRR_DATASET_REQUEST_DEFINITIONS
+    .map((request) => ({
+      ...request,
+      modelUnblockerRoles: [...request.modelUnblockerRoles],
+      nextLocalCheckCommand: "pnpm exec tsx scripts/murph-age/r1076-current-autoresearch-loop-executor.ts",
+      productAuthorized: false as const,
+      recommendedDownloadTargets: [...request.recommendedDownloadTargets],
+      rowParsingAuthorized: false as const,
+      schemaVersion: MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
+    }))
+    .sort((a, b) => a.requestPriorityRank - b.requestPriorityRank || a.datasetId.localeCompare(b.datasetId));
 }
 
 export function validateMurphAgeSourceRouteRegistry(
