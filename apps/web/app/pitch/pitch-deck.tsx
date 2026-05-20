@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DeckChrome, TONES, TOTAL } from "./_components/primitives";
 import {
   AskSlide,
+  BusinessModelSlide,
   CompetitionSlide,
   ExperimentSlide,
   InsightSlide,
@@ -103,6 +104,7 @@ export function PitchDeck() {
       <ValidationSlide />
       <CompetitionSlide />
       <MoatSlide />
+      <BusinessModelSlide />
       <TeamSlide />
       <AskSlide />
     </main>
