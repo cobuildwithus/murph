@@ -916,7 +916,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v4");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v5");
     assert.deepEqual(readiness.runtimeInputs, [
       {
         key: "chronological-age-years",
@@ -936,6 +936,23 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
     assert.equal(readiness.bundle.bundleId, "lab9-bp-body");
     assert.equal(readiness.bundle.status, "ready");
     assert.equal(readiness.bundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
+    assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
+      "lab9-bp-body",
+      "lab5-bp-bmi",
+      "r399-nhis-proxy-anchor",
+      "wearable-context",
+      "function-context",
+    ]);
+    assert.equal(
+      readiness.inputBundleSpecs.find((spec) => spec.bundleId === "lab9-bp-body")
+        ?.completion.requiredFeatureKeys.includes("albumin"),
+      true,
+    );
+    assert.equal(
+      readiness.inputBundleSpecs.find((spec) => spec.bundleId === "wearable-context")
+        ?.scoreBearing,
+      false,
+    );
     assert.deepEqual(readiness.scoreReadiness, {
       bundleId: "lab9-bp-body",
       contextOnly: false,
@@ -1006,8 +1023,9 @@ test("assessMurphAgeInputReadinessFromVault reports empty vault readiness withou
       vaultRoot,
     });
 
-    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v4");
+    assert.equal(readiness.schemaVersion, "murph.age.input-readiness.v5");
     assert.deepEqual(readiness.runtimeInputs.map((input) => input.key), ["chronological-age-years", "sex"]);
+    assert.equal(readiness.inputBundleSpecs.some((spec) => spec.bundleId === "lab9-bp-body"), true);
     assert.equal(readiness.bundle.bundleId, "insufficient");
     assert.equal(readiness.bundle.status, "abstain");
     assert.equal(readiness.bundle.recommendedCardId, "none");
@@ -1118,7 +1136,8 @@ test("assessMurphAgeInputReadinessFromVault reports context-only and invalid asO
     vaultRoot: path.join(os.tmpdir(), "murph-age-missing-vault"),
   });
 
-  assert.equal(invalidReadiness.schemaVersion, "murph.age.input-readiness.v4");
+  assert.equal(invalidReadiness.schemaVersion, "murph.age.input-readiness.v5");
+  assert.equal(invalidReadiness.inputBundleSpecs.some((spec) => spec.bundleId === "wearable-context"), true);
   assert.equal(invalidReadiness.bundle.bundleId, "insufficient");
   assert.equal(invalidReadiness.bundle.warnings[0]?.code, "INVALID_INPUT");
   assert.deepEqual(invalidReadiness.scoreReadiness, {

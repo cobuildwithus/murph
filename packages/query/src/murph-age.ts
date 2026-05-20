@@ -19,6 +19,7 @@ import {
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeInputBundleMetricKeys,
+  listMurphAgeSubmittedCalculatorInputBundleSpecs,
   normalizeMetricValue,
   parseMurphAgeLocalModelCardArtifact,
   resolveMurphAgeModelCardPolicy,
@@ -44,6 +45,7 @@ import {
   type MurphAgeResult,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
+  type MurphAgeSubmittedCalculatorInputBundleSpec,
   type MurphAgeSubmittedCalculatorInput,
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
@@ -138,9 +140,10 @@ export interface MurphAgeInputScoreReadiness {
 
 export interface MurphAgeInputReadinessForVault {
   bundle: MurphAgeInputBundleReadiness;
+  inputBundleSpecs: MurphAgeSubmittedCalculatorInputBundleSpec[];
   contextBundles: MurphAgeInputBundleReadiness[];
   runtimeInputs: MurphAgeRuntimeInputReadiness[];
-  schemaVersion: "murph.age.input-readiness.v4";
+  schemaVersion: "murph.age.input-readiness.v5";
   scoreReadiness: MurphAgeInputScoreReadiness;
   wearableBridge: MurphAgeWearableBridgeInputReadiness;
 }
@@ -377,9 +380,10 @@ export async function assessMurphAgeInputReadinessFromVault(
           code: "INVALID_INPUT",
         }],
       },
+      inputBundleSpecs: listMurphAgeSubmittedCalculatorInputBundleSpecs(),
       contextBundles: [],
       runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-      schemaVersion: "murph.age.input-readiness.v4",
+      schemaVersion: "murph.age.input-readiness.v5",
       scoreReadiness: buildMurphAgeInputScoreReadiness({
         bundleId: "insufficient",
         recommendedCardId: "none",
@@ -408,9 +412,10 @@ export async function assessMurphAgeInputReadinessFromVault(
 
   return {
     bundle: sanitizeMurphAgeInputBundleAssessment(bundleAssessment),
+    inputBundleSpecs: listMurphAgeSubmittedCalculatorInputBundleSpecs(),
     contextBundles: contextAssessments.map(sanitizeMurphAgeInputBundleAssessment),
     runtimeInputs: buildMurphAgeRuntimeInputReadiness(),
-    schemaVersion: "murph.age.input-readiness.v4",
+    schemaVersion: "murph.age.input-readiness.v5",
     scoreReadiness: buildMurphAgeInputScoreReadiness(bundleAssessment),
     wearableBridge: buildMurphAgeWearableBridgeReadiness({
       asOf,
