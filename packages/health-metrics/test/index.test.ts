@@ -4681,6 +4681,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     anchorCardId: "lab9_bp_body_10y_acm_research",
     anchorRiskProbability: research.result?.risk?.probability ?? null,
     assessments: research.wearableShadowIncrementAssessments,
+    referenceRiskCurve: researchModel.referenceRiskCurve,
   });
   assert.deepEqual(directResidualApplication, research.wearableResidualLayerApplication);
   assert.equal(researchActivityShadow ? "unit" in researchActivityShadow : true, false);

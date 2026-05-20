@@ -665,12 +665,15 @@ const murphAgeWearableShadowReadinessSchema = z.object({
 
 const murphAgeWearableResidualLayerViewSchema = z.object({
   anchorCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  anchorRiskAgeEquivalentYears: z.number().nullable(),
   eligibleForResidualResearch: z.boolean(),
+  finalRiskAgeEquivalentYears: z.number().nullable(),
   finalRiskProbability: z.number().nullable(),
   layerId: z.literal('activity-residual-v1'),
   parameterPackHash: z.string().min(1).nullable(),
   parameterizationAvailable: z.boolean(),
   productAuthorized: z.literal(false),
+  residualDeltaYears: z.number().nullable(),
   residualDeltaLogit: z.number(),
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION),
   scoreBearing: z.literal(false),
