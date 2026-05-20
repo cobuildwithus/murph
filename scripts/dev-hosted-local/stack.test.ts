@@ -690,9 +690,14 @@ describe("hosted local dev stack", () => {
     maybeStartHostedLocalMinio.mockResolvedValueOnce({
       containerName: "murph-hosted-local-r2-test",
       env: {
+        HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+        HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
         HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+        HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
       process: minioChild,
     });
@@ -706,7 +711,7 @@ describe("hosted local dev stack", () => {
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
-        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -722,9 +727,14 @@ describe("hosted local dev stack", () => {
     expect(stack.processes.minio).toBe(minioChild);
     expect(vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0].overrides)
       .toEqual(expect.objectContaining({
+        HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+        HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
         HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+        HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }));
   });
 

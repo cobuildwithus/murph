@@ -296,7 +296,35 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
-  it("passes hosted-local MinIO endpoint overrides through only with local e2e R2 placeholders", () => {
+  it("passes hosted-local MinIO endpoint overrides through for dev profile without e2e isolation", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+        HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
+        HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+    });
+
+    expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
+    expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
+    expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
+    expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
+    expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
+    expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
+    expect(merged.MURPH_HOSTED_LOCAL_PROFILE).toBe("dev");
+    expect(merged.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBeUndefined();
+  });
+
+  it("passes hosted-local MinIO endpoint overrides through with local e2e R2 placeholders", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {},
@@ -750,6 +778,7 @@ describe("readHostedLocalDevVarsText", () => {
 describe("resolveHostedLocalPersistentCryptoStatePath", () => {
   it("uses an ignored interactive-dev crypto state file for normal pnpm dev", () => {
     expect(resolveHostedLocalPersistentCryptoStatePath({
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
     })).toContain(".tmp/hosted-local-dev-crypto-state.dev.vars");
   });
@@ -1037,6 +1066,7 @@ describe("buildWranglerVarArgs", () => {
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4222/v1",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
@@ -1052,6 +1082,8 @@ describe("buildWranglerVarArgs", () => {
       "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL:http://127.0.0.1:4111/v1",
       "--var",
       "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL:http://127.0.0.1:4222/v1",
+      "--var",
+      "MURPH_HOSTED_LOCAL_PROFILE:dev",
       "--var",
       "NODE_ENV:test",
       "--var",
@@ -1123,9 +1155,15 @@ describe("buildWranglerEnvFileText", () => {
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         OPENAI_API_KEY: "local-openai-key",
       }),
     ).toContain('OPENAI_API_KEY="local-openai-key"');
+    expect(
+      buildWranglerEnvFileText({
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      }),
+    ).toContain('MURPH_HOSTED_LOCAL_PROFILE="dev"');
   });
 
   it("keeps web-only hosted-local crypto state out of worker env files", () => {
@@ -1262,6 +1300,18 @@ describe("buildWranglerLocalDevConfig", () => {
 
     expect(config.name).toMatch(/^murph-hosted-e2e-[a-f0-9]{24}$/u);
     expect(config.name).not.toBe("murph-hosted");
+  });
+
+  it("keeps normal dev profile on the shared local worker name", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
+    });
+
+    expect(config.name).toBe("murph-hosted");
+    expect(config.vars).toEqual(expect.objectContaining({
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+    }));
   });
 
   it("hashes caller-supplied local runner build ids before they reach image metadata", () => {

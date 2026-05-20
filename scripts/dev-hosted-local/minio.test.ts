@@ -99,11 +99,16 @@ describe("hosted-local MinIO sidecar", () => {
     expect(server?.process).toBe(child);
     expect(server?.containerName).toMatch(/^murph-hosted-local-r2-/u);
     expect(server?.env).toEqual(expect.objectContaining({
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
       HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
       MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
     }));
+    expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_PROFILE");
     expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
     expect(childProcessMocks.spawn).toHaveBeenCalledWith(
       "docker",
@@ -131,6 +136,51 @@ describe("hosted-local MinIO sidecar", () => {
         "label=murph.hosted-local.build-id=build-test",
       ],
       expect.objectContaining({ stdio: ["ignore", "pipe", "ignore"] }),
+    );
+  });
+
+  it("starts a complete local R2 presign sidecar for the normal hosted-local dev profile", async () => {
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+
+    expect(server?.process).toBe(child);
+    expect(server?.env).toEqual(expect.objectContaining({
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
+      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+    }));
+    expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED");
+    expect(runtimeMocks.spawnChildProcess).toHaveBeenCalledWith(
+      "minio",
+      "docker",
+      expect.arrayContaining(["run"]),
+      expect.objectContaining({
+        MINIO_ROOT_PASSWORD: "hosted-local-r2-secret-key",
+        MINIO_ROOT_USER: "hosted-local-r2-access-key",
+      }),
+      expect.any(Object),
     );
   });
 
@@ -289,10 +339,32 @@ describe("hosted-local MinIO sidecar", () => {
       containerHost: "host.docker.internal",
       env: {
         MURPH_DEV_SKIP_MINIO: "1",
-        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
       tempDir: ".tmp/hosted-local-minio-test",
-    })).rejects.toThrow("MURPH_DEV_SKIP_MINIO=1 requires explicit hosted-local R2 presign endpoints");
+    })).rejects.toThrow("MURPH_DEV_SKIP_MINIO=1 requires explicit hosted-local R2 presign endpoints and credentials");
+    expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
+  });
+
+  it("accepts explicit hosted-local R2 presign env when MinIO is intentionally skipped", async () => {
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "explicit-access-key",
+        HOSTED_R2_PRESIGN_ACCOUNT_ID: "explicit-account",
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "explicit-bucket",
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
+        HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "explicit-secret",
+        MURPH_DEV_SKIP_MINIO: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).resolves.toBeNull();
     expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
   });
 });
