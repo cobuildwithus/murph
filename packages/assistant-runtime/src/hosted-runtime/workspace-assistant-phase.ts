@@ -1561,12 +1561,7 @@ function isDueHostedDeviceSyncReconcileAlarm(
 function isDueHostedLegacyDeviceSyncRecoveryAlarm(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (!isDueHostedWorkspaceAlarm(input) || !hasHostedDeviceSyncRuntimeConfigured(input)) {
-    return false;
-  }
-
-  const wakeReason = input.workspace?.nextWakeReason ?? null;
-  return wakeReason === null || wakeReason === "assistant";
+  return isDueHostedWorkspaceAlarm(input) && isDueHostedLegacyDeviceSyncRecoveryWake(input);
 }
 
 function isDueHostedWorkspaceAlarm(
@@ -1592,8 +1587,29 @@ function isDueHostedWorkspaceWake(
     return false;
   }
 
+  return isDueHostedWorkspaceWakeAt(input);
+}
+
+function isDueHostedWorkspaceWakeAt(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  if (!input.workspace?.nextWakeAt) {
+    return false;
+  }
+
   const wakeTime = Date.parse(input.workspace.nextWakeAt);
   return Number.isFinite(wakeTime) && wakeTime <= resolveHostedAssistantPhaseNowMs(input);
+}
+
+function isDueHostedLegacyDeviceSyncRecoveryWake(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  if (!hasHostedDeviceSyncRuntimeConfigured(input) || !isDueHostedWorkspaceWakeAt(input)) {
+    return false;
+  }
+
+  const wakeReason = input.workspace?.nextWakeReason ?? null;
+  return wakeReason === null || wakeReason === "assistant";
 }
 
 function hasHostedDeviceSyncRuntimeConfigured(
@@ -1631,6 +1647,10 @@ function resolveSkippedDeviceSyncWake(input: {
       at: existingWakeAt,
       reason: existingWakeReason,
     };
+  }
+
+  if (isDueHostedLegacyDeviceSyncRecoveryWake(input.input)) {
+    return null;
   }
 
   if (shouldRescheduleSkippedDeviceSyncWake(input.input)) {
