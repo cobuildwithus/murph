@@ -19,6 +19,13 @@ import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  parseHostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRunnerStatusResponse,
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
@@ -52,10 +59,12 @@ const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const checkpointReplayUserId = `member_local_linq_checkpoint_replay_${Date.now()}`;
+const typingLoopUserId = `member_local_linq_typing_loop_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const checkpointReplayReplyText = "Yes - I can help with that.";
+const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
 
@@ -729,6 +738,142 @@ describe("hosted local Linq checkpoint replay e2e", () => {
   );
 });
 
+describe("hosted local Linq stale scheduled wake e2e", () => {
+  beforeAll(async () => {
+    await restartLinqScenario({
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
+    });
+  }, 300_000);
+
+  itOutsideFastDeployGate(
+    "does not keep servicing a stale scheduled wake after a Linq reply",
+    async () => {
+      await requireScenario().seedActiveHostedLinqMember({
+        homePhone: buildLinqHomePhoneNumber(typingLoopUserId),
+        memberId: typingLoopUserId,
+        memberPhone: buildLinqRecipientPhoneNumber(typingLoopUserId),
+      });
+      await requireScenario().runWake(
+        buildActivationWake(typingLoopUserId),
+        typingLoopUserId,
+      );
+      await requireScenario().waitForHostedCompletion(typingLoopUserId);
+      requireScenario().queueAssistantResponses([
+        buildHostedAssistantNotificationDecisionResponse({
+          privateSummary: "deliver signup welcome",
+          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        }),
+      ]);
+      await requireScenario().runWake(
+        buildHostedLinqSignupWelcomeWake({
+          eventId:
+            `assistant.notification.requested:local:${typingLoopUserId}:evt_linq_typing_loop`,
+          userId: typingLoopUserId,
+        }),
+        typingLoopUserId,
+      );
+      await requireLinqStub().waitForSend({
+        expectedPath: requireLinqStub().createChatPath,
+        matchRequest: requireLinqStub().createCreateChatRequestMatcher(typingLoopUserId),
+        scenario: requireScenario(),
+        userId: typingLoopUserId,
+      });
+      await requireScenario().waitForHostedCompletion(typingLoopUserId);
+
+      const materializedChatId = requireLinqStub().requireObservedChatId(typingLoopUserId);
+      const expectedReplyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+      const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
+      const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyPath);
+      requireScenario().queueAssistantResponses([typingLoopReplyText]);
+
+      const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        typingLoopUserId,
+        materializedChatId,
+        {
+          eventId: `evt_typing_loop_reply_${typingLoopUserId}`,
+          messageId: `msg_typing_loop_reply_${typingLoopUserId}`,
+          text: "Can you help me with this?",
+        },
+      ));
+      expect(webhookResponse.status).toBe(202);
+      await expect(webhookResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      await requireScenario().waitForLatestPendingWake(typingLoopUserId);
+      const replySend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: outboundCountBeforeReply,
+        expectedPath: expectedReplyPath,
+        scenario: requireScenario(),
+        userId: typingLoopUserId,
+      });
+      expect(requireLinqStub().readObservedMessageText(replySend)).toBe(typingLoopReplyText);
+      await requireScenario().waitForHostedCompletion(typingLoopUserId);
+
+      const requestCountAfterReply = requireLinqStub().observedRequests.length;
+      await seedStaleWorkspaceWakeFromCurrentCheckpoint(typingLoopUserId);
+
+      const alarmStartedAtMs = Date.now();
+      let alarmSettled = false;
+      const alarmAbortController = new AbortController();
+      const alarmOutcomePromise = runHostedAlarmUntilIdleForTest(
+        typingLoopUserId,
+        alarmAbortController.signal,
+      ).then(
+        (result) => ({
+          kind: "fulfilled" as const,
+          result,
+        }),
+        (error: unknown) => ({
+          errorName: error instanceof Error ? error.name : typeof error,
+          kind: "rejected" as const,
+        }),
+      ).finally(() => {
+        alarmSettled = true;
+      });
+
+      await sendRuntimeWakeProbesWhilePending({
+        intervalMs: 250,
+        isPending: () => !alarmSettled,
+        maxDurationMs: 2_750,
+        userId: typingLoopUserId,
+      });
+
+      let alarmOutcome = await Promise.race([
+        alarmOutcomePromise,
+        sleep(250).then(() => null),
+      ]);
+      if (!alarmOutcome) {
+        alarmAbortController.abort();
+        alarmOutcome = await Promise.race([
+          alarmOutcomePromise,
+          sleep(1_000).then(() => null),
+        ]);
+      }
+
+      const statusAfterAlarm = await readHostedRunnerStatusWithLogLimit(
+        typingLoopUserId,
+        200,
+      );
+      const canonicalRuntimeDeferralsAfterAlarm =
+        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterAlarm, alarmStartedAtMs);
+      const postReplyTypingStarts = requireLinqStub().observedRequests
+        .slice(requestCountAfterReply)
+        .filter((request) => request.method === "POST" && request.url === expectedTypingPath);
+
+      expect(alarmOutcome?.kind).toBe("fulfilled");
+      if (alarmOutcome?.kind !== "fulfilled") {
+        throw new Error("Stale scheduled wake alarm did not settle under runtime wake probes.");
+      }
+      expect(["idle", "scheduled"]).toContain(alarmOutcome.result.status);
+      expect(canonicalRuntimeDeferralsAfterAlarm).toBeLessThanOrEqual(1);
+      expect(postReplyTypingStarts).toHaveLength(0);
+    },
+    300_000,
+  );
+});
+
 function countAssistantProviderResponsesApiRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
@@ -1019,6 +1164,16 @@ async function ensureLinqScenario(): Promise<void> {
   });
 }
 
+async function restartLinqScenario(
+  additionalEnv: NodeJS.ProcessEnv = {},
+): Promise<void> {
+  await scenario?.stop();
+  scenario = null;
+  await linqStub?.stop();
+  linqStub = null;
+  await startLinqScenario(additionalEnv);
+}
+
 function buildLinqFirstContactLocalInboundAllowlist(): string {
   return [
     directReplyUserId,
@@ -1026,7 +1181,94 @@ function buildLinqFirstContactLocalInboundAllowlist(): string {
     fastReplyUserId,
     postAssistantReplyUserId,
     checkpointReplayUserId,
+    typingLoopUserId,
   ].map(buildLinqRecipientPhoneNumber).join(",");
+}
+
+async function seedStaleWorkspaceWakeFromCurrentCheckpoint(userId: string): Promise<void> {
+  const status = await readHostedRunnerStatusWithLogLimit(userId, 100);
+  const workspace = status.workspace;
+  if (!workspace?.snapshotRef || !workspace.browserVaultReplicaRef) {
+    throw new Error("Expected a checkpointed hosted workspace before seeding stale wake.");
+  }
+
+  const checkpoint = await seedHostedWorkspaceCheckpointForTest({
+    browserVaultReplicaRef: workspace.browserVaultReplicaRef,
+    environment: requireScenario().runtimeEnv,
+    nextWakeAt: new Date(Date.now() - 1_000).toISOString(),
+    nextWakeReason: "assistant",
+    redactedStatusJson: {
+      seededStaleWakeForTest: true,
+    },
+    snapshotRef: workspace.snapshotRef,
+    userId,
+  });
+  expect(checkpoint.status).toBe("updated");
+}
+
+async function runHostedAlarmUntilIdleForTest(
+  userId: string,
+  signal: AbortSignal,
+): Promise<HostedWorkspaceInvocationResult> {
+  return await requireScenario().harness.requestJson<HostedWorkspaceInvocationResult>(
+    `/__test/users/${encodeURIComponent(userId)}/run-until-idle?reason=alarm`,
+    {
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+      },
+      method: "POST",
+      signal,
+    },
+  );
+}
+
+async function sendRuntimeWakeProbesWhilePending(input: {
+  intervalMs: number;
+  isPending(): boolean;
+  maxDurationMs: number;
+  userId: string;
+}): Promise<void> {
+  const deadlineMs = Date.now() + input.maxDurationMs;
+  while (input.isPending() && Date.now() < deadlineMs) {
+    await requireScenario().harness.nudgeUserBestEffort(input.userId);
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+    await sleep(Math.min(input.intervalMs, remainingMs));
+  }
+}
+
+async function readHostedRunnerStatusWithLogLimit(
+  userId: string,
+  logLimit: number,
+): Promise<HostedRunnerStatusResponse> {
+  const status = parseHostedRunnerStatusResponse(
+    await requireScenario().harness.requestJson(
+      `/internal/users/${encodeURIComponent(userId)}/status?logLimit=${logLimit}`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+        },
+      },
+    ),
+  );
+  if (status.userId !== userId) {
+    throw new Error("Hosted runner status read returned a different user.");
+  }
+  return status;
+}
+
+function countAssistantCanonicalRuntimeCommitDeferrals(
+  status: HostedRunnerStatusResponse,
+  sinceMs: number,
+): number {
+  return (status.recentLogs ?? []).filter((entry) =>
+    Date.parse(entry.at) >= sinceMs
+    && entry.eventCode === "checkpoint.runtime_residue_deferred"
+    && entry.redactedJson?.checkpointPhase === "assistant"
+    && entry.redactedJson?.checkpointReason === "canonical_runtime_commit"
+  ).length;
 }
 
 async function sleep(ms: number): Promise<void> {

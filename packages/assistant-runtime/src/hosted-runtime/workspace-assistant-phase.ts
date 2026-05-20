@@ -2085,7 +2085,20 @@ function hostedAssistantWakeStateProgressed(input: {
     return false;
   }
 
-  return input.nextWakeAt !== (input.input.workspace?.nextWakeAt ?? null);
+  const existingWakeAt = input.input.workspace?.nextWakeAt ?? null;
+  if (input.nextWakeAt === existingWakeAt) {
+    return false;
+  }
+
+  return (
+    input.nextWakeAt !== null
+    || hasFreshHostedConversationInput(input.input)
+    || input.assistantMetrics.activeTurnInputIngested === true
+    || input.assistantMetrics.assistantAutomationProgressed === true
+    || input.assistantMetrics.deviceSyncProcessed > 0
+    || input.assistantMetrics.parserProcessed > 0
+    || (input.assistantMetrics.postCheckpointRecord ?? null) !== null
+  );
 }
 
 function resolveHostedWorkspaceDeviceConnectProviders(

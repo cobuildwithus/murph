@@ -401,8 +401,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         skipDeviceSync: true,
       }),
     );
-    expect(result.progressed).toBe(true);
-    expect(result.nextWakeAt).toBeNull();
+    expect(result.progressed).toBe(false);
+    expect("checkpointReason" in result).toBe(false);
+    expect("nextWakeAt" in result).toBe(false);
   });
 
   it("re-arms a due legacy assistant-labeled device-sync alarm with the device-sync reason", async () => {
