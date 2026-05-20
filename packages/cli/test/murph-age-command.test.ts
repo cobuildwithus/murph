@@ -13,6 +13,7 @@ import {
   type MetricPoint,
   type MurphAgePublicCalculatorReport,
   type MurphAgePublicDisplaySummary,
+  type MurphAgeResearchCalculatorView,
   type MurphAgeRiskModel,
 } from '@murphai/health-metrics'
 import {
@@ -30,6 +31,7 @@ import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   murphAgeReportResultSchema,
+  murphAgeResearchCalculatorViewResultSchema,
   murphAgeSubmittedPreviewPayloadSchema,
   registerMurphAgeCommands,
 } from '../src/commands/murph-age.js'
@@ -429,6 +431,53 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'coefficient',
     ]) {
       assert.equal(encodedReport.includes(forbidden), false, forbidden)
+    }
+
+    const view = requireData(await runSliceCli<MurphAgeResearchCalculatorView>([
+      'age',
+      'preview-view',
+      '--input',
+      `@${payloadPath}`,
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+
+    assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v1')
+    assert.equal(view.researchOnly, true)
+    assert.equal(view.product.productUseAuthorized, false)
+    assert.equal(view.status, 'ready')
+    assert.equal(view.mode, 'research')
+    assert.equal(view.displayStatus, 'research-only')
+    assert.equal(view.selectedCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(typeof view.ageEstimate?.biologicalAgeYears, 'number')
+    assert.equal(typeof view.risk.probability, 'number')
+    assert.equal(view.featureContributions.some((feature) => feature.metricKey === 'hba1c'), true)
+    assert.equal(view.featureContributions.some((feature) => feature.metricKey === 'steps'), false)
+    assert.equal(view.domainContributions.some((module) => module.moduleId === 'unknown'), true)
+    assert.equal(view.wearable.scoreBearing, false)
+    assert.equal(view.wearable.readyFeatureKeys.includes('activity-volume'), true)
+
+    const encodedView = JSON.stringify(view)
+    for (const forbidden of [
+      artifactRoot,
+      payloadPath,
+      'private metric',
+      'fixture-lab5-research-model',
+      'fasting',
+      'manual-cuff',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      '"label"',
+      '"message"',
+      '"path"',
+      'selectedPointIds',
+      'coefficient',
+      'contributionLogit',
+      'prediction',
+    ]) {
+      assert.equal(encodedView.includes(forbidden), false, forbidden)
     }
   } finally {
     await rm(artifactRoot, { force: true, recursive: true })

@@ -28,6 +28,8 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v1" as const;
+export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
+  "murph.age.research-calculator-view.v1" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -721,6 +723,33 @@ export interface MurphAgePublicCalculatorView {
   };
   risk: MurphAgePublicRiskView;
   schemaVersion: typeof MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION;
+  selectedCardId: MurphAgePublicAuthorization["cardId"];
+  selectedScoreBearingFeatureKeys: string[];
+  selectedScoreBearingMetricKeys: string[];
+  status: MurphAgeInputBundleStatus;
+  warnings: MurphAgePublicWarning[];
+  wearable: MurphAgePublicWearableCalculatorView;
+}
+
+export interface MurphAgeResearchCalculatorView {
+  ageEstimate: MurphAgePublicAgeEstimateView | null;
+  blockedFeatureKeys: string[];
+  displayBlockedReason: MurphAgeDisplayBlockedReason | null;
+  displayStatus: MurphAgeDisplayStatus;
+  domainContributions: MurphAgePublicDomainContributionView[];
+  featureContributions: MurphAgePublicFeatureContributionView[];
+  missingFeatureKeys: string[];
+  mode: MurphAgeCalculatorMode;
+  product: {
+    ageDisplayReady: boolean;
+    promotionBlockers: MurphAgeProductPromotionBlocker[];
+    productUseAuthorized: false;
+    riskDisplayReady: boolean;
+    validationGate: MurphAgePublicValidationGateSummary | null;
+  };
+  researchOnly: true;
+  risk: MurphAgePublicRiskView;
+  schemaVersion: typeof MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION;
   selectedCardId: MurphAgePublicAuthorization["cardId"];
   selectedScoreBearingFeatureKeys: string[];
   selectedScoreBearingMetricKeys: string[];
@@ -4151,6 +4180,76 @@ export function buildMurphAgePublicCalculatorView(
     selectedCardId: canExposeScoreIdentity ? report.authorization.cardId : null,
     selectedScoreBearingFeatureKeys: canExposeScoreIdentity ? [...summary.selectedScoreBearingFeatureKeys] : [],
     selectedScoreBearingMetricKeys: canExposeScoreIdentity ? [...summary.selectedScoreBearingMetricKeys] : [],
+    status: report.status,
+    warnings: report.warnings.map((warning) => ({ ...warning })),
+    wearable: {
+      contextOnlyMetricKeys: contextOnlyWearableMetricKeys,
+      missingFeatureKeys: [...summary.wearableBridge.missingFeatureKeys],
+      partialFeatureKeys: [...summary.wearableBridge.partialFeatureKeys],
+      quality: summary.wearableContext.quality,
+      readyFeatureKeys: [...summary.wearableBridge.readyFeatureKeys],
+      scoreBearing: false,
+      scoreContributionAuthorized: false,
+    },
+  };
+}
+
+export function buildMurphAgeResearchCalculatorView(
+  report: MurphAgePublicCalculatorReport,
+): MurphAgeResearchCalculatorView {
+  const summary = report.displaySummary;
+  const result = report.mode === "research" ? report.result : null;
+  const wearableMetricKeys = new Set(summary.wearableBridge.features.flatMap((feature) => feature.metricKeys));
+  const contextOnlyWearableMetricKeys = summary.contextOnlyMetricKeys.filter((metricKey) =>
+    wearableMetricKeys.has(metricKey)
+  );
+
+  return {
+    ageEstimate: result ? {
+      ageDeltaYears: result.ageDeltaYears,
+      biologicalAgeYears: result.biologicalAgeYears,
+      chronologicalAgeYears: result.chronologicalAgeYears,
+      intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
+    } : null,
+    blockedFeatureKeys: [...summary.blockedFeatureKeys],
+    displayBlockedReason: summary.displayBlockedReason,
+    displayStatus: summary.displayStatus,
+    domainContributions: result ? result.moduleAttributions.map((module) => ({
+      contributionYears: module.contributionYears,
+      featureKeys: [...module.featureKeys],
+      moduleId: module.moduleId,
+    })) : [],
+    featureContributions: result ? result.featureAttributions.map((feature) => ({
+      contributionYears: feature.contributionYears,
+      featureKey: feature.featureKey,
+      metricKey: feature.metricKey,
+      moduleId: feature.moduleId,
+      status: feature.status,
+      warnings: feature.warnings.map((warning) => ({ ...warning })),
+    })) : [],
+    missingFeatureKeys: [...summary.missingFeatureKeys],
+    mode: report.mode,
+    product: {
+      ageDisplayReady: summary.productAgeDisplayReady,
+      productUseAuthorized: false,
+      promotionBlockers: [...summary.productPromotionBlockers],
+      riskDisplayReady: summary.productRiskDisplayReady,
+      validationGate: summary.validationGate ? {
+        ...summary.validationGate,
+        evidenceTiers: [...summary.validationGate.evidenceTiers],
+      } : null,
+    },
+    researchOnly: true,
+    risk: {
+      ageEstimateBasis: summary.outcomeContext.ageEstimateBasis,
+      horizonYears: summary.outcomeContext.horizonYears,
+      probability: result?.risk?.probability ?? null,
+      riskEndpoint: summary.outcomeContext.riskEndpoint,
+    },
+    schemaVersion: MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
+    selectedCardId: result ? report.authorization.cardId : null,
+    selectedScoreBearingFeatureKeys: result ? [...summary.selectedScoreBearingFeatureKeys] : [],
+    selectedScoreBearingMetricKeys: result ? [...summary.selectedScoreBearingMetricKeys] : [],
     status: report.status,
     warnings: report.warnings.map((warning) => ({ ...warning })),
     wearable: {
