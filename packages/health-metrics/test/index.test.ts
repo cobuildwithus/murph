@@ -17,6 +17,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
+  MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
@@ -59,6 +60,7 @@ import {
   listMurphAgePrioritySourceRoutes,
   listMurphAgeSourceRoutes,
   listMurphAgeSourceRoutesByLayer,
+  listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
@@ -2532,6 +2534,77 @@ test("lists Murph Age input bundle metric keys without CRP or hsCRP", () => {
     isMurphAgeInputBundleMetricPointAllowed(wearableMetricPoint("self-rated-health", "wearable-summary")),
     false,
   );
+});
+
+test("exposes submitted Murph Age input bundle specs for calculator integration", () => {
+  const specs = listMurphAgeSubmittedCalculatorInputBundleSpecs();
+  const byId = new Map(specs.map((spec) => [spec.bundleId, spec]));
+  const registryKeys = new Set(listMurphAgeInputBundleMetricKeys());
+
+  assert.deepEqual(specs.map((spec) => spec.bundleId), [
+    "lab9-bp-body",
+    "lab5-bp-bmi",
+    "r399-nhis-proxy-anchor",
+    "wearable-context",
+    "function-context",
+  ]);
+  assert.equal(
+    specs.every((spec) => spec.schemaVersion === MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION),
+    true,
+  );
+  assert.equal(specs.every((spec) => spec.productScoreBearingAuthorized === false), true);
+
+  const lab9 = assertDefined(byId.get("lab9-bp-body"), "lab9 submitted input bundle spec");
+  assert.equal(lab9.researchAgeEstimateEligible, true);
+  assert.equal(lab9.scoreBearing, true);
+  assert.equal(lab9.cardId, "lab9_bp_body_10y_acm_research");
+  assert.equal(lab9.completion.rule, "all-required-features");
+  assert.equal(lab9.completion.requiredFeatureKeys.includes("albumin"), true);
+  assert.equal(lab9.completion.requiredFeatureKeys.includes("glycemia"), true);
+  assert.equal(lab9.completion.requiredFeatureKeys.includes("systolic-blood-pressure"), true);
+  assert.equal(lab9.completion.requiredFeatureKeys.includes("waist-circumference"), false);
+  assert.equal(lab9.featureSpecs.find((feature) => feature.featureKey === "waist-circumference")?.requiredForCompletion, false);
+
+  const lab5 = assertDefined(byId.get("lab5-bp-bmi"), "lab5 submitted input bundle spec");
+  assert.equal(lab5.completion.rule, "all-lab5-features-plus-bmi-or-blood-pressure");
+  assert.deepEqual(lab5.completion.requiredFeatureKeys.sort(), [
+    "creatinine",
+    "glycemia",
+    "hdl-c",
+    "triglycerides",
+  ]);
+  assert.deepEqual(lab5.completion.alternativeFeatureKeyGroups, [
+    ["bmi"],
+    ["systolic-blood-pressure", "diastolic-blood-pressure"],
+  ]);
+  assert.equal(lab5.featureSpecs.find((feature) => feature.featureKey === "bmi")?.requiredForCompletion, false);
+
+  const r399 = assertDefined(byId.get("r399-nhis-proxy-anchor"), "r399 submitted input bundle spec");
+  assert.equal(r399.completion.rule, "one-or-more-proxy-features");
+  assert.equal(r399.completion.minReadyFeatureCount, 1);
+  assert.equal(r399.researchAgeEstimateEligible, true);
+  assert.equal(r399.scoreBearing, true);
+
+  const wearable = assertDefined(byId.get("wearable-context"), "wearable submitted input bundle spec");
+  assert.equal(wearable.researchAgeEstimateEligible, false);
+  assert.equal(wearable.scoreBearing, false);
+  assert.equal(wearable.cardId, "wearable_context_no_risk");
+  assert.equal(wearable.completion.rule, "one-or-more-context-features");
+  assert.equal(wearable.featureSpecs.some((feature) => feature.featureKey === "resting-heart-rate"), true);
+  assert.equal(wearable.featureSpecs.some((feature) => feature.featureKey === "sleep-efficiency"), true);
+  assert.equal(wearable.featureSpecs.every((feature) => feature.requiredForCompletion === false), true);
+
+  const functionContext = assertDefined(byId.get("function-context"), "function submitted input bundle spec");
+  assert.equal(functionContext.scoreBearing, false);
+  assert.equal(functionContext.featureSpecs.some((feature) => feature.featureKey === "frailty-symptoms"), true);
+
+  for (const spec of specs) {
+    for (const feature of spec.featureSpecs) {
+      for (const metricKey of feature.metricKeys) {
+        assert.equal(registryKeys.has(metricKey), true, `${metricKey} must be accepted by the submitted calculator`);
+      }
+    }
+  }
 });
 
 test("keeps Murph Age card metrics reachable while wearable research signals stay non-score-bearing", () => {
