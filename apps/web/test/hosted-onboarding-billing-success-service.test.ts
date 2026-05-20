@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
-    nudgeHostedRunnerBestEffort: vi.fn(),
+    signalHostedRuntimeManualWakeBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
@@ -60,8 +60,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
-  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
+vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
+  signalHostedRuntimeManualWakeBestEffort: mocks.signalHostedRuntimeManualWakeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -188,7 +188,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         tx,
       );
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-      expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
     },
   );
 
@@ -226,10 +226,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       tx,
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
-  it("nudges the hosted runner when Pulse Trial success reconciliation activates access", async () => {
+  it("signals Temporal when Pulse Trial success reconciliation activates access", async () => {
     const tx = {
       __tag: "tx",
     };
@@ -250,8 +250,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       stage: "activating",
     }));
 
-    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
-      context: "stripe.checkout-success",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      eventSource: "stripe.checkout-success",
+      source: "user",
       userId: "member_123",
     });
   });
@@ -297,7 +298,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       tx,
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   it("rejects success reconciliation until the checkout session is complete", async () => {

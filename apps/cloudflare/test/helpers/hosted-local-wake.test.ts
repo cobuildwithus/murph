@@ -1,14 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRuntimeEnsureExecutionResponse } from "@murphai/hosted-execution/orchestration-control";
 
 import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
 
-const nudgeUserRunner = vi.hoisted(() => vi.fn());
+const ensureRuntimeExecution = vi.hoisted(() => vi.fn());
 
 vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
   createCloudflareHostedControlClient: vi.fn(() => ({
-    nudgeUserRunner,
+    ensureRuntimeExecution,
   })),
 }));
 
@@ -20,15 +20,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it("nudges the workspace runner without polling old hosted-run status", async () => {
-  nudgeUserRunner.mockResolvedValue({
-    accepted: true,
-    alarmScheduled: true,
-    kind: "processing-ensured",
-    inFlight: false,
-    leaseGeneration: "1",
-    nextAlarmAt: "2026-04-27T00:00:00.000Z",
-  } satisfies HostedRunnerNudgeResult);
+it("ensures workspace execution without polling old hosted-run status", async () => {
+  ensureRuntimeExecution.mockResolvedValue({
+    kind: "runtime_wake_sent",
+    recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+    runtimeAttemptId: "runtime-attempt-test",
+  } satisfies HostedRuntimeEnsureExecutionResponse);
 
   await expect(wakeHostedWorkerForLatestPendingWake({
     harness: {
@@ -38,13 +35,16 @@ it("nudges the workspace runner without polling old hosted-run status", async ()
     } as HostedLocalDevHarness,
     userId: "member_local_telegram_reply_123",
   })).resolves.toEqual({
-    accepted: true,
-    alarmScheduled: true,
-    kind: "processing-ensured",
-    inFlight: false,
-    leaseGeneration: "1",
-    nextAlarmAt: "2026-04-27T00:00:00.000Z",
+    kind: "runtime_wake_sent",
+    recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+    runtimeAttemptId: "runtime-attempt-test",
   });
 
-  expect(nudgeUserRunner).toHaveBeenCalledWith("member_local_telegram_reply_123");
+  expect(ensureRuntimeExecution).toHaveBeenCalledWith(
+    "member_local_telegram_reply_123",
+    {
+      orchestrationAttemptId: "hosted-local-wake:member_local_telegram_reply_123",
+      reason: "nudge",
+    },
+  );
 });

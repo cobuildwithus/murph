@@ -419,6 +419,7 @@ describe("hosted execution coverage gaps", () => {
       "./env",
       "./hosted-email",
       "./legacy-dashboard-replica",
+      "./orchestration-control",
       "./parsers",
       "./routes",
       "./runtime-control",
@@ -476,6 +477,7 @@ describe("hosted execution coverage gaps", () => {
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
+    expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
       "nudge",

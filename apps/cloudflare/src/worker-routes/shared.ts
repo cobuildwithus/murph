@@ -6,6 +6,10 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedRuntimeEnsureExecutionRequest,
+  HostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution/orchestration-control";
+import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
 
@@ -34,10 +38,17 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     userId: string,
     input?: HostedRunnerNudgeRequest,
   ): Promise<HostedRunnerNudgeResult>;
+  ensureRuntimeExecutionForUser(
+    input: HostedRuntimeEnsureExecutionRequest & { userId: string },
+  ): Promise<HostedRuntimeEnsureExecutionResponse>;
+  /**
+   * @deprecated Compatibility-only no-op; Temporal owns browser-vault refresh
+   * scheduling.
+   */
   scheduleBrowserVaultRefreshForUser?(input: { userId: string }): Promise<unknown>;
   /**
-   * @deprecated Compatibility-only Durable Object method for deploy skew.
-   * Deletion target: 2026-05-23.
+   * @deprecated Compatibility-only no-op; Temporal owns browser-vault refresh
+   * scheduling.
    */
   scheduleDashboardReplicaRefreshForUser?(input: { userId: string }): Promise<unknown>;
   validateRuntimeWriteFence?(input: {

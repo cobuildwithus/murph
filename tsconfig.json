@@ -11,6 +11,9 @@
       "path": "./packages/hosted-execution"
     },
     {
+      "path": "./packages/hosted-orchestrator-temporal"
+    },
+    {
       "path": "./packages/cloudflare-hosted-control"
     },
     {

@@ -1,15 +1,6 @@
 import {
-  startHostedWebhookNudgeWorkflow,
-} from "./webhook-workflow-start";
-import {
-  nudgeHostedAssistantRunnerUserBestEffortResult,
-} from "../hosted-runner/assistant-nudge";
-import {
-  readHostedMailboxItemOwnerById,
-} from "../hosted-mailbox/store";
-import {
-  HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-} from "./webhook-nudge-policy";
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -21,31 +12,17 @@ import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runti
 
 export type HostedWebhookWakeHandoffResult =
   | {
-      directRunnerNudgeStatus: HostedWebhookDirectNudgeStatus;
-      reason: "workflow-started";
-      runId: string;
+      reason: "temporal-signaled";
+      signalAccepted: true;
       started: true;
-      workflowStarted: true;
+      workflowId: string;
     }
   | {
-      directRunnerNudgeStatus: HostedWebhookDirectNudgeStatus;
       errorName?: string | null;
-      reason: "missing-mailbox-item" | "workflow-start-failed";
+      reason: "missing-mailbox-item" | "temporal-signal-failed";
+      signalAccepted: false;
       started: false;
-      workflowStarted: false;
     };
-
-type HostedWebhookDirectNudgeStatus =
-  | "accepted"
-  | "not-accepted"
-  | "not-attempted";
-
-interface HostedWebhookDirectNudgeSummary {
-  accepted: boolean;
-  attempted: boolean;
-  configured: boolean | null;
-  errorCode: string | null;
-}
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
@@ -74,177 +51,40 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
     });
     return {
-      directRunnerNudgeStatus: "not-attempted",
       reason: "missing-mailbox-item",
+      signalAccepted: false,
       started: false,
-      workflowStarted: false,
     };
   }
   const mailboxItemId = input.mailboxItemId;
 
-  const directNudgePromise = observeHostedWebhookDirectNudge({
-    eventId: input.eventId,
-    mailboxItemId,
-    nudge: tryNudgeHostedWebhookRunnerDirectForMailboxItem({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      mailboxItemId,
-      source: input.source,
-      userId: input.userId,
-    }),
-    source: input.source,
-    userId: input.userId,
-  });
-  let workflow: Awaited<ReturnType<typeof startHostedWebhookNudgeWorkflow>>;
+  let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   try {
-    workflow = await startHostedWebhookNudgeWorkflow({
+    signal = await signalHostedMailboxAppendRuntime({
+      expectedUserId: input.userId ?? null,
       mailboxItemId,
       source: input.source,
     });
   } catch (error) {
     const errorName = deriveHostedOnboardingTimingErrorName(error);
-    const directNudge = await directNudgePromise;
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directNudgeAttempted: directNudge.attempted,
-      directNudgeConfigured: directNudge.configured,
-      directNudgeErrorCode: directNudge.errorCode,
       errorName,
     });
     return {
-      directRunnerNudgeStatus: directNudge.accepted ? "accepted" : "not-accepted",
       errorName,
-      reason: "workflow-start-failed",
+      reason: "temporal-signal-failed",
+      signalAccepted: false,
       started: false,
-      workflowStarted: false,
     };
   }
 
-  const directNudge = await directNudgePromise;
-  finishHostedOnboardingTiming(handoffTiming, "workflow-enqueued", {
-    directNudgeAttempted: directNudge.attempted,
-    directNudgeConfigured: directNudge.configured,
-    directNudgeErrorCode: directNudge.errorCode,
-    workflowRunIdSuffix: toHostedOnboardingLogIdSuffix(workflow.runId),
+  finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {
+    workflowIdSuffix: toHostedOnboardingLogIdSuffix(signal.workflowId),
   });
   return {
-    directRunnerNudgeStatus: directNudge.accepted ? "accepted" : "not-accepted",
-    reason: "workflow-started",
-    runId: workflow.runId,
+    reason: "temporal-signaled",
+    signalAccepted: true,
     started: true,
-    workflowStarted: true,
-  };
-}
-
-function observeHostedWebhookDirectNudge(input: {
-  eventId: string;
-  mailboxItemId: string;
-  nudge: Promise<HostedWebhookDirectNudgeSummary>;
-  source: "linq" | "telegram" | "whatsapp";
-  userId?: string;
-}): Promise<HostedWebhookDirectNudgeSummary> {
-  const timing = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.direct-runner-nudge`,
-    {
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
-      mailboxItemIdSuffix: toHostedOnboardingLogIdSuffix(input.mailboxItemId),
-      userIdPresent: Boolean(input.userId),
-      userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
-    },
-  );
-
-  return input.nudge.then((summary) => {
-    finishHostedOnboardingTiming(timing, summary.accepted ? "accepted" : "completed", {
-      directNudgeAttempted: summary.attempted,
-      directNudgeConfigured: summary.configured,
-      directNudgeErrorCode: summary.errorCode,
-    });
-    return summary;
-  }, (error: unknown) => {
-    const errorName = deriveHostedOnboardingTimingErrorName(error);
-    finishHostedOnboardingTiming(timing, "failed", {
-      directNudgeAttempted: false,
-      directNudgeConfigured: null,
-      directNudgeErrorCode: errorName,
-    });
-    return {
-      accepted: false,
-      attempted: false,
-      configured: null,
-      errorCode: errorName,
-    };
-  });
-}
-
-async function tryNudgeHostedWebhookRunnerDirectForMailboxItem(input: {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-  mailboxItemId: string;
-  source: "linq" | "telegram" | "whatsapp";
-  userId?: string;
-}): Promise<HostedWebhookDirectNudgeSummary> {
-  try {
-    const owner = await readHostedMailboxItemOwnerById({
-      mailboxItemId: input.mailboxItemId,
-    });
-
-    if (!owner) {
-      return {
-        accepted: false,
-        attempted: false,
-        configured: null,
-        errorCode: "missing-mailbox-owner",
-      };
-    }
-
-    if (input.userId && input.userId !== owner.userId) {
-      return {
-        accepted: false,
-        attempted: false,
-        configured: null,
-        errorCode: "mailbox-owner-mismatch",
-      };
-    }
-
-    return await tryNudgeHostedWebhookRunnerDirect({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      source: input.source,
-      userId: owner.userId,
-    });
-  } catch (error) {
-    return {
-      accepted: false,
-      attempted: false,
-      configured: null,
-      errorCode: deriveHostedOnboardingTimingErrorName(error),
-    };
-  }
-}
-
-async function tryNudgeHostedWebhookRunnerDirect(input: {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-  source: "linq" | "telegram" | "whatsapp";
-  userId?: string;
-}): Promise<HostedWebhookDirectNudgeSummary> {
-  if (!input.userId) {
-    return {
-      accepted: false,
-      attempted: false,
-      configured: null,
-      errorCode: "missing-user-id",
-    };
-  }
-
-  const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
-    ...(input.aiUsageAllowDecision
-      ? { aiUsageAllowDecision: input.aiUsageAllowDecision }
-      : {}),
-    context: `webhook:${input.source}:direct`,
-    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-    userId: input.userId,
-  });
-
-  return {
-    accepted: result.accepted,
-    attempted: true,
-    configured: result.configured,
-    errorCode: result.errorCode,
+    workflowId: signal.workflowId,
   };
 }

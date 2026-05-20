@@ -1,5 +1,7 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
+import {
+  signalHostedManualRunRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
@@ -106,8 +108,8 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
   });
   if (channelsUpdated) {
-    await nudgeHostedRunnerBestEffort({
-      context: "settings.email.sync",
+    await signalHostedManualRunBestEffort({
+      eventSource: "settings.email.sync",
       userId: auth.member.id,
     });
   }
@@ -119,6 +121,21 @@ export const POST = withJsonError(async (request: Request) => {
     verifiedAt,
   });
 });
+
+async function signalHostedManualRunBestEffort(input: {
+  eventSource: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    await signalHostedManualRunRuntime({
+      eventSource: input.eventSource,
+      source: "user",
+      userId: input.userId,
+    });
+  } catch {
+    // Settings sync should not fail if the best-effort runtime wake is unavailable.
+  }
+}
 
 async function sendSettingsEmailSyncWelcomeEmailBestEffort(input: {
   memberId: string;

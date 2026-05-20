@@ -1,5 +1,5 @@
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
-import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRuntimeEnsureExecutionResponse } from "@murphai/hosted-execution/orchestration-control";
 import {
   appendHostedExecutionWakeForTest,
   type HostedMailboxAppendForTestResponse,
@@ -21,7 +21,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
   userId: string;
 }): Promise<{
   append: HostedMailboxAppendForTestResponse;
-  wakeResult: HostedRunnerNudgeResult;
+  wakeResult: HostedRuntimeEnsureExecutionResponse;
 }> {
   const append = await appendHostedWake(input);
   const wakeResult = await wakeHostedWorker({
@@ -99,15 +99,19 @@ function createHostedLocalCloudflareControlClient(
 export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   userId: string;
-}): Promise<HostedRunnerNudgeResult> {
-  return await createHostedLocalCloudflareControlClient(input.harness).nudgeUserRunner(input.userId);
+}): Promise<HostedRuntimeEnsureExecutionResponse> {
+  return await createHostedLocalCloudflareControlClient(input.harness)
+    .ensureRuntimeExecution(input.userId, {
+      orchestrationAttemptId: `hosted-local-wake:${input.userId}`,
+      reason: "nudge",
+    });
 }
 
 export async function wakeHostedWorkerForLatestPendingWake(input: {
   harness: HostedLocalDevHarness;
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedRunnerNudgeResult> {
+}): Promise<HostedRuntimeEnsureExecutionResponse> {
   void input.timeoutMs;
   return await wakeHostedWorker({
     harness: input.harness,

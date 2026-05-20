@@ -9,7 +9,7 @@ import {
 const mocks = vi.hoisted(() => ({
   applyStripeSubscriptionUpdated: vi.fn(),
   getPrisma: vi.fn(),
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(),
+  signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
     hostedMember: {
@@ -54,8 +54,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
+  signalHostedRuntimeManualWakeBestEffort: mocks.signalHostedRuntimeManualWakeBestEffort,
 }));
 
 import {
@@ -130,7 +130,7 @@ describe("upgradeHostedBillingPlan", () => {
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
     });
-    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
+    mocks.signalHostedRuntimeManualWakeBestEffort.mockResolvedValue({
       status: "sent",
     });
   });
@@ -181,8 +181,9 @@ describe("upgradeHostedBillingPlan", () => {
       now: new Date("2026-05-06T00:00:00.000Z"),
       prisma: mocks.prismaClient,
     });
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "billing.plan-upgrade",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      eventSource: "billing.plan-upgrade",
+      source: "user",
       userId: "member_123",
     });
   });
@@ -290,8 +291,9 @@ describe("upgradeHostedBillingPlan", () => {
       }),
       mocks.prismaClient,
     );
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "billing.plan-upgrade",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      eventSource: "billing.plan-upgrade",
+      source: "user",
       userId: "member_123",
     });
   });
@@ -416,8 +418,9 @@ describe("upgradeHostedBillingPlan", () => {
       expect.any(Object),
       mocks.prismaClient,
     );
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "billing.plan-upgrade",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      eventSource: "billing.plan-upgrade",
+      source: "user",
       userId: "member_123",
     });
   });
@@ -775,7 +778,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
     expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   test("does not report upgraded when local reconciliation has not reached Edge", async () => {
@@ -794,7 +797,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
 
     expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 });
 

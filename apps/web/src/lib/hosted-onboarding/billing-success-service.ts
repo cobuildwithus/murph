@@ -1,7 +1,7 @@
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { nudgeHostedRunnerBestEffort } from "../hosted-runner/control";
+import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -108,8 +108,9 @@ async function nudgeHostedCheckoutSuccessActivationRunner(input: {
     return;
   }
 
-  await nudgeHostedRunnerBestEffort({
-    context: "stripe.checkout-success",
+  await signalHostedRuntimeManualWakeBestEffort({
+    eventSource: "stripe.checkout-success",
+    source: "user",
     userId: input.activatedMemberId,
   });
 }

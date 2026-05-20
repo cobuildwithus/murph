@@ -9,7 +9,7 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: serviceMocks.createHostedDeviceSyncControlPlane,
 }));
 
-vi.mock("@/src/lib/hosted-runner/control", () => ({
+vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
   deleteHostedRunnerUserDataBestEffort: serviceMocks.deleteHostedRunnerUserDataBestEffort,
 }));
 

@@ -8,11 +8,9 @@ import type {
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
-  normalizeFutureWakeAt,
   normalizeIsoDate,
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
-  normalizePreferredWakeAt,
   projectRunnerStateRecord,
   type RunnerMetaRow,
 } from "./runner-state-helpers.js";
@@ -52,17 +50,6 @@ export interface RunnerWriteFenceValidationResult {
   owns: boolean;
   record: RunnerStateRecord;
 }
-
-export type RunnerDueWork =
-  | {
-      kind: "idle";
-      record: RunnerStateRecord;
-    }
-  | {
-      kind: "runtime";
-      reason: "retry" | "wake";
-      record: RunnerStateRecord;
-    };
 
 export type RunnerExpiredActiveRunResult =
   | {
@@ -131,68 +118,6 @@ export class RunnerStateStore {
     if (meta && meta.user_id !== userId) {
       throw new Error("Hosted runner Durable Object is bound to a different user.");
     }
-  }
-
-  async markWakePending(input: {
-    preferredWakeAt?: string | null;
-    resetRetry?: boolean;
-  } = {}): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.wake_at = normalizePreferredWakeAt(input.preferredWakeAt ?? new Date().toISOString())
-      ?? new Date().toISOString();
-    if (input.resetRetry === true) {
-      meta.backoff_until = null;
-      meta.failure_count = 0;
-      meta.last_error_at = null;
-      meta.last_error_code = null;
-    }
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearWakePending(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.wake_at = null;
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async markBrowserVaultRefreshRequested(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.browser_vault_refresh_requested_at = new Date().toISOString();
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearBrowserVaultRefreshRequested(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.browser_vault_refresh_requested_at = null;
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async readDueWork(nowMs: number): Promise<RunnerDueWork> {
-    let meta = this.requireMetaRowSync();
-    const expired = this.clearExpiredActiveRunSync(meta, nowMs);
-    if (expired) {
-      this.writeMetaRowSync(meta);
-      meta = this.requireMetaRowSync();
-    }
-
-    const record = this.readStateFromMetaSync(meta);
-    if (record.writeFence) {
-      return { kind: "idle", record };
-    }
-
-    const runtimeDueAt = readRuntimeDueAt(record);
-    if (runtimeDueAt && Date.parse(runtimeDueAt) <= nowMs) {
-      return {
-        kind: "runtime",
-        reason: readRuntimeDueReason(record) ?? "wake",
-        record,
-      };
-    }
-    return { kind: "idle", record };
   }
 
   async clearExpiredWriteFence(nowMs: number): Promise<RunnerExpiredActiveRunResult> {
@@ -351,18 +276,14 @@ export class RunnerStateStore {
     };
   }
 
-  async clearWriteFenceIfCurrent(input: {
+  async clearWriteFenceForReplacement(input: {
     attemptId: string;
-    failure?: {
-      backoffUntil?: string | null;
-      error: unknown;
-      failedAt?: string | null;
-    };
+    error?: unknown;
+    finishedAt?: string | null;
     generation: string;
     userId: string;
-    wakeAt?: string | null;
   }): Promise<{
-    preempted: boolean;
+    cleared: boolean;
     record: RunnerStateRecord;
   }> {
     const meta = this.requireMetaRowSync();
@@ -372,25 +293,21 @@ export class RunnerStateStore {
       || meta.user_id !== input.userId
     ) {
       return {
-        preempted: false,
+        cleared: false,
         record: this.readStateFromMetaSync(meta),
       };
     }
 
     this.clearActiveRunMetaSync(meta);
-    if (input.failure) {
-      const failedAt = normalizeIsoDateOrNull(input.failure.failedAt ?? null)
-        ?? new Date().toISOString();
+    if (input.error !== undefined) {
       meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
-      meta.last_error_at = failedAt;
-      meta.last_error_code = deriveHostedExecutionErrorCode(input.failure.error);
-      meta.backoff_until = normalizeIsoDateOrNull(input.failure.backoffUntil ?? null);
+      meta.last_error_at = normalizeIsoDateOrNull(input.finishedAt ?? null)
+        ?? new Date().toISOString();
+      meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     }
-    meta.wake_at = normalizePreferredWakeAt(input.wakeAt ?? new Date().toISOString())
-      ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
     return {
-      preempted: true,
+      cleared: true,
       record: this.readStateFromMetaSync(meta),
     };
   }
@@ -408,11 +325,10 @@ export class RunnerStateStore {
     });
   }
 
-  async clearWriteFenceAfterFailure(input: {
+  async clearWriteFenceAfterTransportFailure(input: {
     error: unknown;
     finishedAt?: string | null;
     token: RunnerWriteFenceToken;
-    retryAt?: string | null;
   }): Promise<{
     failed: boolean;
     record: RunnerStateRecord;
@@ -424,13 +340,10 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    const errorCode = deriveHostedExecutionErrorCode(input.error);
     const finishedAt = input.finishedAt ?? new Date().toISOString();
     meta.last_error_at = finishedAt;
-    meta.last_error_code = errorCode;
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
-    meta.backoff_until = normalizeIsoDate(input.retryAt ?? new Date(Date.now() + 1_000).toISOString());
-    meta.wake_at = meta.wake_at ?? normalizeIsoDate(finishedAt);
     this.writeMetaRowSync(meta);
 
     return {
@@ -439,37 +352,8 @@ export class RunnerStateStore {
     };
   }
 
-  async failInvocation(input: {
-    error: unknown;
-    finishedAt?: string | null;
-    lease: RunnerWriteFenceToken;
-    retryAt?: string | null;
-  }): Promise<{
-    failed: boolean;
-    record: RunnerStateRecord;
-  }> {
-    return await this.clearWriteFenceAfterFailure({
-      error: input.error,
-      finishedAt: input.finishedAt,
-      retryAt: input.retryAt,
-      token: input.lease,
-    });
-  }
-
   async clearStaleInvocationIfExpired(_input?: unknown): Promise<RunnerExpiredActiveRunResult> {
     return await this.clearExpiredWriteFence(Date.now());
-  }
-
-  async markPendingInvocationNudge(_input?: unknown): Promise<RunnerStateRecord> {
-    return await this.markWakePending();
-  }
-
-  async clearPendingInvocationNudge(_input?: unknown): Promise<RunnerStateRecord> {
-    return await this.clearWakePending();
-  }
-
-  async consumeDueRunnerAlarmAndDecide(_input?: unknown): Promise<RunnerDueWork> {
-    return await this.readDueWork(Date.now());
   }
 
   async clearWriteFenceForUserDeletion(userId: string): Promise<{
@@ -497,78 +381,6 @@ export class RunnerStateStore {
       attemptId,
       cleared: true,
     };
-  }
-
-  async scheduleNextWake(input: {
-    nextWakeAt?: string | null;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    meta.wake_at = normalizeFutureWakeAt(input.nextWakeAt ?? null);
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async scheduleRetry(input: {
-    error?: unknown;
-    retryAt: string;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    const errorCode = deriveHostedExecutionErrorCode(input.error);
-    const lastErrorAt = new Date().toISOString();
-    meta.backoff_until = normalizeIsoDate(input.retryAt);
-    meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
-    meta.last_error_at = lastErrorAt;
-    meta.last_error_code = errorCode;
-    meta.wake_at = meta.wake_at ?? lastErrorAt;
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async parkAfterRetryCap(input: {
-    retryAt: string;
-  }): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    const record = this.readStateFromMetaSync(meta);
-    if (record.writeFence) {
-      return record;
-    }
-
-    const runtimeDueAt = readRuntimeDueAt(record);
-    const runtimeDueAtMs = runtimeDueAt ? Date.parse(runtimeDueAt) : NaN;
-    if (
-      record.backoffUntil
-      && record.wakeAt
-      && record.backoffUntil === record.wakeAt
-      && Number.isFinite(runtimeDueAtMs)
-      && runtimeDueAtMs > Date.now()
-    ) {
-      return record;
-    }
-
-    const retryAt = normalizeIsoDate(input.retryAt);
-    meta.backoff_until = retryAt;
-    meta.wake_at = retryAt;
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearRetryStateForFreshDemand(): Promise<RunnerStateRecord> {
-    const meta = this.requireMetaRowSync();
-    if (this.readWriteFenceTokenSync(meta)) {
-      return this.readStateFromMetaSync(meta);
-    }
-
-    meta.backoff_until = null;
-    meta.failure_count = 0;
-    meta.last_error_at = null;
-    meta.last_error_code = null;
-    meta.wake_at = null;
-    this.writeMetaRowSync(meta);
-    return this.readStateFromMetaSync(meta);
-  }
-
-  async clearRetryCapRecoveryProbe(): Promise<RunnerStateRecord> {
-    return await this.clearRetryStateForFreshDemand();
   }
 
   async readWriteFenceToken(): Promise<RunnerWriteFenceToken | null> {
@@ -625,8 +437,6 @@ export class RunnerStateStore {
     const errorCode = deriveHostedExecutionErrorCode(error);
     this.clearActiveRunMetaSync(meta);
     const failedAt = new Date(nowMs).toISOString();
-    meta.wake_at = meta.wake_at ?? failedAt;
-    meta.backoff_until = failedAt;
     meta.failure_count = normalizeNonNegativeInteger(meta.failure_count) + 1;
     meta.last_error_at = failedAt;
     meta.last_error_code = errorCode;
@@ -806,53 +616,11 @@ export class RunnerStateStore {
   }
 }
 
-function readRuntimeDueAt(record: RunnerStateRecord): string | null {
-  if (!record.wakeAt) {
-    return null;
-  }
-  return latestIsoDate(record.wakeAt, record.backoffUntil);
-}
-
 function requireWorkspaceVersion(value: string): string {
   if (!/^[0-9]+$/u.test(value)) {
     throw new TypeError("Hosted runner workspace version must be a non-negative base-10 integer string.");
   }
   return value;
-}
-
-function readRuntimeDueReason(record: RunnerStateRecord): "retry" | "wake" | null {
-  if (!record.wakeAt) {
-    return null;
-  }
-  if (!record.backoffUntil) {
-    return "wake";
-  }
-
-  const wakeMs = Date.parse(record.wakeAt);
-  const backoffMs = Date.parse(record.backoffUntil);
-  if (!Number.isFinite(wakeMs) || !Number.isFinite(backoffMs)) {
-    return "wake";
-  }
-  return backoffMs >= wakeMs ? "retry" : "wake";
-}
-
-function latestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs > leftMs ? right : left;
 }
 
 function createRuntimeWriteAttemptId(): string {

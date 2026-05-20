@@ -11,16 +11,21 @@ import {
   wrapHostedBrowserSessionKey,
 } from "@murphai/runtime-state";
 import type {
-  HostedRunnerNudgeRequest,
-  HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
   HostedWorkspaceInvocationReason,
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_WORKSPACE_INVOCATION_REASONS,
-  parseHostedRunnerNudgeRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRunnerNudgeRequest,
+  HostedRunnerNudgeResult,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimeEnsureExecutionRequest,
+  HostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -29,6 +34,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedBrowserVaultReplicaRef,
+  parseHostedRuntimeEnsureExecutionRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
@@ -55,6 +61,7 @@ import {
   jsonError,
   methodNotAllowed,
   notFound,
+  requireJsonObject,
   readOptionalJsonObject,
   unauthorized,
 } from "./json.ts";
@@ -108,7 +115,11 @@ import {
 
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
-type WorkerRouteAuthorization = "vercel-oidc" | "web-callback-signature" | null;
+type WorkerRouteAuthorization =
+  | "vercel-oidc"
+  | "web-callback-signature"
+  | "vercel-oidc-or-web-callback-signature"
+  | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
 interface DeclarativeRoute<Context> {
@@ -249,16 +260,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
+    authorization: "vercel-oidc-or-web-callback-signature",
     beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "runner-nudge");
+      return requireBoundInternalRouteUser(context, params, "runtime-ensure-execution");
     },
     async handle(context, params) {
-      return handleRunnerNudgeRoute(context, params.userId);
+      return handleRuntimeEnsureExecutionRoute(context, params.userId);
     },
-    match: (pathname) => matchCloudflareHostedControlUserRoutePath("runnerNudge", pathname),
-    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runnerNudge.method],
-    name: "runner-nudge",
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("runtimeEnsureExecution", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeEnsureExecution.method],
+    name: "runtime-ensure-execution",
     wrongMethodResponse: "method-not-allowed",
   },
 
@@ -288,20 +299,6 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     match: (pathname) => matchCloudflareHostedControlUserRoutePath("browserVaultSession", pathname),
     methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.browserVaultSession.method],
     name: "browser-vault-session",
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorizeBeforeMethod: true,
-    authorization: "vercel-oidc",
-    beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "browser-vault-refresh");
-    },
-    async handle(context, params) {
-      return handleBrowserVaultRefreshRoute(context, params.userId);
-    },
-    match: (pathname) => matchCloudflareHostedControlUserRoutePath("browserVaultRefresh", pathname),
-    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.browserVaultRefresh.method],
-    name: "browser-vault-refresh",
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -392,14 +389,19 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.nudgeHostedRunnerForUser(userId, input);
   }
 
+  async ensureRuntimeExecutionForUser(
+    input: HostedRuntimeEnsureExecutionRequest & { userId: string },
+  ): Promise<HostedRuntimeEnsureExecutionResponse> {
+    return this.runner.ensureRuntimeExecutionForUser(input);
+  }
+
   async scheduleBrowserVaultRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
   async scheduleDashboardReplicaRefreshForUser(input: { userId: string }): ReturnType<HostedUserRunner["scheduleBrowserVaultRefreshForUser"]> {
-    // Legacy Durable Object method for deploy skew. Deletion target:
-    // 2026-05-23, after deployed web callers have switched to
-    // `scheduleBrowserVaultRefreshForUser`.
+    // Legacy Durable Object method for deploy skew. Browser-vault refresh
+    // scheduling is Temporal-owned, so this compatibility surface is a no-op.
     return this.runner.scheduleBrowserVaultRefreshForUser(input);
   }
 
@@ -594,6 +596,7 @@ async function authorizeRoute(
         payload,
         request: context.request,
         search: url.search,
+        userId: readOptionalHostedExecutionUserIdHeader(context.request),
       });
 
       if (verified) {
@@ -609,6 +612,62 @@ async function authorizeRoute(
         }, context.request),
         level: "warn",
         message: "Hosted worker route rejected an internal request after callback signature verification failed.",
+        phase: "failed",
+      });
+      return unauthorized();
+    }
+    case "vercel-oidc-or-web-callback-signature": {
+      const validation = context.environment?.vercelOidcValidation;
+      if (
+        validation
+        && await verifyHostedExecutionVercelOidcRequest({
+          request: context.request,
+          validation,
+        })
+      ) {
+        return null;
+      }
+
+      const callbackSigning = context.environment?.webCallbackSigning;
+      const url = context.url;
+      if (callbackSigning && url) {
+        let payload: string;
+        try {
+          payload = await readCachedRequestText(context, {
+            limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+          });
+        } catch (error) {
+          if (isRequestBodyTooLargeError(error)) {
+            return jsonError("Request body too large.", 413);
+          }
+
+          throw error;
+        }
+
+        const verified = await verifyHostedWebCallbackSignatureHeaders({
+          environment: callbackSigning,
+          method: context.request.method,
+          path: url.pathname,
+          payload,
+          request: context.request,
+          search: url.search,
+          userId: readOptionalHostedExecutionUserIdHeader(context.request),
+        });
+
+        if (verified) {
+          return null;
+        }
+      }
+
+      emitHostedExecutionStructuredLog({
+        component: "worker",
+        details: buildWorkerRouteLogDetails({
+          authScheme: "vercel-oidc-or-web-callback-signature",
+          reason: "authorization-verification-failed",
+          routeName,
+        }, context.request),
+        level: "warn",
+        message: "Hosted worker route rejected an internal request after all supported authorization checks failed.",
         phase: "failed",
       });
       return unauthorized();
@@ -654,6 +713,16 @@ async function authorizeRoute(
     default:
       return null;
   }
+}
+
+function readOptionalHostedExecutionUserIdHeader(request: Request): string | null {
+  const value = request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER);
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function isRequestBodyTooLargeError(error: unknown): error is RangeError {
@@ -1443,26 +1512,29 @@ function parseTestPositiveIntegerValue(value: unknown): number | "invalid" | nul
   return parsed;
 }
 
-async function handleRunnerNudgeRoute(
+async function handleRuntimeEnsureExecutionRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  let nudgeRequest: HostedRunnerNudgeRequest = {};
+  let ensureRequest: HostedRuntimeEnsureExecutionRequest;
   try {
-    nudgeRequest = parseHostedRunnerNudgeRequest(await readOptionalJsonObject(context.request, {
+    const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    }));
+    });
+    ensureRequest = parseHostedRuntimeEnsureExecutionRequest(
+      requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
+    );
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
-        reason: "runner-nudge-request-body-invalid",
-        routeName: "runner-nudge",
+        reason: "runtime-ensure-execution-request-body-invalid",
+        routeName: "runtime-ensure-execution",
       }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted worker runner nudge route rejected an invalid request body.",
+      message: "Hosted worker runtime ensure-execution route rejected an invalid request body.",
       phase: "failed",
       userId,
     });
@@ -1470,11 +1542,10 @@ async function handleRunnerNudgeRoute(
   }
 
   const stub = context.env.USER_RUNNER.getByName(userId);
-  const nudge = nudgeRequest.aiUsageAllowDecision
-    ? await stub.nudgeHostedRunnerForUser(userId, nudgeRequest)
-    : await stub.nudgeHostedRunnerForUser(userId);
-
-  return json(nudge, 202);
+  return json(await stub.ensureRuntimeExecutionForUser({
+    ...ensureRequest,
+    userId,
+  }));
 }
 
 
@@ -1602,58 +1673,8 @@ async function handleBrowserVaultSessionRoute(
   });
 }
 
-async function handleBrowserVaultRefreshRoute(
-  context: WorkerRouteContext,
-  encodedUserId: string,
-): Promise<Response> {
-  const userId = decodeRouteParam(encodedUserId);
-  try {
-    parseBrowserVaultRefreshRequest(parseJsonValue(await readCachedRequestText(context)));
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "worker",
-      details: buildWorkerRouteLogDetails({
-        reason: "browser-vault-refresh-request-invalid",
-        routeName: "browser-vault-refresh",
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted worker browser-vault refresh route rejected an invalid request body.",
-      phase: "failed",
-      userId,
-    });
-    throw error;
-  }
-
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  if (stub.scheduleBrowserVaultRefreshForUser) {
-    await stub.scheduleBrowserVaultRefreshForUser({ userId });
-    return json({
-      accepted: true,
-      scheduled: true,
-      userId,
-    });
-  }
-  if (stub.scheduleDashboardReplicaRefreshForUser) {
-    // Legacy Durable Object fallback for deploy skew. Deletion target:
-    // 2026-05-23, after deployed Durable Objects expose
-    // `scheduleBrowserVaultRefreshForUser`.
-    await stub.scheduleDashboardReplicaRefreshForUser({ userId });
-    return json({
-      accepted: true,
-      scheduled: true,
-      userId,
-    });
-  }
-  throw new Error("Hosted user runner does not support browser-vault refresh scheduling.");
-}
-
 function parseJsonValue(value: string): unknown {
   return JSON.parse(value);
-}
-
-function parseBrowserVaultRefreshRequest(value: unknown): void {
-  requireJsonRecord(value, "Browser vault refresh request");
 }
 
 function parseBrowserVaultSessionRequest(value: unknown): {

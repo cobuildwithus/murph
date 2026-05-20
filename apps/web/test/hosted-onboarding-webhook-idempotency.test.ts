@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   }),
   nudgeHostedRunnerUserBestEffort: vi.fn(),
   nudgeHostedRunnerUserBestEffortResult: vi.fn(),
-  startHostedWebhookNudgeWorkflow: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
@@ -69,8 +69,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -200,8 +200,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       remainingUsdMicros: 100_000n,
       spentUsdMicros: 0n,
     });
-    mocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
-      runId: "workflow_run_123",
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
     });
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
@@ -478,12 +479,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       }),
     });
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "webhook:linq:direct",
-      timeoutMs: 5000,
-      userId: "member_123",
-    });
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
       source: "linq",
     });
@@ -574,7 +572,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 });
 

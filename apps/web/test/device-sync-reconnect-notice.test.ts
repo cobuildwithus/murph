@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   recordHostedRuntimeLogTx: vi.fn(),
-  startHostedWebhookNudgeWorkflow: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -23,8 +23,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: mocks.startHostedWebhookNudgeWorkflow,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -75,6 +75,10 @@ describe("hosted device sync reconnect notice", () => {
         dedupeKey: input.envelope.eventId,
       },
     }));
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
   });
 
   afterEach(() => {
@@ -129,7 +133,7 @@ describe("hosted device sync reconnect notice", () => {
     expect(JSON.stringify(envelope)).not.toContain("whoop-client-secret");
 
     await startHostedDeviceSyncReconnectNoticeWorkflowBestEffort("hmi_reconnect_123");
-    expect(mocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       mailboxItemId: "hmi_reconnect_123",
       source: "device-sync",
     });

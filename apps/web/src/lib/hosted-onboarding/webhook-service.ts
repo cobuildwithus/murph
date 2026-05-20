@@ -156,11 +156,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-      wakeHandoffDirectRunnerNudgeStatus:
-        wakeHandoff?.directRunnerNudgeStatus ?? null,
       wakeHandoffReason: wakeHandoff?.reason ?? null,
+      wakeHandoffSignalAccepted: wakeHandoff?.signalAccepted ?? false,
       wakeHandoffStarted: wakeHandoff?.started ?? false,
-      wakeHandoffWorkflowStarted: wakeHandoff?.workflowStarted ?? false,
     });
     return plan.response;
   } catch (error) {
@@ -187,31 +185,27 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   const responseReason = input.plan.response.reason ?? null;
-  const directRunnerNudgeStatus =
-    input.wakeHandoff?.directRunnerNudgeStatus ?? null;
   const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
   const wakeHandoffStarted = input.wakeHandoff?.started === true;
-  const wakeHandoffWorkflowStarted = input.wakeHandoff?.workflowStarted ?? false;
+  const wakeHandoffSignalAccepted = input.wakeHandoff?.signalAccepted ?? false;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
       chatIdPresent: true,
-      directRunnerNudgeStatus,
       responseReason,
       wakeHandoffReason,
       wakeHandoffStarted,
-      wakeHandoffWorkflowStarted,
+      wakeHandoffSignalAccepted,
     },
   );
 
-  if (!wakeHandoffStarted && directRunnerNudgeStatus !== "accepted") {
+  if (!wakeHandoffStarted) {
     finishHostedOnboardingTiming(readReceiptTiming, "skipped-handoff-not-started", {
-      directRunnerNudgeStatus,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
-      wakeHandoffWorkflowStarted,
+      wakeHandoffSignalAccepted,
     });
     return;
   }
@@ -223,23 +217,21 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     });
 
     finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {
-      directRunnerNudgeStatus,
       httpStatus: result.status,
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
-      wakeHandoffWorkflowStarted,
+      wakeHandoffSignalAccepted,
     });
   } catch (error) {
     finishHostedOnboardingTiming(readReceiptTiming, "failed", {
-      directRunnerNudgeStatus,
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
       signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
       wakeHandoffReason,
       wakeHandoffStarted,
-      wakeHandoffWorkflowStarted,
+      wakeHandoffSignalAccepted,
     });
   }
 }

@@ -9,14 +9,14 @@ device-sync control-plane authority, the hosted AI usage ledger,
 and the hosted mailbox, latest workspace checkpoint pointer, and redacted
 runtime logs/status projection.
 
-Exact hosted message/event producers append encrypted mailbox items in Postgres.
-Webhook and email ingress then hand execution off through a pointer-only Vercel
-Workflow whose step performs the narrow authenticated Cloudflare runner nudge.
+Exact hosted message/event producers append encrypted mailbox items in Postgres,
+then signal the pointer-only hosted Temporal workflow for the affected member.
 Device-sync webhook freshness is a dirty-state path instead: web records
 trace/audit facts, widens per-connection dirty resources, completes the trace in
 that transaction, and appends opaque wake pointers for clean-to-dirty
 transitions and bounded dirty-sweeper recovery while the dirty row remains the
-source of truth.
+source of truth; those recovery paths signal Temporal instead of nudging
+Cloudflare directly.
 Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
@@ -104,8 +104,9 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events
-- Cloudflare nudges the per-user runner only; it does not own a queue, mailbox
-  cursor, or web-visible run recovery ledger
+- Temporal orchestrates per-user execution wakeups; Cloudflare only executes or
+  wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
+  run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
@@ -247,7 +248,7 @@ Hosted AI usage metering:
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
 - Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, and serves the signed Cloudflare usage gate before runner invocation. It is a post-task hard stop, not an exact prepaid cap.
 - Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created on the next gate resolution after the prior billing or calendar period ends, with no separate reset cron.
-- `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`, shared with Cloudflare, lets web attach a fresh signed allow decision to foreground runner nudges after the live usage gate allows a turn. That payload is compatibility metadata in the current runner-start boundary: web must gate before append/nudge, Cloudflare does not treat the signed decision as runner-start authority, and missing, stale, or malformed decisions do not trigger a live usage-gate fallback from Cloudflare.
+- `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`, shared with Cloudflare, lets web issue a fresh signed allow decision after the live usage gate allows a turn. Temporal fetches that decision inside the execution Activity when demand requires model usage and passes it directly to Cloudflare ensure-execution; the workflow never stores the signed decision.
 - Pulse Trial uses the same allowance system with a phase-aware 2.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 

@@ -9,8 +9,8 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  startHostedWebhookNudgeWorkflow,
-} from "@/src/lib/hosted-onboarding/webhook-workflow-start";
+  signalHostedMailboxAppendRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject, readRawBodyBuffer } from "@/src/lib/http";
 
 const HOSTED_EMAIL_INGRESS_NUDGE_WORKFLOW_MAX_BODY_BYTES = 2 * 1024;
@@ -33,12 +33,13 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const workflow = await startHostedWebhookNudgeWorkflow({
+  const signal = await signalHostedMailboxAppendRuntime({
+    expectedUserId: userId,
     mailboxItemId: body.mailboxItemId,
     source: "email",
   });
 
-  return jsonOk(workflow);
+  return jsonOk(signal);
 });
 
 async function readBoundedHostedEmailNudgeWorkflowRequest(request: Request): Promise<Request> {

@@ -1,7 +1,7 @@
 import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
-} from "../hosted-runner/control";
+} from "./user-data-delete";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export const HOSTED_STALE_RUNNER_USER_IDS_ENV = "HOSTED_STALE_RUNNER_USER_IDS";

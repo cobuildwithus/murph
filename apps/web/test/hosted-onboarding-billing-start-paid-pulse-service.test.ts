@@ -10,7 +10,7 @@ import {
 const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(),
+  signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
   },
@@ -29,8 +29,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
+  signalHostedRuntimeManualWakeBestEffort: mocks.signalHostedRuntimeManualWakeBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -107,7 +107,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       },
     );
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   test("returns payment_required for a retry after failed payment without requiring active access", async () => {
@@ -141,7 +141,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   test("rejects payment recovery when the latest invoice customer mismatches", async () => {
@@ -255,8 +255,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
       HostedBillingStatus.active,
       subscription,
     );
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
-      context: "billing.start-paid-pulse",
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      eventSource: "billing.start-paid-pulse",
+      source: "user",
       userId: "member_123",
     });
   });

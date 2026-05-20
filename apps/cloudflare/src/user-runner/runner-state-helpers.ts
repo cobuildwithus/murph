@@ -64,13 +64,11 @@ export function projectRunnerStateRecord(input: {
       }
     : null;
   const activeReason = writeFence ? "runtime" : null;
-  const wakeAt = normalizeIsoDateOrNull(input.meta.wake_at);
-  const backoffUntil = normalizeIsoDateOrNull(input.meta.backoff_until);
   const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
   const lastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
 
   return {
-    backoffUntil,
+    backoffUntil: null,
     writeFence,
     // Legacy active projection around the write fence. Delete after 2026-05-25.
     activeRun: writeFence,
@@ -92,28 +90,26 @@ export function projectRunnerStateRecord(input: {
     lastErrorAt: input.meta.last_error_at,
     lastErrorCode: input.meta.last_error_code,
     lastInvocationAt: input.meta.last_invocation_at,
-    browserVaultRefreshRequestedAt: normalizeIsoDateOrNull(
-      input.meta.browser_vault_refresh_requested_at,
-    ),
+    browserVaultRefreshRequestedAt: null,
     leaseGeneration: writeFenceGeneration,
     failureCount,
-    nextWakeAt: wakeAt,
-    // Legacy pendingNudge projection around wake_at. Delete after 2026-05-25.
-    pendingNudge: wakeAt !== null,
-    // Legacy pendingNudge projection around wake_at. Delete after 2026-05-25.
-    pendingNudgeGeneration: wakeAt !== null ? writeFenceGeneration : 0,
-    // Legacy pendingWork projection around wake_at. Delete after 2026-05-25.
-    pendingWork: wakeAt !== null,
+    nextWakeAt: null,
+    // Legacy inert wake projection retained for response compatibility.
+    pendingNudge: false,
+    // Legacy inert wake projection retained for response compatibility.
+    pendingNudgeGeneration: 0,
+    // Legacy inert wake projection retained for response compatibility.
+    pendingWork: false,
     retry: {
-      at: backoffUntil,
+      at: null,
       count: failureCount,
       lastErrorCode: input.meta.last_error_code,
     },
     retryFailureCount: failureCount,
     schema: "murph.hosted-runner.v3",
     userId: input.meta.user_id,
-    wakeAt,
-    wakePending: wakeAt !== null,
+    wakeAt: null,
+    wakePending: false,
     workspaceInvocation: writeFence
       ? {
           attemptId: writeFence.attemptId,

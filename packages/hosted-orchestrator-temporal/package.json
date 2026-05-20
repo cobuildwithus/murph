@@ -1,0 +1,59 @@
+{
+  "name": "@murphai/hosted-orchestrator-temporal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./activities": {
+      "types": "./dist/activities/index.d.ts",
+      "default": "./dist/activities/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/signal-hosted-user-runtime.d.ts",
+      "default": "./dist/client/signal-hosted-user-runtime.js"
+    },
+    "./client/temporal-client": {
+      "types": "./dist/client/temporal-client.d.ts",
+      "default": "./dist/client/temporal-client.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./workflows/hosted-user-runtime": {
+      "types": "./dist/workflows/hosted-user-runtime.d.ts",
+      "default": "./dist/workflows/hosted-user-runtime.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json",
+    "temporal:worker": "pnpm exec tsx --tsconfig ../../tsconfig.base.json src/worker.ts",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
+  },
+  "dependencies": {
+    "@murphai/hosted-execution": "workspace:*",
+    "@temporalio/client": "1.16.2",
+    "@temporalio/worker": "1.16.2",
+    "@temporalio/workflow": "1.16.2"
+  },
+  "engines": {
+    "node": ">=24.14.1"
+  }
+}

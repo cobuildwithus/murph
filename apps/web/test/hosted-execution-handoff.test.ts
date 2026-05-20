@@ -6,25 +6,6 @@ import {
   it,
   vi,
 } from "vitest";
-import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
-
-interface MockAssistantNudgeInput {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
-  context?: string;
-  timeoutMs?: number;
-  userId: string;
-}
-interface MockAssistantNudgeResult {
-  accepted: boolean;
-  alarmScheduled: boolean | null;
-  kind: "caught-up" | "processing-ensured" | "retry-scheduled" | null;
-  configured: boolean;
-  errorCode: string | null;
-  immediateDriveStarted: boolean | null;
-  inFlight: boolean | null;
-  nextAlarmAtPresent: boolean | null;
-  usageGateDenied: boolean;
-}
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
@@ -36,97 +17,27 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
   }),
 }));
 
-const workflowMocks = vi.hoisted(() => ({
-  startHostedWebhookNudgeWorkflow: vi.fn(),
+const signalMocks = vi.hoisted(() => ({
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
-const mailboxStoreMocks = vi.hoisted(() => ({
-  readHostedMailboxItemOwnerById: vi.fn(),
-}));
-
-const assistantNudgeMocks = vi.hoisted(() => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: MockAssistantNudgeInput,
-  ): Promise<MockAssistantNudgeResult> => {
-    void input;
-    return {
-      accepted: true,
-      alarmScheduled: false,
-      configured: true,
-      errorCode: null,
-      immediateDriveStarted: false,
-      inFlight: false,
-      kind: "caught-up",
-      nextAlarmAtPresent: false,
-      usageGateDenied: false,
-    };
-  }),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/webhook-workflow-start", () => ({
-  startHostedWebhookNudgeWorkflow: workflowMocks.startHostedWebhookNudgeWorkflow,
-}));
-
-vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  readHostedMailboxItemOwnerById: mailboxStoreMocks.readHostedMailboxItemOwnerById,
-}));
-
-vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
-  nudgeHostedAssistantRunnerUserBestEffortResult:
-    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult,
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: signalMocks.signalHostedMailboxAppendRuntime,
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import {
   deleteHostedRunnerUserDataBestEffort,
-  nudgeHostedRunnerBestEffort,
-} from "@/src/lib/hosted-runner/control";
+} from "@/src/lib/hosted-execution/user-data-delete";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
-describe("nudgeHostedRunnerBestEffort", () => {
+describe("hosted webhook Temporal handoff", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockReset();
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockResolvedValue({
-      runId: "workflow-run-123",
-    });
-    mailboxStoreMocks.readHostedMailboxItemOwnerById.mockReset();
-    mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValue({
-      id: "mailbox_123",
-      userId: "user-123",
-    });
-    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockReset();
-    assistantNudgeMocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockImplementation(async (input) => {
-      const client = vi.mocked(readHostedExecutionControlClientIfConfigured)(input.timeoutMs);
-      if (!client) {
-        return {
-          accepted: false,
-          alarmScheduled: null,
-          kind: null,
-          configured: false,
-          errorCode: null,
-          immediateDriveStarted: null,
-          inFlight: null,
-          nextAlarmAtPresent: null,
-          usageGateDenied: false,
-        };
-      }
-      const result = input.aiUsageAllowDecision
-        ? await client.nudgeUserRunner(input.userId, {
-            aiUsageAllowDecision: input.aiUsageAllowDecision,
-          })
-        : await client.nudgeUserRunner(input.userId);
-      return {
-        accepted: result.accepted,
-        alarmScheduled: result.alarmScheduled,
-        kind: result.kind,
-        configured: true,
-        errorCode: null,
-        immediateDriveStarted: result.immediateDriveStarted ?? null,
-        inFlight: result.inFlight,
-        nextAlarmAtPresent: (result.nextAlarmAt ?? null) !== null,
-        usageGateDenied: false,
-      };
+    signalMocks.signalHostedMailboxAppendRuntime.mockReset();
+    signalMocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:user-123",
     });
   });
 
@@ -134,68 +45,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     vi.restoreAllMocks();
   });
 
-  it("swallows nudge failures because the handoff is best-effort", async () => {
-    const nudgeUserRunner = vi.fn().mockRejectedValue(new Error("nudge failed"));
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await expect(
-      nudgeHostedRunnerBestEffort({
-        userId: "user-123",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      "Hosted runner nudge failed.",
-      expect.objectContaining({ message: "nudge failed" }),
-    );
-  });
-
-  it("nudges the user immediately when configured", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      inFlight: false,
-      leaseGeneration: "1",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-
-    await nudgeHostedRunnerBestEffort({
-      context: "member-activation",
-      timeoutMs: 25,
-      userId: "user-123",
-    });
-
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
-  });
-
-  it("starts the Linq runner direct nudge before pointer workflow bookkeeping", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      inFlight: false,
-      leaseGeneration: "1",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-
+  it("signals Temporal for Linq mailbox handoff without a direct runner nudge", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
@@ -206,211 +56,23 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "linq",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "accepted",
-      reason: "workflow-started",
+      reason: "temporal-signaled",
+      signalAccepted: true,
       started: true,
-      workflowStarted: true,
+      workflowId: "hosted-user-runtime:user-123",
     });
 
-    await vi.waitFor(() =>
-      expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000),
-    );
-    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
-    expect(mailboxStoreMocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
-    expect(
-      mailboxStoreMocks.readHostedMailboxItemOwnerById.mock.invocationCallOrder[0],
-    ).toBeLessThan(workflowMocks.startHostedWebhookNudgeWorkflow.mock.invocationCallOrder[0]);
-  });
-
-  it("does not wait for pointer workflow start before nudging the runner", async () => {
-    const workflowStart = createDeferred<{ runId: string }>();
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockReturnValueOnce(workflowStart.promise);
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      inFlight: false,
-      leaseGeneration: "1",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    });
-
-    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
-    let settled = false;
-    void handoff.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-
-    workflowStart.resolve({
-      runId: "workflow-run-123",
-    });
-    await expect(handoff).resolves.toMatchObject({
-      directRunnerNudgeStatus: "accepted",
-      reason: "workflow-started",
-      started: true,
-      workflowStarted: true,
-    });
-  });
-
-  it("waits for the success-path direct nudge before returning workflow handoff", async () => {
-    let resolveDirectNudge!: (value: {
-      accepted: boolean;
-      alarmScheduled: boolean;
-      kind: "caught-up" | "processing-ensured" | "retry-scheduled";
-      inFlight: boolean;
-      leaseGeneration: string;
-    }) => void;
-    const directNudge = new Promise<{
-      accepted: boolean;
-      alarmScheduled: boolean;
-      kind: "caught-up" | "processing-ensured" | "retry-scheduled";
-      inFlight: boolean;
-      leaseGeneration: string;
-    }>((resolve) => {
-      resolveDirectNudge = resolve;
-    });
-    const nudgeUserRunner = vi.fn().mockReturnValue(directNudge);
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-
-    const handoff = maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_direct_nudge_pending",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    });
-
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
-    await vi.waitFor(() => expect(nudgeUserRunner).toHaveBeenCalledWith("user-123"));
-    let settled = false;
-    void handoff.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-
-    resolveDirectNudge({
-      accepted: true,
-      alarmScheduled: false,
-      inFlight: false,
-      kind: "processing-ensured",
-      leaseGeneration: "1",
-    });
-    await expect(handoff).resolves.toMatchObject({
-      directRunnerNudgeStatus: "accepted",
-      reason: "workflow-started",
-      started: true,
-      workflowStarted: true,
-    });
-  });
-
-  it("starts the Linq pointer workflow when direct nudge config is unavailable", async () => {
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue(null);
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "not-accepted",
-      reason: "workflow-started",
-      started: true,
-      workflowStarted: true,
-    });
-
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
       source: "linq",
     });
   });
 
-  it("skips the success-path direct nudge when mailbox ownership mismatches", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: false,
-      inFlight: false,
-      leaseGeneration: "1",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
-      id: "mailbox_123",
-      userId: "owner-456",
-    });
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      source: "linq",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "not-accepted",
-      reason: "workflow-started",
-      started: true,
-      workflowStarted: true,
-    });
-
-    expect(nudgeUserRunner).not.toHaveBeenCalled();
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "linq",
-    });
-  });
-
-  it("keeps webhook handoff best-effort when the workflow cannot start", async () => {
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue(null);
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(
-      new Error("workflow unavailable"),
+  it("keeps webhook handoff best-effort when Temporal signaling fails", async () => {
+    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
     );
 
     await expect(
@@ -425,114 +87,17 @@ describe("nudgeHostedRunnerBestEffort", () => {
         userId: "user-123",
       }),
     ).resolves.toMatchObject({
-      directRunnerNudgeStatus: "not-accepted",
-      reason: "workflow-start-failed",
+      reason: "temporal-signal-failed",
+      signalAccepted: false,
       started: false,
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
-    expect(mailboxStoreMocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
       source: "linq",
     });
-  });
-
-  it("falls back to the direct runner nudge when workflow start fails", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: true,
-      kind: "processing-ensured",
-      immediateDriveStarted: true,
-      inFlight: false,
-      leaseGeneration: "1",
-      nextAlarmAt: "2026-05-09T00:00:00.000Z",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(
-      new Error("workflow unavailable"),
-    );
-
-    await expect(
-      maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_inline_gap",
-        mailboxItemId: "mailbox_123",
-        response: {
-          ok: true,
-          reason: "wake-appended-active-member",
-        },
-        source: "telegram",
-        userId: "user-123",
-      }),
-    ).resolves.toMatchObject({
-      directRunnerNudgeStatus: "accepted",
-      reason: "workflow-start-failed",
-      started: false,
-      workflowStarted: false,
-    });
-
-    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
-    expect(mailboxStoreMocks.readHostedMailboxItemOwnerById).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-    });
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
-      mailboxItemId: "mailbox_123",
-      source: "telegram",
-    });
-  });
-
-  it("does not direct-nudge a mismatched mailbox owner after workflow start fails", async () => {
-    const nudgeUserRunner = vi.fn().mockResolvedValue({
-      accepted: true,
-      alarmScheduled: true,
-      kind: "processing-ensured",
-      immediateDriveStarted: true,
-      inFlight: false,
-      leaseGeneration: "1",
-      nextAlarmAt: "2026-05-09T00:00:00.000Z",
-    });
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultSession: vi.fn(),
-      deleteUserData: vi.fn(),
-      getRunnerStatus: vi.fn(),
-      nudgeUserRunner,
-      scheduleBrowserVaultRefresh: vi.fn(),
-    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
-    mailboxStoreMocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
-      id: "mailbox_123",
-      userId: "owner-456",
-    });
-    workflowMocks.startHostedWebhookNudgeWorkflow.mockRejectedValueOnce(
-      new Error("workflow unavailable"),
-    );
-
-    await expect(
-      maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_inline_gap",
-        mailboxItemId: "mailbox_123",
-        response: {
-          ok: true,
-          reason: "wake-appended-active-member",
-        },
-        source: "telegram",
-        userId: "user-123",
-      }),
-    ).resolves.toMatchObject({
-      directRunnerNudgeStatus: "not-accepted",
-      reason: "workflow-start-failed",
-      started: false,
-      workflowStarted: false,
-    });
-
-    expect(nudgeUserRunner).not.toHaveBeenCalled();
   });
 
   it("keeps webhook handoff best-effort when no mailbox pointer exists", async () => {
@@ -548,16 +113,15 @@ describe("nudgeHostedRunnerBestEffort", () => {
       }),
     ).resolves.toMatchObject({
       reason: "missing-mailbox-item",
+      signalAccepted: false,
       started: false,
     });
 
     expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).not.toHaveBeenCalled();
+    expect(signalMocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
-  it("starts the pointer workflow even when the direct nudge control plane is not configured", async () => {
-    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue(null);
-
+  it("signals Temporal for Telegram handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
@@ -568,29 +132,20 @@ describe("nudgeHostedRunnerBestEffort", () => {
       source: "telegram",
       userId: "user-123",
     })).resolves.toMatchObject({
-      directRunnerNudgeStatus: "not-accepted",
-      reason: "workflow-started",
+      reason: "temporal-signaled",
+      signalAccepted: true,
       started: true,
-      workflowStarted: true,
+      workflowId: "hosted-user-runtime:user-123",
     });
 
-    expect(readHostedExecutionControlClientIfConfigured).toHaveBeenCalledWith(5000);
-    expect(workflowMocks.startHostedWebhookNudgeWorkflow).toHaveBeenCalledWith({
+    expect(readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
       source: "telegram",
     });
   });
 });
-
-function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, reject, resolve };
-}
 
 describe("deleteHostedRunnerUserDataBestEffort", () => {
   beforeEach(() => {
@@ -620,6 +175,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
+      ensureRuntimeExecution: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner: vi.fn(),
       scheduleBrowserVaultRefresh: vi.fn(),

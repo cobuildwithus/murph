@@ -1,5 +1,7 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
+import {
+  signalHostedManualRunRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -71,8 +73,8 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (channelSyncDispatch) {
-    await nudgeHostedRunnerBestEffort({
-      context: "settings.telegram.sync",
+    await signalHostedManualRunBestEffort({
+      eventSource: "settings.telegram.sync",
       userId: auth.member.id,
     });
   }
@@ -93,4 +95,19 @@ function normalizeComparableTelegramUserId(value: string | null | undefined): st
 
   const normalized = value.trim();
   return normalized || null;
+}
+
+async function signalHostedManualRunBestEffort(input: {
+  eventSource: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    await signalHostedManualRunRuntime({
+      eventSource: input.eventSource,
+      source: "user",
+      userId: input.userId,
+    });
+  } catch {
+    // Settings sync should not fail if the best-effort runtime wake is unavailable.
+  }
 }

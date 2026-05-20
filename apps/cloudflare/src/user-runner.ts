@@ -9,6 +9,10 @@ import {
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedRuntimeEnsureExecutionRequest,
+  HostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -71,13 +75,11 @@ import {
   RunnerWriteFenceAlreadyActiveError,
   RunnerStateStore,
 } from "./user-runner/runner-state-store.js";
-import { normalizeFutureWakeAt } from "./user-runner/runner-state-helpers.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import type {
   DurableObjectStateLike,
   RunnerStateRecord,
 } from "./user-runner/types.js";
-import { computeRetryDelayMs } from "./user-runner/types.js";
 import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
@@ -92,75 +94,8 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
-const FRESH_WRITE_FENCE_STARTUP_GRACE_MS = 15_000;
-const RETRY_CAP_RECOVERY_PROBE_DELAY_MS = 30 * 60_000;
+const ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS = 5_000;
 const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
-
-type RunnerProgressSnapshot = {
-  durableDemand:
-    | {
-        kind: "mailbox-backlog";
-        mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"];
-      }
-    | { kind: "assistant-wake"; source: "runner" | "workspace"; wakeAt: string }
-    | { kind: "browser-vault-refresh" }
-    | { kind: "idle"; nextWakeAt: string | null };
-  record: RunnerStateRecord;
-  webStatus: HostedRuntimeWebStatusResponse;
-};
-
-type RunnerProgressDemand = Exclude<
-  RunnerProgressSnapshot["durableDemand"],
-  { kind: "idle" }
->;
-
-type EnsureRunnerProgressResult =
-  | {
-      demand: RunnerProgressDemand | null;
-      kind: "caught-up";
-      record: RunnerStateRecord;
-    }
-  | {
-      containerResult:
-        | Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>
-        | null;
-      demand: RunnerProgressDemand | null;
-      kind: "processing-ensured";
-      nextAlarmAt?: string | null;
-      record: RunnerStateRecord;
-    }
-  | {
-      containerResult:
-        | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
-        | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>;
-      demand: RunnerProgressDemand | null;
-      localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "processing-started";
-      nextAlarmAt?: string | null;
-      previousAttemptId: string;
-      record: RunnerStateRecord;
-    }
-  | {
-      containerResult: null;
-      demand: RunnerProgressDemand | null;
-      localEnsurePromise: Promise<HostedWorkspaceInvocationResult> | null;
-      kind: "processing-started";
-      nextAlarmAt?: string | null;
-      record: RunnerStateRecord;
-    }
-  | {
-      deferredFreshWriteFenceReplacement?: boolean;
-      demand: RunnerProgressDemand | null;
-      kind: "retry-scheduled";
-      nextAlarmAt?: string | null;
-      record: RunnerStateRecord;
-      statusReadFailed?: boolean;
-      containerResult:
-        | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
-        | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>
-        | null;
-    };
 
 export interface HostedRunnerUserDataDeletionResult {
   deletedAt: string;
@@ -180,7 +115,8 @@ export interface HostedRunnerUserDataDeletionResult {
 
 export interface HostedBrowserVaultRefreshScheduleResult {
   accepted: true;
-  scheduled: true;
+  removed: true;
+  scheduled: false;
   userId: string;
 }
 
@@ -190,10 +126,14 @@ interface RunnerUserStores {
   userId: string;
 }
 
-interface RunnerProgressInput {
+interface LegacyRunnerExecutionInput {
   aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   reason: HostedWorkspaceInvocationReason;
 }
+
+type RuntimeExecutionInput = HostedRuntimeEnsureExecutionRequest & {
+  userId: string;
+};
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -208,14 +148,15 @@ class HostedRunnerUserDataDeletionRunnerStillActiveError extends Error {
   }
 }
 
-class HostedRunnerRetryAlreadyRecordedError extends Error {
+class HostedRuntimeExecutionRetryableError extends Error {
+  readonly retryable = true;
+
   constructor(
     message: string,
-    readonly record: RunnerStateRecord,
-    options?: ErrorOptions,
+    readonly reason: string,
   ) {
-    super(message, options);
-    this.name = "HostedRunnerRetryAlreadyRecordedError";
+    super(message);
+    this.name = "HostedRuntimeExecutionRetryableError";
   }
 }
 
@@ -255,25 +196,27 @@ export class HostedUserRunner {
 
   async alarm(): Promise<void> {
     try {
-      const progress = await this.ensureRunnerProgress({
-        reason: "alarm",
-      });
-      if (
-        progress.kind === "processing-started"
-        && progress.localEnsurePromise
-      ) {
-        await progress.localEnsurePromise.catch(() => undefined);
+      const result = await this.stateStore.clearExpiredWriteFence(Date.now());
+      await this.syncWatchdogAlarm(result.record);
+      if (result.cleared) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: buildRunnerRecordTimingLogDetails(result.record),
+          message: "Hosted runner alarm cleared an expired write fence.",
+          phase: "scheduled",
+          userId: result.record.userId,
+        });
       }
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner alarm reconciliation failed; scheduling retry.",
+        message: "Hosted runner watchdog alarm maintenance failed.",
         phase: "failed",
         userId: await this.tryReadBoundUserId(),
       });
-      await this.scheduleRetryAfterFailure(error);
+      await this.state.storage.deleteAlarm?.();
     }
   }
 
@@ -289,10 +232,7 @@ export class HostedUserRunner {
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
-      nextAlarmAt: earliestIsoDate(
-        readRunnerOperationalAlarmAt(record),
-        normalizeFutureWakeAt(webStatus.workspace?.nextWakeAt ?? null),
-      ),
+      nextAlarmAt: readWriteFenceWatchdogAlarmAt(record),
       mailboxLag: webStatus.mailboxLag,
       userId: record.userId,
       workspace: webStatus.workspace,
@@ -342,18 +282,26 @@ export class HostedUserRunner {
   }
 
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
-    const progress = await this.ensureRunnerProgress({
+    const record = await this.stateStore.readState();
+    const execution = await this.ensureRuntimeExecutionForUser({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+      orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("nudge"),
       reason: "nudge",
+      userId: record.userId,
     });
-    const result = this.toHostedRunnerNudgeResult(progress);
+    const updatedRecord = await this.stateStore.readState();
+    const result = this.toHostedRunnerNudgeResult(execution, updatedRecord);
 
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      details: buildEnsureRunnerProgressLogDetails(progress),
-      message: "Hosted runner nudge accepted.",
+      details: {
+        runtimeExecutionKind: execution.kind,
+        runtimeAttemptId: execution.runtimeAttemptId,
+        ...buildRunnerRecordTimingLogDetails(updatedRecord),
+      },
+      message: "Hosted runner legacy nudge translated to runtime execution.",
       phase: "scheduled",
-      userId: progress.record.userId,
+      userId: updatedRecord.userId,
     });
 
     return result;
@@ -367,22 +315,31 @@ export class HostedUserRunner {
     return this.nudgeHostedRunner(input);
   }
 
-  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
+  async ensureRuntimeExecutionForUser(
+    input: RuntimeExecutionInput,
+  ): Promise<HostedRuntimeEnsureExecutionResponse> {
     await this.stateStore.bindUser(input.userId);
-    await this.stateStore.markBrowserVaultRefreshRequested();
-    const progress = await this.ensureRunnerProgress({
-      reason: "browser_vault_refresh",
-    });
+    const record = await this.stateStore.readState();
+    if (record.writeFence) {
+      return await this.ensureExistingRuntimeExecution(input, record);
+    }
+    return await this.startRuntimeExecution(input, "started");
+  }
+
+  async scheduleBrowserVaultRefreshForUser(input: { userId: string }): Promise<HostedBrowserVaultRefreshScheduleResult> {
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
-      details: buildEnsureRunnerProgressLogDetails(progress),
-      message: "Hosted runner accepted browser-vault refresh scheduling.",
+      details: {
+        removed: true,
+      },
+      message: "Hosted runner legacy browser-vault refresh scheduling is disabled.",
       phase: "scheduled",
       userId: input.userId,
     });
     return {
       accepted: true,
-      scheduled: true,
+      removed: true,
+      scheduled: false,
       userId: input.userId,
     };
   }
@@ -573,7 +530,7 @@ export class HostedUserRunner {
     await this.stateStore.bindUser(input.userId);
     const existing = await this.stateStore.readState();
     if (existing.writeFence) {
-      await this.syncAlarm(existing);
+      await this.syncWatchdogAlarm(existing);
       return null;
     }
 
@@ -590,13 +547,15 @@ export class HostedUserRunner {
       if (!activeRecord) {
         throw error;
       }
-      await this.syncAlarm(activeRecord);
+      await this.syncWatchdogAlarm(activeRecord);
       return null;
     }
-    return await this.stateStore.bindWriteFenceWorkspaceVersion({
+    const bound = await this.stateStore.bindWriteFenceWorkspaceVersion({
       token,
       workspaceVersion: input.workspaceVersion,
     });
+    await this.syncWatchdogAlarm(await this.stateStore.readState());
+    return bound;
   }
 
   async finishRuntimeWriteFenceForSmoke(input: {
@@ -611,471 +570,217 @@ export class HostedUserRunner {
       userId: input.userId,
     });
     if (result.completed) {
-      await this.syncAlarm(await this.stateStore.readState());
+      await this.syncWatchdogAlarm(await this.stateStore.readState());
     }
     return { completed: result.completed };
   }
 
-  async runUntilIdleOrBudget(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
-    const progress = await this.ensureRunnerProgress({
+  async runUntilIdleOrBudget(input: LegacyRunnerExecutionInput): Promise<HostedWorkspaceInvocationResult> {
+    const record = await this.stateStore.readState();
+    const execution = await this.ensureRuntimeExecutionForUser({
       aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
+      orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("run-until-idle"),
+      reason: input.reason,
+      userId: record.userId,
+    });
+    return this.toLegacyWorkspaceInvocationResult(execution);
+  }
+
+  private async ensureExistingRuntimeExecution(
+    input: RuntimeExecutionInput,
+    record: RunnerStateRecord,
+  ): Promise<HostedRuntimeEnsureExecutionResponse> {
+    if (!record.writeFence) {
+      return await this.startRuntimeExecution(input, "started");
+    }
+
+    const activeFence = record.writeFence;
+    const containerResult = await this.ensureActiveRuntimeProcessing({
+      activeRuntime: {
+        attemptId: activeFence.attemptId,
+        leaseGeneration: String(activeFence.generation),
+        userId: record.userId,
+      },
       reason: input.reason,
     });
-    if (
-      progress.kind === "processing-started"
-      && progress.localEnsurePromise
-    ) {
-      return await progress.localEnsurePromise;
-    }
-    if (progress.kind === "caught-up") {
+
+    if (containerResult.kind === "accepted") {
+      await this.syncWatchdogAlarm(record);
       return {
-        nextWakeAt: readRunnerStateAlarmAt(progress.record),
-        status: "idle",
+        kind: "runtime_wake_sent",
+        recommendedRecheckAt: this.computeActiveRuntimeWakeRecheckAt(),
+        runtimeAttemptId: activeFence.attemptId,
       };
     }
-    const nextWakeAt = readEnsureRunnerProgressNextAlarmAt(progress);
-    return {
-      nextWakeAt,
-      status: "scheduled",
-    };
+
+    if (containerResult.kind === "start-required") {
+      const cleared = await this.stateStore.clearWriteFenceForReplacement({
+        attemptId: activeFence.attemptId,
+        finishedAt: new Date().toISOString(),
+        generation: String(activeFence.generation),
+        userId: record.userId,
+      });
+      await this.syncWatchdogAlarm(cleared.record);
+      if (!cleared.cleared) {
+        throw new HostedRuntimeExecutionRetryableError(
+          "Hosted runtime active write fence changed before replacement could start.",
+          "active-fence-replacement-stale",
+        );
+      }
+
+      this.retireCurrentEnsurePromise();
+      return await this.startRuntimeExecution(input, "replaced");
+    }
+
+    await this.syncWatchdogAlarm(record);
+    throw new HostedRuntimeExecutionRetryableError(
+      "Hosted runtime active child wake could not be confirmed.",
+      containerResult.reason,
+    );
   }
 
-  private toHostedRunnerNudgeResult(
-    progress: EnsureRunnerProgressResult,
-  ): HostedRunnerNudgeResult {
-    const immediateDriveStarted =
-      progress.kind === "processing-started"
-      && progress.localEnsurePromise !== null;
-    const nextAlarmAt = readEnsureRunnerProgressNextAlarmAt(progress);
-    const kind = progress.kind === "caught-up"
-      ? "caught-up"
-      : progress.kind === "retry-scheduled"
-      ? "retry-scheduled"
-      : "processing-ensured";
-
-    return {
-      accepted: true,
-      alarmScheduled: nextAlarmAt !== null,
-      kind,
-      immediateDriveStarted,
-      inFlight:
-        progress.record.writeFence !== null
-        || progress.kind === "processing-ensured"
-        || progress.kind === "processing-started",
-      nextAlarmAt,
-    };
-  }
-
-  private async ensureRunnerProgress(input: RunnerProgressInput): Promise<EnsureRunnerProgressResult> {
-    const progressStartedAt = Date.now();
+  private async startRuntimeExecution(
+    input: RuntimeExecutionInput,
+    action: "started" | "replaced",
+  ): Promise<HostedRuntimeEnsureExecutionResponse> {
+    const runtimeWakeStartedAt = Date.now();
+    const initialRecord = await this.stateStore.readState();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        localEnsureInFlightPresent: this.localEnsureInFlight !== null,
-        progressReason: input.reason,
+        ...buildRunnerRecordTimingLogDetails(initialRecord),
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        runtimeReason: input.reason,
       },
-      message: "Hosted runner progress check started.",
-      phase: "scheduled",
-      userId: null,
+      message: "Hosted runner runtime execution adapter start requested.",
+      phase: "runtime.starting",
+      userId: input.userId,
     });
-    let demandReadDurationMs = 0;
-    const finish = (progress: EnsureRunnerProgressResult): EnsureRunnerProgressResult => {
+
+    let token: RunnerWriteFenceToken;
+    try {
+      token = await this.stateStore.beginWriteFence({
+        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
+        kind: "runtime",
+        reason: input.reason,
+        userId: input.userId,
+      });
+    } catch (error) {
+      if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
+        throw error;
+      }
+      await this.syncWatchdogAlarm(error.record);
+      return await this.ensureExistingRuntimeExecution(input, error.record);
+    }
+
+    await this.syncWatchdogAlarm(await this.stateStore.readState());
+
+    let workspaceVersion: string | null = null;
+    try {
+      const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
+      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
+      workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      token = await this.stateStore.bindWriteFenceWorkspaceVersion({
+        token,
+        workspaceVersion,
+      });
+
+      const result = await this.invokeWorkspaceRunner({
+        token,
+        reason: input.reason,
+        userId: input.userId,
+        workspace: workspaceRead.workspace,
+        workspaceVersion,
+      });
+      const completed = await this.stateStore.clearWriteFenceAfterCompletion({
+        finishedAt: new Date().toISOString(),
+        token,
+      });
+      await this.syncWatchdogAlarm(completed.record);
+      if (!completed.completed) {
+        throw new HostedRuntimeExecutionRetryableError(
+          "Hosted runtime execution completed after its write fence changed.",
+          "runtime-completion-stale",
+        );
+      }
+
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
-          ...buildEnsureRunnerProgressLogDetails(progress),
-          ...buildRunnerRecordTimingLogDetails(progress.record),
-          localEnsureInFlightPresent: this.localEnsureInFlight !== null,
-          progressDemandReadDurationMs: demandReadDurationMs,
-          progressDurationMs: Date.now() - progressStartedAt,
-          progressReason: input.reason,
-          progressStateNextAlarmAt: readEnsureRunnerProgressNextAlarmAt(progress),
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          runtimeExecutionDurationMs: Date.now() - runtimeWakeStartedAt,
+          runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
+          workspaceAttemptId: token.attemptId,
+          workspaceStatus: result.status,
+          workspaceVersion,
         },
-        message: "Hosted runner progress check completed.",
-        phase: "scheduled",
-        userId: null,
+        message: "Hosted runner runtime execution adapter completed.",
+        phase: "checkpoint",
+        userId: input.userId,
       });
-      return progress;
-    };
 
-    const demandReadStartedAt = Date.now();
-    let snapshot: RunnerProgressSnapshot;
-    try {
-      snapshot = await this.readProgressSnapshot({
-        includeBrowserVaultRefresh: input.reason === "browser_vault_refresh",
-      });
+      return {
+        action,
+        kind: "runtime_completed",
+        runtimeAttemptId: token.attemptId,
+        runtimeResultNextWakeAt: result.nextWakeAt ?? null,
+        runtimeStatus: result.status,
+      };
     } catch (error) {
-      demandReadDurationMs = Date.now() - demandReadStartedAt;
-      const recheck = await this.scheduleRetryAfterProgressDemandReadFailure(error);
+      const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
+        error,
+        finishedAt: new Date().toISOString(),
+        token,
+      });
+      await this.syncWatchdogAlarm(failed.record);
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
           ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          failureCount: recheck.record.failureCount,
-          maxEventAttempts: this.env.maxEventAttempts,
-          progressReason: input.reason,
-          scheduledWakeAt: recheck.nextAlarmAt,
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          transportFailureFenceCleared: failed.failed,
+          workspaceAttemptId: token.attemptId,
+          workspaceReason: input.reason,
+          workspaceVersion,
         },
         level: "warn",
-        message: "Hosted runner progress demand read failed; scheduled retry.",
-        phase: "scheduled",
-        userId: null,
+        message: "Hosted runner runtime execution adapter failed.",
+        phase: "failed",
+        userId: input.userId,
       });
-      return finish({
-        containerResult: null,
-        demand: null,
-        kind: "retry-scheduled",
-        nextAlarmAt: recheck.nextAlarmAt,
-        record: recheck.record,
-        statusReadFailed: true,
-      });
+      throw error;
     }
-    demandReadDurationMs = Date.now() - demandReadStartedAt;
-    const demand = readRunnerProgressDemand(snapshot);
-    let record = await this.clearRetryStateForFreshMailboxDemand({
-      demand,
-      record: snapshot.record,
-      reason: "progress-demand",
-    });
-    snapshot = { ...snapshot, record };
-    if (
-      demand?.kind === "assistant-wake"
-      && demand.source === "runner"
-      && isRunnerRetryCapRecoveryProbeDue(record, this.env.maxEventAttempts)
-    ) {
-      const caughtUp = await this.clearRetryCapProbeAndSyncIdleAlarm(snapshot);
-      return finish({ demand: null, kind: "caught-up", record: caughtUp });
-    }
-
-    const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-      demand,
-      record,
-      reason: "progress-demand",
-    });
-    if (parkedByRetryCap) {
-      return finish({
-        containerResult: null,
-        demand,
-        kind: "retry-scheduled",
-        record: parkedByRetryCap,
-      });
-    }
-
-    if (record.writeFence) {
-      const containerResult = await this.ensureActiveRuntimeProcessing({
-        activeRuntime: {
-          attemptId: record.writeFence.attemptId,
-          leaseGeneration: String(record.writeFence.generation),
-          userId: record.userId,
-        },
-        reason: input.reason,
-      });
-      if (containerResult.kind === "accepted") {
-        const confirmedMailboxBacklog = demand?.kind === "mailbox-backlog";
-        if (confirmedMailboxBacklog && input.reason !== "alarm") {
-          const recheck = await this.scheduleShortProgressRecheck();
-          return finish({
-            containerResult,
-            demand,
-            kind: "processing-ensured",
-            nextAlarmAt: recheck.nextAlarmAt,
-            record: recheck.record,
-          });
-        }
-        const syncedRecord = confirmedMailboxBacklog && record.wakeAt !== null
-          ? await this.stateStore.clearWakePending()
-          : record;
-        await this.syncAlarmAt(
-          confirmedMailboxBacklog
-            ? readRunnerStateAlarmAt(syncedRecord)
-            : readRunnerOperationalAlarmAt(syncedRecord),
-        );
-        return finish({
-          containerResult,
-          demand,
-          kind: "processing-ensured",
-          record: syncedRecord,
-        });
-      }
-
-      if (
-        containerResult.kind === "retry-scheduled"
-        && this.shouldDeferFreshActiveRuntimeReplacement(record)
-      ) {
-        const retryRecord = await this.stateStore.markWakePending({
-          preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
-        });
-        await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return finish({
-          containerResult,
-          deferredFreshWriteFenceReplacement: true,
-          demand,
-          kind: "retry-scheduled",
-          record: retryRecord,
-        });
-      }
-
-      if (
-        containerResult.kind === "start-required"
-        && this.shouldDeferFreshActiveRuntimeReplacement(record)
-      ) {
-        const retryRecord = await this.stateStore.markWakePending({
-          preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
-        });
-        await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return finish({
-          containerResult,
-          deferredFreshWriteFenceReplacement: true,
-          demand,
-          kind: "retry-scheduled",
-          record: retryRecord,
-        });
-      }
-
-      if (!shouldReplaceUnconfirmedActiveRuntime(containerResult)) {
-        const retryRecord = await this.stateStore.markWakePending({
-          preferredWakeAt: new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString(),
-        });
-        await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-        return finish({
-          containerResult,
-          demand,
-          kind: "retry-scheduled",
-          record: retryRecord,
-        });
-      }
-
-      const previousFence = record.writeFence;
-      const preemptionError = new Error(
-        "Hosted runner active write fence was replaced after liveness could not be confirmed.",
-      );
-      const preempted = await this.stateStore.clearWriteFenceIfCurrent({
-        attemptId: previousFence.attemptId,
-        failure: {
-          backoffUntil: null,
-          error: preemptionError,
-          failedAt: new Date().toISOString(),
-        },
-        generation: String(previousFence.generation),
-        userId: record.userId,
-        wakeAt: new Date().toISOString(),
-      });
-
-      if (!preempted.preempted) {
-        await this.syncAlarm(preempted.record);
-        return await this.ensureRunnerProgress(input);
-      }
-
-      this.retireCurrentEnsurePromise();
-      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-        demand,
-        error: preemptionError,
-        reason: "active-fence-replacement",
-        record: preempted.record,
-      });
-      if (parkedByRetryCap) {
-        return finish({
-          containerResult,
-          demand,
-          kind: "retry-scheduled",
-          record: parkedByRetryCap,
-        });
-      }
-      await this.syncAlarm(preempted.record);
-
-      const localEnsureInFlight = this.kickLocalEnsure({
-        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-        reason: input.reason,
-      });
-      return finish({
-        containerResult,
-        demand,
-        localEnsurePromise: localEnsureInFlight,
-        kind: "processing-started",
-        previousAttemptId: previousFence.attemptId,
-        record: preempted.record,
-      });
-    }
-
-    if (
-      !shouldBypassRunnerRetryForDemand({ demand, record })
-      && isRunnerBackoffActive(record, Date.now())
-    ) {
-      const retryRecord = await this.stateStore.markWakePending({
-        preferredWakeAt: new Date().toISOString(),
-      });
-      await this.syncAlarmAt(readRunnerRuntimeDueAt(retryRecord));
-      return finish({
-        containerResult: null,
-        demand,
-        kind: "retry-scheduled",
-        record: retryRecord,
-      });
-    }
-
-    if (!demand) {
-      const syncedRecord = await this.syncProgressSnapshotIdleAlarm(snapshot);
-      return finish({ demand: null, kind: "caught-up", record: syncedRecord });
-    }
-
-    this.retireCurrentEnsurePromise();
-    const initialAlarmAt = new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString();
-    await this.syncAlarmAt(initialAlarmAt);
-    const localEnsureInFlight = this.kickLocalEnsure({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-      reason: input.reason === "browser_vault_refresh"
-        ? "browser_vault_refresh"
-        : resolveRunnerProgressReason({
-            demand,
-            record,
-            requestedReason: input.reason,
-          }),
-    });
-    return finish({
-      containerResult: null,
-      demand,
-      localEnsurePromise: localEnsureInFlight,
-      kind: "processing-started",
-      nextAlarmAt: initialAlarmAt,
-      record,
-    });
   }
 
-  private async readProgressSnapshot(input: {
-    ignoredWorkspaceWakeAt?: string | null;
-    includeBrowserVaultRefresh?: boolean;
-  } = {}): Promise<RunnerProgressSnapshot> {
-    const nowMs = Date.now();
-    const due = await this.stateStore.readDueWork(nowMs);
-    const webStatus = await this.readMailboxBacklogStatus(due.record);
+  private toHostedRunnerNudgeResult(
+    execution: HostedRuntimeEnsureExecutionResponse,
+    record: RunnerStateRecord,
+  ): HostedRunnerNudgeResult {
+    const watchdogAlarmAt = readWriteFenceWatchdogAlarmAt(record);
+    return {
+      accepted: true,
+      alarmScheduled: watchdogAlarmAt !== null,
+      kind: "processing-ensured",
+      immediateDriveStarted: execution.kind === "runtime_completed",
+      inFlight: record.writeFence !== null || execution.kind === "runtime_wake_sent",
+      nextAlarmAt: watchdogAlarmAt,
+    };
+  }
 
-    if (hasMailboxBacklog(webStatus.mailboxLag)) {
+  private toLegacyWorkspaceInvocationResult(
+    execution: HostedRuntimeEnsureExecutionResponse,
+  ): HostedWorkspaceInvocationResult {
+    if (execution.kind === "runtime_completed") {
       return {
-        durableDemand: {
-          kind: "mailbox-backlog",
-          mailboxLag: webStatus.mailboxLag,
-        },
-        record: due.record,
-        webStatus,
-      };
-    }
-
-    const workspaceWakeAt = readDueWorkspaceWakeAt(
-      webStatus.workspace?.nextWakeAt ?? null,
-      nowMs,
-    );
-    if (
-      workspaceWakeAt
-      && workspaceWakeAt !== input.ignoredWorkspaceWakeAt
-      && (
-        due.kind !== "runtime"
-        || isRunnerRetryCapRecoveryProbeDue(due.record, this.env.maxEventAttempts)
-      )
-    ) {
-      return {
-        durableDemand: {
-          kind: "assistant-wake",
-          source: "workspace",
-          wakeAt: workspaceWakeAt,
-        },
-        record: due.record,
-        webStatus,
-      };
-    }
-
-    if (due.kind === "runtime") {
-      return {
-        durableDemand: {
-          kind: "assistant-wake",
-          source: "runner",
-          wakeAt: readRunnerRuntimeDueAt(due.record)
-            ?? due.record.wakeAt
-            ?? new Date().toISOString(),
-        },
-        record: due.record,
-        webStatus,
-      };
-    }
-
-    if (
-      webStatus.workspace
-      && (
-        input.includeBrowserVaultRefresh === true
-        || due.record.browserVaultRefreshRequestedAt !== null
-      )
-    ) {
-      return {
-        durableDemand: { kind: "browser-vault-refresh" },
-        record: due.record,
-        webStatus,
+        nextWakeAt: execution.runtimeResultNextWakeAt,
+        status: execution.runtimeStatus,
       };
     }
 
     return {
-      durableDemand: {
-        kind: "idle",
-        nextWakeAt: normalizeFutureWakeAt(webStatus.workspace?.nextWakeAt ?? null),
-      },
-      record: due.record,
-      webStatus,
+      nextWakeAt: execution.recommendedRecheckAt,
+      status: "scheduled",
     };
-  }
-
-  private async syncProgressSnapshotIdleAlarm(
-    snapshot: RunnerProgressSnapshot,
-  ): Promise<RunnerStateRecord> {
-    const nextWakeAt = snapshot.durableDemand.kind === "idle"
-      ? earliestIsoDate(
-        readRunnerStateAlarmAt(snapshot.record),
-        snapshot.durableDemand.nextWakeAt,
-      )
-      : null;
-    const record = await this.stateStore.scheduleNextWake({ nextWakeAt });
-    await this.syncAlarm(record);
-    return record;
-  }
-
-  private async clearRetryCapProbeAndSyncIdleAlarm(
-    snapshot: RunnerProgressSnapshot,
-  ): Promise<RunnerStateRecord> {
-    await this.stateStore.clearRetryCapRecoveryProbe();
-    const record = await this.stateStore.scheduleNextWake({
-      nextWakeAt: normalizeFutureWakeAt(snapshot.webStatus.workspace?.nextWakeAt ?? null),
-    });
-    await this.syncAlarm(record);
-    return record;
-  }
-
-  private async readMailboxBacklogStatus(
-    record: RunnerStateRecord,
-  ): Promise<HostedRuntimeWebStatusResponse> {
-    const statusReadStartedAt = Date.now();
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        ...buildRunnerRecordTimingLogDetails(record),
-      },
-      message: "Hosted runner mailbox backlog status read started.",
-      phase: "scheduled",
-      userId: null,
-    });
-    const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
-    const mailboxBacklogPresent = hasMailboxBacklog(webStatus.mailboxLag);
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        mailboxBacklogPresent,
-        mailboxLagLaneCount: webStatus.mailboxLag.length,
-        statusReadDurationMs: Date.now() - statusReadStartedAt,
-        workspacePresent: webStatus.workspace !== null,
-        workspaceVersion: webStatus.workspace?.version ?? null,
-      },
-      message: "Hosted runner mailbox backlog status read completed.",
-      phase: "scheduled",
-      userId: null,
-    });
-
-    return webStatus;
   }
 
   private async ensureActiveRuntimeProcessing(
@@ -1153,106 +858,11 @@ export class HostedUserRunner {
     }
   }
 
-  private shouldDeferFreshActiveRuntimeReplacement(record: RunnerStateRecord): boolean {
-    if (!record.writeFence) {
-      return false;
-    }
-    const startedAt = Date.parse(record.writeFence.startedAt);
-    if (!Number.isFinite(startedAt)) {
-      return false;
-    }
-    return Date.now() - startedAt < FRESH_WRITE_FENCE_STARTUP_GRACE_MS;
-  }
-
-  private async scheduleShortProgressRecheck(input: {
-    respectBackoff?: boolean;
-  } = {}): Promise<{
-    nextAlarmAt: string | null;
-    record: RunnerStateRecord;
-  }> {
-    const preferredWakeAt = new Date(Date.now() + IMMEDIATE_WAKE_RETRY_DELAY_MS).toISOString();
-    const record = await this.stateStore.markWakePending({
-      preferredWakeAt,
-    });
-    const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-      record,
-      reason: "progress-recheck",
-    });
-    if (parkedByRetryCap) {
-      return {
-        nextAlarmAt: readRunnerStateAlarmAt(parkedByRetryCap),
-        record: parkedByRetryCap,
-      };
-    }
-    const nextAlarmAt = input.respectBackoff === true
-      ? readRunnerRuntimeDueAt(record) ?? preferredWakeAt
-      : preferredWakeAt;
-    await this.syncAlarmAt(nextAlarmAt);
-    return { nextAlarmAt, record };
-  }
-
-  private async scheduleRetryAfterProgressDemandReadFailure(
-    error: unknown,
-  ): Promise<{
-    nextAlarmAt: string | null;
-    record: RunnerStateRecord;
-  }> {
-    const currentRecord = await this.stateStore.readState();
-    const parkedBeforeRetry = await this.parkIfRunnerRetryCapReached({
-      error,
-      reason: "progress-demand-read-failure",
-      record: currentRecord,
-    });
-    if (parkedBeforeRetry) {
-      return {
-        nextAlarmAt: readRunnerStateAlarmAt(parkedBeforeRetry),
-        record: parkedBeforeRetry,
-      };
-    }
-
-    if (currentRecord.writeFence) {
-      await this.syncAlarm(currentRecord);
-      return {
-        nextAlarmAt: readRunnerOperationalAlarmAt(currentRecord),
-        record: currentRecord,
-      };
-    }
-
-    const retryDelayMs = this.resolveRetryDelayMs(currentRecord.failureCount + 1);
-    const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
-    const record = await this.stateStore.scheduleRetry({
-      error,
-      retryAt,
-    });
-    const parkedAfterRetry = await this.parkIfRunnerRetryCapReached({
-      error,
-      reason: "progress-demand-read-failure",
-      record,
-    });
-    if (parkedAfterRetry) {
-      return {
-        nextAlarmAt: readRunnerStateAlarmAt(parkedAfterRetry),
-        record: parkedAfterRetry,
-      };
-    }
-
-    await this.syncAlarm(record);
-    return {
-      nextAlarmAt: readRunnerStateAlarmAt(record),
-      record,
-    };
-  }
-
   async runUntilIdleForTest(input: {
     reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult> {
     await this.stateStore.bindUser(input.userId);
-    const record = await this.stateStore.markWakePending({
-      preferredWakeAt: new Date().toISOString(),
-      resetRetry: true,
-    });
-    await this.syncAlarm(record);
     return await this.runUntilIdleOrBudget({
       reason: input.reason,
     });
@@ -1272,51 +882,14 @@ export class HostedUserRunner {
       reason: input.reason ?? "manual",
       userId: input.userId,
     });
-    const record = await this.stateStore.markWakePending({
-      preferredWakeAt: new Date().toISOString(),
-    });
+    const record = await this.stateStore.readState();
+    await this.syncWatchdogAlarm(record);
 
     return {
       attemptId: token.attemptId,
-      nextWakeAt: readRunnerStateAlarmAt(record),
+      nextWakeAt: readWriteFenceWatchdogAlarmAt(record),
       ok: true,
     };
-  }
-
-  private kickLocalEnsure(
-    input: RunnerProgressInput,
-  ): Promise<HostedWorkspaceInvocationResult> | null {
-    if (this.localEnsureInFlight) {
-      return null;
-    }
-
-    const localEnsure = this.runLocalEnsureLoop(input)
-      .finally(() => {
-        if (this.localEnsureInFlight === localEnsure) {
-          this.localEnsureInFlight = null;
-        }
-      });
-    this.localEnsureInFlight = localEnsure;
-
-    try {
-      this.state.waitUntil?.(localEnsure);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted runner could not register detached ensure with Durable Object waitUntil.",
-        phase: "scheduled",
-        userId: null,
-      });
-    }
-    void localEnsure.catch(async (error) => {
-      if (this.retiredEnsurePromises.has(localEnsure)) {
-        return;
-      }
-      await this.scheduleRetryAfterFailure(error);
-    });
-    return localEnsure;
   }
 
   private retireCurrentEnsurePromise(): void {
@@ -1325,599 +898,6 @@ export class HostedUserRunner {
     }
     this.retiredEnsurePromises.add(this.localEnsureInFlight);
     this.localEnsureInFlight = null;
-  }
-
-  private async runLocalEnsureLoop(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
-    const loopStartedAt = Date.now();
-    let loopIteration = 0;
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        localEnsureReason: input.reason,
-      },
-      message: "Hosted runner local ensure loop started.",
-      phase: "scheduled",
-      userId: null,
-    });
-    let lastResult: HostedWorkspaceInvocationResult = {
-      nextWakeAt: null,
-      status: "idle",
-    };
-    let ignoredWorkspaceWakeAt: string | null = null;
-
-    while (true) {
-      loopIteration += 1;
-      const demandReadStartedAt = Date.now();
-      const snapshot = await this.readProgressSnapshot({
-        ignoredWorkspaceWakeAt,
-        includeBrowserVaultRefresh: input.reason === "browser_vault_refresh",
-      });
-      const demand = readRunnerProgressDemand(snapshot);
-      let record = await this.clearRetryStateForFreshMailboxDemand({
-        demand,
-        record: snapshot.record,
-        reason: "local-ensure-loop",
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          demandKind: readRunnerProgressDemandKind({ demand, record }),
-          demandReadDurationMs: Date.now() - demandReadStartedAt,
-          localEnsureElapsedMs: Date.now() - loopStartedAt,
-          localEnsureIteration: loopIteration,
-          localEnsureReason: input.reason,
-          ...buildRunnerRecordTimingLogDetails(record),
-        },
-        message: "Hosted runner local ensure loop demand checked.",
-        phase: "scheduled",
-        userId: null,
-      });
-
-      if (
-        demand?.kind === "assistant-wake"
-        && demand.source === "runner"
-        && isRunnerRetryCapRecoveryProbeDue(record, this.env.maxEventAttempts)
-      ) {
-        const caughtUp = await this.clearRetryCapProbeAndSyncIdleAlarm(snapshot);
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildRunnerRecordTimingLogDetails(caughtUp),
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "retry-cap-probe-caught-up",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return {
-          nextWakeAt: readRunnerStateAlarmAt(caughtUp),
-          status: lastResult.status,
-        };
-      }
-
-      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-        demand,
-        record,
-        reason: "local-ensure-loop",
-      });
-      if (parkedByRetryCap) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildRunnerRecordTimingLogDetails(parkedByRetryCap),
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "retry-cap-reached",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return {
-          nextWakeAt: readRunnerStateAlarmAt(parkedByRetryCap),
-          status: "scheduled",
-        };
-      }
-
-      if (record.writeFence) {
-        const activeWait = demand?.kind === "mailbox-backlog"
-          ? await this.scheduleShortProgressRecheck()
-          : null;
-        const nextWakeAt = activeWait?.nextAlarmAt
-          ?? readRunnerStateAlarmAt(record);
-        const logRecord = activeWait?.record ?? record;
-        if (!activeWait) {
-          await this.syncAlarm(record);
-        }
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildRunnerRecordTimingLogDetails(logRecord),
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: demand?.kind === "mailbox-backlog"
-              ? "active-write-fence-mailbox-backlog"
-              : "active-write-fence",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return {
-          nextWakeAt,
-          status: "scheduled",
-        };
-      }
-
-      if (
-        !shouldBypassRunnerRetryForDemand({ demand, record })
-        && isRunnerBackoffActive(record, Date.now())
-      ) {
-        await this.syncAlarmAt(readRunnerRuntimeDueAt(record));
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildRunnerRecordTimingLogDetails(record),
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "backoff-active",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return {
-          nextWakeAt: readRunnerRuntimeDueAt(record),
-          status: "scheduled",
-        };
-      }
-
-      if (!demand) {
-        const syncedRecord = await this.syncProgressSnapshotIdleAlarm(snapshot);
-        const nextWakeAt = readRunnerStateAlarmAt(syncedRecord);
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildRunnerRecordTimingLogDetails(syncedRecord),
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "caught-up",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-            lastRuntimeStatus: lastResult.status,
-            nextWakePresent: lastResult.nextWakeAt !== null,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return {
-          ...lastResult,
-          nextWakeAt,
-          status: nextWakeAt !== null ? "scheduled" : lastResult.status,
-        };
-      }
-
-      const runtimeReason = resolveRunnerProgressReason({
-        demand,
-        record,
-        requestedReason: input.reason,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          demandKind: demand.kind,
-          localEnsureElapsedMs: Date.now() - loopStartedAt,
-          localEnsureIteration: loopIteration,
-          runtimeReason,
-        },
-        message: "Hosted runner local ensure loop starting runtime wake.",
-        phase: "runtime.starting",
-        userId: null,
-      });
-      const runtimeWakeStartedAt = Date.now();
-      lastResult = await this.runRuntimeWake({
-        aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
-        reason: runtimeReason,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          localEnsureElapsedMs: Date.now() - loopStartedAt,
-          localEnsureIteration: loopIteration,
-          nextWakePresent: lastResult.nextWakeAt !== null,
-          runtimeWakeDurationMs: Date.now() - runtimeWakeStartedAt,
-          runtimeWakeStatus: lastResult.status,
-        },
-        message: "Hosted runner local ensure loop runtime wake completed.",
-        phase: "checkpoint",
-        userId: null,
-      });
-      if (demand.kind === "assistant-wake") {
-        if (demand.source === "workspace") {
-          ignoredWorkspaceWakeAt = demand.wakeAt;
-        } else {
-          ignoredWorkspaceWakeAt = readDueWorkspaceWakeAt(
-            snapshot.webStatus.workspace?.nextWakeAt ?? null,
-            demandReadStartedAt,
-          );
-        }
-      } else {
-        ignoredWorkspaceWakeAt = readDueWorkspaceWakeAt(
-          snapshot.webStatus.workspace?.nextWakeAt ?? null,
-          demandReadStartedAt,
-        );
-      }
-      if (runtimeReason === "browser_vault_refresh") {
-        await this.stateStore.clearBrowserVaultRefreshRequested();
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "browser-vault-refresh-attempted",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-            nextWakePresent: lastResult.nextWakeAt !== null,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return lastResult;
-      }
-      if (input.reason === "browser_vault_refresh") {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "higher-priority-runtime-attempted",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-            nextWakePresent: lastResult.nextWakeAt !== null,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return lastResult;
-      }
-      if (lastResult.status === "scheduled" || lastResult.status === "budget_exhausted") {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            localEnsureDurationMs: Date.now() - loopStartedAt,
-            localEnsureFinishReason: "runtime-scheduled",
-            localEnsureIteration: loopIteration,
-            localEnsureReason: input.reason,
-            nextWakePresent: lastResult.nextWakeAt !== null,
-          },
-          message: "Hosted runner local ensure loop completed.",
-          phase: "scheduled",
-          userId: null,
-        });
-        return lastResult;
-      }
-    }
-  }
-
-  private async runRuntimeWake(input: RunnerProgressInput): Promise<HostedWorkspaceInvocationResult> {
-    const runtimeWakeStartedAt = Date.now();
-    const initialRecord = await this.stateStore.readState();
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        ...buildRunnerRecordTimingLogDetails(initialRecord),
-        runtimeReason: input.reason,
-      },
-      message: "Hosted runner runtime wake started.",
-      phase: "runtime.starting",
-      userId: null,
-    });
-    let token: RunnerWriteFenceToken;
-    try {
-      const writeFenceStartedAt = Date.now();
-      token = await this.stateStore.beginWriteFence({
-        expiresAt: new Date(Date.now() + this.env.runnerTimeoutMs).toISOString(),
-        kind: "runtime",
-        reason: input.reason,
-        userId: initialRecord.userId,
-      });
-      await this.syncAlarm(await this.stateStore.readState());
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          runtimeReason: input.reason,
-          writeFenceAcquireDurationMs: Date.now() - writeFenceStartedAt,
-          workspaceAttemptId: token.attemptId,
-          workspaceWriteFenceGeneration: token.generation,
-        },
-        message: "Hosted runner runtime wake write fence acquired.",
-        phase: "runtime.starting",
-        userId: null,
-      });
-    } catch (error) {
-      if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
-        throw error;
-      }
-      await this.syncAlarm(error.record);
-      return {
-        nextWakeAt: readRunnerStateAlarmAt(error.record),
-        status: "scheduled",
-      };
-    }
-
-    let workspaceVersion: string | null = null;
-    try {
-      const workspaceReadStartedAt = Date.now();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          workspaceAttemptId: token.attemptId,
-          workspaceWriteFenceGeneration: token.generation,
-          workspaceReason: input.reason,
-        },
-        message: "Hosted runner workspace read started.",
-        phase: "runtime.starting",
-        userId: initialRecord.userId,
-      });
-      const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
-      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
-      workspaceVersion = workspaceRead.workspace?.version ?? "0";
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          workspaceAttemptId: token.attemptId,
-          workspaceReadLatencyMs: Date.now() - workspaceReadStartedAt,
-          workspaceWriteFenceGeneration: token.generation,
-          workspacePresent: workspaceRead.workspace !== null,
-          workspaceVersion,
-        },
-        message: "Hosted runner workspace read completed.",
-        phase: "runtime.starting",
-        userId: initialRecord.userId,
-      });
-      token = await this.stateStore.bindWriteFenceWorkspaceVersion({
-        token,
-        workspaceVersion,
-      });
-
-      const result = await this.invokeWorkspaceRunner({
-        token,
-        reason: input.reason,
-        userId: initialRecord.userId,
-        workspace: workspaceRead.workspace,
-        workspaceVersion,
-      });
-      const completed = await this.stateStore.clearWriteFenceAfterCompletion({
-        finishedAt: new Date().toISOString(),
-        token,
-      });
-      if (!completed.completed) {
-        await this.syncAlarm(completed.record);
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            workspaceAttemptId: token.attemptId,
-            workspaceStatus: result.status,
-          },
-          message: "Hosted runner ignored stale runtime wake completion.",
-          phase: "checkpoint",
-          userId: initialRecord.userId,
-        });
-        return {
-          nextWakeAt: readRunnerStateAlarmAt(completed.record),
-          status: "scheduled",
-        };
-      }
-      const reconciledResult = await this.scheduleAfterRuntimeWake({
-        result,
-        userId: initialRecord.userId,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          nextWakePresent: reconciledResult.nextWakeAt != null,
-          runtimeWakeDurationMs: Date.now() - runtimeWakeStartedAt,
-          workspaceAttemptId: token.attemptId,
-          workspaceStatus: reconciledResult.status,
-        },
-        message: "Hosted runner runtime wake completed.",
-        phase: "checkpoint",
-        userId: initialRecord.userId,
-      });
-      return reconciledResult;
-    } catch (error) {
-      const retryDelayMs = this.resolveRetryDelayMs(initialRecord.failureCount + 1);
-      const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
-      const failed = await this.stateStore.clearWriteFenceAfterFailure({
-        error,
-        finishedAt: new Date().toISOString(),
-        token,
-        retryAt,
-      });
-      if (!failed.failed) {
-        await this.syncAlarm(failed.record);
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-            failureCount: failed.record.failureCount,
-            maxEventAttempts: this.env.maxEventAttempts,
-            workspaceAttemptId: token.attemptId,
-            workspaceWriteFenceGeneration: token.generation,
-            workspaceReason: input.reason,
-            workspaceVersion,
-            runtimeRetryDelayMs: retryDelayMs,
-            runtimeRetryAt: retryAt,
-          },
-          level: "warn",
-          message: "Hosted runner ignored stale runtime wake failure.",
-          phase: "failed",
-          userId: initialRecord.userId,
-        });
-        return {
-          nextWakeAt: readRunnerStateAlarmAt(failed.record),
-          status: "scheduled",
-        };
-      }
-      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-        error,
-        reason: "runtime-wake-failure",
-        record: failed.record,
-      });
-      if (parkedByRetryCap) {
-        return {
-          nextWakeAt: readRunnerStateAlarmAt(parkedByRetryCap),
-          status: "scheduled",
-        };
-      }
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          failureCount: failed.record.failureCount,
-          maxEventAttempts: this.env.maxEventAttempts,
-          workspaceAttemptId: token.attemptId,
-          workspaceWriteFenceGeneration: token.generation,
-          workspaceReason: input.reason,
-          workspaceVersion,
-          runtimeRetryDelayMs: retryDelayMs,
-          runtimeRetryAt: retryAt,
-        },
-        level: "warn",
-        message: "Hosted runner runtime wake failed.",
-        phase: "failed",
-        userId: initialRecord.userId,
-      });
-      try {
-        await this.syncAlarm(failed.record);
-      } catch (alarmError) {
-        throw new HostedRunnerRetryAlreadyRecordedError(
-          "Hosted runner retry was recorded, but alarm sync failed.",
-          failed.record,
-          { cause: alarmError },
-        );
-      }
-      return {
-        nextWakeAt: readRunnerStateAlarmAt(failed.record),
-        status: "scheduled",
-      };
-    }
-  }
-
-  private async scheduleAfterRuntimeWake(input: {
-    result: HostedWorkspaceInvocationResult;
-    userId: string;
-  }): Promise<HostedWorkspaceInvocationResult> {
-    let webStatus: HostedRuntimeWebStatusResponse;
-    try {
-      webStatus = await this.readHostedRuntimeStatusFromWeb(input.userId);
-    } catch (error) {
-      const recheck = await this.scheduleShortProgressRecheck({
-        respectBackoff: true,
-      });
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
-          scheduledWakeAt: recheck.nextAlarmAt,
-        },
-        level: "warn",
-        message: "Hosted runner runtime wake completion reconciliation failed; scheduled recheck.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return {
-        ...input.result,
-        nextWakeAt: recheck.nextAlarmAt,
-        status: "scheduled",
-      };
-    }
-    const mailboxBacklogPresent = hasMailboxBacklog(webStatus.mailboxLag);
-    if (mailboxBacklogPresent) {
-      const recheck = await this.scheduleShortProgressRecheck();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          mailboxBacklogPresent,
-          mailboxLagLaneCount: webStatus.mailboxLag.length,
-          runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
-          scheduledWakeAt: recheck.nextAlarmAt,
-          workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
-          workspaceVersion: webStatus.workspace?.version ?? null,
-        },
-        message: "Hosted runner reconciled runtime wake completion.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return {
-        ...input.result,
-        nextWakeAt: recheck.nextAlarmAt,
-        status: "scheduled",
-      };
-    }
-
-    if (isImmediateRuntimeWakeRequest(input.result.nextWakeAt ?? null)) {
-      const recheck = await this.scheduleShortProgressRecheck();
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          mailboxBacklogPresent,
-          mailboxLagLaneCount: webStatus.mailboxLag.length,
-          runtimeResultNextWakeAtPresent: true,
-          scheduledWakeAt: recheck.nextAlarmAt,
-          workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
-          workspaceVersion: webStatus.workspace?.version ?? null,
-        },
-        message: "Hosted runner reconciled immediate runtime wake request.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-      return {
-        ...input.result,
-        nextWakeAt: recheck.nextAlarmAt,
-        status: "scheduled",
-      };
-    }
-
-    const runtimeResultNextWakeAt = normalizeFutureWakeAt(input.result.nextWakeAt ?? null);
-    const nextWakeAt = earliestIsoDate(
-      normalizeFutureWakeAt(webStatus.workspace?.nextWakeAt ?? null),
-      runtimeResultNextWakeAt,
-    );
-    const record = await this.stateStore.scheduleNextWake({
-      nextWakeAt,
-    });
-    await this.syncAlarm(record);
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        mailboxBacklogPresent,
-        mailboxLagLaneCount: webStatus.mailboxLag.length,
-        runtimeResultNextWakeAtPresent: input.result.nextWakeAt != null,
-        scheduledWakeAt: nextWakeAt,
-        workspaceNextWakeAtPresent: webStatus.workspace?.nextWakeAt != null,
-        workspaceVersion: webStatus.workspace?.version ?? null,
-      },
-      message: "Hosted runner reconciled runtime wake completion.",
-      phase: "checkpoint",
-      userId: input.userId,
-    });
-    return {
-      ...input.result,
-      nextWakeAt,
-      status: nextWakeAt !== null
-        ? "scheduled"
-        : input.result.status === "budget_exhausted"
-        ? "budget_exhausted"
-        : "idle",
-    };
   }
 
   private async invokeWorkspaceRunner(input: {
@@ -2010,9 +990,8 @@ export class HostedUserRunner {
     });
   }
 
-  private async syncAlarm(record: RunnerStateRecord): Promise<void> {
-    const nextAlarmAt = readRunnerOperationalAlarmAt(record);
-    await this.syncAlarmAt(nextAlarmAt);
+  private async syncWatchdogAlarm(record: RunnerStateRecord): Promise<void> {
+    await this.syncAlarmAt(record.writeFence?.expiresAt ?? null);
   }
 
   private async syncAlarmAt(nextAlarmAt: string | null): Promise<void> {
@@ -2024,153 +1003,10 @@ export class HostedUserRunner {
     await this.state.storage.setAlarm(new Date(nextAlarmAt));
   }
 
-  private async parkRunnerAfterRetryCap(input: {
-    error?: unknown;
-    reason: string;
-    record: RunnerStateRecord;
-  }): Promise<RunnerStateRecord> {
-    const recoveryProbeAt = new Date(
-      Date.now() + RETRY_CAP_RECOVERY_PROBE_DELAY_MS,
+  private computeActiveRuntimeWakeRecheckAt(): string {
+    return new Date(
+      Date.now() + this.env.idleCheckpointDelayMs + ACTIVE_RUNTIME_WAKE_RECHECK_MARGIN_MS,
     ).toISOString();
-    const parked = await this.stateStore.parkAfterRetryCap({
-      retryAt: recoveryProbeAt,
-    });
-    await this.syncAlarm(parked);
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        ...buildHostedRunnerMetadataOnlyErrorDetails(input.error),
-        activeWriteFencePresent: parked.writeFence !== null,
-        failureCount: parked.failureCount,
-        lastErrorCode: parked.lastErrorCode,
-        maxEventAttempts: this.env.maxEventAttempts,
-        retryCapRecoveryProbeAt: readRunnerStateAlarmAt(parked),
-        retryCapRecoveryProbeDelayMs: RETRY_CAP_RECOVERY_PROBE_DELAY_MS,
-        retryCapReason: input.reason,
-      },
-      level: "warn",
-      message: "Hosted runner parked after retry cap.",
-      phase: "scheduled",
-      userId: null,
-    });
-    return parked;
-  }
-
-  private async parkIfRunnerRetryCapReached(input: {
-    demand?: RunnerProgressDemand | null;
-    error?: unknown;
-    reason: string;
-    record: RunnerStateRecord;
-  }): Promise<RunnerStateRecord | null> {
-    if (
-      input.record.writeFence
-      || shouldBypassRunnerRetryForDemand({
-        demand: input.demand ?? null,
-        record: input.record,
-      })
-      || !isRunnerRetryCapReached(input.record, this.env.maxEventAttempts)
-      || isRunnerRetryCapRecoveryProbeDue(input.record, this.env.maxEventAttempts)
-    ) {
-      return null;
-    }
-
-    return this.parkRunnerAfterRetryCap(input);
-  }
-
-  private async clearRetryStateForFreshMailboxDemand(input: {
-    demand: RunnerProgressDemand | null;
-    reason: string;
-    record: RunnerStateRecord;
-  }): Promise<RunnerStateRecord> {
-    if (
-      !shouldBypassRunnerRetryForDemand({
-        demand: input.demand,
-        record: input.record,
-      })
-      || input.record.writeFence
-      || !hasRunnerRetryState(input.record)
-    ) {
-      return input.record;
-    }
-
-    const cleared = await this.stateStore.clearRetryStateForFreshDemand();
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: {
-        backoffUntilPresent: input.record.backoffUntil !== null,
-        failureCount: input.record.failureCount,
-        lastErrorCode: input.record.lastErrorCode,
-        retryClearReason: input.reason,
-        wakeAtPresent: input.record.wakeAt !== null,
-      },
-      message: "Hosted runner cleared retry state for fresh mailbox demand.",
-      phase: "scheduled",
-      userId: null,
-    });
-    return cleared;
-  }
-
-  private async scheduleRetryAfterFailure(error: unknown): Promise<void> {
-    try {
-      if (error instanceof HostedRunnerRetryAlreadyRecordedError) {
-        const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-          error,
-          reason: "retry-already-recorded",
-          record: error.record,
-        });
-        if (parkedByRetryCap) {
-          return;
-        }
-        await this.syncAlarm(error.record);
-        return;
-      }
-      const currentRecord = await this.stateStore.readState();
-      const retryDelayMs = this.resolveRetryDelayMs(currentRecord.failureCount + 1);
-      const retryAt = new Date(Date.now() + retryDelayMs).toISOString();
-      const record = await this.stateStore.scheduleRetry({
-        error,
-        retryAt,
-      });
-      const parkedByRetryCap = await this.parkIfRunnerRetryCapReached({
-        error,
-        reason: "detached-ensure-failure",
-        record,
-      });
-      if (parkedByRetryCap) {
-        return;
-      }
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-          failureCount: record.failureCount,
-          maxEventAttempts: this.env.maxEventAttempts,
-          runtimeRetryDelayMs: retryDelayMs,
-          runtimeRetryAt: retryAt,
-        },
-        level: "warn",
-        message: "Hosted runner scheduled retry after failure.",
-        phase: "scheduled",
-        userId: await this.tryReadBoundUserId(),
-      });
-      await this.syncAlarm(record);
-    } catch (retryError) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(retryError),
-        level: "warn",
-        message: "Hosted runner retry scheduling failed.",
-        phase: "failed",
-        userId: await this.tryReadBoundUserId(),
-      });
-    }
-  }
-
-  private resolveRetryDelayMs(attempts: number): number {
-    return computeRetryDelayMs(
-      Math.max(IMMEDIATE_WAKE_RETRY_DELAY_MS, this.env.retryDelayMs),
-      attempts,
-    );
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -2491,247 +1327,16 @@ async function deleteR2ObjectsWithPrefix(
   return { deletedCount };
 }
 
-function readRunnerStateAlarmAt(record: RunnerStateRecord): string | null {
-  if (record.writeFence) {
-    return record.writeFence.expiresAt;
-  }
-  return readRunnerRuntimeDueAt(record);
+function readWriteFenceWatchdogAlarmAt(record: RunnerStateRecord): string | null {
+  return record.writeFence?.expiresAt ?? null;
 }
 
-function readRunnerOperationalAlarmAt(record: RunnerStateRecord): string | null {
-  if (record.writeFence) {
-    return earliestIsoDate(normalizeFutureWakeAt(record.wakeAt), record.writeFence.expiresAt);
-  }
-  return readRunnerRuntimeDueAt(record);
-}
-
-function hasMailboxBacklog(
-  mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"],
-): boolean {
-  for (const lane of mailboxLag) {
-    if (compareHostedMailboxSeq(lane.maxSeq, lane.importedSeq) <= 0) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-function readDueWorkspaceWakeAt(value: string | null, nowMs: number): string | null {
-  if (!value) {
-    return null;
-  }
-  const parsedMs = Date.parse(value);
-  if (!Number.isFinite(parsedMs) || parsedMs > nowMs) {
-    return null;
-  }
-  return new Date(parsedMs).toISOString();
-}
-
-function readRunnerProgressDemand(
-  snapshot: RunnerProgressSnapshot,
-): RunnerProgressDemand | null {
-  return snapshot.durableDemand.kind === "idle" ? null : snapshot.durableDemand;
-}
-
-function readRunnerProgressDemandKind(input: {
-  demand: RunnerProgressDemand | null;
-  record: RunnerStateRecord;
-}): string | null {
-  if (input.demand) {
-    return input.demand.kind;
-  }
-  return input.record.writeFence ? "active-runtime" : null;
-}
-
-function shouldBypassRunnerRetryForDemand(input: {
-  demand: RunnerProgressDemand | null;
-  record: RunnerStateRecord;
-}): boolean {
-  if (input.demand?.kind !== "mailbox-backlog") {
-    return false;
-  }
-  if (!hasRunnerRetryState(input.record)) {
-    return true;
-  }
-  return isMailboxBacklogNewerThanLastError({
-    lastErrorAt: input.record.lastErrorAt,
-    mailboxLag: input.demand.mailboxLag,
-  });
-}
-
-function hasRunnerRetryState(record: RunnerStateRecord): boolean {
-  return (
-    record.failureCount > 0
-    || record.backoffUntil !== null
-    || record.lastErrorAt !== null
-    || record.lastErrorCode !== null
-  );
-}
-
-function isMailboxBacklogNewerThanLastError(input: {
-  lastErrorAt: string | null;
-  mailboxLag: HostedRuntimeWebStatusResponse["mailboxLag"];
-}): boolean {
-  if (!input.lastErrorAt) {
-    return false;
-  }
-  const lastErrorAtMs = Date.parse(input.lastErrorAt);
-  if (!Number.isFinite(lastErrorAtMs)) {
-    return false;
+function createLegacyCloudflareOrchestrationAttemptId(source: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `legacy-cloudflare-${source}-${crypto.randomUUID()}`;
   }
 
-  for (const lane of input.mailboxLag) {
-    if (compareHostedMailboxSeq(lane.maxSeq, lane.importedSeq) <= 0) {
-      continue;
-    }
-    if (!lane.maxUpdatedAt) {
-      continue;
-    }
-    const maxUpdatedAtMs = Date.parse(lane.maxUpdatedAt);
-    if (Number.isFinite(maxUpdatedAtMs) && maxUpdatedAtMs > lastErrorAtMs) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function resolveRunnerProgressReason(input: {
-  demand: RunnerProgressDemand;
-  record: RunnerStateRecord;
-  requestedReason: HostedWorkspaceInvocationReason;
-}): HostedWorkspaceInvocationReason {
-  if (input.demand.kind === "browser-vault-refresh") {
-    return "browser_vault_refresh";
-  }
-  if (input.requestedReason === "browser_vault_refresh") {
-    return input.demand.kind === "assistant-wake"
-      && readRunnerRuntimeReason(input.record) === "retry"
-      ? "retry"
-      : "nudge";
-  }
-  return input.demand.kind === "assistant-wake"
-    && readRunnerRuntimeReason(input.record) === "retry"
-    && input.requestedReason === "alarm"
-    ? "retry"
-    : input.requestedReason;
-}
-
-function compareHostedMailboxSeq(left: string, right: string): number {
-  const leftValue = BigInt(left);
-  const rightValue = BigInt(right);
-  if (leftValue === rightValue) {
-    return 0;
-  }
-  return leftValue > rightValue ? 1 : -1;
-}
-
-function readRunnerRuntimeDueAt(record: RunnerStateRecord): string | null {
-  if (!record.wakeAt) {
-    return null;
-  }
-  return latestIsoDate(record.wakeAt, record.backoffUntil);
-}
-
-function readRunnerRuntimeReason(record: RunnerStateRecord): "retry" | "wake" | null {
-  if (!record.wakeAt) {
-    return null;
-  }
-  if (!record.backoffUntil) {
-    return "wake";
-  }
-
-  const wakeMs = Date.parse(record.wakeAt);
-  const backoffMs = Date.parse(record.backoffUntil);
-  if (!Number.isFinite(wakeMs) || !Number.isFinite(backoffMs)) {
-    return "wake";
-  }
-  return backoffMs >= wakeMs ? "retry" : "wake";
-}
-
-function isRunnerBackoffActive(record: RunnerStateRecord, nowMs: number): boolean {
-  if (!record.backoffUntil) {
-    return false;
-  }
-  const backoffUntilMs = Date.parse(record.backoffUntil);
-  return Number.isFinite(backoffUntilMs) && backoffUntilMs > nowMs;
-}
-
-function isRunnerRetryCapReached(
-  record: RunnerStateRecord,
-  maxEventAttempts: number,
-): boolean {
-  return record.failureCount >= Math.max(1, maxEventAttempts);
-}
-
-function isRunnerRetryCapRecoveryProbeDue(
-  record: RunnerStateRecord,
-  maxEventAttempts: number,
-  nowMs = Date.now(),
-): boolean {
-  if (
-    record.writeFence
-    || !isRunnerRetryCapReached(record, maxEventAttempts)
-    || !record.wakeAt
-    || !record.backoffUntil
-    || record.wakeAt !== record.backoffUntil
-  ) {
-    return false;
-  }
-
-  const dueAt = readRunnerRuntimeDueAt(record);
-  if (!dueAt) {
-    return false;
-  }
-  const dueAtMs = Date.parse(dueAt);
-  return Number.isFinite(dueAtMs) && dueAtMs <= nowMs;
-}
-
-function earliestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs < leftMs ? right : left;
-}
-
-function latestIsoDate(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs)) {
-    return right;
-  }
-  if (!Number.isFinite(rightMs)) {
-    return left;
-  }
-  return rightMs > leftMs ? right : left;
-}
-
-function isImmediateRuntimeWakeRequest(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-  const parsedMs = Date.parse(value);
-  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
+  return `legacy-cloudflare-${source}-${Date.now().toString(36)}`;
 }
 
 function safeCleanupErrorCode(error: unknown): string {
@@ -2781,20 +1386,6 @@ function normalizeRunnerRuntimeWakeResult(value: unknown): RunnerRuntimeWakeResu
   return { kind: "unknown", reason: "legacy-wake-result" };
 }
 
-function shouldReplaceUnconfirmedActiveRuntime(
-  result:
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "start-required" }>
-    | Extract<RunnerContainerEnsureProcessingResult, { kind: "retry-scheduled" }>,
-): boolean {
-  if (result.kind === "start-required") {
-    return true;
-  }
-
-  return result.reason === "active-child-rejected"
-    || result.reason === "container-rpc-error"
-    || result.reason === "container-rpc-timeout";
-}
-
 function isRunnerRuntimeWakeUnknownReason(
   value: string,
 ): value is Extract<RunnerRuntimeWakeResult, { kind: "unknown" }>["reason"] {
@@ -2806,69 +1397,6 @@ function isRunnerRuntimeWakeUnknownReason(
     || value === "missing-wake-method";
 }
 
-function buildEnsureRunnerProgressLogDetails(
-  progress: EnsureRunnerProgressResult,
-): HostedExecutionStructuredLogDetails {
-  const containerResult = readEnsureRunnerProgressContainerResult(progress);
-  return {
-    immediateDriveStarted:
-      progress.kind === "processing-started"
-      && progress.localEnsurePromise !== null,
-    demandKind: readRunnerProgressDemandKind({
-      demand: progress.demand,
-      record: progress.record,
-    }),
-    mailboxBacklogPresent: progress.demand?.kind === "mailbox-backlog",
-    progressKind: progress.kind,
-    containerProcessingAction: readContainerProcessingAction(containerResult),
-    containerProcessingResult: containerResult
-      ? formatContainerEnsureProcessingResult(containerResult)
-      : null,
-    freshLocalEnsurePreemptionDeferred:
-      progress.kind === "retry-scheduled"
-      && progress.deferredFreshWriteFenceReplacement === true
-      && progress.containerResult?.kind === "start-required",
-    progressStatusReadFailed:
-      progress.kind === "retry-scheduled"
-      && progress.statusReadFailed === true,
-    freshWriteFenceReplacementDeferred:
-      progress.kind === "retry-scheduled"
-      && progress.deferredFreshWriteFenceReplacement === true,
-    staleWriteFencePreempted:
-      progress.kind === "processing-started"
-      && "previousAttemptId" in progress,
-    writeFenceHeldAfterStartRequired:
-      progress.kind === "retry-scheduled"
-      && progress.deferredFreshWriteFenceReplacement === true
-      && progress.containerResult?.kind === "start-required",
-    ...(progress.kind === "processing-started" && "previousAttemptId" in progress
-      ? {
-        previousAttemptId: progress.previousAttemptId,
-        progressStarted: progress.localEnsurePromise !== null,
-      }
-      : {}),
-    wakePending: progress.record.wakePending,
-  };
-}
-
-function readEnsureRunnerProgressNextAlarmAt(
-  progress: EnsureRunnerProgressResult,
-): string | null {
-  if (progress.kind === "retry-scheduled") {
-    if (progress.nextAlarmAt !== undefined) {
-      return progress.nextAlarmAt;
-    }
-    return readRunnerRuntimeDueAt(progress.record);
-  }
-  if (
-    (progress.kind === "processing-ensured" || progress.kind === "processing-started")
-    && progress.nextAlarmAt !== undefined
-  ) {
-    return progress.nextAlarmAt;
-  }
-  return readRunnerStateAlarmAt(progress.record);
-}
-
 function buildRunnerRecordTimingLogDetails(
   record: RunnerStateRecord,
   nowMs = Date.now(),
@@ -2876,7 +1404,6 @@ function buildRunnerRecordTimingLogDetails(
   const writeFence = record.writeFence;
   const writeFenceStartedAtMs = writeFence ? Date.parse(writeFence.startedAt) : NaN;
   const writeFenceExpiresAtMs = writeFence ? Date.parse(writeFence.expiresAt) : NaN;
-  const runtimeDueAt = readRunnerRuntimeDueAt(record);
 
   return {
     activeWriteFenceAgeMs: Number.isFinite(writeFenceStartedAtMs)
@@ -2888,12 +1415,9 @@ function buildRunnerRecordTimingLogDetails(
     activeWriteFenceGeneration: writeFence?.generation ?? null,
     activeWriteFencePresent: writeFence !== null,
     activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
-    backoffActive: isRunnerBackoffActive(record, nowMs),
     failureCount: record.failureCount,
     lastErrorCode: record.lastErrorCode,
-    runtimeDueAt,
-    runtimeDuePresent: runtimeDueAt !== null,
-    wakePending: record.wakePending,
+    watchdogAlarmAt: readWriteFenceWatchdogAlarmAt(record),
   };
 }
 
@@ -2957,36 +1481,6 @@ function readRunnerWriteFenceValidationRejectReason(input: {
     return "workspace_version_mismatch";
   }
   return "unknown";
-}
-
-function readEnsureRunnerProgressContainerResult(
-  progress: EnsureRunnerProgressResult,
-): RunnerContainerEnsureProcessingResult | null {
-  if (
-    progress.kind === "processing-ensured"
-    || progress.kind === "processing-started"
-    || progress.kind === "retry-scheduled"
-  ) {
-    return progress.containerResult;
-  }
-  return null;
-}
-
-function readContainerProcessingAction(result: RunnerContainerEnsureProcessingResult | null): string | null {
-  if (!result || !("action" in result)) {
-    return null;
-  }
-  return result.action;
-}
-
-function formatContainerEnsureProcessingResult(result: RunnerContainerEnsureProcessingResult): string {
-  if (result.kind === "accepted") {
-    return `accepted:${result.action}`;
-  }
-  if (result.kind === "start-required") {
-    return `start-required:${result.reason}`;
-  }
-  return `retry-scheduled:${result.reason}`;
 }
 
 function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecutionStructuredLogDetails {
