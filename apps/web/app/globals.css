@@ -59,6 +59,64 @@
   animation: marquee 30s linear infinite;
 }
 
+@media print {
+  @page {
+    size: 1600px 900px;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 1600px;
+    margin: 0;
+    background: #f5f0e8;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  [data-pitch-deck] {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    scroll-snap-type: none !important;
+  }
+
+  [data-pitch-chrome] {
+    display: none !important;
+  }
+
+  [data-pitch-slide] {
+    box-sizing: border-box;
+    width: 1600px;
+    height: 900px;
+    min-height: 900px !important;
+    overflow: hidden !important;
+    break-after: page;
+    page-break-after: always;
+    scroll-snap-align: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  [data-pitch-slide]:last-of-type {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  [data-pitch-slide] *,
+  [data-pitch-slide]::before,
+  [data-pitch-slide]::after {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  [data-pitch-slide] .animate-fade-up {
+    opacity: 1 !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
 @keyframes dot-pulse {
   0%, 100% {
     transform: scale(1);
