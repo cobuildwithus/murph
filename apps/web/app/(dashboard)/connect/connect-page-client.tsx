@@ -43,6 +43,7 @@ type ConnectSource = {
   id: string;
   logo: LogoAsset;
   name: string;
+  requiresReconnect?: boolean;
 };
 
 type ConnectPageInitialLoadError = {
@@ -198,7 +199,7 @@ export function ConnectSourcesGrid({
     stripDeviceConnectIntentParams();
 
     const source = findInitialConnectIntentSource(activeConnectIntent, displaySources);
-    if (!source || !source.connectTarget || source.connected) {
+    if (!source || !source.connectTarget || (source.connected && !source.requiresReconnect)) {
       return;
     }
 
@@ -415,11 +416,16 @@ function SourceCard({
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
+  const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-5">
       <div className="absolute top-4 right-4">
-        <SourceStatusDot connected={source.connected} sourceName={source.name} />
+        <SourceStatusDot
+          connected={source.connected}
+          requiresReconnect={source.requiresReconnect}
+          sourceName={source.name}
+        />
       </div>
 
       <div className="mb-5 flex h-14 min-w-0 items-center">
@@ -435,7 +441,7 @@ function SourceCard({
         </p>
       </div>
 
-      {source.connected ? (
+      {source.connected && !source.requiresReconnect ? (
         <div className="mt-auto flex flex-col gap-2">
           {canDisconnect ? (
             <button
@@ -465,13 +471,24 @@ function SourceCard({
               type="button"
               disabled={!canStart || pending}
               aria-label={isAvailable
-                ? `Connect ${source.name}`
+                ? `${actionLabel} ${source.name}`
                 : `${source.name} connection is not available yet`}
               onClick={() => void onStartConnection(source)}
             >
-              {pending ? "Opening..." : isAvailable ? "Connect" : "Not available"}
+              {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
             </Button>
           )}
+          {source.requiresReconnect && canDisconnect ? (
+            <button
+              type="button"
+              aria-label={`Disconnect ${source.name}`}
+              disabled={pendingDisconnect}
+              onClick={() => onDisconnectTargetChange(source)}
+              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            >
+              {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+            </button>
+          ) : null}
           {errorMessage ? (
             <p role="alert" className="text-xs leading-snug text-destructive">
               {errorMessage}
@@ -751,7 +768,7 @@ function resolveInitialConnectIntentPresentation(
     };
   }
 
-  if (source.connected) {
+  if (source.connected && !source.requiresReconnect) {
     return {
       actionError: null,
       notice: {
@@ -803,24 +820,30 @@ function normalizeConnectSourceId(value: string | null | undefined): string | nu
 
 function SourceStatusDot({
   connected = false,
+  requiresReconnect = false,
   sourceName,
 }: {
   connected?: boolean;
+  requiresReconnect?: boolean;
   sourceName: string;
 }) {
+  const state = requiresReconnect ? "needs-access" : connected ? "connected" : "idle";
+
   return (
     <>
       <span
         aria-hidden="true"
-        data-connection-state={connected ? "connected" : "idle"}
+        data-connection-state={state}
         className={
-          connected
+          requiresReconnect
+            ? "block size-2.5 rounded-full bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.18)]"
+            : connected
             ? "block size-2.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
             : "block size-2.5 rounded-full bg-stone-300 shadow-[0_0_0_3px_rgba(120,113,108,0.12)]"
         }
       />
       <span className="sr-only">
-        {sourceName} {connected ? "connected" : "not connected"}
+        {sourceName} {requiresReconnect ? "needs reconnect" : connected ? "connected" : "not connected"}
       </span>
     </>
   );

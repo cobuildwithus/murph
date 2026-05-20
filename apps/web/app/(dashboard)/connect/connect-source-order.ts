@@ -1,6 +1,7 @@
 type OrderedConnectSource = {
   connected?: boolean;
   id: string;
+  requiresReconnect?: boolean;
 };
 
 const CONNECT_SOURCE_POPULARITY_ORDER = [
@@ -50,6 +51,12 @@ export function sortConnectSourcesByConnectionState<TSource extends OrderedConne
     .sort((left, right) => {
       const leftConnected = Boolean(left.source.connected);
       const rightConnected = Boolean(right.source.connected);
+      const leftRequiresReconnect = Boolean(left.source.requiresReconnect);
+      const rightRequiresReconnect = Boolean(right.source.requiresReconnect);
+
+      if (leftRequiresReconnect !== rightRequiresReconnect) {
+        return leftRequiresReconnect ? -1 : 1;
+      }
 
       if (leftConnected !== rightConnected) {
         return leftConnected ? -1 : 1;

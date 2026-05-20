@@ -1,10 +1,15 @@
 import "server-only";
 
 import type { HostedMember } from "@prisma/client";
+import {
+  listConfiguredDeviceSyncConnectTargets,
+  readConfiguredDeviceSyncConnectTargetConfigs,
+} from "@murphai/device-syncd/connect-config";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import {
   buildHostedDeviceSyncSettingsSources,
+  type HostedDeviceSyncSettingsConnectTarget,
   type HostedDeviceSyncSettingsResponse,
 } from "./settings-surface";
 import {
@@ -31,6 +36,14 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
     sources: buildHostedDeviceSyncSettingsSources({
       connectionSources,
       connections,
+      connectTargets: listConfiguredDeviceSyncConnectTargets(
+        readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+      ).map((target): HostedDeviceSyncSettingsConnectTarget => ({
+        connectSourceId: target.connectSourceId,
+        connectTarget: target.connectTarget,
+        provider: target.provider,
+        sourceProviderSlug: target.sourceProviderSlug ?? null,
+      })),
       providers,
     }),
   };

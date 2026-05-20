@@ -104,6 +104,8 @@ export function markSyncFailed(
   status: DeviceSyncAccountStatus | null | undefined,
 ): void {
   withImmediateTransaction(database, () => {
+    const terminalFailure = status === "reauthorization_required" || status === "disconnected";
+
     database.prepare(`
       update device_connection
       set status = ?,
@@ -116,10 +118,11 @@ export function markSyncFailed(
       set last_sync_error_at = ?,
           last_error_code = ?,
           last_error_message = ?,
+          next_reconcile_at = case when ? then null else next_reconcile_at end,
           local_connection_revision = local_connection_revision + 1,
           updated_at = ?
       where account_id = ?
-    `).run(now, code, message, now, accountId);
+    `).run(now, code, message, terminalFailure ? 1 : 0, now, accountId);
   });
 }
 

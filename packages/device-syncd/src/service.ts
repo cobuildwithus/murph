@@ -697,6 +697,14 @@ class DeviceSyncServiceController {
         retryable: failure.retryable,
       });
       this.store.markSyncFailed(storedAccount.id, now, failure.code, failure.message, failure.accountStatus);
+      if (failure.accountStatus === "reauthorization_required") {
+        this.store.markPendingJobsDeadForAccount(
+          storedAccount.id,
+          failureNow,
+          "ACCOUNT_REAUTHORIZATION_REQUIRED",
+          "Device sync account requires reconnection before queued jobs can run.",
+        );
+      }
       this.logger.warn?.("Device sync job failed.", {
         provider: provider.provider,
         jobId: job.id,

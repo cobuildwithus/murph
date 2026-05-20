@@ -16,6 +16,7 @@ import {
 
 import {
   HostedDeviceSyncDisconnectDialog,
+  HostedDeviceSyncReconnectConsentDialog,
   HostedDeviceSyncSettingsContent,
   HostedDeviceSyncSettingsStatusCard,
 } from "./hosted-device-sync-settings-sections";
@@ -27,6 +28,10 @@ import type { HostedDeviceSyncSettingsInitialLoadError } from "./hosted-device-s
 
 interface HostedDeviceSyncDisconnectResponse {
   warning?: { code: string; message: string };
+}
+
+interface HostedDeviceSyncConnectResponse {
+  authorizationUrl: string;
 }
 
 const SETTINGS_DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS = [
@@ -52,6 +57,7 @@ export function HostedDeviceSyncSettingsClient(props: {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<HostedDeviceSyncSettingsSource | null>(null);
+  const [reconnectConsentTarget, setReconnectConsentTarget] = useState<HostedDeviceSyncSettingsSource | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
@@ -113,6 +119,7 @@ export function HostedDeviceSyncSettingsClient(props: {
     setErrorState(null);
     setSuccessMessage(null);
     setWarningMessage(null);
+    setReconnectConsentTarget(null);
 
     try {
       const result = await requestHostedOnboardingJson<HostedDeviceSyncDisconnectResponse>({
@@ -138,6 +145,43 @@ export function HostedDeviceSyncSettingsClient(props: {
         ),
       );
     } finally {
+      setPendingActionKey(null);
+    }
+  }
+
+  async function handleReconnect(source: HostedDeviceSyncSettingsSource) {
+    const connectSourceId = source.connectSourceId?.trim();
+    if (!connectSourceId || pendingActionKey === sourceKey(source, "reconnect")) {
+      return;
+    }
+
+    setPendingActionKey(sourceKey(source, "reconnect"));
+    setErrorState(null);
+    setSuccessMessage(null);
+    setWarningMessage(null);
+    setReconnectConsentTarget(null);
+
+    try {
+      const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
+        method: "POST",
+        url: `/api/connect-sources/${encodeURIComponent(connectSourceId)}/start`,
+      });
+      const authorizationUrl = readHostedDeviceSyncAuthorizationUrl(result);
+      window.location.assign(authorizationUrl);
+    } catch (error) {
+      if (isHostedConsentRequiredError(error)) {
+        setReconnectConsentTarget(source);
+        setPendingActionKey(null);
+        return;
+      }
+
+      setErrorState(
+        createHostedDeviceSyncErrorState(
+          error,
+          `We could not start reconnecting ${source.providerLabel} right now.`,
+          "action",
+        ),
+      );
       setPendingActionKey(null);
     }
   }
@@ -192,8 +236,19 @@ export function HostedDeviceSyncSettingsClient(props: {
           sources={sources}
           onDisconnectTargetChange={setDisconnectTarget}
           onRefresh={loadSources}
+          onReconnect={handleReconnect}
         />
       )}
+
+      <HostedDeviceSyncReconnectConsentDialog
+        source={reconnectConsentTarget}
+        onAccepted={handleReconnect}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReconnectConsentTarget(null);
+          }
+        }}
+      />
 
       <HostedDeviceSyncDisconnectDialog
         disconnectPending={disconnectPending}
@@ -253,6 +308,23 @@ function isHostedDeviceSyncBlockedState(
   errorState: HostedDeviceSyncSettingsErrorState | null,
 ): boolean {
   return errorState?.code === "HOSTED_ACCESS_REQUIRED" || errorState?.code === "HOSTED_MEMBER_SUSPENDED";
+}
+
+function isHostedConsentRequiredError(error: unknown): boolean {
+  return error instanceof HostedOnboardingApiError && error.code === "HOSTED_CONSENT_REQUIRED";
+}
+
+function readHostedDeviceSyncAuthorizationUrl(response: HostedDeviceSyncConnectResponse): string {
+  if (typeof response.authorizationUrl !== "string" || !response.authorizationUrl.trim()) {
+    throw new Error("Connection could not be started.");
+  }
+
+  const url = new URL(response.authorizationUrl);
+  if (url.protocol !== "https:") {
+    throw new Error("Connection could not be started.");
+  }
+
+  return response.authorizationUrl;
 }
 
 function readOptionalErrorCode(error: Error): string | null {

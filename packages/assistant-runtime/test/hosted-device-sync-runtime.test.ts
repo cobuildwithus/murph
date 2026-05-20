@@ -1908,6 +1908,102 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("pending dirty state for reauthorization-required accounts is acknowledged without enqueuing jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-reauth",
+        provider: "demo",
+        state: begin.state,
+      });
+      getStore(service).markSyncFailed(
+        connected.account.id,
+        "2026-04-04T09:30:00.000Z",
+        "PROVIDER_REAUTH_REQUIRED",
+        "Provider asked for reconnection.",
+        "reauthorization_required",
+      );
+
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_reauth",
+        externalAccountId: connected.account.externalAccountId,
+        status: "reauthorization_required",
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_reauth",
+        dirtyRevision: "13",
+        dirtyResources: [
+          {
+            count: 4,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        eventCount: "4",
+        resourceCategoryCounts: {
+          timeseries: 4,
+        },
+        sourceProviderCounts: {
+          garmin: 4,
+        },
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: "2026-04-04T10:15:00.000Z",
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_reauth",
+        localAccountId: connected.account.id,
+        nextWakeAt: "2026-04-04T10:15:00.000Z",
+        processedRevision: "13",
+      });
+      assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.reauthorization_required",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("same-connection device-sync wake hints enqueue both distinct jobs", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -2215,6 +2311,9 @@ describe("hosted device-sync runtime", () => {
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_reauth",
         externalAccountId: connected.account.externalAccountId,
+        localState: {
+          nextReconcileAt: "2026-04-06T10:00:00.000Z",
+        },
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -2230,6 +2329,7 @@ describe("hosted device-sync runtime", () => {
 
       const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.status, "reauthorization_required");
+      assert.equal(stored?.nextReconcileAt, null);
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -3633,6 +3733,9 @@ describe("hosted device-sync runtime", () => {
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_error_delta",
         externalAccountId: "demo-error-delta",
+        localState: {
+          nextReconcileAt: "2026-04-06T11:00:00.000Z",
+        },
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -3687,6 +3790,7 @@ describe("hosted device-sync runtime", () => {
           lastErrorCode: "LOCAL_ERR",
           lastErrorMessage: "local error delta",
           lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
+          nextReconcileAt: null,
         },
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
       });

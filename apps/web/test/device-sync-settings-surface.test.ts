@@ -238,8 +238,14 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(sources[0]?.displayName).not.toBe(sources[1]?.displayName);
   });
 
-  it("marks provider reauthorization as attention-worthy without a settings connect action", () => {
+  it("marks provider reauthorization as attention-worthy with a reconnect action when configured", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
+      connectTargets: [{
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+        sourceProviderSlug: null,
+      }],
       connections: [buildConnection({
         lastSyncCompletedAt: "2026-04-02T07:00:00.000Z",
         lastSyncErrorAt: "2026-04-03T08:00:00.000Z",
@@ -250,8 +256,10 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
 
     expect(source).toMatchObject({
+      connectSourceId: "oura",
+      connectTarget: "oura",
       headline: "Access needs attention",
-      primaryAction: null,
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
       secondaryAction: { kind: "disconnect", label: "Disconnect" },
       state: "reauthorization_required",
       statusLabel: "Needs access",

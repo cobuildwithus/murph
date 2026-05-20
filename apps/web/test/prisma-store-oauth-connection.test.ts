@@ -734,6 +734,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       accessTokenEncrypted: null,
       id: "dsc_123",
       keyVersion: null,
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastErrorMessage: "Reconnect required.",
+      lastSyncErrorAt: new Date("2026-03-25T08:00:00.000Z"),
       provider: "whoop",
       refreshTokenEncrypted: null,
       status: "disconnected",
@@ -788,12 +791,18 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       data: expect.objectContaining({
         accessTokenEncrypted: "enc:new-access-token",
         keyVersion: "v1",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncErrorAt: null,
         refreshTokenEncrypted: "enc:new-refresh-token",
         status: "active",
         tokenVersion: 1,
       }),
     }));
     expect(stored.status).toBe("active");
+    expect(stored.lastErrorCode).toBeNull();
+    expect(stored.lastErrorMessage).toBeNull();
+    expect(stored.lastSyncErrorAt).toBeNull();
   });
 
   it("clears hosted OAuth tokens when post-connect setup fails", async () => {

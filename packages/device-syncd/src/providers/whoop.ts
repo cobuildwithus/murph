@@ -364,15 +364,25 @@ function buildWhoopApiError(
 }
 
 function resolveWhoopTokenRequestAccountStatus(input: {
+  clientCredentialPresent?: boolean;
   grantType?: string;
   oauthErrorCode?: string | null;
+  refreshCredentialPresent?: boolean;
   response: Response;
 }): "reauthorization_required" | null {
   if (input.grantType !== "refresh_token") {
     return null;
   }
 
-  if ((input.response.status === 400 || input.response.status === 401) && input.oauthErrorCode === "invalid_grant") {
+  const tokenSpecificRefreshFailure =
+    input.oauthErrorCode === "invalid_grant"
+    || (
+      input.oauthErrorCode === "invalid_request"
+      && input.clientCredentialPresent === true
+      && input.refreshCredentialPresent === true
+    );
+
+  if ((input.response.status === 400 || input.response.status === 401) && tokenSpecificRefreshFailure) {
     return "reauthorization_required";
   }
 
@@ -475,8 +485,10 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: resolveWhoopTokenRequestAccountStatus({
+            clientCredentialPresent: Boolean(parameters.client_id && parameters.client_secret),
             grantType: parameters.grant_type,
             oauthErrorCode,
+            refreshCredentialPresent: Boolean(parameters.refresh_token),
             response,
           }),
           diagnostics,
