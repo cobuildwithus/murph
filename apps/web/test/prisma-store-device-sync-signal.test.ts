@@ -68,11 +68,6 @@ function createSignalStore(seed: MutableSignal[] = []) {
       nextId += 1;
       return cloneSignal(signal);
     },
-    findMany: async ({ where }: { where: Record<string, unknown> }) => {
-      const rows = [...signals.values()].filter((signal) => matchesWhere(signal, where));
-      rows.sort((left, right) => left.id - right.id);
-      return rows.map(cloneSignal);
-    },
   };
 
   const store = new PrismaDeviceSyncControlPlaneStore({
@@ -203,7 +198,7 @@ function createWebhookTraceStore(
 }
 
 describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
-  it("persists and returns only sparse webhook hint payloads", async () => {
+  it("persists minimized webhook hint payloads", async () => {
     const { createCalls, store } = createSignalStore();
 
     const created = await store.createSignal({
@@ -250,9 +245,6 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       createdAt: "2026-03-26T12:00:00.000Z",
     });
 
-    const listed = await store.listSignalsForUser("user-123");
-
-    expect(listed).toEqual([created]);
   });
 
   it("drops hosted revoke warning messages while keeping the warning code", async () => {
@@ -437,18 +429,6 @@ function normalizeSignalRecord(id: number, data: Record<string, unknown>): Mutab
     revokeWarningMessage: typeof data.revokeWarningMessage === "string" ? data.revokeWarningMessage : null,
     createdAt: new Date(data.createdAt),
   };
-}
-
-function matchesWhere(signal: MutableSignal, where: Record<string, unknown>): boolean {
-  if (typeof where.userId === "string" && signal.userId !== where.userId) {
-    return false;
-  }
-
-  if (!isRecord(where.id) || !("gt" in where.id) || typeof where.id.gt !== "number") {
-    return true;
-  }
-
-  return signal.id > where.id.gt;
 }
 
 function cloneSignal(signal: MutableSignal): MutableSignal {
