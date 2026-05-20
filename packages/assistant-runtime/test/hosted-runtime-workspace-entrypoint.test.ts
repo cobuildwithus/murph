@@ -5737,6 +5737,93 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    {
+      label: "assistant-labeled",
+      nextWakeReason: "assistant" as const,
+    },
+    {
+      label: "null-labeled",
+      nextWakeReason: null,
+    },
+    {
+      label: "explicit device-sync",
+      nextWakeReason: "device-sync.reconcile" as const,
+    },
+  ])("e2e clears stale $label device-sync recovery wake when no dirty work remains", async (input) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const staleWakeAt = "2026-04-26T23:59:59.000Z";
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 1,
+            reason: "alarm",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/stale-device-sync-clear.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Import should not run when no mailbox items are fetched.");
+          },
+          platform: createPlatform({
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleWakeAt,
+                nextWakeReason: input.nextWakeReason,
+                version: "0",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "snapshot:idle_shutdown",
+        "workspace.checkpoint",
+      ]);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.redactedStatus?.hostedMailboxFetchedCount, 0);
+      assert.equal(result.redactedStatus?.hostedMailboxImportedCount, 0);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("e2e preserves device-sync follow-up wake and runs the scheduled alarm lane", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -6378,6 +6465,53 @@ function createSnapshotDeviceSyncPort(input: {
         generatedAt: TEST_NOW,
         userId: TEST_USER_ID,
       };
+    },
+    get fetchSnapshotCalls() {
+      return fetchSnapshotCalls;
+    },
+  };
+}
+
+function createEmptyDeviceSyncPort(): HostedRuntimeDeviceSyncPort & {
+  readonly fetchDirtyStatesCalls: number;
+  readonly fetchSnapshotCalls: number;
+} {
+  let fetchDirtyStatesCalls = 0;
+  let fetchSnapshotCalls = 0;
+  return {
+    async ackDirtyStateProcessed() {
+      throw new Error("Device sync dirty ack should not run in this e2e.");
+    },
+    async applyUpdates(request) {
+      assert.deepEqual(request.updates, []);
+      return {
+        appliedAt: request.occurredAt ?? new Date().toISOString(),
+        updates: [],
+        userId: TEST_USER_ID,
+      };
+    },
+    async createConnectLink() {
+      throw new Error("Device sync connect link should not run in this e2e.");
+    },
+    async fetchDirtyStates() {
+      fetchDirtyStatesCalls += 1;
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: TEST_USER_ID,
+      };
+    },
+    async fetchSnapshot() {
+      fetchSnapshotCalls += 1;
+      return {
+        connections: [],
+        generatedAt: TEST_NOW,
+        userId: TEST_USER_ID,
+      };
+    },
+    get fetchDirtyStatesCalls() {
+      return fetchDirtyStatesCalls;
     },
     get fetchSnapshotCalls() {
       return fetchSnapshotCalls;
