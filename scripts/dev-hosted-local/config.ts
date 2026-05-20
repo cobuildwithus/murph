@@ -157,7 +157,7 @@ export function printHelp(): void {
       "  MURPH_DEV_WORKER_PORT=8787          Cloudflare worker listen port",
       "  MURPH_DEV_WORKER_PROTOCOL=http      Cloudflare local protocol (http or https)",
       "  MURPH_DEV_REUSE_EXISTING_WORKER=1   Reuse an already-running local Cloudflare worker instead of requiring a fresh worker",
-      "  MURPH_DEV_CF_PERSIST_DIR=...        Wrangler local persistence directory",
+      "  MURPH_DEV_CF_PERSIST_DIR=...        Override Wrangler local persistence directory (defaults to a per-run temp dir)",
       "  MURPH_DEV_TEMP_DIR=.tmp/...         Keep generated worker env/config under a repo-local .tmp subdir (contains local secrets)",
       "",
     ].join("\n"),
