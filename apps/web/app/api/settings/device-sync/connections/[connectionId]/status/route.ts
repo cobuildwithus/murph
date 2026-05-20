@@ -14,18 +14,23 @@ export const GET = withJsonError(async (
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const [{ connection }, { providers }] = await Promise.all([
+  const [{ connection }, settings] = await Promise.all([
     controlPlane.getConnectionStatus(auth.member.id, connectionId),
     controlPlane.listConnections(auth.member.id),
   ]);
+  const connections = settings.connections.some((entry) => entry.id === connection.id)
+    ? settings.connections.map((entry) => entry.id === connection.id ? connection : entry)
+    : [connection, ...settings.connections];
+  const source = buildHostedDeviceSyncSettingsSources({
+    connectionSources: settings.connectionSources,
+    connections,
+    providers: settings.providers,
+  }).find((entry) => entry.connectionId === connection.id) ?? null;
 
   return jsonOk({
     generatedAt: new Date().toISOString(),
     ok: true,
-    source: buildHostedDeviceSyncSettingsSources({
-      connections: [connection],
-      providers,
-    })[0] ?? null,
+    source,
   } satisfies {
     generatedAt: string;
     ok: true;

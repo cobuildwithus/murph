@@ -167,7 +167,7 @@ function createWorkspaceSnapshotV2Ref(input: {
   const objectKey = `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
   return {
     archive: {
-      compression: "gzip",
+      compression: "zstd",
       encryptedByteSize: input.encryptedByteSize,
       encryptedObjectSha256: "a".repeat(64),
       fileCount: 1,

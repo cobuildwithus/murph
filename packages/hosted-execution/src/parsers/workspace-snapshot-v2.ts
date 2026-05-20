@@ -1,4 +1,5 @@
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -104,8 +105,8 @@ function parseHostedWorkspaceSnapshotV2Compression(
   label: string,
 ): HostedWorkspaceSnapshotV2Compression {
   const compression = requireString(value, label);
-  if (compression !== "gzip") {
-    throw new TypeError(`${label} must be gzip.`);
+  if (compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
+    throw new TypeError(`${label} must be ${HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION}.`);
   }
   return compression;
 }

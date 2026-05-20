@@ -54,7 +54,7 @@ describe("hosted workspace snapshot v2 refs", () => {
       ...ref,
       archive: {
         ...ref.archive,
-        compression: "zstd",
+        compression: "gzip",
       },
     })).toThrow(/compression/u);
 
@@ -135,7 +135,7 @@ function createWorkspaceSnapshotV2Ref() {
 
   return {
     archive: {
-      compression: "gzip" as const,
+      compression: "zstd" as const,
       encryptedByteSize: 1024,
       encryptedObjectSha256: "b".repeat(64),
       fileCount: 12,
