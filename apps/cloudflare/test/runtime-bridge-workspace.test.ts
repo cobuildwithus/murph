@@ -1782,8 +1782,11 @@ function createPlatform(input: {
       }),
       directPutEncryptedObject: async (request: {
         encryptedByteSize: number;
+        encryptedObjectSha256: string;
+        expiresAt: string;
         putUrl: string;
         sourceFilePath: string;
+        snapshotId: string;
       }) => {
         const upload = workspaceSnapshotUploadByPutUrl.get(request.putUrl);
         if (!upload) {
@@ -1797,6 +1800,22 @@ function createPlatform(input: {
           objectKey: upload.objectKey,
           snapshotId: upload.snapshotId,
         });
+      },
+      presignUploadedObject: async (request: {
+        encryptedByteSize: number;
+        encryptedObjectSha256: string;
+        objectKey: string;
+        snapshotId: string;
+      }) => {
+        const putUrl = `https://r2.example.invalid/${encodeURIComponent(request.objectKey)}`;
+        workspaceSnapshotUploadByPutUrl.set(putUrl, {
+          objectKey: request.objectKey,
+          snapshotId: request.snapshotId,
+        });
+        return {
+          expiresAt: "2099-05-01T00:10:00.000Z",
+          putUrl,
+        };
       },
       abortUpload: async (request: {
         objectKey: string;
@@ -1824,11 +1843,6 @@ function createPlatform(input: {
           snapshotId,
           userId: "member_1",
         });
-        const putUrl = `https://r2.example.invalid/${encodeURIComponent(objectKey)}`;
-        workspaceSnapshotUploadByPutUrl.set(putUrl, {
-          objectKey,
-          snapshotId,
-        });
         void request.nextWakeAt;
         void request.nextWakeReason;
         return {
@@ -1846,7 +1860,6 @@ function createPlatform(input: {
             scheme: workspaceSnapshotEncryptionScheme,
             wrappedDataKey: "wrapped_data_key_test",
           },
-          expiresAt: "2026-05-01T00:10:00.000Z",
           limits: {
             maxSinglePartEncryptedBytes:
               input.workspaceSnapshotLimits?.maxSinglePartEncryptedBytes
@@ -1856,7 +1869,6 @@ function createPlatform(input: {
               ?? HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
           },
           objectKey,
-          putUrl,
           snapshotId,
         };
       },

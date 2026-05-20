@@ -18,11 +18,16 @@ import {
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
+  applyMurphAgeWearableResidualLayer,
   assessMurphAgeInputBundle,
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
   assessMurphAgeWearableShadowIncrements,
@@ -30,6 +35,7 @@ import {
   buildMurphAgePublicCalculatorView,
   buildMurphAgeResearchCalculatorView,
   buildMurphAgeIncrementEvaluationCard,
+  buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
   calculateMurphAgeFromSubmittedInputs,
@@ -77,6 +83,8 @@ import {
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
   summarizeMurphAgePublicLabWearableShadowEvidenceStatus,
+  summarizeMurphAgeWearableParameterPackContract,
+  summarizeMurphAgeWearableResidualLayerContract,
   summarizeMurphAgeWearableScoreBearingStrategy,
   summarizeMurphAgeWearableLabAggregateReceipt,
   toPublicMurphAgeCalculatorReport,
@@ -87,6 +95,7 @@ import {
   validateMurphAgeRiskModel,
   validateMurphAgeSourceRouteRegistry,
   validateMurphAgeWearableLabAggregateReceipt,
+  validateMurphAgeWearableResidualParameterPack,
   validateMurphAgeWearableShadowIncrementResultCard,
   type GoalMetricTarget,
   type MetricPoint,
@@ -98,6 +107,7 @@ import {
   type MurphAgeValidationEvidenceTier,
   type MurphAgeIncrementEvaluationCard,
   type MurphAgeWearableLabAggregateReceipt,
+  type MurphAgeWearableResidualParameterPack,
   type MurphAgeWearableShadowIncrementResultCard,
 } from "../src/index.ts";
 
@@ -125,6 +135,7 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("hypertension_history_proxy_yes")?.key, "hypertension-history-proxy-yes");
   assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");
   assert.equal(resolveMetricDefinition("waist")?.key, "waist-circumference");
+  assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");
   assert.equal(resolveMetricDefinition("adl-count")?.key, "adl-limitation-count");
@@ -425,7 +436,7 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(whiOpach?.activationStatus, "admin-required");
   assert.equal(whiOpach?.layers.includes("wearable-shadow-increment"), true);
   assert.equal(whiOpach?.ordinarySubmitterFit.ageBandFit, "older-adult-skewed");
-  assert.equal(whiOpach?.ordinarySubmitterFit.rank, null);
+  assert.equal(whiOpach?.ordinarySubmitterFit.rank, 13);
   assert.equal(whiOpach?.productAuthorized, false);
 
   const mhas = resolveMurphAgeSourceRoute("mhas-harmonized-aging");
@@ -511,6 +522,8 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
     "uk-biobank-integrated",
     "project-baseline-sensor-clinical",
     "framingham-activity-cvd",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
   ]);
   assert.equal(
     ordinaryLabWearableRoutes.every((route) =>
@@ -535,14 +548,17 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   const ordinaryAutoresearchPriority = listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority();
   assert.deepEqual(ordinaryAutoresearchPriority.map((route) => route.routeId), [
     "nhanes-activity-shadow-lmf",
-    "cardia-biomarker-activity",
-    "hchs-sol-biomarker-activity",
     "all-of-us-fitbit-labs-ehr",
     "mipact-apple-watch-ehr",
+    "framingham-activity-cvd",
+    "uk-biobank-integrated",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
     "nako-accelerometer-biobank",
     "hunt-activity-sensor-biobank",
     "lifelines-activelife-biobank",
-    "uk-biobank-integrated",
   ]);
   assert.deepEqual(ordinaryAutoresearchPriority.map((route) => route.executionPriorityRank), [
     1,
@@ -554,15 +570,24 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
     7,
     8,
     9,
+    10,
+    11,
+    12,
   ]);
   assert.equal(ordinaryAutoresearchPriority[0]?.ordinarySubmitterRank, 8);
   assert.equal(ordinaryAutoresearchPriority[0]?.executionMode, "public-locked-benchmark");
   assert.equal(ordinaryAutoresearchPriority[0]?.rankReasonIds.includes("fastest-public-row-path"), true);
-  assert.equal(ordinaryAutoresearchPriority[1]?.ordinarySubmitterRank, 1);
-  assert.equal(ordinaryAutoresearchPriority[1]?.executionMode, "free-registered-activation");
-  assert.equal(ordinaryAutoresearchPriority[3]?.executionMode, "human-admin-workbench");
-  assert.equal(ordinaryAutoresearchPriority[4]?.routeId, "mipact-apple-watch-ehr");
-  assert.equal(ordinaryAutoresearchPriority[4]?.rankReasonIds.includes("sensor-rich-clinical-fit"), true);
+  assert.equal(ordinaryAutoresearchPriority[1]?.routeId, "all-of-us-fitbit-labs-ehr");
+  assert.equal(ordinaryAutoresearchPriority[1]?.ordinarySubmitterRank, 3);
+  assert.equal(ordinaryAutoresearchPriority[1]?.executionMode, "human-admin-workbench");
+  assert.equal(ordinaryAutoresearchPriority[2]?.routeId, "mipact-apple-watch-ehr");
+  assert.equal(ordinaryAutoresearchPriority[2]?.rankReasonIds.includes("sensor-rich-clinical-fit"), true);
+  assert.equal(ordinaryAutoresearchPriority[3]?.routeId, "framingham-activity-cvd");
+  assert.equal(ordinaryAutoresearchPriority[3]?.rankReasonIds.includes("lab-activity-linked-outcome"), true);
+  assert.equal(ordinaryAutoresearchPriority[5]?.routeId, "cardia-biomarker-activity");
+  assert.equal(ordinaryAutoresearchPriority[5]?.executionMode, "free-registered-activation");
+  assert.equal(ordinaryAutoresearchPriority[7]?.routeId, "nsrr-mesa-sleep-autonomic");
+  assert.equal(ordinaryAutoresearchPriority[7]?.rankReasonIds.includes("sleep-autonomic-fit"), true);
   assert.equal(
     ordinaryAutoresearchPriority.every((route) =>
       route.schemaVersion === MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION
@@ -573,7 +598,7 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
       && route.blockedUntil.length > 0
       && route.rankReasonIds.length > 0
       && route.inputFamilies.includes("bloodwork-labs")
-      && route.inputFamilies.includes("daily-activity")
+      && route.inputFamilies.some((family) => family === "autonomic" || family === "daily-activity" || family === "sleep")
     ),
     true,
   );
@@ -712,6 +737,7 @@ test("summarizes Murph Age architecture layers without product display authoriza
     summarizeMurphAgeWearableScoreBearingStrategy(),
   );
   assert.equal(summary.wearableScoreBearingStrategy.productWearableMultiplier, 0);
+  assert.equal(summary.wearableScoreBearingStrategy.architecturePattern, "anchor-plus-wearable-residual-shadow");
   assert.equal(summary.wearableScoreBearingStrategy.researchResidualMode, "locked-evaluator-only");
   assert.equal(summary.wearableScoreBearingStrategy.deployableParameterizationRequiredForProductScoring, true);
   assert.equal(summary.sourceRouteIdsByPriority[0], "nhis-r399-outcome-anchor");
@@ -727,17 +753,22 @@ test("summarizes Murph Age architecture layers without product display authoriza
     "uk-biobank-integrated",
     "project-baseline-sensor-clinical",
     "framingham-activity-cvd",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
   ]);
   assert.deepEqual(summary.ordinaryLabWearableAutoresearchSourceRouteIdsByExecutionPriority, [
     "nhanes-activity-shadow-lmf",
-    "cardia-biomarker-activity",
-    "hchs-sol-biomarker-activity",
     "all-of-us-fitbit-labs-ehr",
     "mipact-apple-watch-ehr",
+    "framingham-activity-cvd",
+    "uk-biobank-integrated",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
     "nako-accelerometer-biobank",
     "hunt-activity-sensor-biobank",
     "lifelines-activelife-biobank",
-    "uk-biobank-integrated",
   ]);
 
   const layersById = new Map(summary.layers.map((layer) => [layer.layerId, layer]));
@@ -849,25 +880,31 @@ test("summarizes public lab and wearable shadow evidence as mixed and non-score-
     "r1049-nhanes-activity-control-diagnostic",
   ]);
   assert.deepEqual(status.nextExternalOrPartnerRouteIdsByPriority, [
-    "cardia-biomarker-activity",
-    "hchs-sol-biomarker-activity",
     "all-of-us-fitbit-labs-ehr",
     "mipact-apple-watch-ehr",
+    "framingham-activity-cvd",
+    "uk-biobank-integrated",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
     "nako-accelerometer-biobank",
     "hunt-activity-sensor-biobank",
     "lifelines-activelife-biobank",
-    "uk-biobank-integrated",
   ]);
   assert.deepEqual(status.sourceRouteIdsByEvidencePriority, [
     "nhanes-activity-shadow-lmf",
-    "cardia-biomarker-activity",
-    "hchs-sol-biomarker-activity",
     "all-of-us-fitbit-labs-ehr",
     "mipact-apple-watch-ehr",
+    "framingham-activity-cvd",
+    "uk-biobank-integrated",
+    "cardia-biomarker-activity",
+    "hchs-sol-biomarker-activity",
+    "nsrr-mesa-sleep-autonomic",
+    "whi-opach-womens-health-activity",
     "nako-accelerometer-biobank",
     "hunt-activity-sensor-biobank",
     "lifelines-activelife-biobank",
-    "uk-biobank-integrated",
   ]);
 
   const packetsById = new Map(status.packets.map((packet) => [packet.packetId, packet]));
@@ -2704,6 +2741,7 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.deepEqual(featureKeys, [
     "wearable-coverage-quality",
     "activity-volume",
+    "activity-intensity-pattern",
     "sedentary-time",
     "sleep-duration-regularity",
     "resting-heart-rate",
@@ -2731,16 +2769,24 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.deepEqual(firstWave, [
     "wearable-coverage-quality",
     "activity-volume",
+    "activity-intensity-pattern",
     "sedentary-time",
   ]);
 
   const activityVolume = resolveMurphAgeWearableBridgeFeatureSpec("activity-volume");
   assert.equal(activityVolume?.role, "shadow-increment-signal");
   assert.equal(activityVolume?.family, "activity");
+  assert.equal(activityVolume?.measurementMethod, "consumer-device");
   assert.equal(activityVolume?.metricKeys.includes("steps"), true);
   assert.equal(activityVolume?.metricKeys.includes("mvpa-minutes"), true);
   assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-valid-day-count-28d"), true);
   assert.equal(activityVolume?.requiredQualityMetricKeys.includes("wearable-coverage-index"), true);
+
+  const intensityPattern = resolveMurphAgeWearableBridgeFeatureSpec("activity-intensity-pattern");
+  assert.equal(intensityPattern?.role, "shadow-increment-signal");
+  assert.equal(intensityPattern?.family, "activity");
+  assert.equal(intensityPattern?.measurementMethod, "consumer-device");
+  assert.deepEqual(intensityPattern?.metricKeys, ["peak-30-minute-cadence"]);
 
   const sleep = resolveMurphAgeWearableBridgeFeatureSpec("sleep-duration-regularity");
   assert.equal(sleep?.unlockPriority, "second");
@@ -2751,7 +2797,11 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   const hrv = resolveMurphAgeWearableBridgeFeatureSpec("hrv-rmssd");
   assert.equal(hrv?.role, "deferred-context");
   assert.equal(hrv?.unlockPriority, "defer");
+  assert.equal(hrv?.measurementMethod, "consumer-device");
   assert.equal(hrv?.methodQualifier, "required");
+
+  const estimatedFitness = resolveMurphAgeWearableBridgeFeatureSpec("estimated-vo2-max");
+  assert.equal(estimatedFitness?.measurementMethod, "estimated-fitness");
 
   if (activityVolume) {
     (activityVolume.metricKeys as string[]).push("hba1c");
@@ -2772,6 +2822,51 @@ test("keeps the wearable scoring strategy explicit while product contribution st
   assert.equal(strategy.productWearableMultiplier, 0);
   assert.equal(strategy.aggregateReceiptOnlyAuthorizesScienceReview, true);
   assert.equal(strategy.deployableParameterizationRequiredForProductScoring, true);
+  assert.equal(strategy.residualLayerContract.schemaVersion, MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION);
+  assert.equal(strategy.residualLayerContract.layerId, "activity-residual-v1");
+  assert.equal(strategy.residualLayerContract.family, "activity");
+  assert.equal(strategy.residualLayerContract.combinationScale, "logit-residual");
+  assert.equal(strategy.residualLayerContract.currentDeploymentStatus, "contract-only-no-validated-parameters");
+  assert.equal(strategy.residualLayerContract.deployableParameterizationAvailable, false);
+  assert.equal(strategy.residualLayerContract.researchMultiplier, 0);
+  assert.equal(strategy.residualLayerContract.productMultiplier, 0);
+  assert.equal(strategy.residualLayerContract.scoreBearing, false);
+  assert.equal(strategy.residualLayerContract.scoreContributionAuthorized, false);
+  assert.equal(
+    strategy.residualLayerContract.parameterPackContract.schemaVersion,
+    MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
+  );
+  assert.equal(strategy.residualLayerContract.parameterPackContract.requiredForResidualScoring, true);
+  assert.equal(
+    strategy.residualLayerContract.parameterPackContract.emptyPackBehavior,
+    "exact-current-zero-delta-behavior",
+  );
+  assert.equal(strategy.residualLayerContract.parameterPackContract.familyPriorityOrder[0], "activity");
+  assert.equal(strategy.residualLayerContract.parameterPackContract.requiredFields.includes("packHash"), true);
+  assert.equal(strategy.residualLayerContract.parameterPackContract.requiredFields.includes("deploymentRights"), true);
+  assert.equal(
+    strategy.residualLayerContract.parameterPackContract.supportedDeploymentRights.includes("product-authorized"),
+    true,
+  );
+  assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab9_bp_body_10y_acm_research"), true);
+  assert.equal(strategy.residualLayerContract.anchorCardIds.includes("lab5_bp_bmi_transport_research"), true);
+  assert.deepEqual(strategy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys, [
+    "steps",
+    "activity-minutes",
+    "mvpa-minutes",
+    "peak-30-minute-cadence",
+    "sedentary-minutes",
+  ]);
+  assert.equal(strategy.residualLayerContract.featureSetContract.coverageControlMetricKeys.includes("wearable-coverage-index"), true);
+  assert.equal(strategy.residualLayerContract.featureSetContract.firstPassOnlyFamily, "activity");
+  assert.equal(strategy.residualLayerContract.featureSetContract.methodQualifierRequired, true);
+  assert.equal(strategy.residualLayerContract.featureSetContract.proprietaryDeviceScoresExcluded, true);
+  assert.equal(strategy.residualLayerContract.qualityGateMetricKeys.includes("wearable-coverage-index"), true);
+  assert.equal(strategy.residualLayerContract.qualityGateMetricKeys.includes("wearable-valid-day-count-28d"), true);
+  assert.equal(strategy.residualLayerContract.signalMetricKeys.includes("steps"), true);
+  assert.equal(strategy.residualLayerContract.signalMetricKeys.includes("sedentary-minutes"), true);
+  assert.equal(strategy.residualLayerContract.deferredFamilyOrder[0], "resting-heart-rate");
+  assert.equal(strategy.residualLayerContract.coverageScoringPolicy, "gate-and-control-only-not-age-contribution");
   assert.deepEqual(strategy.primaryDecisionComparisons, [
     "m5-vs-m1-lab-body",
     "m5-vs-m2-coverage-control",
@@ -2803,7 +2898,7 @@ test("keeps the wearable scoring strategy explicit while product contribution st
   assert.equal(activity.signalMetricKeys.includes("steps"), true);
 
   const sleep = assertDefined(policiesByFamily.get("sleep"), "sleep strategy must resolve");
-  assert.equal(sleep.scoreBearingPromotionPriority, "second");
+  assert.equal(sleep.scoreBearingPromotionPriority, "third");
   assert.equal(sleep.minimumValidNights28d, 14);
   assert.equal(sleep.requiresDeviceOrMethodQualification, true);
 
@@ -2811,7 +2906,7 @@ test("keeps the wearable scoring strategy explicit while product contribution st
     policiesByFamily.get("resting-heart-rate"),
     "resting heart rate strategy must resolve",
   );
-  assert.equal(restingHeartRate.scoreBearingPromotionPriority, "third");
+  assert.equal(restingHeartRate.scoreBearingPromotionPriority, "second");
   assert.equal(restingHeartRate.minimumValidDays28d, 10);
   assert.equal(restingHeartRate.productMultiplier, 0);
 
@@ -2821,8 +2916,169 @@ test("keeps the wearable scoring strategy explicit while product contribution st
   assert.equal(hrv.scoreBearingPromotionPriority, "defer");
 
   strategy.familyPolicies[0]?.signalMetricKeys.push("mutated");
+  strategy.residualLayerContract.signalMetricKeys.push("mutated");
+  strategy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys.push("mutated");
+  strategy.residualLayerContract.parameterPackContract.requiredFields.push("sourceRouteId");
   const freshStrategy = summarizeMurphAgeWearableScoreBearingStrategy();
   assert.equal(freshStrategy.familyPolicies[0]?.signalMetricKeys.includes("mutated"), false);
+  assert.equal(freshStrategy.residualLayerContract.signalMetricKeys.includes("mutated"), false);
+  assert.equal(
+    freshStrategy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys.includes("mutated"),
+    false,
+  );
+  assert.equal(
+    freshStrategy.residualLayerContract.parameterPackContract.requiredFields.filter((field) =>
+      field === "sourceRouteId"
+    ).length,
+    1,
+  );
+  assert.deepEqual(summarizeMurphAgeWearableResidualLayerContract(), freshStrategy.residualLayerContract);
+  assert.deepEqual(
+    summarizeMurphAgeWearableParameterPackContract(),
+    freshStrategy.residualLayerContract.parameterPackContract,
+  );
+});
+
+test("applies research-only wearable residual parameter packs without making wearables product score-bearing", () => {
+  const asOf = "2026-05-10T00:00:00.000Z";
+  const points = [
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:steps:2026-05-08:pack:0",
+      metricKey: "steps",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "pack_steps",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 10_000,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:activity-minutes:2026-05-08:pack:0",
+      metricKey: "activity-minutes",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "pack_activity_minutes",
+      sourceKind: "wearable-summary",
+      unit: "minutes",
+      value: 75,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-valid-days:2026-05-08:pack:0",
+      metricKey: "wearable-valid-day-count-28d",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "pack_valid_days",
+      sourceKind: "wearable-summary",
+      unit: "count",
+      value: 24,
+    }),
+    metricPoint({
+      effectiveDate: "2026-05-08",
+      id: "metric-point:wearable-coverage:2026-05-08:pack:0",
+      metricKey: "wearable-coverage-index",
+      observedAt: "2026-05-08T08:00:00.000Z",
+      recordId: "pack_coverage",
+      sourceKind: "wearable-summary",
+      unit: "score",
+      value: 0.86,
+    }),
+  ];
+  const assessments = assessMurphAgeWearableShadowIncrements({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    asOf,
+    points,
+  });
+  const pack = {
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "true-external-validation",
+    family: "activity",
+    featureWeights: [
+      {
+        center: 8_000,
+        coefficient: -0.08,
+        metricKey: "steps",
+        scale: 2_000,
+        transform: "center-scale",
+      },
+      {
+        center: 45,
+        coefficient: -0.02,
+        metricKey: "activity-minutes",
+        scale: 30,
+        transform: "center-scale",
+      },
+    ],
+    globalWearableCapLogit: 0.25,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "activity-residual-v1",
+    packHash: "research-pack-activity-v1",
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  } satisfies MurphAgeWearableResidualParameterPack;
+
+  assert.deepEqual(validateMurphAgeWearableResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: pack,
+  }), {
+    status: "valid",
+    warnings: [],
+  });
+
+  const application = applyMurphAgeWearableResidualLayer({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorRiskProbability: 0.1,
+    asOf,
+    assessments,
+    parameterPack: pack,
+    points,
+  });
+  assert.equal(application.status, "research-parameterized-shadow-delta");
+  assert.equal(application.parameterizationAvailable, true);
+  assert.equal(application.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(application.residualDeltaLogit, -0.1);
+  assert.equal(application.finalRiskProbability !== null && application.finalRiskProbability < 0.1, true);
+  assert.equal(application.productAuthorized, false);
+  assert.equal(application.scoreBearing, false);
+  assert.equal(application.scoreContributionAuthorized, false);
+  assert.equal(JSON.stringify(application).includes("10000"), false);
+
+  const invalidPackValidation = validateMurphAgeWearableResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: {
+      ...pack,
+      deploymentRights: "not-authorized",
+      featureWeights: [
+        ...pack.featureWeights,
+        {
+          center: 60,
+          coefficient: 0.05,
+          metricKey: "resting-heart-rate",
+          scale: 10,
+          transform: "center-scale",
+        },
+      ],
+      packHash: "/tmp/not-a-pack-hash",
+      sourceRouteId: "midus-biomarker-mortality",
+    },
+  });
+  assert.equal(invalidPackValidation.status, "invalid");
+  assert.equal(
+    invalidPackValidation.warnings.some((warning) => warning.message.includes("not authorized")),
+    true,
+  );
+  assert.equal(
+    invalidPackValidation.warnings.some((warning) => warning.message.includes("wearable shadow increment route")),
+    true,
+  );
+  assert.equal(
+    invalidPackValidation.warnings.some((warning) => warning.message.includes("signal metric")),
+    true,
+  );
 });
 
 test("exposes wearable shadow increment policies without score authorization", () => {
@@ -3571,6 +3827,41 @@ test("evaluates M0-M5 wearable/lab aggregate receipts without unlocking product 
   assert.ok(summary.m2ToM5Deltas);
   assert.ok(summary.m1ToM5Deltas.logLossDelta !== null && summary.m1ToM5Deltas.logLossDelta < 0);
   assert.ok(summary.m2ToM5Deltas.brierDelta !== null && summary.m2ToM5Deltas.brierDelta < 0);
+  const convertedEvidenceCard = buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(receipt);
+  assert.ok(convertedEvidenceCard);
+  assert.equal(convertedEvidenceCard.sourceRouteId, "all-of-us-fitbit-labs-ehr");
+  assert.equal(convertedEvidenceCard.layer, "wearable-shadow-increment");
+  assert.equal(convertedEvidenceCard.candidateBatchId, "ordinary-lab-wearable-aggregate-v1");
+  assert.equal(convertedEvidenceCard.candidateId, "all-of-us-fitbit-labs-ehr-wearable-shadow-increment");
+  assert.equal(convertedEvidenceCard.anchorCardId, "r399_nhis_proxy_10y_acm_research");
+  assert.equal(convertedEvidenceCard.productAuthorized, false);
+  assert.equal(convertedEvidenceCard.scoreBearing, false);
+  assert.equal(convertedEvidenceCard.scoreContributionAuthorized, false);
+  assert.equal(convertedEvidenceCard.outputBoundary.coefficientsExportAllowed, false);
+  assert.equal(convertedEvidenceCard.outputBoundary.modelParametersExportAllowed, false);
+  assert.equal(convertedEvidenceCard.evaluation.aggregateSample?.eventCount, 140);
+  assert.ok(
+    convertedEvidenceCard.evaluation.aggregateMetricDeltas.logLossDelta !== undefined
+      && Math.abs(convertedEvidenceCard.evaluation.aggregateMetricDeltas.logLossDelta + 0.008) < 1e-12,
+  );
+  assert.equal(validateMurphAgeIncrementEvaluationCard(convertedEvidenceCard).status, "valid");
+  assert.equal(
+    assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(convertedEvidenceCard).status,
+    "ready",
+  );
+  assert.equal(JSON.stringify(convertedEvidenceCard).includes("\"coefficients\":"), false);
+
+  const aliasedWorkbenchReceipt = {
+    ...receipt,
+    receiptId: "all-of-us-workbench-alias-m0-m5-v0",
+    sourceRouteId: "all_of_us_workbench_aggregate",
+  };
+  const aliasedValidation = validateMurphAgeWearableLabAggregateReceipt(aliasedWorkbenchReceipt);
+  assert.equal(aliasedValidation.status, "valid");
+  const aliasedEvidenceCard = buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(aliasedWorkbenchReceipt);
+  assert.ok(aliasedEvidenceCard);
+  assert.equal(aliasedEvidenceCard.sourceRouteId, "all-of-us-fitbit-labs-ehr");
+  assert.equal(aliasedEvidenceCard.candidateId, "all-of-us-fitbit-labs-ehr-wearable-shadow-increment");
 
   const noDeltaReceipt = {
     ...receipt,
@@ -3589,6 +3880,7 @@ test("evaluates M0-M5 wearable/lab aggregate receipts without unlocking product 
     },
   } satisfies MurphAgeWearableLabAggregateReceipt;
   const noDeltaSummary = summarizeMurphAgeWearableLabAggregateReceipt(noDeltaReceipt);
+  assert.equal(buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(noDeltaReceipt), null);
   assert.equal(noDeltaSummary.validation.status, "valid");
   assert.equal(noDeltaSummary.conclusion, "valid-no-delta");
   assert.equal(noDeltaSummary.reviewGptRequired, false);
@@ -3600,6 +3892,20 @@ test("evaluates M0-M5 wearable/lab aggregate receipts without unlocking product 
   ] as const) {
     assert.equal(noDeltaSummary.blockers.includes(expectedBlocker), true, expectedBlocker);
   }
+
+  const metriclessReceipt = {
+    ...receipt,
+    models: receipt.models.map((model) => ({ ...model, metrics: {} })),
+  } satisfies MurphAgeWearableLabAggregateReceipt;
+  const metriclessValidation = validateMurphAgeWearableLabAggregateReceipt(metriclessReceipt);
+  assert.equal(metriclessValidation.status, "invalid");
+  assert.equal(
+    metriclessValidation.warnings.some((warning) =>
+      warning.message.includes("must include a finite Brier score or log loss")
+    ),
+    true,
+  );
+  assert.equal(summarizeMurphAgeWearableLabAggregateReceipt(metriclessReceipt).conclusion, "blocked");
 
   const unsafeReceipt = {
     ...receipt,
@@ -3624,6 +3930,7 @@ test("evaluates M0-M5 wearable/lab aggregate receipts without unlocking product 
   const unsafeSummary = summarizeMurphAgeWearableLabAggregateReceipt(unsafeReceipt);
   assert.equal(unsafeSummary.conclusion, "blocked");
   assert.equal(unsafeSummary.blockers.includes("receipt_invalid"), true);
+  assert.equal(buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(unsafeReceipt), null);
 });
 
 test("assesses wearable shadow increment readiness without exposing values", () => {
@@ -3985,6 +4292,38 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     points: lab9WithWearableContextPoints,
     sex: "female",
   });
+  const wearableResidualParameterPack = {
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "true-external-validation",
+    family: "activity",
+    featureWeights: [{
+      center: 8_000,
+      coefficient: -0.08,
+      metricKey: "steps",
+      scale: 2_000,
+      transform: "center-scale",
+    }],
+    globalWearableCapLogit: 0.2,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "activity-residual-v1",
+    packHash: "research-pack-activity-v1",
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  } satisfies MurphAgeWearableResidualParameterPack;
+  const researchWithWearablePack = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithWearableContextPoints,
+    sex: "female",
+    wearableResidualParameterPack,
+  });
   const labOnlyResearch = calculateMurphAgeFromInputBundle({
     asOf,
     chronologicalAgeYears: 45,
@@ -4007,6 +4346,46 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(research.result?.biologicalAgeYears, labOnlyResearch.result?.biologicalAgeYears);
   assert.equal(research.result?.ageDeltaYears, labOnlyResearch.result?.ageDeltaYears);
   assert.equal(research.result?.risk?.probability, labOnlyResearch.result?.risk?.probability);
+  assert.equal(productDefault.wearableResidualLayerApplication, null);
+  assert.equal(labOnlyResearch.wearableResidualLayerApplication?.status, "ineligible-insufficient-coverage");
+  assert.equal(research.wearableResidualLayerApplication?.schemaVersion, MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION);
+  assert.equal(research.wearableResidualLayerApplication?.layerId, "activity-residual-v1");
+  assert.equal(research.wearableResidualLayerApplication?.status, "mechanics-ready-zero-delta");
+  assert.equal(research.wearableResidualLayerApplication?.eligibleForResidualResearch, true);
+  assert.equal(research.wearableResidualLayerApplication?.parameterizationAvailable, false);
+  assert.equal(research.wearableResidualLayerApplication?.residualDeltaLogit, 0);
+  assert.equal(research.wearableResidualLayerApplication?.finalRiskProbability, research.result?.risk?.probability);
+  assert.equal(research.wearableResidualLayerApplication?.scoreBearing, false);
+  assert.equal(research.wearableResidualLayerApplication?.scoreContributionAuthorized, false);
+  assert.equal(research.wearableResidualLayerApplication?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(researchWithWearablePack.result?.risk?.probability, research.result?.risk?.probability);
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.parameterizationAvailable, true);
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.residualDeltaLogit, -0.08);
+  const shadowRiskProbability = researchWithWearablePack.wearableResidualLayerApplication?.finalRiskProbability;
+  const baseRiskProbability = researchWithWearablePack.result?.risk?.probability;
+  assert.equal(
+    shadowRiskProbability !== null
+      && shadowRiskProbability !== undefined
+      && baseRiskProbability !== undefined
+      && shadowRiskProbability < baseRiskProbability,
+    true,
+  );
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.scoreBearing, false);
+  assert.equal(researchWithWearablePack.wearableResidualLayerApplication?.scoreContributionAuthorized, false);
+  const publicResearchWithWearablePackReport = toPublicMurphAgeCalculatorReport(researchWithWearablePack);
+  const researchWithWearablePackView = buildMurphAgeResearchCalculatorView(publicResearchWithWearablePackReport);
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.parameterizationAvailable, true);
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreBearing, false);
+  assert.equal(publicResearchWithWearablePackReport.wearableResidualLayer?.scoreContributionAuthorized, false);
+  assert.equal(researchWithWearablePackView.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(researchWithWearablePackView.wearableResidualLayer?.finalRiskProbability, shadowRiskProbability);
+  assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("metric-point:"), false);
+  assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("10000"), false);
   assert.deepEqual(
     research.result?.featureAttributions.map((feature) => ({
       contributionLogit: feature.contributionLogit,
@@ -4097,6 +4476,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchActivityShadow?.selectedMetricKeys.includes("steps"), true);
   assert.equal(researchActivityShadow?.selectedMetricKeys.includes("wearable-coverage-index"), true);
   assert.equal(researchActivityShadow ? "value" in researchActivityShadow : true, false);
+
+  const directResidualApplication = applyMurphAgeWearableResidualLayer({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorRiskProbability: research.result?.risk?.probability ?? null,
+    assessments: research.wearableShadowIncrementAssessments,
+  });
+  assert.deepEqual(directResidualApplication, research.wearableResidualLayerApplication);
   assert.equal(researchActivityShadow ? "unit" in researchActivityShadow : true, false);
   const researchSleepShadow = research.wearableShadowIncrementAssessments.find((assessment) =>
     assessment.family === "sleep"
@@ -4145,12 +4531,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(researchSummary.wearableContext.uncertaintyAction, "context-only");
   assert.equal(researchSummary.wearableContext.scoreBearing, false);
   assert.equal(researchSummary.wearableContext.scoreContributionAuthorized, false);
-  assert.equal(researchSummary.wearableBridge.candidateFeatureCount, 7);
+  assert.equal(researchSummary.wearableBridge.candidateFeatureCount, 8);
   assert.deepEqual(researchSummary.wearableBridge.firstPriorityReadyFeatureKeys, [
     "wearable-coverage-quality",
     "activity-volume",
   ]);
   assert.deepEqual(researchSummary.wearableBridge.firstPriorityIncompleteFeatureKeys, [
+    "activity-intensity-pattern",
     "sedentary-time",
   ]);
   assert.deepEqual(researchSummary.wearableBridge.secondPriorityReadyFeatureKeys, [
@@ -4163,6 +4550,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(
     researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "activity-volume")?.qualityReady,
     true,
+  );
+  assert.equal(
+    researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "activity-volume")?.measurementMethod,
+    "consumer-device",
+  );
+  assert.equal(
+    researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "estimated-vo2-max")?.measurementMethod,
+    "estimated-fitness",
   );
   assert.equal(
     researchSummary.wearableBridge.features.find((feature) => feature.featureKey === "hrv-rmssd")?.status,
@@ -4400,6 +4795,14 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicResearchReport.result?.biologicalAgeYears, research.result?.biologicalAgeYears);
   assert.equal(publicResearchReport.result?.risk?.probability, research.result?.risk?.probability);
   assert.equal(publicResearchReport.result?.authorization.productAuthorized, false);
+  assert.equal(publicResearchReport.wearableResidualLayer?.status, "mechanics-ready-zero-delta");
+  assert.equal(publicResearchReport.wearableResidualLayer?.parameterizationAvailable, false);
+  assert.equal(publicResearchReport.wearableResidualLayer?.residualDeltaLogit, 0);
+  assert.equal(publicResearchReport.wearableResidualLayer?.finalRiskProbability, research.result?.risk?.probability);
+  assert.equal(publicResearchReport.wearableResidualLayer?.scoreBearing, false);
+  assert.equal(publicResearchReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
+  assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("metric-point:"), false);
+  assert.equal(JSON.stringify(publicResearchReport.wearableResidualLayer).includes("10000"), false);
   assert.equal(publicResearchReport.researchCandidateCards.length, 3);
   const publicLab9Candidate = publicResearchReport.researchCandidateCards.find((candidate) =>
     candidate.cardId === "lab9_bp_body_10y_acm_research"
@@ -4507,6 +4910,58 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
           valueLabel: "private value",
           warnings: [],
         },
+        {
+          ...internalReadyAttribution,
+          contributionYears: 0.6,
+          featureKey: "waist-circumference",
+          label: "Waist circumference",
+          metricKey: "waist-circumference",
+          moduleId: "body-composition",
+          selectedPointIds: ["metric-point:private-row:waist"],
+          unit: "cm",
+          value: 82,
+          valueLabel: "82 cm",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: -0.4,
+          featureKey: "hdl-c",
+          label: "HDL-C",
+          metricKey: "hdl-c",
+          moduleId: "lipids",
+          selectedPointIds: ["metric-point:private-row:hdl"],
+          unit: "mg/dL",
+          value: 62,
+          valueLabel: "62 mg/dL",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: 0.3,
+          featureKey: "white-blood-cell-count",
+          label: "White blood cells",
+          metricKey: "white-blood-cell-count",
+          moduleId: "immune-hematologic",
+          selectedPointIds: ["metric-point:private-row:wbc"],
+          unit: "10^3/uL",
+          value: 7,
+          valueLabel: "7",
+          warnings: [],
+        },
+        {
+          ...internalReadyAttribution,
+          contributionYears: -0.2,
+          featureKey: "albumin",
+          label: "Albumin",
+          metricKey: "albumin",
+          moduleId: "liver-renal",
+          selectedPointIds: ["metric-point:private-row:albumin"],
+          unit: "g/dL",
+          value: 4.4,
+          valueLabel: "4.4 g/dL",
+          warnings: [],
+        },
       ],
       moduleAttributions: [
         ...research.result.moduleAttributions,
@@ -4529,6 +4984,20 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
           featureKeys: ["private-feature"],
           moduleId: "private-module",
         },
+        {
+          contributionLogit: 0.06,
+          contributionYears: 0.6,
+          featureKeys: ["waist-circumference"],
+          moduleId: "body-composition",
+        },
+        { contributionLogit: -0.04, contributionYears: -0.4, featureKeys: ["hdl-c"], moduleId: "lipids" },
+        {
+          contributionLogit: 0.03,
+          contributionYears: 0.3,
+          featureKeys: ["white-blood-cell-count"],
+          moduleId: "immune-hematologic",
+        },
+        { contributionLogit: -0.02, contributionYears: -0.2, featureKeys: ["albumin"], moduleId: "liver-renal" },
       ],
     } : null,
   });
@@ -4540,6 +5009,27 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(publicWearableModuleIds.has("recovery"), true);
   assert.equal(publicWearableModuleIds.has("private-module"), false);
   assert.equal(publicWearableModuleIds.has("unknown"), true);
+  const publicBodyModules = publicReportWithWearableModules.result?.moduleAttributions.filter((module) =>
+    module.moduleId === "body"
+  ) ?? [];
+  assert.equal(publicBodyModules.length, 1);
+  assert.equal(publicBodyModules[0]?.featureKeys.includes("bmi"), true);
+  assert.equal(publicBodyModules[0]?.featureKeys.includes("waist-circumference"), true);
+  const publicCardiovascularModule = publicReportWithWearableModules.result?.moduleAttributions.find((module) =>
+    module.moduleId === "cardiovascular"
+  );
+  assert.ok(publicCardiovascularModule);
+  assert.equal(publicCardiovascularModule.featureKeys.includes("hdl-c"), true);
+  const publicImmuneModule = publicReportWithWearableModules.result?.moduleAttributions.find((module) =>
+    module.moduleId === "immune"
+  );
+  assert.ok(publicImmuneModule);
+  assert.equal(publicImmuneModule.featureKeys.includes("white-blood-cell-count"), true);
+  const publicLiverModule = publicReportWithWearableModules.result?.moduleAttributions.find((module) =>
+    module.moduleId === "liver"
+  );
+  assert.ok(publicLiverModule);
+  assert.equal(publicLiverModule.featureKeys.includes("albumin"), true);
   assert.equal(
     publicReportWithWearableModules.result?.featureAttributions.find((feature) => feature.metricKey === "steps")
       ?.moduleId,
@@ -4672,10 +5162,12 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   const productDefaultView = buildMurphAgePublicCalculatorView(productDefaultReport);
   assert.equal(productDefaultReport.status, "abstain");
   assert.equal(productDefaultReport.result, null);
+  assert.equal(productDefaultReport.wearableResidualLayer, null);
   assert.equal(productDefaultView.displayCategory, "abstain");
   assert.equal(productDefaultView.selectedCardId, null);
   assert.equal(productDefaultView.ageEstimate, null);
   assert.equal(productDefaultView.risk.probability, null);
+  assert.equal(productDefaultView.wearableResidualLayer, null);
   assert.equal(productDefaultView.featureContributions.length, 0);
   assert.equal(productDefaultView.domainContributions.length, 0);
   assert.equal(productDefaultReport.inputReadiness.bundle.bundleId, "lab9-bp-body");
@@ -5220,7 +5712,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5View.wearable.scoreBearing, false);
   assert.equal(submittedLab5View.wearable.scoreContributionAuthorized, false);
   assert.equal(submittedLab5View.wearable.quality, "usable-context");
-  assert.equal(submittedLab5View.wearable.candidateFeatureCount, 7);
+  assert.equal(submittedLab5View.wearable.candidateFeatureCount, 8);
   assert.equal(submittedLab5View.wearable.readyFeatureKeys.includes("activity-volume"), true);
   assert.equal(submittedLab5View.wearable.firstPriorityReadyFeatureKeys.includes("activity-volume"), true);
   assert.equal(submittedLab5View.wearable.firstPriorityIncompleteFeatureKeys.includes("sedentary-time"), true);
@@ -5232,6 +5724,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   );
   assert.equal(submittedLab5View.wearable.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(submittedLab5View.featureContributions.length, 0);
+  assert.equal(submittedLab5View.featureDrivers.older.length, 0);
+  assert.equal(submittedLab5View.featureDrivers.younger.length, 0);
+  assert.equal(submittedLab5View.featureDrivers.neutral.length, 0);
   assert.equal(submittedLab5View.domainContributions.length, 0);
   const submittedLab5ResearchView = buildMurphAgeResearchCalculatorView(submittedLab5Report);
   const submittedLab5ResearchViewJson = JSON.stringify(submittedLab5ResearchView);
@@ -5283,6 +5778,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     assert.equal(contaminatedSubmittedLab5ArbiterJson.includes(forbidden), false, forbidden);
   }
   assert.equal(submittedLab5ResearchView.model.currentModelFamily, "frozen-nhis-r399-plus-research-increments");
+  assert.deepEqual(submittedLab5ResearchView.model.composition, {
+    anchorLayerStatus: "available-as-research-anchor-and-fallback-not-layered",
+    currentScoringMode: "single-selected-research-card",
+    labBodyStatus: "selected-card-score-not-additive-increment",
+    nextArchitectureStep: "validate-anchor-plus-increment-before-layered-scoring",
+    wearableStatus: "context-only-zero-product-multiplier",
+  });
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
   assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
   assert.equal(submittedLab5ResearchView.model.productUseAuthorized, false);
@@ -5362,7 +5864,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.model.wearable.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
   assert.equal(
     submittedLab5ResearchView.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join("|"),
-    "cardia-biomarker-activity|hchs-sol-biomarker-activity|all-of-us-fitbit-labs-ehr|mipact-apple-watch-ehr|nako-accelerometer-biobank|hunt-activity-sensor-biobank|lifelines-activelife-biobank|uk-biobank-integrated",
+    "all-of-us-fitbit-labs-ehr|mipact-apple-watch-ehr|framingham-activity-cvd|uk-biobank-integrated|cardia-biomarker-activity|hchs-sol-biomarker-activity|nsrr-mesa-sleep-autonomic|whi-opach-womens-health-activity|nako-accelerometer-biobank|hunt-activity-sensor-biobank|lifelines-activelife-biobank",
   );
   assert.equal(
     submittedLab5ResearchView.model.wearable.shadowEvidencePacketIds.join("|"),
@@ -5382,6 +5884,31 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     submittedLab5ResearchView.featureContributions.some((feature) => feature.metricKey === "steps"),
     false,
   );
+  assert.equal(
+    submittedLab5ResearchView.featureDrivers.younger.length
+      + submittedLab5ResearchView.featureDrivers.older.length
+      + submittedLab5ResearchView.featureDrivers.neutral.length > 0,
+    true,
+  );
+  assert.equal(
+    submittedLab5ResearchView.featureDrivers.younger.every((driver) =>
+      driver.direction === "younger" && driver.metricKey !== null && driver.contributionYears !== null
+    ),
+    true,
+  );
+  assert.equal(
+    submittedLab5ResearchView.featureDrivers.older.every((driver) =>
+      driver.direction === "older" && driver.metricKey !== null && driver.contributionYears !== null
+    ),
+    true,
+  );
+  if (submittedLab5ResearchView.featureDrivers.older.length > 1) {
+    assert.equal(
+      submittedLab5ResearchView.featureDrivers.older[0]?.absoluteContributionYears
+        >= (submittedLab5ResearchView.featureDrivers.older[1]?.absoluteContributionYears ?? 0),
+      true,
+    );
+  }
   assert.equal(
     submittedLab5ResearchView.domainContributions.some((module) => module.moduleId === "metabolic"),
     true,

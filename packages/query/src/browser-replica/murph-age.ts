@@ -172,6 +172,7 @@ const ACTIVITY_METRIC_KEY_HINTS = new Set([
   "activity-minutes",
   "estimated-vo2-max",
   "mvpa-minutes",
+  "peak-30-minute-cadence",
   "sedentary-minutes",
   "steps",
   "wearable-valid-day-count-28d",

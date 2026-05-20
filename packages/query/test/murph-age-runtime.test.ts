@@ -8,6 +8,7 @@ import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
@@ -16,6 +17,8 @@ import {
   summarizeMurphAgeCalculatorPublicOutput,
   type MetricPoint,
   type MurphAgeRiskModel,
+  type MurphAgeScoreBearingCardId,
+  type MurphAgeWearableResidualParameterPack,
 } from "@murphai/health-metrics";
 import { test } from "vitest";
 
@@ -391,6 +394,86 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
   }
 });
 
+test("calculateMurphAgeFromVaultInputBundle carries a research-only wearable residual pack as shadow output", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      ...lab9BpBodyMetricPoints(),
+      ...wearableContextMetricPoints(),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+      wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
+        "lab9_bp_body_10y_acm_research",
+      ),
+    });
+
+    assert.equal(output.status, "ready");
+    assert.equal(output.result?.authorization.cardId, "lab9_bp_body_10y_acm_research");
+    assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(output.wearableResidualLayerApplication?.status, "research-parameterized-shadow-delta");
+    assert.equal(output.wearableResidualLayerApplication?.parameterizationAvailable, true);
+    assert.equal(output.wearableResidualLayerApplication?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(output.wearableResidualLayerApplication?.residualDeltaLogit, -0.08);
+    assert.equal(output.wearableResidualLayerApplication?.scoreBearing, false);
+    assert.equal(output.wearableResidualLayerApplication?.scoreContributionAuthorized, false);
+    assert.equal(output.wearableResidualLayerApplication?.selectedMetricKeys.includes("steps"), true);
+
+    const publicReport = await calculateMurphAgePublicReportFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+      sex: "female",
+      vaultRoot,
+      wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
+        "lab9_bp_body_10y_acm_research",
+      ),
+    });
+
+    assert.equal(publicReport.status, "ready");
+    assert.equal(publicReport.result?.risk?.probability, output.result?.risk?.probability);
+    assert.equal(publicReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+    assert.equal(publicReport.wearableResidualLayer?.parameterizationAvailable, true);
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(publicReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
+    assert.equal(publicReport.wearableResidualLayer?.scoreBearing, false);
+    assert.equal(publicReport.wearableResidualLayer?.scoreContributionAuthorized, false);
+    assert.equal(
+      publicReport.wearableResidualLayer?.finalRiskProbability !== null
+        && publicReport.wearableResidualLayer?.finalRiskProbability !== undefined
+        && output.result?.risk?.probability !== undefined
+        && publicReport.wearableResidualLayer.finalRiskProbability < output.result.risk.probability,
+      true,
+    );
+
+    const encodedReport = JSON.stringify(publicReport);
+    for (const forbidden of [
+      vaultRoot,
+      "metric-point:",
+      "\"value\"",
+      "\"unit\"",
+      "\"message\"",
+      "selectedPointIds",
+      "coefficient",
+      "10000",
+    ]) {
+      assert.equal(encodedReport.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("assessMurphAgeWearableShadowReadinessFromVault reports sanitized shadow readiness", async () => {
   const vaultRoot = await createProjectionVault();
   try {
@@ -727,6 +810,9 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
         { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
         { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.8 },
       ],
+      wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
+        "lab5_bp_bmi_transport_research",
+      ),
     });
 
     assert.equal(publicReport.status, "ready");
@@ -735,6 +821,12 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(publicReport.result?.authorization.cardId, "lab5_bp_bmi_transport_research");
     assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
     assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(publicReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
+    assert.equal(publicReport.wearableResidualLayer?.parameterizationAvailable, true);
+    assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
+    assert.equal(publicReport.wearableResidualLayer?.residualDeltaLogit, -0.08);
+    assert.equal(publicReport.wearableResidualLayer?.scoreBearing, false);
+    assert.equal(publicReport.wearableResidualLayer?.selectedMetricKeys.includes("steps"), true);
     assert.equal(publicReport.researchCandidateCards.some((card) =>
       card.cardId === "lab5_bp_bmi_transport_research" && card.modelLoaded && card.selected
     ), true);
@@ -743,6 +835,8 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(encodedReport.includes("fixture-lab5-research-model"), false);
     assert.equal(encodedReport.includes("metric-point:"), false);
     assert.equal(encodedReport.includes("\"value\""), false);
+    assert.equal(encodedReport.includes("coefficient"), false);
+    assert.equal(encodedReport.includes("10000"), false);
   } finally {
     await rm(modelCardArtifactRoot, { force: true, recursive: true });
   }
@@ -1834,6 +1928,34 @@ function wearableFeatureValue(
   featureKey: string,
 ): number | null {
   return output.bundleAssessment.featureStatuses.find((feature) => feature.featureKey === featureKey)?.value ?? null;
+}
+
+function fixtureActivityWearableResidualParameterPack(
+  anchorCardId: MurphAgeScoreBearingCardId,
+): MurphAgeWearableResidualParameterPack {
+  return {
+    anchorCardId,
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "true-external-validation",
+    family: "activity",
+    featureWeights: [{
+      center: 8_000,
+      coefficient: -0.08,
+      metricKey: "steps",
+      scale: 2_000,
+      transform: "center-scale",
+    }],
+    globalWearableCapLogit: 0.2,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "activity-residual-v1",
+    packHash: "research-pack-activity-v1",
+    schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  };
 }
 
 function fixtureMurphAgeModel(): MurphAgeRiskModel {

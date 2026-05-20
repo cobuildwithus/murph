@@ -207,14 +207,33 @@ function createPlatform(input: {
         snapshotRef: request.ref,
       }),
       directPutEncryptedObject: async (request: {
+        encryptedObjectSha256: string;
+        expiresAt: string;
         putUrl: string;
         sourceFilePath: string;
+        snapshotId: string;
       }) => {
         const upload = uploadByPutUrl.get(request.putUrl);
         if (!upload) {
           throw new Error("Workspace snapshot test direct PUT URL was not started.");
         }
         input.uploadedObjects.set(upload.objectKey, await readFile(request.sourceFilePath));
+      },
+      presignUploadedObject: async (request: {
+        encryptedByteSize: number;
+        encryptedObjectSha256: string;
+        objectKey: string;
+        snapshotId: string;
+      }) => {
+        const putUrl = `https://r2.example.invalid/${encodeURIComponent(request.objectKey)}`;
+        uploadByPutUrl.set(putUrl, {
+          objectKey: request.objectKey,
+          snapshotId: request.snapshotId,
+        });
+        return {
+          expiresAt: "2099-05-01T00:10:00.000Z",
+          putUrl,
+        };
       },
       abortUpload: async (request: {
         objectKey: string;
@@ -239,11 +258,6 @@ function createPlatform(input: {
           snapshotId,
           userId: "member_1",
         });
-        const putUrl = `https://r2.example.invalid/${encodeURIComponent(objectKey)}`;
-        uploadByPutUrl.set(putUrl, {
-          objectKey,
-          snapshotId,
-        });
 
         return {
           encryption: {
@@ -258,13 +272,11 @@ function createPlatform(input: {
             scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
             wrappedDataKey: "wrapped_data_key_test",
           },
-          expiresAt: "2026-05-01T00:10:00.000Z",
           limits: {
             maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
             warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
           },
           objectKey,
-          putUrl,
           snapshotId,
         };
       },

@@ -67,8 +67,6 @@ import {
 } from "./workspace-snapshot-store.ts";
 import {
   hostedWorkspaceSnapshotObjectKey,
-  hostedWorkspaceSnapshotUserPrefix,
-  isUserScopedHostedWorkspaceSnapshotObjectKey,
 } from "./storage-paths.ts";
 import {
   createHostedR2PresignedPutUrl,
@@ -79,6 +77,8 @@ import {
 } from "./web-control-plane.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
+
+const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -129,27 +129,6 @@ export async function handleRunnerOutboundRequest(
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
-      if (url.pathname.startsWith("/__test/r2-presigned-put/")) {
-        if (!isHostedRunnerLocalTestRoutesEnabled(asWorkerStringEnvironment(env))) {
-          return notFound();
-        }
-        if (request.method !== "PUT") {
-          return methodNotAllowed();
-        }
-        const objectKey = readHostedLocalTestPresignedPutObjectKey(url);
-        if (!objectKey) {
-          return notFound();
-        }
-        return handleRunnerWorkspaceSnapshotLocalTestPresignedPutRequest({
-          bucket: env.BUNDLES,
-          env,
-          objectKey,
-          request,
-          url,
-          userId,
-        });
-      }
-
       if (url.pathname === "/workspace-snapshots/start") {
         if (request.method !== "POST") {
           return methodNotAllowed();
@@ -163,7 +142,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap)?$/u.exec(
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-put)?$/u.exec(
         url.pathname,
       );
       if (!match?.groups) {
@@ -178,6 +157,18 @@ export async function handleRunnerOutboundRequest(
           bucket: env.BUNDLES,
           env,
           environment,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix === "/presign-put") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotPresignPutRequest({
+          env,
           request,
           snapshotId: match.groups.snapshotId,
           userId,
@@ -289,52 +280,6 @@ function readRunnerOutboundOperation(url: URL, method: string): string {
     pathname: url.pathname,
   });
   return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
-}
-
-function isHostedRunnerLocalTestRoutesEnabled(
-  env: Readonly<Record<string, string | undefined>>,
-): boolean {
-  return env.NODE_ENV === "test" && env.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
-}
-
-function createHostedWorkspaceSnapshotLocalTestPresignedPutUrl(input: {
-  objectKey: string;
-}): { expiresAt: string; url: string } {
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
-  const encodedKey = input.objectKey.split("/").map(encodeURIComponent).join("/");
-  const url = new URL(
-    `/__test/r2-presigned-put/${encodedKey}`,
-    `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore}`,
-  );
-  url.searchParams.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
-  url.searchParams.set("X-Amz-Credential", "hosted-local-test/20260520/auto/s3/aws4_request");
-  url.searchParams.set("X-Amz-Date", now.toISOString().replace(/[:-]|\.\d{3}/gu, ""));
-  url.searchParams.set("X-Amz-Expires", "600");
-  url.searchParams.set("X-Amz-SignedHeaders", "content-type;host;if-none-match");
-  url.searchParams.set("X-Amz-Signature", "hosted-local-test-signature");
-
-  return {
-    expiresAt,
-    url: url.toString(),
-  };
-}
-
-function readHostedLocalTestPresignedPutObjectKey(url: URL): string | null {
-  const prefix = "/__test/r2-presigned-put/";
-  if (!url.pathname.startsWith(prefix)) {
-    return null;
-  }
-  const encodedKey = url.pathname.slice(prefix.length);
-  if (!encodedKey) {
-    return null;
-  }
-
-  try {
-    return encodedKey.split("/").map(decodeURIComponent).join("/");
-  } catch {
-    return null;
-  }
 }
 
 async function handleRunnerArtifactRequest(input: {
@@ -506,64 +451,6 @@ async function handleRunnerArtifactRequest(input: {
   }
 }
 
-async function handleRunnerWorkspaceSnapshotLocalTestPresignedPutRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
-  env: RunnerOutboundEnvironmentSource;
-  objectKey: string;
-  request: Request;
-  url: URL;
-  userId: string;
-}): Promise<Response> {
-  const signedHeaders = input.url.searchParams.get("X-Amz-SignedHeaders");
-  if (signedHeaders !== "content-type;host;if-none-match") {
-    return jsonError("Hosted workspace snapshot test PUT URL is invalid.", 400);
-  }
-  if (input.request.headers.get("if-none-match") !== "*") {
-    return jsonError("Hosted workspace snapshot test PUT requires if-none-match.", 400);
-  }
-  const contentType = input.request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  if (contentType !== HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE) {
-    return jsonError("Hosted workspace snapshot test PUT content-type is invalid.", 415);
-  }
-  if (!isUserScopedHostedWorkspaceSnapshotObjectKey(input.objectKey)) {
-    return jsonError("Hosted workspace snapshot test PUT object key is invalid.", 400);
-  }
-  const userPrefix = await hostedWorkspaceSnapshotUserPrefix({
-    userId: input.userId,
-  });
-  if (!input.objectKey.startsWith(userPrefix)) {
-    return unauthorized();
-  }
-
-  const authorized = await writeRequestOwnsRuntimeWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!authorized) {
-    return unauthorized();
-  }
-
-  if (!input.request.body) {
-    return jsonError("Hosted workspace snapshot test PUT body is required.", 400);
-  }
-
-  const existing = input.bucket.head
-    ? await input.bucket.head(input.objectKey)
-    : await input.bucket.get(input.objectKey);
-  if (existing) {
-    return new Response(null, { status: 412 });
-  }
-
-  await input.bucket.put(input.objectKey, input.request.body, {
-    httpMetadata: {
-      contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-    },
-  });
-
-  return new Response(null, { status: 200 });
-}
-
 async function handleRunnerWorkspaceSnapshotStartRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -623,15 +510,9 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
   const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
   dataKey.fill(0);
   const ivBase64 = createHostedWorkspaceSnapshotIvBase64();
-  const presigned = isHostedRunnerLocalTestRoutesEnabled(asWorkerStringEnvironment(input.env))
-    ? createHostedWorkspaceSnapshotLocalTestPresignedPutUrl({
-        objectKey,
-      })
-    : await createHostedR2PresignedPutUrl({
-        contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-        environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
-        key: objectKey,
-      });
+  const expiresAt = new Date(
+    Date.now() + HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS,
+  ).toISOString();
 
   const session: HostedWorkspaceSnapshotUploadSession = {
     attemptId: writeFence.attemptId,
@@ -644,7 +525,7 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       wrappedDataKey,
     },
     expectedWorkspaceVersion,
-    expiresAt: presigned.expiresAt,
+    expiresAt,
     leaseGeneration: writeFence.generation,
     objectKey,
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
@@ -667,14 +548,114 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
       scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
       wrappedDataKey,
     },
-    expiresAt: presigned.expiresAt,
+    expiresAt,
     limits: {
       maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
       warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
     },
     objectKey,
-    putUrl: presigned.url,
     snapshotId,
+  });
+}
+
+async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  const requestedObjectKey = requireSnapshotDataKeyString(body.objectKey, "objectKey");
+  const encryptedByteSize = requireSnapshotPositiveSafeInteger(
+    body.encryptedByteSize,
+    "encryptedByteSize",
+  );
+  const encryptedObjectSha256 = requireSnapshotSha256Hex(
+    body.encryptedObjectSha256,
+    "encryptedObjectSha256",
+  );
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot presign snapshotId does not match its route.", 400);
+  }
+  if (encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+    return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
+  }
+
+  const session = await readWorkspaceSnapshotUploadSession({
+    env: input.env,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (!session) {
+    return notFound();
+  }
+  if (Date.parse(session.expiresAt) <= Date.now()) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: null,
+      deleteObject: false,
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot upload session expired.", 410);
+  }
+  if (
+    session.attemptId !== writeFence.attemptId
+    || session.leaseGeneration !== writeFence.generation
+    || session.workspaceVersion !== writeFence.workspaceVersion
+  ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: null,
+      deleteObject: false,
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+  if (
+    session.userId !== input.userId
+    || session.snapshotId !== input.snapshotId
+    || session.objectKey !== requestedObjectKey
+    || session.encryption.aad.objectKey !== requestedObjectKey
+    || session.encryption.aad.snapshotId !== input.snapshotId
+  ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: null,
+      deleteObject: false,
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
+  }
+
+  const presigned = await createHostedR2PresignedPutUrl({
+    contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+    environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
+    key: requestedObjectKey,
+    metadata: {
+      encryptedsha256: encryptedObjectSha256,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+      snapshotid: input.snapshotId,
+    },
+  });
+
+  return json({
+    expiresAt: presigned.expiresAt,
+    putUrl: presigned.url,
   });
 }
 
@@ -995,10 +976,39 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
+  if (
+    readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256")
+      !== snapshotRef.archive.encryptedObjectSha256
+    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema")
+      !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
+    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "snapshotid")
+      !== snapshotRef.snapshotId
+  ) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot object metadata does not match its ref.", 409);
+  }
   const checkpointRequest = parseHostedWorkspaceCheckpointRequest({
     ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
     snapshotRef,
   });
+  if (checkpointRequest.reason !== "idle_shutdown") {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: true,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot checkpoint reason must be idle_shutdown.", 400);
+  }
   if (
     checkpointRequest.attemptId !== writeFence.attemptId
     || checkpointRequest.leaseGeneration !== writeFence.generation
@@ -1023,7 +1033,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!checkpointResponse.ok) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      deleteObject: true,
+      deleteObject: false,
       env: input.env,
       objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
@@ -1035,7 +1045,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (checkpoint.workspace.userId !== input.userId) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      deleteObject: true,
+      deleteObject: false,
       env: input.env,
       objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
@@ -1046,7 +1056,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!checkpoint.checkpointed) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      deleteObject: true,
+      deleteObject: false,
       env: input.env,
       objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
@@ -1065,7 +1075,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      deleteObject: true,
+      deleteObject: false,
       env: input.env,
       objectKey: snapshotRef.objectKey,
       snapshotId: input.snapshotId,
@@ -1090,7 +1100,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
 }
 
 async function retireWorkspaceSnapshotUploadSession(input: {
-  bucket: WorkspaceSnapshotR2BucketLike;
+  bucket: WorkspaceSnapshotR2BucketLike | null;
   deleteObject: boolean;
   env: RunnerOutboundEnvironmentSource;
   objectKey?: string;
@@ -1111,10 +1121,10 @@ async function retireWorkspaceSnapshotUploadSession(input: {
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
-  bucket: WorkspaceSnapshotR2BucketLike;
+  bucket: WorkspaceSnapshotR2BucketLike | null;
   objectKey: string;
 }): Promise<void> {
-  if (!input.bucket.delete) {
+  if (!input.bucket?.delete) {
     return;
   }
   try {
@@ -1133,6 +1143,22 @@ function readWorkspaceSnapshotCompleteCheckpointRequest(
     throw new TypeError("Hosted workspace snapshot complete checkpointRequest must be an object.");
   }
   return value as Record<string, unknown>;
+}
+
+function readWorkspaceSnapshotObjectMetadata(
+  metadata: Record<string, string> | undefined,
+  key: string,
+): string | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const normalizedKey = key.toLowerCase();
+  for (const [candidateKey, value] of Object.entries(metadata)) {
+    if (candidateKey.toLowerCase() === normalizedKey) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 async function fetchHostedExecutionWorkspaceSnapshotCheckpoint(input: {
@@ -1192,6 +1218,21 @@ function requireSnapshotDataKeyString(value: unknown, label: string): string {
     throw new TypeError(`Hosted workspace snapshot ${label} must be a non-empty string.`);
   }
   return value.trim();
+}
+
+function requireSnapshotPositiveSafeInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a positive safe integer.`);
+  }
+  return value;
+}
+
+function requireSnapshotSha256Hex(value: unknown, label: string): string {
+  const text = requireSnapshotDataKeyString(value, label).toLowerCase();
+  if (!/^[0-9a-f]{64}$/u.test(text)) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a lowercase sha256 hex digest.`);
+  }
+  return text;
 }
 
 async function handleRunnerBrowserVaultReplicaWriteRequest(input: {

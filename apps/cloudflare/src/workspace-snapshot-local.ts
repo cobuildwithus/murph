@@ -187,41 +187,36 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     decipher.setAuthTag(authTag);
 
     const plaintextArchiveHash = createHash("sha256");
-    const tar = spawn("tar", [
-      "-C",
-      restoreRoot,
-      "-xzf",
-      "-",
-    ], {
-      stdio: ["pipe", "ignore", "pipe"],
-    });
-    tar.stderr?.resume();
-    const tarExit = waitForTarArchiveProcess(tar);
-
-    try {
-      if (!tar.stdin) {
-        throw new Error("Hosted workspace snapshot restore tar stdin is unavailable.");
-      }
-      await pipeline(
-        createReadStream(encryptedFilePath, {
-          end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
-          start: 0,
-        }),
-        decipher,
-        createHashTransform(plaintextArchiveHash),
-        tar.stdin,
-      );
-      await tarExit;
-    } catch (error) {
-      tar.kill("SIGTERM");
-      await tarExit.catch(() => {});
-      throw error;
-    }
+    const plaintextArchivePath = path.join(tempDir, "workspace.snapshot.tar.gz");
+    await pipeline(
+      createReadStream(encryptedFilePath, {
+        end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
+        start: 0,
+      }),
+      decipher,
+      createHashTransform(plaintextArchiveHash),
+      createWriteStream(plaintextArchivePath, { mode: 0o600 }),
+    );
 
     const plaintextArchiveSha256 = plaintextArchiveHash.digest("hex");
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
+    await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchivePath);
+
+    const tar = spawn("tar", [
+      "-C",
+      restoreRoot,
+      "--no-same-owner",
+      "--no-same-permissions",
+      "-xzf",
+      plaintextArchivePath,
+    ], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    tar.stderr?.resume();
+    await waitForTarArchiveProcess(tar);
+
     const restoredState = await preflightHostedWorkspaceSnapshotDurableRoot(restoreRoot);
     if (restoredState.fileCount !== input.ref.archive.fileCount) {
       throw new Error("Hosted workspace snapshot restored file count does not match its ref.");
@@ -326,6 +321,54 @@ function isHostedWorkspaceSnapshotEnvPath(relativePath: string): boolean {
   return relativePath
     .split("/")
     .some((segment) => segment === ".env" || segment.startsWith(".env."));
+}
+
+async function assertHostedWorkspaceSnapshotTarEntriesSafe(archivePath: string): Promise<void> {
+  const entries = await listHostedWorkspaceSnapshotTarEntries(archivePath);
+  const verboseEntries = await listHostedWorkspaceSnapshotTarEntries(archivePath, true);
+  if (verboseEntries.some((entry) => entry.startsWith("l") || entry.startsWith("h"))) {
+    throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
+  }
+
+  for (const entry of entries) {
+    const normalized = entry.replace(/\\/gu, "/").replace(/^\.\/+/u, "");
+    if (
+      normalized.includes("\u0000")
+      || path.posix.isAbsolute(normalized)
+      || normalized === ".."
+      || normalized.startsWith("../")
+      || normalized.includes("/../")
+      || normalized.endsWith("/..")
+    ) {
+      throw new Error("Hosted workspace snapshot tar entry path is unsafe.");
+    }
+  }
+}
+
+async function listHostedWorkspaceSnapshotTarEntries(
+  archivePath: string,
+  verbose = false,
+): Promise<string[]> {
+  const tar = spawn("tar", [
+    verbose ? "-tzvf" : "-tzf",
+    archivePath,
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!tar.stdout) {
+    throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
+  }
+  tar.stderr?.resume();
+  const chunks: string[] = [];
+  tar.stdout.setEncoding("utf8");
+  for await (const chunk of tar.stdout) {
+    chunks.push(String(chunk));
+  }
+  await waitForTarArchiveProcess(tar);
+  return chunks.join("")
+    .split(/\r?\n/u)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 function decodeHostedWorkspaceSnapshotIv(value: string): Buffer {
