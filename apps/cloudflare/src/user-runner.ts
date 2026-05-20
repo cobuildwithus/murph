@@ -771,7 +771,8 @@ export class HostedUserRunner {
         reason: input.reason,
       });
       if (containerResult.kind === "accepted") {
-        if (demand?.kind === "mailbox-backlog") {
+        const confirmedMailboxBacklog = demand?.kind === "mailbox-backlog";
+        if (confirmedMailboxBacklog && input.reason !== "alarm") {
           const recheck = await this.scheduleShortProgressRecheck();
           return finish({
             containerResult,
@@ -781,12 +782,19 @@ export class HostedUserRunner {
             record: recheck.record,
           });
         }
-        await this.syncAlarm(record);
+        const syncedRecord = confirmedMailboxBacklog && record.wakeAt !== null
+          ? await this.stateStore.clearWakePending()
+          : record;
+        await this.syncAlarmAt(
+          confirmedMailboxBacklog
+            ? readRunnerStateAlarmAt(syncedRecord)
+            : readRunnerOperationalAlarmAt(syncedRecord),
+        );
         return finish({
           containerResult,
           demand,
           kind: "processing-ensured",
-          record,
+          record: syncedRecord,
         });
       }
 
