@@ -12,12 +12,14 @@ import {
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
 import {
+  buildMurphAgeResearchCalculatorView,
   isMurphAgePublicFeatureKey,
   isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
 } from '@murphai/health-metrics'
@@ -444,26 +446,28 @@ export const murphAgeInputReadinessResultSchema = z.object({
   wearableShadow: murphAgeWearableShadowReadinessSchema,
 })
 
+const murphAgeDisplayBlockedReasonSchema = z.enum([
+  'age-estimate-unavailable',
+  'context-only',
+  'policy-violation',
+  'product-not-authorized',
+  'risk-estimate-unavailable',
+  'risk-to-age-not-authorized',
+])
+const murphAgeDisplayStatusSchema = z.enum([
+  'abstain',
+  'context-only',
+  'product-age-ready',
+  'product-risk-only',
+  'research-only',
+])
 const murphAgePublicDisplaySummarySchema = z.object({
   ageEstimateAvailable: z.boolean(),
   blockedFeatureKeys: z.array(z.string().min(1)),
   contextOnlyFeatureKeys: z.array(z.string().min(1)),
   contextOnlyMetricKeys: z.array(z.string().min(1)),
-  displayBlockedReason: z.enum([
-    'age-estimate-unavailable',
-    'context-only',
-    'policy-violation',
-    'product-not-authorized',
-    'risk-estimate-unavailable',
-    'risk-to-age-not-authorized',
-  ]).nullable(),
-  displayStatus: z.enum([
-    'abstain',
-    'context-only',
-    'product-age-ready',
-    'product-risk-only',
-    'research-only',
-  ]),
+  displayBlockedReason: murphAgeDisplayBlockedReasonSchema.nullable(),
+  displayStatus: murphAgeDisplayStatusSchema,
   missingFeatureKeys: z.array(z.string().min(1)),
   outcomeContext: murphAgeOutcomeContextSchema,
   productAgeDisplayReady: z.boolean(),
@@ -488,6 +492,70 @@ export const murphAgeReportResultSchema = z.object({
   schemaVersion: z.literal('murph.age.public-calculator-report.v4'),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
+})
+
+const murphAgePublicAgeEstimateViewSchema = z.object({
+  ageDeltaYears: z.number().nullable(),
+  biologicalAgeYears: z.number().nullable(),
+  chronologicalAgeYears: z.number(),
+  intervalYears: z.object({
+    high: z.number(),
+    low: z.number(),
+  }).nullable(),
+})
+const murphAgePublicRiskViewSchema = z.object({
+  ageEstimateBasis: z.enum(['none', 'risk-age-equivalent']),
+  horizonYears: z.number().nullable(),
+  probability: z.number().nullable(),
+  riskEndpoint: z.enum(['all-cause-mortality', 'none']),
+})
+const murphAgePublicFeatureContributionViewSchema = z.object({
+  contributionYears: z.number().nullable(),
+  featureKey: z.string().min(1),
+  metricKey: z.string().min(1).nullable(),
+  moduleId: z.string().min(1),
+  status: z.enum(['blocked', 'imputed', 'missing', 'ready']),
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+const murphAgePublicDomainContributionViewSchema = z.object({
+  contributionYears: z.number().nullable(),
+  featureKeys: z.array(z.string().min(1)),
+  moduleId: z.string().min(1),
+})
+const murphAgePublicWearableCalculatorViewSchema = z.object({
+  contextOnlyMetricKeys: z.array(z.string().min(1)),
+  missingFeatureKeys: z.array(z.string().min(1)),
+  partialFeatureKeys: z.array(z.string().min(1)),
+  quality: murphAgeWearableContextQualitySchema,
+  readyFeatureKeys: z.array(z.string().min(1)),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+})
+export const murphAgeResearchCalculatorViewResultSchema = z.object({
+  ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
+  blockedFeatureKeys: z.array(z.string().min(1)),
+  displayBlockedReason: murphAgeDisplayBlockedReasonSchema.nullable(),
+  displayStatus: murphAgeDisplayStatusSchema,
+  domainContributions: z.array(murphAgePublicDomainContributionViewSchema),
+  featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
+  missingFeatureKeys: z.array(z.string().min(1)),
+  mode: murphAgeModeSchema,
+  product: z.object({
+    ageDisplayReady: z.boolean(),
+    productUseAuthorized: z.literal(false),
+    promotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
+    riskDisplayReady: z.boolean(),
+    validationGate: murphAgePublicValidationGateSummarySchema.nullable(),
+  }),
+  researchOnly: z.literal(true),
+  risk: murphAgePublicRiskViewSchema,
+  schemaVersion: z.literal(MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION),
+  selectedCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  selectedScoreBearingFeatureKeys: z.array(z.string().min(1)),
+  selectedScoreBearingMetricKeys: z.array(z.string().min(1)),
+  status: murphAgeInputBundleStatusSchema,
+  warnings: z.array(murphAgePublicWarningSchema),
+  wearable: murphAgePublicWearableCalculatorViewSchema,
 })
 
 const strictUtcTimestampSchema = isoTimestampSchema
@@ -538,6 +606,10 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   submittedMetrics: z.array(murphAgeSubmittedMetricInputSchema).min(1),
 })
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
+type MurphAgeSubmittedPreviewOptions = {
+  input: string;
+  modelCardArtifactRoot?: string;
+}
 
 export function registerMurphAgeCommands(
   cli: Cli.Cli,
@@ -653,14 +725,33 @@ export function registerMurphAgeCommands(
       'This command is research-only. It is for local model development and demos, not product claims or medical recommendations.',
     output: murphAgeReportResultSchema,
     async run({ options }) {
-      const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
-        await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
-      )
+      return loadMurphAgeSubmittedPreviewReport(options)
+    },
+  })
 
-      return getMurphAgeResearchPreviewForSubmittedInputs({
-        ...payload,
-        modelCardArtifactRoot: options.modelCardArtifactRoot ?? payload.modelCardArtifactRoot,
-      })
+  age.command('preview-view', {
+    description:
+      'Return an internal research-only Murph Age calculator view from a submitted JSON payload.',
+    args: emptyArgsSchema,
+    options: z.object({
+      input: inputFileOptionSchema.describe('Submitted Murph Age payload in @file.json form or - for stdin.'),
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
+    }),
+    examples: [
+      {
+        description:
+          'Run a local internal calculator view with age, risk, and feature/domain breakdowns for model development.',
+        options: {
+          input: '@murph-age-preview.json',
+          modelCardArtifactRoot: './.runtime/operations/murph-age/model-cards',
+        },
+      },
+    ],
+    hint:
+      'This view is internal and research-only. It can show scores for model development, but product use remains unauthorized.',
+    output: murphAgeResearchCalculatorViewResultSchema,
+    async run({ options }) {
+      return buildMurphAgeResearchCalculatorView(await loadMurphAgeSubmittedPreviewReport(options))
     },
   })
 
@@ -779,6 +870,19 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
       { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.86 },
     ],
   }
+}
+
+async function loadMurphAgeSubmittedPreviewReport(
+  options: MurphAgeSubmittedPreviewOptions,
+) {
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+    await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
+  )
+
+  return getMurphAgeResearchPreviewForSubmittedInputs({
+    ...payload,
+    modelCardArtifactRoot: options.modelCardArtifactRoot ?? payload.modelCardArtifactRoot,
+  })
 }
 
 function isKnownMurphAgeModelCardId(

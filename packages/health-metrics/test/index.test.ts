@@ -14,6 +14,7 @@ import {
   MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
@@ -24,6 +25,7 @@ import {
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
   buildMurphAgePublicCalculatorView,
+  buildMurphAgeResearchCalculatorView,
   buildMurphAgeIncrementEvaluationCard,
   calculateMurphAge,
   calculateMurphAgeFromInputBundle,
@@ -4885,6 +4887,28 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5View.wearable.contextOnlyMetricKeys.includes("steps"), true);
   assert.equal(submittedLab5View.featureContributions.length, 0);
   assert.equal(submittedLab5View.domainContributions.length, 0);
+  const submittedLab5ResearchView = buildMurphAgeResearchCalculatorView(submittedLab5Report);
+  assert.equal(submittedLab5ResearchView.schemaVersion, MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION);
+  assert.equal(submittedLab5ResearchView.researchOnly, true);
+  assert.equal(submittedLab5ResearchView.product.productUseAuthorized, false);
+  assert.equal(submittedLab5ResearchView.displayStatus, "research-only");
+  assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
+  assert.equal(submittedLab5ResearchView.ageEstimate?.biologicalAgeYears, submittedLab5Report.result?.biologicalAgeYears);
+  assert.equal(submittedLab5ResearchView.risk.probability, submittedLab5Report.result?.risk?.probability);
+  assert.equal(
+    submittedLab5ResearchView.featureContributions.some((feature) => feature.metricKey === "glucose"),
+    true,
+  );
+  assert.equal(
+    submittedLab5ResearchView.featureContributions.some((feature) => feature.metricKey === "steps"),
+    false,
+  );
+  assert.equal(
+    submittedLab5ResearchView.domainContributions.some((module) => module.moduleId === "metabolic"),
+    true,
+  );
+  assert.equal(submittedLab5ResearchView.wearable.scoreBearing, false);
+  assert.equal(submittedLab5ResearchView.wearable.readyFeatureKeys.includes("activity-volume"), true);
   const submittedLab5ViewJson = JSON.stringify(submittedLab5View);
   for (const forbidden of [
     "private metric",
@@ -4899,6 +4923,21 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "prediction",
   ]) {
     assert.equal(submittedLab5ViewJson.includes(forbidden), false, forbidden);
+  }
+  const submittedLab5ResearchViewJson = JSON.stringify(submittedLab5ResearchView);
+  for (const forbidden of [
+    "private metric",
+    "metric-point:",
+    "\"value\"",
+    "\"unit\"",
+    "\"label\"",
+    "\"message\"",
+    "\"path\"",
+    "coefficient",
+    "contributionLogit",
+    "prediction",
+  ]) {
+    assert.equal(submittedLab5ResearchViewJson.includes(forbidden), false, forbidden);
   }
 
   const submittedReportWithFutureInputs = calculateMurphAgeFromSubmittedInputs({

@@ -485,6 +485,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
     'age preview',
+    'age preview-view',
     'allergy import-json',
     'automation import-json',
     'blood-test import-json',
