@@ -2530,6 +2530,96 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
   });
 
+  it("caps direct-R2 presigned PUT expiry to the remaining upload session window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_presign_near_expiry";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(
+      snapshotRef,
+      { expiresAt: "2026-05-20T00:01:00.000Z" },
+    ));
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(await response.json(), "workspace snapshot presign response");
+    const putUrl = new URL(requireTestString(body.putUrl, "workspace snapshot putUrl"));
+    expect(putUrl.searchParams.get("X-Amz-Expires")).toBe("60");
+  });
+
+  it("rejects direct-R2 presign requests when the upload session is too close to expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_presign_too_late";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(
+      snapshotRef,
+      { expiresAt: "2026-05-20T00:00:20.000Z" },
+    ));
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is too close to expiry.",
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
   it("unwraps workspace snapshot data keys only through the bound AAD", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
@@ -2603,39 +2693,94 @@ describe("handleRunnerOutboundRequest", () => {
     expect(rejected.status).toBe(403);
   });
 
-  it("streams workspace snapshot reads without arrayBuffering the object", async () => {
+  it("rejects workspace snapshot data-key unwrap without a fresh workspace version fence", async () => {
+    const missingVersionRunner = createWorkspaceVersionAwareUserRunner();
+    const missingVersionResponse = await handleRunnerOutboundRequest(
+      new Request("http://workspace-snapshots.worker/workspace-snapshots/snapshot_missing/data-key/unwrap", {
+        body: JSON.stringify({}),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: missingVersionRunner.getByName,
+        },
+      }),
+      "member_123",
+    );
+    expect(missingVersionResponse.status).toBe(401);
+    expect(missingVersionRunner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+
+    const runner = createWorkspaceVersionAwareUserRunner({
+      workspaceVersion: "5",
+    });
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://workspace-snapshots.worker/workspace-snapshots/snapshot_stale/data-key/unwrap", {
+        body: JSON.stringify({}),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(401);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+  });
+
+  it("presigns direct-R2 workspace snapshot GET URLs instead of streaming bodies through the Worker", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_read_stream";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
       userId: "member_123",
     });
-    const bytes = new Uint8Array([9, 8, 7, 6]);
-    const arrayBuffer = vi.fn(async () => toArrayBuffer(new Uint8Array([1])));
     const env = createRunnerOutboundEnv({
-      BUNDLES: {
-        async get(key: string) {
-          expect(key).toBe(objectKey);
-          return {
-            arrayBuffer,
-            body: new ReadableStream<Uint8Array>({
-              start(controller) {
-                controller.enqueue(bytes);
-                controller.close();
-              },
-            }),
-            key,
-            size: bytes.byteLength,
-          };
-        },
-        async put() {},
-      },
       USER_RUNNER: {
         getByName: runner.getByName,
       },
     });
 
     const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(await response.json(), "workspace snapshot presign GET response");
+    const getUrl = new URL(requireTestString(body.getUrl, "workspace snapshot getUrl"));
+    expect(getUrl.hostname).toBe("r2accounttest.r2.cloudflarestorage.com");
+    expect(getUrl.pathname).toBe(`/bundles-test/${objectKey}`);
+    expect(getUrl.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(getUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
+    expect(body.expiresAt).toEqual(expect.stringMatching(/^20/u));
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+
+    const workerBodyResponse = await handleRunnerOutboundRequest(
       new Request(`http://workspace-snapshots.worker/workspace-snapshots/${snapshotId}`, {
         headers: createRunnerProxyHeaders({
           "x-hosted-runtime-attempt-id": "attempt_1",
@@ -2648,11 +2793,64 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-length")).toBe(String(bytes.byteLength));
-    await expect(response.arrayBuffer()).resolves.toEqual(toArrayBuffer(bytes));
-    expect(arrayBuffer).not.toHaveBeenCalled();
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(workerBodyResponse.status).toBe(405);
+  });
+
+  it("rejects direct-R2 workspace snapshot GET presigns without a fresh workspace version fence", async () => {
+    const snapshotId = "snapshot_read_stale";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+
+    const missingVersionRunner = createWorkspaceVersionAwareUserRunner();
+    const missingVersionResponse = await handleRunnerOutboundRequest(
+      new Request(`http://workspace-snapshots.worker/workspace-snapshots/${snapshotId}/presign-get`, {
+        body: JSON.stringify({
+          objectKey,
+          snapshotId,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: missingVersionRunner.getByName,
+        },
+      }),
+      "member_123",
+    );
+    expect(missingVersionResponse.status).toBe(401);
+    expect(missingVersionRunner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+
+    const staleVersionRunner = createWorkspaceVersionAwareUserRunner({
+      workspaceVersion: "5",
+    });
+    const staleVersionResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: staleVersionRunner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(staleVersionResponse.status).toBe(401);
+    expect(staleVersionRunner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
   });
 
   it("does not expose a test-gated Worker body upload route for workspace snapshots", async () => {
@@ -2996,6 +3194,61 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint failed.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("retires workspace snapshot upload sessions without deleting the object when checkpoint fetch is ambiguous", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_checkpoint_ambiguous";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async () => {
+      throw new Error("ambiguous checkpoint failure");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint failed.",
     });
@@ -4147,6 +4400,29 @@ function createWorkspaceSnapshotPresignPutRequest(input: {
   );
 }
 
+function createWorkspaceSnapshotPresignGetRequest(input: {
+  objectKey: string;
+  snapshotId: string;
+  workspaceVersion: string;
+}): Request {
+  return new Request(
+    `http://workspace-snapshots.worker/workspace-snapshots/${input.snapshotId}/presign-get`,
+    {
+      body: JSON.stringify({
+        objectKey: input.objectKey,
+        snapshotId: input.snapshotId,
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        "x-hosted-runtime-attempt-id": "attempt_1",
+        "x-hosted-runtime-lease-generation": "9",
+        "x-hosted-runtime-workspace-version": input.workspaceVersion,
+      }),
+      method: "POST",
+    },
+  );
+}
+
 function createWorkspaceSnapshotAbortRequest(input: {
   objectKey: string;
   snapshotId: string;
@@ -4218,13 +4494,16 @@ function createWorkspaceSnapshotHeadMetadata(
 
 function createWorkspaceSnapshotUploadSession(
   snapshotRef: HostedWorkspaceSnapshotV2Ref,
+  input: {
+    expiresAt?: string;
+  } = {},
 ): HostedWorkspaceSnapshotUploadSession {
   const session = {
     attemptId: "attempt_1",
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: snapshotRef.encryption,
     expectedWorkspaceVersion: "4",
-    expiresAt: "9999-01-01T00:00:00.000Z",
+    expiresAt: input.expiresAt ?? "9999-01-01T00:00:00.000Z",
     leaseGeneration: "9",
     objectKey: snapshotRef.objectKey,
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,

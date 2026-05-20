@@ -10,6 +10,10 @@ import {
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import type {
   HostedExecutionContainerNamespaceLike,
@@ -24,6 +28,10 @@ import {
   hostedWorkspaceSnapshotUserPrefix,
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  type HostedWorkspaceSnapshotUploadSession,
+} from "../src/workspace-snapshot-store.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -2381,6 +2389,43 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
+  it("best-effort deletes the previous workspace snapshot object when replacing the active upload session", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner } = createRunnerHarness({ bucket });
+    const previousObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_previous.snapshot.enc`;
+    const nextObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_next.snapshot.enc`;
+    await bucket.put(previousObjectKey, "previous-encrypted-snapshot");
+
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: previousObjectKey,
+        snapshotId: "snapshot_previous",
+      }),
+    );
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: nextObjectKey,
+        snapshotId: "snapshot_next",
+      }),
+    );
+
+    expect(bucket.deleted).toContain(previousObjectKey);
+    expect(bucket.objects.has(previousObjectKey)).toBe(false);
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: "snapshot_previous",
+      userId: "member_123",
+    })).resolves.toBeNull();
+    await expect(runner.readHostedWorkspaceSnapshotUploadSession({
+      snapshotId: "snapshot_next",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      objectKey: nextObjectKey,
+      snapshotId: "snapshot_next",
+    });
+  });
+
   it("does not invoke or recreate state when deletion wins the pre-container drain window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2660,14 +2705,17 @@ function createDurableObjectState(): {
   const alarms: string[] = [];
   const sql = createTestSqlStorage();
   const waitUntilPromises: Promise<unknown>[] = [];
+  const values = new Map<string, unknown>();
   const storage: DurableObjectStorageLike = {
-    delete: async () => false,
+    delete: async (key) => values.delete(key),
     deleteAlarm: async () => {
       alarms.push("deleted");
     },
-    get: async () => undefined,
+    get: async <T>(key: string): Promise<T | undefined> => values.get(key) as T | undefined,
     getAlarm: async () => null,
-    put: async () => {},
+    put: async <T>(key: string, value: T): Promise<void> => {
+      values.set(key, value);
+    },
     setAlarm: async (scheduledTime) => {
       const date = scheduledTime instanceof Date
         ? scheduledTime
@@ -2772,6 +2820,35 @@ function createBrowserVaultReplicaRef(input: {
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash,
+  };
+}
+
+function createWorkspaceSnapshotUploadSessionForTest(input: {
+  objectKey: string;
+  snapshotId: string;
+}): HostedWorkspaceSnapshotUploadSession {
+  return {
+    attemptId: "attempt_1",
+    createdAt: FIXED_NOW,
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: input.objectKey,
+        snapshotId: input.snapshotId,
+        userId: "member_123",
+      }),
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_test",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    expectedWorkspaceVersion: "4",
+    expiresAt: "2026-04-27T00:10:00.000Z",
+    leaseGeneration: "9",
+    objectKey: input.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+    snapshotId: input.snapshotId,
+    userId: "member_123",
+    workspaceVersion: "4",
   };
 }
 

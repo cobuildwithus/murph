@@ -419,12 +419,10 @@ export class HostedUserRunner {
     if (previousCurrent !== undefined) {
       const previousSession = parseHostedWorkspaceSnapshotUploadSession(previousCurrent);
       if (previousSession.userId === input.userId && previousSession.snapshotId !== session.snapshotId) {
-        await this.state.storage.delete(
-          workspaceSnapshotUploadSessionStorageKey(previousSession.snapshotId),
-        );
+        await deleteR2ObjectIfSupported(this.bucket, previousSession.objectKey)
+          .catch(() => undefined);
       }
     }
-    await this.state.storage.put(workspaceSnapshotUploadSessionStorageKey(session.snapshotId), session);
     await this.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
     return session;
   }
@@ -435,14 +433,17 @@ export class HostedUserRunner {
   }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     await this.stateStore.bindUser(input.userId);
     const value = await this.state.storage.get<unknown>(
-      workspaceSnapshotUploadSessionStorageKey(input.snapshotId),
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
     );
     if (value === undefined) {
       return null;
     }
     const session = parseHostedWorkspaceSnapshotUploadSession(value);
-    if (session.userId !== input.userId || session.snapshotId !== input.snapshotId) {
+    if (session.userId !== input.userId) {
       throw new Error("Hosted workspace snapshot upload session is outside the bound user namespace.");
+    }
+    if (session.snapshotId !== input.snapshotId) {
+      return null;
     }
     return session;
   }
@@ -452,19 +453,19 @@ export class HostedUserRunner {
     userId: string;
   }): Promise<{ deleted: boolean }> {
     await this.stateStore.bindUser(input.userId);
-    const deleted = await this.state.storage.delete(
-      workspaceSnapshotUploadSessionStorageKey(input.snapshotId),
-    );
     const current = await this.state.storage.get<unknown>(
       workspaceSnapshotUploadSessionCurrentStorageKey(),
     );
-    if (current !== undefined) {
-      const currentSession = parseHostedWorkspaceSnapshotUploadSession(current);
-      if (currentSession.userId === input.userId && currentSession.snapshotId === input.snapshotId) {
-        await this.state.storage.delete(workspaceSnapshotUploadSessionCurrentStorageKey());
-      }
+    if (current === undefined) {
+      return { deleted: false };
     }
-    return { deleted };
+    const currentSession = parseHostedWorkspaceSnapshotUploadSession(current);
+    if (currentSession.userId === input.userId && currentSession.snapshotId === input.snapshotId) {
+      return {
+        deleted: await this.state.storage.delete(workspaceSnapshotUploadSessionCurrentStorageKey()),
+      };
+    }
+    return { deleted: false };
   }
 
   async beginRuntimeWriteFenceForSmoke(input: {
@@ -2899,10 +2900,6 @@ function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecut
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
-}
-
-function workspaceSnapshotUploadSessionStorageKey(snapshotId: string): string {
-  return `workspace-snapshot-upload-session:${snapshotId}`;
 }
 
 function workspaceSnapshotUploadSessionCurrentStorageKey(): string {

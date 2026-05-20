@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createHostedR2PresignedGetUrl,
   createHostedR2PresignedPutUrl,
   readHostedR2PresignEnvironment,
 } from "../src/r2-presigned-url.js";
@@ -49,6 +50,25 @@ describe("R2 presigned URL helpers", () => {
     expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe(
       "content-type;host;if-none-match;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
     );
+    expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
+  });
+
+  it("creates presigned GET URLs with only the host header signed", async () => {
+    const result = await createHostedR2PresignedGetUrl({
+      environment: {
+        accessKeyId: "AKIDEXAMPLE",
+        bucketName: "snapshot-bucket",
+        endpoint: "https://example-account.r2.cloudflarestorage.com",
+        secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      },
+      expiresSeconds: 600,
+      key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
+      now: new Date("2026-05-20T12:34:56.000Z"),
+    });
+    const url = new URL(result.url);
+
+    expect(url.pathname).toBe("/snapshot-bucket/users/ns/workspace-snapshots/snapshot-1.snapshot.enc");
+    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
     expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
   });
 

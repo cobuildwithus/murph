@@ -77,6 +77,9 @@ export function readHostedRunnerInternalOperation(input: {
     if (/^\/workspace-snapshots\/[^/]+\/presign-put$/u.test(input.pathname)) {
       return "workspace_snapshot_presign_put";
     }
+    if (/^\/workspace-snapshots\/[^/]+\/presign-get$/u.test(input.pathname)) {
+      return "workspace_snapshot_presign_get";
+    }
     if (/^\/workspace-snapshots\/[^/]+\/complete$/u.test(input.pathname)) {
       return "workspace_snapshot_complete";
     }

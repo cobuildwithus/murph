@@ -20,24 +20,55 @@ import {
 } from "../src/workspace-snapshot-local.js";
 
 describe("workspace snapshot local restore", () => {
-  it("rejects unsafe tar member paths before extraction", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
-    const snapshotId = "snapshot_unsafe_tar";
-    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
-    const userId = "member_123";
-    const aad = buildHostedWorkspaceSnapshotV2Aad({
-      objectKey,
-      snapshotId,
-      userId,
+  it.each([
+    "../escape.txt",
+    "/absolute.txt",
+    "safe/..",
+  ])("rejects unsafe tar member path %s before extraction", async (name) => {
+    await expectUnsafeTarArchive({
+      entries: [{
+        body: Buffer.from("outside\n", "utf8"),
+        name,
+      }],
+      expectedError: "Hosted workspace snapshot tar entry path is unsafe.",
     });
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-    const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 10);
-    const plaintextArchive = gzipSync(createTarArchive([{
-      body: Buffer.from("outside\n", "utf8"),
-      name: "../escape.txt",
-    }]));
+  });
+
+  it.each([
+    { name: "symlink", typeFlag: "2" },
+    { name: "hardlink", typeFlag: "1" },
+    { name: "fifo", typeFlag: "6" },
+  ])("rejects unsafe tar $name entries before extraction", async ({ typeFlag }) => {
+    await expectUnsafeTarArchive({
+      entries: [{
+        linkName: "target.txt",
+        name: "link.txt",
+        typeFlag,
+      }],
+      expectedError: "Hosted workspace snapshot tar entry type is unsafe.",
+    });
+  });
+});
+
+async function expectUnsafeTarArchive(input: {
+  entries: TarArchiveEntry[];
+  expectedError: string;
+}): Promise<void> {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
+  const durableRoot = path.join(tempRoot, "durable");
+  const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
+  const snapshotId = "snapshot_unsafe_tar";
+  const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
+  const userId = "member_123";
+  const aad = buildHostedWorkspaceSnapshotV2Aad({
+    objectKey,
+    snapshotId,
+    userId,
+  });
+  const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 10);
+  const plaintextArchive = gzipSync(createTarArchive(input.entries));
+  try {
     const cipher = createCipheriv("aes-256-gcm", Buffer.from(dataKey), Buffer.from(iv));
     cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
     const encryptedBody = Buffer.concat([
@@ -70,27 +101,36 @@ describe("workspace snapshot local restore", () => {
       userId,
     };
 
-    try {
-      await expect(restoreEncryptedWorkspaceSnapshot({
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        encryptedFilePath,
-        ref,
-      })).rejects.toThrow("Hosted workspace snapshot tar entry path is unsafe.");
-      await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-      dataKey.fill(0);
-    }
-  });
-});
+    await expect(restoreEncryptedWorkspaceSnapshot({
+      dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+      durableRoot,
+      encryptedFilePath,
+      ref,
+    })).rejects.toThrow(input.expectedError);
+    await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true });
+    dataKey.fill(0);
+  }
+}
 
-function createTarArchive(entries: Array<{ body: Buffer; name: string }>): Buffer {
+interface TarArchiveEntry {
+  body?: Buffer;
+  linkName?: string;
+  name: string;
+  typeFlag?: string;
+}
+
+function createTarArchive(entries: TarArchiveEntry[]): Buffer {
   const chunks: Buffer[] = [];
   for (const entry of entries) {
-    chunks.push(createTarHeader(entry.name, entry.body.byteLength));
-    chunks.push(entry.body);
-    const padding = (512 - (entry.body.byteLength % 512)) % 512;
+    const body = entry.body ?? Buffer.alloc(0);
+    chunks.push(createTarHeader(entry.name, body.byteLength, {
+      linkName: entry.linkName,
+      typeFlag: entry.typeFlag,
+    }));
+    chunks.push(body);
+    const padding = (512 - (body.byteLength % 512)) % 512;
     if (padding > 0) {
       chunks.push(Buffer.alloc(padding));
     }
@@ -99,7 +139,14 @@ function createTarArchive(entries: Array<{ body: Buffer; name: string }>): Buffe
   return Buffer.concat(chunks);
 }
 
-function createTarHeader(name: string, size: number): Buffer {
+function createTarHeader(
+  name: string,
+  size: number,
+  input: {
+    linkName?: string;
+    typeFlag?: string;
+  } = {},
+): Buffer {
   const header = Buffer.alloc(512);
   header.write(name, 0, 100, "utf8");
   writeTarOctal(header, 100, 8, 0o644);
@@ -108,7 +155,10 @@ function createTarHeader(name: string, size: number): Buffer {
   writeTarOctal(header, 124, 12, size);
   writeTarOctal(header, 136, 12, 0);
   header.fill(0x20, 148, 156);
-  header.write("0", 156, 1, "ascii");
+  header.write(input.typeFlag ?? "0", 156, 1, "ascii");
+  if (input.linkName) {
+    header.write(input.linkName, 157, 100, "utf8");
+  }
   header.write("ustar", 257, 5, "ascii");
   header.write("00", 263, 2, "ascii");
 

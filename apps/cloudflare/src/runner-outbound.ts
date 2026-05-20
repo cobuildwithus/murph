@@ -69,6 +69,7 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "./storage-paths.ts";
 import {
+  createHostedR2PresignedGetUrl,
   createHostedR2PresignedPutUrl,
   readHostedR2PresignEnvironment,
 } from "./r2-presigned-url.ts";
@@ -79,6 +80,8 @@ import {
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
 const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
+const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS = 10 * 60;
+const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -142,7 +145,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-put)?$/u.exec(
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-get|\/presign-put)?$/u.exec(
         url.pathname,
       );
       if (!match?.groups) {
@@ -175,6 +178,18 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
+      if (match.groups.suffix === "/presign-get") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotPresignGetRequest({
+          env,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
       if (match.groups.suffix === "/data-key/unwrap") {
         if (request.method !== "POST") {
           return methodNotAllowed();
@@ -199,17 +214,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      if (match.groups.suffix || request.method !== "GET") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerWorkspaceSnapshotReadRequest({
-        bucket: env.BUNDLES,
-        env,
-        request,
-        snapshotId: match.groups.snapshotId,
-        userId,
-      });
+      return methodNotAllowed();
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
@@ -601,7 +606,12 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   if (!session) {
     return notFound();
   }
-  if (Date.parse(session.expiresAt) <= Date.now()) {
+  const sessionExpiresAtMs = Date.parse(session.expiresAt);
+  const nowMs = Date.now();
+  if (
+    !Number.isFinite(sessionExpiresAtMs)
+    || sessionExpiresAtMs <= nowMs
+  ) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: null,
       deleteObject: false,
@@ -610,6 +620,17 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
       userId: input.userId,
     });
     return jsonError("Hosted workspace snapshot upload session expired.", 410);
+  }
+  const remainingSessionSeconds = Math.floor((sessionExpiresAtMs - nowMs) / 1000);
+  if (remainingSessionSeconds < HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS) {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: null,
+      deleteObject: false,
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    return jsonError("Hosted workspace snapshot upload session is too close to expiry.", 410);
   }
   if (
     session.attemptId !== writeFence.attemptId
@@ -645,6 +666,10 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   const presigned = await createHostedR2PresignedPutUrl({
     contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
     environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
+    expiresSeconds: Math.min(
+      HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS,
+      remainingSessionSeconds,
+    ),
     key: requestedObjectKey,
     metadata: {
       encryptedsha256: encryptedObjectSha256,
@@ -659,47 +684,46 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   });
 }
 
-async function handleRunnerWorkspaceSnapshotReadRequest(input: {
-  bucket: WorkspaceSnapshotR2BucketLike;
+async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  const authorized = await writeRequestOwnsRuntimeWriteFence({
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
     env: input.env,
     request: input.request,
     userId: input.userId,
   });
-  if (!authorized) {
+  if (!writeFence) {
     return unauthorized();
   }
-  if (!input.bucket.get) {
-    return notFound();
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  const requestedObjectKey = requireSnapshotDataKeyString(body.objectKey, "objectKey");
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot presign snapshotId does not match its route.", 400);
   }
 
-  const objectKey = await hostedWorkspaceSnapshotObjectKey({
+  const expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
-  const object = await input.bucket.get(objectKey);
-  if (!object) {
-    return notFound();
-  }
-  if (object.body) {
-    const headers = new Headers({
-      "content-type": "application/octet-stream",
-    });
-    const objectSize = object.size;
-    if (typeof objectSize === "number" && Number.isSafeInteger(objectSize) && objectSize >= 0) {
-      headers.set("content-length", String(objectSize));
-    }
-    return new Response(object.body, {
-      headers,
-    });
+  if (requestedObjectKey !== expectedObjectKey) {
+    return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  return jsonError("Hosted workspace snapshot object stream is unavailable.", 503);
+  const presigned = await createHostedR2PresignedGetUrl({
+    environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
+    key: requestedObjectKey,
+  });
+
+  return json({
+    expiresAt: presigned.expiresAt,
+    getUrl: presigned.url,
+  });
 }
 
 async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
@@ -710,12 +734,12 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  const authorized = await writeRequestOwnsRuntimeWriteFence({
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
     env: input.env,
     request: input.request,
     userId: input.userId,
   });
-  if (!authorized) {
+  if (!writeFence) {
     return unauthorized();
   }
 
@@ -1024,44 +1048,38 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot checkpoint write fence is stale.", 409);
   }
-  const checkpointResponse = await fetchHostedExecutionWorkspaceSnapshotCheckpoint({
-    checkpointRequest,
-    environment: input.environment,
-    fetchImpl: fetch,
+  await retireWorkspaceSnapshotUploadSession({
+    bucket: input.bucket,
+    deleteObject: false,
+    env: input.env,
+    objectKey: snapshotRef.objectKey,
+    snapshotId: input.snapshotId,
     userId: input.userId,
   });
-  if (!checkpointResponse.ok) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: false,
-      env: input.env,
-      objectKey: snapshotRef.objectKey,
-      snapshotId: input.snapshotId,
+  let checkpointResponse: Response;
+  try {
+    checkpointResponse = await fetchHostedExecutionWorkspaceSnapshotCheckpoint({
+      checkpointRequest,
+      environment: input.environment,
+      fetchImpl: fetch,
       userId: input.userId,
     });
+  } catch {
+    return jsonError("Hosted workspace snapshot checkpoint failed.", 502);
+  }
+  if (!checkpointResponse.ok) {
     return jsonError("Hosted workspace snapshot checkpoint failed.", checkpointResponse.status);
   }
-  const checkpoint = parseHostedWorkspaceCheckpointResponse(await checkpointResponse.json());
+  let checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
+  try {
+    checkpoint = parseHostedWorkspaceCheckpointResponse(await checkpointResponse.json());
+  } catch {
+    return jsonError("Hosted workspace snapshot checkpoint response is invalid.", 502);
+  }
   if (checkpoint.workspace.userId !== input.userId) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: false,
-      env: input.env,
-      objectKey: snapshotRef.objectKey,
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-    });
     return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
   }
   if (!checkpoint.checkpointed) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: false,
-      env: input.env,
-      objectKey: snapshotRef.objectKey,
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-    });
     return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
   }
 
@@ -1073,24 +1091,8 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointSnapshotRef.archive.encryptedByteSize !== snapshotRef.archive.encryptedByteSize
     || checkpointSnapshotRef.archive.encryptedObjectSha256 !== snapshotRef.archive.encryptedObjectSha256
   ) {
-    await retireWorkspaceSnapshotUploadSession({
-      bucket: input.bucket,
-      deleteObject: false,
-      env: input.env,
-      objectKey: snapshotRef.objectKey,
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-    });
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
-
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: false,
-    env: input.env,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
 
   return json({
     checkpoint,

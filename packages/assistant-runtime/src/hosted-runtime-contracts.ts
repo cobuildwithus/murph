@@ -12,7 +12,9 @@ export type {
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
 export type {
+  HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
+  HostedRuntimeArtifactWriter,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
@@ -39,7 +41,8 @@ export type {
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
   HostedRuntimeWorkspaceSnapshotDataKey,
-  HostedRuntimeWorkspaceSnapshotUploadStart,
+  HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
+  HostedRuntimeWorkspaceSnapshotSessionStart,
   HostedRuntimeWorkspaceSnapshotPort,
 } from "./hosted-runtime/platform.ts";
 export {

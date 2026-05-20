@@ -121,6 +121,62 @@ export async function createHostedR2PresignedPutUrl(input: {
   };
 }
 
+export async function createHostedR2PresignedGetUrl(input: {
+  environment: HostedR2PresignEnvironment;
+  expiresSeconds?: number;
+  key: string;
+  now?: Date;
+}): Promise<{
+  expiresAt: string;
+  url: string;
+}> {
+  const expiresSeconds = normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds);
+  const now = input.now ?? new Date();
+  const amzDate = formatAmzDate(now);
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
+  const endpoint = new URL(input.environment.endpoint);
+  const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
+  const signedHeaders = "host";
+  const query = new URLSearchParams({
+    "X-Amz-Algorithm": AWS4_ALGORITHM,
+    "X-Amz-Content-Sha256": UNSIGNED_PAYLOAD,
+    "X-Amz-Credential": `${input.environment.accessKeyId}/${credentialScope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(expiresSeconds),
+    "X-Amz-SignedHeaders": signedHeaders,
+  });
+  const canonicalQuery = canonicalizeSearchParams(query);
+  const canonicalHeaders = [
+    `host:${endpoint.host}`,
+    "",
+  ].join("\n");
+  const canonicalRequest = [
+    "GET",
+    canonicalUri,
+    canonicalQuery,
+    canonicalHeaders,
+    signedHeaders,
+    UNSIGNED_PAYLOAD,
+  ].join("\n");
+  const stringToSign = [
+    AWS4_ALGORITHM,
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+  const signingKey = await deriveAws4SigningKey({
+    dateStamp,
+    secretAccessKey: input.environment.secretAccessKey,
+  });
+  query.set("X-Amz-Signature", await hmacHex(signingKey, stringToSign));
+
+  return {
+    expiresAt: new Date(now.getTime() + expiresSeconds * 1000).toISOString(),
+    url: `${endpoint.origin}${canonicalUri}?${canonicalizeSearchParams(query)}`,
+  };
+}
+
 function normalizeHostedR2PresignMetadataHeaders(
   metadata: Readonly<Record<string, string>>,
 ): [string, string][] {

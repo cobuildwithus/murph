@@ -1,11 +1,10 @@
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
   createHostedConversationMailboxImportItem,
   enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
-  readHostedMaterializedArtifactPaths,
   type HostedAssistantRuntimeConfig,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedWorkspaceRuntimeJobOptions,
@@ -15,15 +14,11 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  readHostedExecutionSnapshotBaseRef,
-  readHostedExecutionSnapshotDeltaRef,
-  readHostedExecutionSnapshotHotRef,
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  type HostedExecutionBundleRef,
   type HostedExecutionConversationMessageWake,
   type HostedExecutionSnapshotRef,
   type HostedExecutionSystemWake,
@@ -36,21 +31,6 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HostedWorkspaceSnapshotContinuityIncompleteError,
-  createHostedPortableWorkspaceManifestFromBundle,
-  listHostedBundleInlineFiles,
-  readHostedPortableWorkspaceDeltaManifestFromBundle,
-  readHostedPortableWorkspaceManifestFromBundle,
-  readHostedWorkspaceSkippedInlineFiles,
-  sha256HostedBundleHex,
-  type HostedBundleInlineLocation,
-  type HostedCodexHomeSnapshotDiagnostics,
-  type HostedPortableWorkspaceDeltaManifest,
-  type HostedPortableWorkspaceManifest,
-  type HostedWorkspaceSkippedInlineFile,
-  type HostedWorkspaceSnapshotSizeDiagnostics,
-} from "@murphai/runtime-state/node";
 
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
@@ -87,6 +67,10 @@ import {
 import {
   createEncryptedWorkspaceSnapshotFile,
 } from "./workspace-snapshot-local.ts";
+import {
+  materializeLegacyWorkspaceRefsForV2Snapshot,
+  prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
+} from "./legacy-workspace-snapshot-materialization.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
@@ -175,10 +159,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           redactedStatus: checkpointInput.redactedStatus ?? null,
           snapshotRef: null,
         },
-        codexHomeSnapshotHashSecret: resolveHostedCodexHomeSnapshotHashSecret({
-          forwardedEnv: runtime.forwardedEnv,
-          platformEnv: runtime.platformEnv,
-        }),
         userId: input.request.userId,
         vaultRoot,
       });
@@ -262,7 +242,6 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 }
 
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
-  codexHomeSnapshotHashSecret: string | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -273,41 +252,28 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
   const request = requireHostedWorkspaceBridgeIdleCheckpointRequest(input.request);
-
-  const currentRefs = input.platform.workspacePort?.read
-    ? await readHostedWorkspaceCurrentCheckpointRefs(input)
-    : {
-        baseSnapshotRef: null,
-        snapshotRef: null,
-      };
-  const preservedState = currentRefs.snapshotRef
-    ? await readHostedWorkspaceEffectivePreservedState({
-        platform: input.platform,
-        snapshotRef: currentRefs.snapshotRef,
-      })
-    : null;
+  const legacyMaterialization = await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
+    artifactStore: input.platform.artifactStore,
+    platform: input.platform,
+    vaultRoot: input.vaultRoot,
+  });
   await writeHostedCheckpointSnapshotLifecycleLog({
     details: {
-      baseSnapshotRefPresent: currentRefs.baseSnapshotRef !== null,
-      preservedStatePresent: preservedState !== null,
-      snapshotRefPresent: currentRefs.snapshotRef !== null,
+      currentSnapshotRefPresent: legacyMaterialization.currentSnapshotRefPresent,
+      legacyBundleRefPresent: legacyMaterialization.legacyBundleRefPresent,
+      preservedInlineFileCount: legacyMaterialization.preservedInlineFileCount,
+      skippedInlineFileCount: legacyMaterialization.skippedInlineFileCount,
     },
     eventCode: "checkpoint.snapshot_plan",
     level: "info",
     platform: input.platform,
     request,
   });
-  return currentRefs.baseSnapshotRef
-    ? await createFullCompactionSnapshot({
-        ...input,
-        preservedState,
-        request,
-      })
-    : await createFullSeedSnapshot({
-        ...input,
-        preservedState,
-        request,
-      });
+  return await createHostedWorkspaceV2Snapshot({
+    ...input,
+    legacyMaterialization,
+    request,
+  });
 }
 
 function requireHostedWorkspaceBridgeIdleCheckpointRequest(
@@ -323,57 +289,22 @@ function requireHostedWorkspaceBridgeIdleCheckpointRequest(
   };
 }
 
-class HostedWorkspaceCommittedStateUnavailableError extends Error {
-  constructor() {
-    super("Hosted workspace committed snapshot state is missing.");
-    this.name = "HostedWorkspaceCommittedStateUnavailableError";
-  }
-}
+const HOSTED_WORKSPACE_V2_SNAPSHOT_MODE = "workspace_snapshot_v2";
 
-type HostedWorkspaceFullCheckpointCommitKind =
-  | "full_compaction"
-  | "full_seed";
-type HostedWorkspaceCheckpointCommitKind = HostedWorkspaceFullCheckpointCommitKind;
-type HostedWorkspaceCheckpointSnapshotMode = "full" | "workspace_snapshot_v2";
-type HostedWorkspaceCheckpointPolicy = "full";
-
-async function createFullSeedSnapshot(
-  input: HostedWorkspaceBridgeFullSnapshotInput,
-): Promise<{
-  checkpoint?: HostedWorkspaceCheckpointResponse;
-  snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}> {
-  return await createFullSnapshot({
-    ...input,
-    commitKind: "full_seed",
-  });
-}
-
-async function createFullCompactionSnapshot(
-  input: HostedWorkspaceBridgeFullSnapshotInput,
-): Promise<{
-  checkpoint?: HostedWorkspaceCheckpointResponse;
-  snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}> {
-  return await createFullSnapshot({
-    ...input,
-    commitKind: "full_compaction",
-  });
-}
-
-interface HostedWorkspaceBridgeFullSnapshotInput {
-  codexHomeSnapshotHashSecret: string | null;
+interface HostedWorkspaceBridgeV2SnapshotInput {
+  legacyMaterialization: Awaited<
+    ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
+  >;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  preservedState?: HostedWorkspaceEffectivePreservedState | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceIdleCheckpointRequest;
   userId: string;
   vaultRoot: string;
 }
 
-async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput & {
-  commitKind: HostedWorkspaceFullCheckpointCommitKind;
-}): Promise<{
+async function createHostedWorkspaceV2Snapshot(
+  input: HostedWorkspaceBridgeV2SnapshotInput,
+): Promise<{
   checkpoint?: HostedWorkspaceCheckpointResponse;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }> {
@@ -383,20 +314,16 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     throw new Error("Hosted workspace snapshot port is required for v2 checkpoints.");
   }
 
-  const skippedInlineFiles = await readHostedWorkspaceSkippedInlineFilesBestEffort({
-    vaultRoot: input.vaultRoot,
-  });
   await writeHostedCheckpointSnapshotLifecycleLog({
-    commitKind: input.commitKind,
     details: {
-      checkpointPolicy: "full",
       checkpointReason: input.request.reason,
+      legacyBundleRefPresent: input.legacyMaterialization.legacyBundleRefPresent,
       nextWakeAtPresent: input.request.nextWakeAt != null,
       nextWakeReasonPresent: input.request.nextWakeReason != null,
-      preservedStatePresent: input.preservedState !== null && input.preservedState !== undefined,
+      preservedInlineFileCount: input.legacyMaterialization.preservedInlineFileCount,
       redactedStatusPresent: input.request.redactedStatus !== null,
-      skippedInlineFileCount: skippedInlineFiles.length,
-      snapshotMode: "workspace_snapshot_v2",
+      skippedInlineFileCount: input.legacyMaterialization.skippedInlineFileCount,
+      snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
     },
     eventCode: "checkpoint.snapshot_started",
     level: "info",
@@ -408,7 +335,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   let checkpoint: HostedWorkspaceCheckpointResponse | undefined;
   let encryptedByteSize = 0;
   let encryptedTemporaryDirectoryPath: string | null = null;
-  let startedUpload: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startUpload"]>> | null = null;
+  let snapshotSession: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startSnapshotSession"]>> | null = null;
   let checkpointAttempted = false;
   try {
     leaseCheckCount += 1;
@@ -418,27 +345,26 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       stage: "before_snapshot",
       userId: input.userId,
     });
-    await materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot({
+    await materializeLegacyWorkspaceRefsForV2Snapshot({
       artifactStore: input.platform.artifactStore,
-      files: skippedInlineFiles,
-      preservedState: input.preservedState ?? null,
       operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+      plan: input.legacyMaterialization,
       vaultRoot: input.vaultRoot,
     });
 
-    startedUpload = await input.platform.workspaceSnapshotPort.startUpload({
+    snapshotSession = await input.platform.workspaceSnapshotPort.startSnapshotSession({
       expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
       nextWakeAt: input.request.nextWakeAt,
       nextWakeReason: input.request.nextWakeReason,
       reason: "idle_shutdown",
     });
     const encrypted = await createEncryptedWorkspaceSnapshotFile({
-      aad: startedUpload.encryption.aad,
-      dataKey: startedUpload.encryption.dataKeyBase64,
+      aad: snapshotSession.encryption.aad,
+      dataKey: snapshotSession.encryption.dataKeyBase64,
       durableRoot: resolveWorkspaceDurableRoot(input.vaultRoot),
-      ivBase64: startedUpload.encryption.ivBase64,
+      ivBase64: snapshotSession.encryption.ivBase64,
       maxEncryptedBytes: Math.min(
-        startedUpload.limits.maxSinglePartEncryptedBytes,
+        snapshotSession.limits.maxSinglePartEncryptedBytes,
         HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
       ),
       outputDir: resolveWorkspaceScratchRoot(input.vaultRoot),
@@ -446,7 +372,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     encryptedTemporaryDirectoryPath = encrypted.temporaryDirectoryPath;
     encryptedByteSize = encrypted.encryptedByteSize;
     const warnEncryptedBytes = Math.min(
-      startedUpload.limits.warnEncryptedBytes,
+      snapshotSession.limits.warnEncryptedBytes,
       HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
     );
     if (encryptedByteSize >= warnEncryptedBytes) {
@@ -455,8 +381,8 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
         details: {
           encryptedByteSize,
           fileCount: encrypted.fileCount,
-          maxSinglePartEncryptedBytes: startedUpload.limits.maxSinglePartEncryptedBytes,
-          snapshotMode: "workspace_snapshot_v2",
+          maxSinglePartEncryptedBytes: snapshotSession.limits.maxSinglePartEncryptedBytes,
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           totalPlainBytes: encrypted.totalPlainBytes,
           warnEncryptedBytes,
         },
@@ -474,19 +400,12 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       stage: "before_direct_r2_put",
       userId: input.userId,
     });
-    const presignedUpload = await input.platform.workspaceSnapshotPort.presignUploadedObject({
+    await input.platform.workspaceSnapshotPort.putSnapshotObjectDirect({
       encryptedByteSize: encrypted.encryptedByteSize,
       encryptedObjectSha256: encrypted.encryptedObjectSha256,
-      objectKey: startedUpload.objectKey,
-      snapshotId: startedUpload.snapshotId,
-    });
-    await input.platform.workspaceSnapshotPort.directPutEncryptedObject({
-      encryptedByteSize: encrypted.encryptedByteSize,
-      encryptedObjectSha256: encrypted.encryptedObjectSha256,
-      expiresAt: presignedUpload.expiresAt,
-      putUrl: presignedUpload.putUrl,
+      objectKey: snapshotSession.objectKey,
       sourceFilePath: encrypted.encryptedFilePath,
-      snapshotId: startedUpload.snapshotId,
+      snapshotId: snapshotSession.snapshotId,
     });
 
     snapshotRef = {
@@ -500,20 +419,20 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       },
       createdAt: new Date().toISOString(),
       encryption: {
-        aad: startedUpload.encryption.aad,
-        ivBase64: startedUpload.encryption.ivBase64,
-        rootKeyId: startedUpload.encryption.rootKeyId,
-        scheme: startedUpload.encryption.scheme,
-        wrappedDataKey: startedUpload.encryption.wrappedDataKey,
+        aad: snapshotSession.encryption.aad,
+        ivBase64: snapshotSession.encryption.ivBase64,
+        rootKeyId: snapshotSession.encryption.rootKeyId,
+        scheme: snapshotSession.encryption.scheme,
+        wrappedDataKey: snapshotSession.encryption.wrappedDataKey,
       },
-      objectKey: startedUpload.objectKey,
+      objectKey: snapshotSession.objectKey,
       schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
-      snapshotId: startedUpload.snapshotId,
+      snapshotId: snapshotSession.snapshotId,
       upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
       userId: input.userId,
     };
     checkpointAttempted = true;
-    const completed = await input.platform.workspaceSnapshotPort.completeUploadedSnapshot({
+    const completed = await input.platform.workspaceSnapshotPort.completeSnapshotSession({
       checkpointRequest: {
         ...input.request,
         snapshotRef,
@@ -524,34 +443,32 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     checkpoint = completed.checkpoint;
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
-    if (startedUpload && !checkpointAttempted) {
+    if (snapshotSession && !checkpointAttempted) {
       try {
-        await input.platform.workspaceSnapshotPort.abortUpload({
-          objectKey: startedUpload.objectKey,
-          snapshotId: startedUpload.snapshotId,
+        await input.platform.workspaceSnapshotPort.abortSnapshotSession({
+          objectKey: snapshotSession.objectKey,
+          snapshotId: snapshotSession.snapshotId,
         });
       } catch (abortError) {
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
-            snapshotMode: "workspace_snapshot_v2",
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
           error: abortError,
           level: "warn",
-          message: "Hosted workspace snapshot upload abort failed.",
+          message: "Hosted workspace snapshot session abort failed.",
           phase: "checkpoint",
           userId: input.userId,
         });
       }
     }
     await writeHostedCheckpointSnapshotLifecycleLog({
-      commitKind: input.commitKind,
       details: {
-        checkpointPolicy: "full",
         encryptedByteSize,
         leaseCheckCount,
         snapshotElapsedMs: Date.now() - startedAt,
-        snapshotMode: "workspace_snapshot_v2",
+        snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
       },
       error: classifiedError,
       eventCode: "checkpoint.snapshot_failed",
@@ -571,7 +488,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
-            snapshotMode: "workspace_snapshot_v2",
+            snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
           error: cleanupError,
           level: "warn",
@@ -584,243 +501,17 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   }
 
   await writeHostedCheckpointSnapshotMetricLog({
-    checkpointPolicy: "full",
-    commitKind: input.commitKind,
     encryptedByteSize,
     leaseCheckCount,
     platform: input.platform,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
-    snapshotMode: "workspace_snapshot_v2",
+    snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
   });
 
   return {
     ...(checkpoint ? { checkpoint } : {}),
     snapshotRef,
-  };
-}
-
-async function readHostedWorkspaceSkippedInlineFilesBestEffort(input: {
-  vaultRoot: string;
-}): Promise<HostedWorkspaceSkippedInlineFile[]> {
-  try {
-    return await readHostedWorkspaceSkippedInlineFiles(input);
-  } catch {
-    return [];
-  }
-}
-
-async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: {
-  artifactStore: HostedWorkspaceRuntimeJobOptions["platform"]["artifactStore"];
-  files: readonly HostedWorkspaceSkippedInlineFile[];
-  operatorHomeRoot: string;
-  preservedState: HostedWorkspaceEffectivePreservedState | null;
-  vaultRoot: string;
-}): Promise<void> {
-  const preservedInlineFiles = new Map(
-    (input.preservedState?.inlineFiles ?? []).map((file) => [`${file.root}:${file.path}`, file]),
-  );
-  const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-    vaultRoot: input.vaultRoot,
-  });
-  for (const file of input.files) {
-    const root = resolveHostedWorkspaceSkippedInlineFileRoot({
-      operatorHomeRoot: input.operatorHomeRoot,
-      root: file.root,
-      vaultRoot: input.vaultRoot,
-    });
-    const targetPath = resolveSafeHostedWorkspaceSnapshotPath(root, file.path);
-    if (
-      materializedArtifactPaths.has(`${file.root}:${file.path}`)
-      || await hostedWorkspaceSnapshotPathExists(targetPath)
-    ) {
-      continue;
-    }
-    const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
-    const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
-      ? inlineFile.bytes
-      : await input.artifactStore.get(file.sha256);
-    if (bytes === null) {
-      throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
-    }
-    if (bytes.byteLength !== file.size || sha256HostedBundleHex(bytes) !== file.sha256) {
-      throw new Error("Hosted workspace skipped-inline artifact digest does not match its manifest.");
-    }
-    await mkdir(path.dirname(targetPath), { mode: 0o700, recursive: true });
-    await writeFile(targetPath, bytes, { mode: 0o600 });
-  }
-}
-
-async function hostedWorkspaceSnapshotPathExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resolveHostedWorkspaceSkippedInlineFileRoot(input: {
-  operatorHomeRoot: string;
-  root: string;
-  vaultRoot: string;
-}): string {
-  if (input.root === "vault") {
-    return input.vaultRoot;
-  }
-  if (input.root === "operator-home") {
-    return input.operatorHomeRoot;
-  }
-  throw new Error("Hosted workspace skipped-inline file root is unsupported.");
-}
-
-function resolveSafeHostedWorkspaceSnapshotPath(root: string, relativePath: string): string {
-  const normalizedRoot = path.resolve(root);
-  if (!relativePath || path.isAbsolute(relativePath)) {
-    throw new Error("Hosted workspace skipped-inline file path is invalid.");
-  }
-  const targetPath = path.resolve(
-    normalizedRoot,
-    ...relativePath.split(path.posix.sep),
-  );
-  const relativeToRoot = path.relative(normalizedRoot, targetPath);
-  if (
-    relativeToRoot === ""
-    || relativeToRoot.startsWith("..")
-    || path.isAbsolute(relativeToRoot)
-  ) {
-    throw new Error("Hosted workspace skipped-inline file path escapes its root.");
-  }
-  return targetPath;
-}
-
-interface HostedWorkspaceEffectivePreservedState {
-  inlineFiles: HostedBundleInlineLocation[];
-}
-
-async function readHostedWorkspaceEffectivePreservedState(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  snapshotRef: HostedExecutionSnapshotRef | null;
-}): Promise<HostedWorkspaceEffectivePreservedState> {
-  const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
-  if (!baseSnapshotRef) {
-    return createHostedWorkspaceEffectivePreservedState();
-  }
-
-  const baseBundle = await input.platform.artifactStore.get(baseSnapshotRef.hash);
-  if (!baseBundle) {
-    throw new HostedWorkspaceCommittedStateUnavailableError();
-  }
-  const baseManifest =
-    readHostedPortableWorkspaceManifestFromBundle(baseBundle)
-      ?? createHostedPortableWorkspaceManifestFromBundle(baseBundle);
-  const baseInlineFiles = listHostedBundleInlineFiles({
-    bytes: baseBundle,
-    expectedKind: "vault",
-  });
-  const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(input.snapshotRef);
-  if (!deltaSnapshotRef) {
-    const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
-    if (hotSnapshotRef) {
-      const hotBundle = await input.platform.artifactStore.get(hotSnapshotRef.hash);
-      if (!hotBundle) {
-        throw new HostedWorkspaceCommittedStateUnavailableError();
-      }
-      const hotInlineFiles = listHostedBundleInlineFiles({
-        bytes: hotBundle,
-        expectedKind: "vault",
-      });
-      return createHostedWorkspaceEffectivePreservedState(
-        createHostedWorkspaceBridgeOverlayInlineFiles({
-          baseInlineFiles,
-          overlayInlineFiles: hotInlineFiles,
-        }),
-      );
-    }
-    return createHostedWorkspaceEffectivePreservedState(baseInlineFiles);
-  }
-
-  const deltaBundle = await input.platform.artifactStore.get(deltaSnapshotRef.hash);
-  if (!deltaBundle) {
-    throw new HostedWorkspaceCommittedStateUnavailableError();
-  }
-  const deltaManifest = readHostedPortableWorkspaceDeltaManifestFromBundle(deltaBundle);
-  if (!deltaManifest) {
-    throw new HostedWorkspaceCommittedStateUnavailableError();
-  }
-
-  if (deltaManifest.baseManifestHash !== baseManifest.manifestHash) {
-    throw new HostedWorkspaceCommittedStateUnavailableError();
-  }
-
-  return createHostedWorkspaceEffectivePreservedState(
-    createHostedWorkspaceBridgeWorkingInlineFiles({
-      baseInlineFiles,
-      deltaBundle,
-      deltaManifest,
-    }),
-  );
-}
-
-function createHostedWorkspaceEffectivePreservedState(
-  inlineFiles: HostedBundleInlineLocation[] = [],
-): HostedWorkspaceEffectivePreservedState {
-  return {
-    inlineFiles,
-  };
-}
-
-function createHostedWorkspaceBridgeOverlayInlineFiles(input: {
-  baseInlineFiles: readonly HostedBundleInlineLocation[];
-  overlayInlineFiles: readonly HostedBundleInlineLocation[];
-}): HostedBundleInlineLocation[] {
-  const files = new Map(input.baseInlineFiles.map((file) => [
-    `${file.root}:${file.path}`,
-    file,
-  ]));
-  for (const file of input.overlayInlineFiles) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-  return [...files.values()];
-}
-
-function createHostedWorkspaceBridgeWorkingInlineFiles(input: {
-  baseInlineFiles: readonly HostedBundleInlineLocation[];
-  deltaBundle: Uint8Array | ArrayBuffer;
-  deltaManifest: HostedPortableWorkspaceDeltaManifest;
-}): HostedBundleInlineLocation[] {
-  const files = new Map(input.baseInlineFiles.map((file) => [
-    `${file.root}:${file.path}`,
-    file,
-  ]));
-  for (const tombstone of input.deltaManifest.tombstones) {
-    files.delete(`${tombstone.root}:${tombstone.path}`);
-  }
-  for (const file of listHostedBundleInlineFiles({
-    bytes: input.deltaBundle,
-    expectedKind: "vault",
-  })) {
-    files.set(`${file.root}:${file.path}`, file);
-  }
-  return [...files.values()];
-}
-
-async function readHostedWorkspaceCurrentCheckpointRefs(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-}): Promise<{
-  baseSnapshotRef: HostedExecutionBundleRef | null;
-  snapshotRef: HostedExecutionSnapshotRef | null;
-}> {
-  if (!input.platform.workspacePort?.read) {
-    throw new TypeError(
-      "Hosted workspace runtime bridge requires workspace read support for layered checkpoints.",
-    );
-  }
-
-  const currentWorkspace = await input.platform.workspacePort.read();
-  return {
-    baseSnapshotRef: readHostedExecutionSnapshotBaseRef(currentWorkspace.workspace?.snapshotRef ?? null),
-    snapshotRef: currentWorkspace.workspace?.snapshotRef ?? null,
   };
 }
 
@@ -840,14 +531,12 @@ function classifyHostedWorkspaceSnapshotFailure(error: unknown): unknown {
 }
 
 async function writeHostedCheckpointSnapshotLifecycleLog(input: {
-  commitKind?: HostedWorkspaceCheckpointCommitKind;
   details?: HostedRuntimeRedactedJson;
   error?: unknown;
   eventCode: HostedRuntimeLogEventCode;
   level: "error" | "info" | "warn";
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceIdleCheckpointRequest;
-  workspaceSnapshotSizeDiagnostics?: HostedWorkspaceSnapshotSizeDiagnostics | null;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -856,16 +545,9 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
-    ...(input.commitKind ? { commitKind: input.commitKind } : {}),
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
-  if (input.workspaceSnapshotSizeDiagnostics) {
-    appendHostedWorkspaceSnapshotSizeDiagnostics(
-      redactedJson,
-      input.workspaceSnapshotSizeDiagnostics,
-    );
-  }
 
   try {
     await input.platform.logPort.write({
@@ -951,71 +633,13 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 }
 
-async function writeHostedCodexHomeSnapshotFailureLog(input: {
-  error: unknown;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleCheckpointRequest;
-  snapshotMode?: HostedWorkspaceCheckpointSnapshotMode;
-}): Promise<void> {
-  if (!(input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError)) {
-    return;
-  }
-  const diagnostics = input.error.codexHomeSnapshotDiagnostics;
-  const safeErrorMessage = redactHostedRuntimeDiagnosticText(readHostedSnapshotErrorMessage(input.error));
-  const errorName = input.error.name;
-  const snapshotMode = input.snapshotMode ?? "full";
-
-  console.warn("Hosted Codex home snapshot failed.", {
-    errorName,
-    snapshotMode,
-  });
-  if (!input.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointReason: input.request.reason,
-    errorName,
-    safeErrorMessage,
-    snapshotMode,
-  };
-  if (input.error instanceof HostedWorkspaceSnapshotContinuityIncompleteError) {
-    redactedJson.continuityReason = input.error.reason;
-  }
-  appendHostedCodexHomeSnapshotDiagnostics(redactedJson, diagnostics);
-
-  try {
-    await input.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: input.request.attemptId,
-          component: "workspace",
-          eventCode: "workspace.codex_home_snapshot_failed",
-          leaseGeneration: input.request.leaseGeneration,
-          level: "error",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: input.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted Codex home snapshot failure log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
 async function writeHostedCheckpointSnapshotMetricLog(input: {
-  checkpointPolicy: HostedWorkspaceCheckpointPolicy;
-  commitKind: HostedWorkspaceCheckpointCommitKind;
   encryptedByteSize: number;
   leaseCheckCount: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
-  snapshotMode: HostedWorkspaceCheckpointSnapshotMode;
+  snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -1023,9 +647,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
-    checkpointPolicy: input.checkpointPolicy,
     checkpointReason: input.request.reason,
-    commitKind: input.commitKind,
     leaseCheckCount: input.leaseCheckCount,
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,
@@ -1053,181 +675,6 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
-}
-
-async function writeHostedCheckpointSnapshotSizeDiagnosticLog(input: {
-  checkpointPolicy: HostedWorkspaceCheckpointPolicy;
-  diagnostics: HostedWorkspaceSnapshotSizeDiagnostics;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleCheckpointRequest;
-  snapshotMode: HostedWorkspaceCheckpointSnapshotMode;
-}): Promise<void> {
-  if (!input.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {
-    checkpointPolicy: input.checkpointPolicy,
-    checkpointReason: input.request.reason,
-    snapshotMode: input.snapshotMode,
-  };
-  appendHostedWorkspaceSnapshotSizeDiagnostics(redactedJson, input.diagnostics);
-
-  try {
-    await input.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: input.request.attemptId,
-          component: "workspace",
-          eventCode: "checkpoint.snapshot_size_progress",
-          leaseGeneration: input.request.leaseGeneration,
-          level: "info",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: input.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted checkpoint snapshot size diagnostic log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
-function appendHostedWorkspaceSnapshotSizeDiagnostics(
-  redactedJson: HostedRuntimeRedactedJson,
-  diagnostics: HostedWorkspaceSnapshotSizeDiagnostics,
-): void {
-  if (diagnostics.workspaceSnapshotArchiveArtifactCount !== null) {
-    redactedJson.workspaceSnapshotArchiveArtifactCount =
-      diagnostics.workspaceSnapshotArchiveArtifactCount;
-  }
-  if (diagnostics.workspaceSnapshotArchiveFileCount !== null) {
-    redactedJson.workspaceSnapshotArchiveFileCount =
-      diagnostics.workspaceSnapshotArchiveFileCount;
-  }
-  if (diagnostics.workspaceSnapshotArchiveInlineFileCount !== null) {
-    redactedJson.workspaceSnapshotArchiveInlineFileCount =
-      diagnostics.workspaceSnapshotArchiveInlineFileCount;
-  }
-  if (diagnostics.workspaceSnapshotArchivePreservedArtifactCandidateCount !== null) {
-    redactedJson.workspaceSnapshotArchivePreservedArtifactCandidateCount =
-      diagnostics.workspaceSnapshotArchivePreservedArtifactCandidateCount;
-  }
-  if (diagnostics.workspaceSnapshotArchivePreservedArtifactIncludedCount !== null) {
-    redactedJson.workspaceSnapshotArchivePreservedArtifactIncludedCount =
-      diagnostics.workspaceSnapshotArchivePreservedArtifactIncludedCount;
-  }
-  redactedJson.workspaceSnapshotClassSummary =
-    diagnostics.workspaceSnapshotClassSummary;
-  redactedJson.workspaceSnapshotExternalArtifactBytes =
-    diagnostics.workspaceSnapshotExternalArtifactBytes;
-  redactedJson.workspaceSnapshotExternalArtifactCount =
-    diagnostics.workspaceSnapshotExternalArtifactCount;
-  redactedJson.workspaceSnapshotFingerprintStatus =
-    diagnostics.workspaceSnapshotFingerprintStatus;
-  redactedJson.workspaceSnapshotIncludedFileCount =
-    diagnostics.workspaceSnapshotIncludedFileCount;
-  redactedJson.workspaceSnapshotInlineBytes =
-    diagnostics.workspaceSnapshotInlineBytes;
-  redactedJson.workspaceSnapshotLargestFiles =
-    diagnostics.workspaceSnapshotLargestFiles;
-  redactedJson.workspaceSnapshotMaxFileBytes =
-    diagnostics.workspaceSnapshotMaxFileBytes;
-  redactedJson.workspaceSnapshotMaxFileClass =
-    diagnostics.workspaceSnapshotMaxFileClass;
-}
-
-function appendHostedCodexHomeSnapshotDiagnostics(
-  redactedJson: HostedRuntimeRedactedJson,
-  diagnostics: HostedCodexHomeSnapshotDiagnostics | null,
-): void {
-  if (!diagnostics) {
-    return;
-  }
-
-  redactedJson.codexResumeArchivedUnsupportedCount =
-    diagnostics.codexResumeArchivedUnsupportedCount;
-  redactedJson.codexResumeFlushFailed =
-    diagnostics.codexResumeFlushFailed;
-  redactedJson.codexResumeInvalidPathCount =
-    diagnostics.codexResumeInvalidPathCount;
-  redactedJson.codexResumeMissingRolloutCount =
-    diagnostics.codexResumeMissingRolloutCount;
-  redactedJson.codexResumeRolloutBytes =
-    diagnostics.codexResumeRolloutBytes;
-  redactedJson.codexResumeRolloutFileBytes =
-    diagnostics.codexResumeRolloutFileBytes;
-  redactedJson.codexResumeRolloutRelHashes =
-    diagnostics.codexResumeRolloutRelHashes;
-  redactedJson.codexResumeThreadCount =
-    diagnostics.codexResumeThreadCount;
-}
-
-async function writeHostedCodexHomeSnapshotDiagnosticLog(input: {
-  diagnostics: HostedCodexHomeSnapshotDiagnostics | null;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleCheckpointRequest;
-}): Promise<void> {
-  if (!input.diagnostics || !input.platform.logPort) {
-    return;
-  }
-
-  const redactedJson: HostedRuntimeRedactedJson = {};
-  appendHostedCodexHomeSnapshotDiagnostics(redactedJson, input.diagnostics);
-
-  try {
-    await input.platform.logPort.write({
-      entries: [
-        {
-          at: new Date().toISOString(),
-          attemptId: input.request.attemptId,
-          component: "workspace",
-          eventCode: "workspace.codex_home_snapshot",
-          leaseGeneration: input.request.leaseGeneration,
-          level: "info",
-          phase: "checkpoint",
-          redactedJson,
-          workspaceVersion: input.request.expectedWorkspaceVersion,
-        },
-      ],
-    });
-  } catch (error) {
-    console.warn("Hosted Codex home snapshot diagnostic log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
-function readHostedSnapshotErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
-
-function resolveHostedCodexHomeSnapshotHashSecret(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
-  platformEnv: Readonly<Record<string, string>>;
-}): string | null {
-  return normalizeHostedRuntimeBridgeString(
-    input.forwardedEnv.HOSTED_LOG_FINGERPRINT_SECRET
-      ?? input.platformEnv.HOSTED_LOG_FINGERPRINT_SECRET,
-  );
-}
-
-function normalizeHostedRuntimeBridgeString(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function assertHostedWorkspaceBridgeCheckpointLease(input: {
