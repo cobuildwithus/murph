@@ -409,6 +409,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
   let encryptedByteSize = 0;
   let encryptedTemporaryDirectoryPath: string | null = null;
   let startedUpload: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startUpload"]>> | null = null;
+  let checkpointAttempted = false;
   try {
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
@@ -473,10 +474,19 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       stage: "before_direct_r2_put",
       userId: input.userId,
     });
+    const presignedUpload = await input.platform.workspaceSnapshotPort.presignUploadedObject({
+      encryptedByteSize: encrypted.encryptedByteSize,
+      encryptedObjectSha256: encrypted.encryptedObjectSha256,
+      objectKey: startedUpload.objectKey,
+      snapshotId: startedUpload.snapshotId,
+    });
     await input.platform.workspaceSnapshotPort.directPutEncryptedObject({
       encryptedByteSize: encrypted.encryptedByteSize,
-      putUrl: startedUpload.putUrl,
+      encryptedObjectSha256: encrypted.encryptedObjectSha256,
+      expiresAt: presignedUpload.expiresAt,
+      putUrl: presignedUpload.putUrl,
       sourceFilePath: encrypted.encryptedFilePath,
+      snapshotId: startedUpload.snapshotId,
     });
 
     snapshotRef = {
@@ -502,6 +512,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
       upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
       userId: input.userId,
     };
+    checkpointAttempted = true;
     const completed = await input.platform.workspaceSnapshotPort.completeUploadedSnapshot({
       checkpointRequest: {
         ...input.request,
@@ -513,7 +524,7 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     checkpoint = completed.checkpoint;
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
-    if (startedUpload) {
+    if (startedUpload && !checkpointAttempted) {
       try {
         await input.platform.workspaceSnapshotPort.abortUpload({
           objectKey: startedUpload.objectKey,

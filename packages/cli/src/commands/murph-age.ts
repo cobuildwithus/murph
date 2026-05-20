@@ -14,6 +14,7 @@ import {
 } from '@murphai/query'
 import {
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
+  buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt,
   buildMurphAgePublicCalculatorView,
   buildMurphAgeResearchCalculatorView,
   calculateMurphAgePublicReportFromSubmittedInputs,
@@ -22,14 +23,27 @@ import {
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
+  listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
+  listMurphAgeWearableActivityBenchmarkCards,
+  listMurphAgeWearableLabAggregateReceiptTemplates,
+  MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
+  resolveMurphAgeSourceRoute,
+  type MurphAgeSourceRouteId,
+  type MurphAgeWearableResidualParameterPack,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
@@ -383,6 +397,14 @@ const murphAgePublicWearableContextSummarySchema = z.object({
 const murphAgePublicWearableBridgeFeatureReadinessSchema = z.object({
   family: z.enum(['activity', 'hrv', 'quality', 'resting-heart-rate', 'sleep']),
   featureKey: z.string().min(1),
+  measurementMethod: z.enum([
+    'consumer-device',
+    'estimated-fitness',
+    'psg-or-ecg',
+    'research-actigraphy',
+    'self-report',
+    'unknown',
+  ]),
   methodQualifier: z.enum(['not-required', 'recommended', 'required']),
   metricKeys: z.array(z.string().min(1)),
   missingMetricKeys: z.array(z.string().min(1)),
@@ -430,8 +452,110 @@ const murphAgeWearableScoreBearingFamilyPolicySchema = z.object({
   scoreContributionAuthorized: z.literal(false),
   signalMetricKeys: z.array(z.string().min(1)),
 })
+const murphAgeWearableParameterPackContractSchema = z.object({
+  deploymentRightsRequiredForProductScoring: z.literal(true),
+  emptyPackBehavior: z.literal('exact-current-zero-delta-behavior'),
+  familyPriorityOrder: z.array(z.enum(['activity', 'sleep', 'resting-heart-rate', 'hrv', 'estimated-vo2-max'])),
+  requiredFields: z.array(z.enum([
+    'anchorCardId',
+    'calibrationIntercept',
+    'calibrationSlope',
+    'deploymentRights',
+    'deviceMethodQualifier',
+    'eligibleAgeSexBounds',
+    'endpoint',
+    'evidenceTier',
+    'family',
+    'featureNames',
+    'featureTransforms',
+    'globalWearableCap',
+    'horizonYears',
+    'packHash',
+    'promotionGateResults',
+    'sourceRouteId',
+    'validDayNightRules',
+  ])),
+  requiredForResidualScoring: z.literal(true),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION),
+  supportedDeploymentRights: z.array(z.enum(['not-authorized', 'research-only', 'product-authorized'])),
+})
+const murphAgeSourceRouteIdSchema = z.custom<MurphAgeSourceRouteId>(
+  (value): value is MurphAgeSourceRouteId =>
+    typeof value === 'string' && resolveMurphAgeSourceRoute(value) !== null,
+  { error: 'Expected a known Murph Age source route id.' },
+)
+const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableResidualParameterPack> = z.object({
+  anchorCardId: murphAgeScoreBearingModelCardIdSchema,
+  calibrationIntercept: z.number().finite(),
+  calibrationSlope: z.number().finite().positive(),
+  deploymentRights: z.enum(['not-authorized', 'research-only', 'product-authorized']),
+  endpoint: z.literal('10-year all-cause mortality'),
+  evidenceTier: murphAgeValidationEvidenceTierSchema,
+  family: z.literal('activity'),
+  featureWeights: z.array(z.object({
+    center: z.number().finite(),
+    coefficient: z.number().finite(),
+    metricKey: z.string().min(1).max(128),
+    scale: z.number().finite().positive(),
+    transform: z.literal('center-scale'),
+  })).min(1),
+  globalWearableCapLogit: z.number().finite().positive().max(1),
+  horizonYears: z.literal(10),
+  intercept: z.number().finite(),
+  layerId: z.literal('activity-residual-v1'),
+  packHash: z.string().min(8).max(128).regex(/^[a-z0-9][a-z0-9._-]+$/u),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
+  sourceRouteId: murphAgeSourceRouteIdSchema,
+})
+const murphAgeWearableResidualFeatureSetContractSchema = z.object({
+  activityVolumeCandidateMetricKeys: z.array(z.string().min(1)),
+  coverageControlMetricKeys: z.array(z.string().min(1)),
+  firstPassOnlyFamily: z.literal('activity'),
+  methodQualifierRequired: z.literal(true),
+  proprietaryDeviceScoresExcluded: z.literal(true),
+  trailingWindowDays: z.literal(28),
+})
+const murphAgeWearableResidualLayerContractSchema = z.object({
+  anchorCardIds: z.array(murphAgeScoreBearingModelCardIdSchema),
+  parameterPackContract: murphAgeWearableParameterPackContractSchema,
+  combinationScale: z.literal('logit-residual'),
+  coverageScoringPolicy: z.literal('gate-and-control-only-not-age-contribution'),
+  currentDeploymentStatus: z.literal('contract-only-no-validated-parameters'),
+  deployableParameterizationAvailable: z.literal(false),
+  deferredFamilyOrder: z.array(z.enum(['sleep', 'resting-heart-rate', 'hrv', 'estimated-vo2-max'])),
+  family: z.literal('activity'),
+  featureSetContract: murphAgeWearableResidualFeatureSetContractSchema,
+  layerId: z.literal('activity-residual-v1'),
+  minimumValidDays28d: z.literal(14),
+  missingnessPolicy: z.literal('missing-or-undercovered-family-zero-delta-widen-uncertainty'),
+  nuisanceControlMetricKeys: z.array(z.string().min(1)),
+  primaryDecisionComparisons: z.array(z.enum([
+    'm5-vs-m1-lab-body',
+    'm5-vs-m2-coverage-control',
+  ])),
+  productAuthorized: z.literal(false),
+  productMultiplier: z.literal(0),
+  qualityGateMetricKeys: z.array(z.string().min(1)),
+  requiredPromotionSignals: z.array(z.enum([
+    'deployable-parameterization-authorized',
+    'm5-beats-m1-proper-score',
+    'm5-beats-m2-coverage-control',
+    'm5-calibration-passes',
+    'negative-controls-pass',
+    'replicates-in-two-source-families',
+    'reverse-causation-washout-passes',
+  ])),
+  researchMultiplier: z.literal(0),
+  residualDeltaStatus: z.literal('zero-until-validated'),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  signalMetricKeys: z.array(z.string().min(1)),
+  trailingWindowDays: z.literal(28),
+})
 const murphAgeWearableScoreBearingStrategySchema = z.object({
   aggregateReceiptOnlyAuthorizesScienceReview: z.literal(true),
+  architecturePattern: z.literal('anchor-plus-wearable-residual-shadow'),
   deployableParameterizationRequiredForProductScoring: z.literal(true),
   familyPolicies: z.array(murphAgeWearableScoreBearingFamilyPolicySchema),
   modelForm: z.literal('penalized-additive-residual-bounded-and-shrunk'),
@@ -441,6 +565,7 @@ const murphAgeWearableScoreBearingStrategySchema = z.object({
   ])),
   productStatus: z.literal('context-only'),
   productWearableMultiplier: z.literal(0),
+  residualLayerContract: murphAgeWearableResidualLayerContractSchema,
   requiredPromotionSignals: z.array(z.enum([
     'deployable-parameterization-authorized',
     'm5-beats-m1-proper-score',
@@ -505,6 +630,28 @@ const murphAgeWearableShadowReadinessSchema = z.object({
   warnings: z.array(murphAgePublicWarningSchema),
 })
 
+const murphAgeWearableResidualLayerViewSchema = z.object({
+  anchorCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  eligibleForResidualResearch: z.boolean(),
+  finalRiskProbability: z.number().nullable(),
+  layerId: z.literal('activity-residual-v1'),
+  parameterPackHash: z.string().min(1).nullable(),
+  parameterizationAvailable: z.boolean(),
+  productAuthorized: z.literal(false),
+  residualDeltaLogit: z.number(),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  selectedMetricKeys: z.array(z.string().min(1)),
+  status: z.enum([
+    'blocked-incompatible-anchor',
+    'ineligible-insufficient-coverage',
+    'mechanics-ready-zero-delta',
+    'research-parameterized-shadow-delta',
+  ]),
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+
 export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
@@ -558,9 +705,10 @@ export const murphAgeReportResultSchema = z.object({
   mode: murphAgeModeSchema,
   researchCandidateCards: z.array(murphAgePublicResearchCandidateCardAssessmentSchema),
   result: murphAgePublicResultSchema.nullable(),
-  schemaVersion: z.literal('murph.age.public-calculator-report.v4'),
+  schemaVersion: z.literal(MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION),
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
+  wearableResidualLayer: murphAgeWearableResidualLayerViewSchema.nullable(),
 })
 
 const murphAgePublicAgeEstimateViewSchema = z.object({
@@ -590,6 +738,15 @@ const murphAgePublicDomainContributionViewSchema = z.object({
   contributionYears: z.number().nullable(),
   featureKeys: z.array(z.string().min(1)),
   moduleId: z.string().min(1),
+})
+const murphAgePublicDriverViewSchema = murphAgePublicFeatureContributionViewSchema.extend({
+  absoluteContributionYears: z.number().nonnegative(),
+  direction: z.enum(['neutral', 'older', 'younger']),
+})
+const murphAgePublicDriverSummaryViewSchema = z.object({
+  neutral: z.array(murphAgePublicDriverViewSchema),
+  older: z.array(murphAgePublicDriverViewSchema),
+  younger: z.array(murphAgePublicDriverViewSchema),
 })
 const murphAgePublicWearableCalculatorViewSchema = z.object({
   candidateFeatureCount: z.number().int().nonnegative(),
@@ -623,6 +780,7 @@ export const murphAgePublicCalculatorViewResultSchema = z.object({
   displayStatus: murphAgeDisplayStatusSchema,
   domainContributions: z.array(murphAgePublicDomainContributionViewSchema),
   featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
+  featureDrivers: murphAgePublicDriverSummaryViewSchema,
   missingFeatureKeys: z.array(z.string().min(1)),
   mode: murphAgeModeSchema,
   product: z.object({
@@ -639,6 +797,7 @@ export const murphAgePublicCalculatorViewResultSchema = z.object({
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
   wearable: murphAgePublicWearableCalculatorViewSchema,
+  wearableResidualLayer: murphAgeWearableResidualLayerViewSchema.nullable(),
 })
 const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
   bundleId: z.enum([
@@ -679,6 +838,13 @@ const murphAgeResearchModelStatusViewSchema = z.object({
   ])),
   contextOnlyMetricKeys: z.array(z.string().min(1)),
   currentModelFamily: z.literal('frozen-nhis-r399-plus-research-increments'),
+  composition: z.object({
+    anchorLayerStatus: z.literal('available-as-research-anchor-and-fallback-not-layered'),
+    currentScoringMode: z.literal('single-selected-research-card'),
+    labBodyStatus: z.literal('selected-card-score-not-additive-increment'),
+    nextArchitectureStep: z.literal('validate-anchor-plus-increment-before-layered-scoring'),
+    wearableStatus: z.literal('context-only-zero-product-multiplier'),
+  }),
   functionDisability: z.object({
     currentUse: z.literal('context-only-diagnostic-sidecar'),
     nextAction: z.literal('fresh-source-feasibility-before-promotion'),
@@ -723,6 +889,7 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   displayStatus: murphAgeDisplayStatusSchema,
   domainContributions: z.array(murphAgePublicDomainContributionViewSchema),
   featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
+  featureDrivers: murphAgePublicDriverSummaryViewSchema,
   missingFeatureKeys: z.array(z.string().min(1)),
   mode: murphAgeModeSchema,
   model: murphAgeResearchModelStatusViewSchema,
@@ -742,6 +909,7 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
   wearable: murphAgePublicWearableCalculatorViewSchema,
+  wearableResidualLayer: murphAgeWearableResidualLayerViewSchema.nullable(),
 })
 export const murphAgeCalculatorViewResultSchema = z.union([
   murphAgePublicCalculatorViewResultSchema,
@@ -783,15 +951,183 @@ const murphAgeAggregateEvidenceRouteSlotSchema = z.object({
   ])),
   sourceRouteId: z.string().min(1),
 })
+const murphAgeWearableLabAggregateReceiptModelIdSchema = z.enum([
+  'm0-anchor-only',
+  'm1-anchor-plus-lab-body-bp',
+  'm2-coverage-device-ehr-density-control',
+  'm3-wearable-residual',
+  'm4-wearable-plus-coverage',
+  'm5-residualized-wearable-after-controls',
+])
+const murphAgeWearableLabAggregateReceiptMetricFieldSchema = z.enum([
+  'auc',
+  'brier',
+  'calibrationIntercept',
+  'calibrationSlope',
+  'cIndex',
+  'events',
+  'logLoss',
+  'meanPrediction',
+  'n',
+  'observedRate',
+])
+const murphAgeWearableLabAggregateReceiptEndpointFamilySchema = z.enum([
+  'all-cause-mortality',
+  'cardiometabolic-event',
+  'cvd-event',
+  'ehr-event-burden',
+  'hospitalization-or-acute-event',
+])
+const murphAgeWearableLabAggregateReceiptIndexDateRuleSchema = z.enum([
+  'baseline-exam-before-risk-window',
+  'feature-window-end-before-risk-window',
+])
+const murphAgeWearableLabAggregateReceiptOutcomeAscertainmentSchema = z.enum([
+  'adjudicated-event',
+  'death-registry',
+  'ehr-event',
+  'registry-linked-event',
+])
+const murphAgeWearableLabAggregateReceiptNegativeControlFieldSchema = z.enum([
+  'coverageOnlyBeatenByResidualWearable',
+  'deviceOrEhrDensityDominates',
+  'earlyEventSensitivityPassed',
+  'reverseCausationWashoutPassed',
+])
+const murphAgeIncrementEvaluationOutputBoundarySchema = z.object({
+  aggregateOnly: z.literal(true),
+  coefficientsExportAllowed: z.literal(false),
+  localArtifactPathExportAllowed: z.literal(false),
+  modelParametersExportAllowed: z.literal(false),
+  participantIdentifiersExportAllowed: z.literal(false),
+  participantLevelExportAllowed: z.literal(false),
+  predictionsExportAllowed: z.literal(false),
+  productDisplayExportAllowed: z.literal(false),
+  rowValuesExportAllowed: z.literal(false),
+  sourceTextExportAllowed: z.literal(false),
+  splitMembershipExportAllowed: z.literal(false),
+})
+const murphAgeWearableLabAggregateReceiptTemplateSchema = z.object({
+  denominator: z.object({
+    minimumEventCountForScienceDelta: z.literal(100),
+    optionalFields: z.array(z.literal('personYears')),
+    requiredFields: z.array(z.enum([
+      'evaluatedRowCount',
+      'eventCount',
+      'minimumCellCount',
+      'suppressedCellCount',
+    ])),
+    smallCellSuppressionRequired: z.literal(true),
+  }),
+  endpoint: z.object({
+    acceptedEndpointFamilies: z.array(murphAgeWearableLabAggregateReceiptEndpointFamilySchema),
+    acceptedIndexDateRules: z.array(murphAgeWearableLabAggregateReceiptIndexDateRuleSchema),
+    acceptedOutcomeAscertainments: z.array(murphAgeWearableLabAggregateReceiptOutcomeAscertainmentSchema),
+    endpointFrozenBeforeScoringRequired: z.literal(true),
+    outcomeLinkedRequired: z.literal(true),
+  }),
+  evaluatorFrozenBeforeExecutionRequired: z.literal(true),
+  evidenceTierOptions: z.array(z.enum([
+    'external-validation',
+    'internal-diagnostic',
+    'partner-aggregate',
+    'same-family-sanity',
+  ])),
+  metricFields: z.array(murphAgeWearableLabAggregateReceiptMetricFieldSchema),
+  modelIds: z.array(murphAgeWearableLabAggregateReceiptModelIdSchema),
+  negativeControlFields: z.array(murphAgeWearableLabAggregateReceiptNegativeControlFieldSchema),
+  productAuthorized: z.literal(false),
+  receiptSchemaVersion: z.literal(MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION),
+  sameDenominatorRequired: z.literal(true),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  sourceRouteAliases: z.array(z.string().min(1)),
+  sourceRouteId: z.string().min(1),
+})
+const murphAgeWearableActivityBenchmarkCardSchema = z.object({
+  acceptedAggregateMetricDeltaFields: z.array(z.string().min(1)),
+  accelerometryProtocol: z.enum([
+    'nhanes-2003-2006-hip-am7164-waking-7d',
+    'nhanes-2011-2014-wrist-gt3x-plus-24h-7d',
+  ]),
+  architecturePattern: z.literal('anchor-plus-wearable-residual-shadow'),
+  benchmarkId: z.enum([
+    'nhanes_2003_06_hip_activity_lmf_v1',
+    'nhanes_2011_14_wrist_activity_lmf_v1',
+  ]),
+  benchmarkStatus: z.literal('locked-card-ready-for-local-adapter'),
+  denominatorPolicy: z.object({
+    adultAgeRangeYears: z.object({
+      max: z.number().int().positive(),
+      min: z.number().int().positive(),
+    }),
+    eligibleLinkedMortalityRequired: z.literal(true),
+    labBodyAnchorDenominatorRequired: z.literal(true),
+    objectiveActivityWindowRequired: z.literal(true),
+    publicUseRowsOnly: z.literal(true),
+    sameDenominatorRequired: z.literal(true),
+  }),
+  endpoint: z.object({
+    endpointFamily: z.string().min(1),
+    endpointFrozenBeforeScoring: z.literal(true),
+    horizonYears: z.number().positive().nullable(),
+    indexDateRule: z.string().min(1),
+    outcomeAscertainment: z.string().min(1),
+    outcomeLinked: z.literal(true),
+    washoutDays: z.number().int().nonnegative(),
+  }),
+  evidenceClass: z.literal('public-same-family-shadow-benchmark'),
+  evidenceTierIfExecuted: z.string().min(1),
+  featureFamilies: z.array(z.string().min(1)),
+  measurementMethod: z.literal('research-actigraphy'),
+  modelLadder: z.array(z.object({
+    modelId: z.string().min(1),
+    required: z.literal(true),
+    role: z.string().min(1),
+  })),
+  negativeControlPolicy: z.object({
+    coverageOnlyControlRequired: z.literal(true),
+    earlyEventWashoutRequired: z.literal(true),
+    reverseCausationSensitivityRequired: z.literal(true),
+    shuffledWithinAgeSexBinsRequired: z.literal(true),
+  }),
+  outputBoundary: murphAgeIncrementEvaluationOutputBoundarySchema,
+  productAuthorized: z.literal(false),
+  requiredAggregateSampleFields: z.array(z.string().min(1)),
+  rowParsingAuthorized: z.literal(false),
+  schemaVersion: z.literal('murph.age.wearable-activity-benchmark-card.v1'),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  selectionPolicy: z.object({
+    calibrationFirst: z.literal(true),
+    discriminationOnlySelectionAllowed: z.literal(false),
+    properScoresRequired: z.literal(true),
+    sameDenominatorComparisonsRequired: z.literal(true),
+    testSetMutationAuthorized: z.literal(false),
+  }),
+  sourceRouteId: z.literal('nhanes-activity-shadow-lmf'),
+  splitPolicy: z.object({
+    aggregateSplitCountsExportOnly: z.literal(true),
+    frozenBeforeScoring: z.literal(true),
+    participantIdsExportAllowed: z.literal(false),
+    splitMembershipExportAllowed: z.literal(false),
+  }),
+  transformIds: z.array(z.string().min(1)),
+})
 export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   assessments: z.array(murphAgeAggregateEvidenceAssessmentSchema),
+  benchmarkCards: z.array(murphAgeWearableActivityBenchmarkCardSchema),
   inputCardCount: z.number().int().nonnegative(),
   missingSourceRouteIds: z.array(z.string().min(1)),
+  nextExecutionSourceRouteIds: z.array(z.string().min(1)),
   nextMissingSourceRouteIds: z.array(z.string().min(1)),
   readyCardCount: z.number().int().nonnegative(),
   readySourceRouteIds: z.array(z.string().min(1)),
+  receiptSlots: z.array(murphAgeWearableLabAggregateReceiptTemplateSchema),
   routeSlots: z.array(murphAgeAggregateEvidenceRouteSlotSchema),
-  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v1'),
+  sourceRouteIdsByExecutionPriority: z.array(z.string().min(1)),
+  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v4'),
   status: z.enum(['blocked', 'ready']),
 })
 
@@ -841,6 +1177,7 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
   sex: murphAgeSexSchema,
   submittedMetrics: z.array(murphAgeSubmittedMetricInputSchema).min(1),
+  wearableResidualParameterPack: murphAgeWearableResidualParameterPackSchema.optional(),
 })
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
 type MurphAgeSubmittedPreviewOptions = {
@@ -1135,12 +1472,16 @@ export function registerMurphAgeCommands(
       includeTemplates: z.boolean()
         .default(false)
         .describe('Include safe route-slot templates for the next aggregate receipts to collect.'),
+      includeBenchmarkCards: z.boolean()
+        .default(false)
+        .describe('Include locked aggregate-only public benchmark cards for local evaluator setup.'),
     }),
     examples: [
       {
         description:
           'Show the current aggregate receipt slots without providing any receipt cards.',
         options: {
+          includeBenchmarkCards: true,
           includeTemplates: true,
         },
       },
@@ -1159,6 +1500,7 @@ export function registerMurphAgeCommands(
       const candidates = options.input
         ? await loadMurphAgeAggregateEvidenceCandidateCards(options.input)
         : []
+      const assessmentCandidates = candidates.map(normalizeMurphAgeAggregateEvidenceCandidateCard)
       const ordinaryRouteIds = new Set(
         listMurphAgeOrdinaryLabWearableSourceRoutes().map((route) => route.routeId),
       )
@@ -1167,7 +1509,7 @@ export function registerMurphAgeCommands(
           .map((template) => buildMurphAgeAggregateEvidenceRouteSlotKey(template))
           .filter((key) => key !== null),
       )
-      const assessments = candidates.map((candidate) => {
+      const assessments = assessmentCandidates.map((candidate) => {
         const assessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(candidate)
         return summarizeMurphAgeAggregateEvidenceAssessment({
           assessment,
@@ -1181,9 +1523,14 @@ export function registerMurphAgeCommands(
           .filter((assessment) => assessment.status === 'ready' && assessment.routeId)
           .map((assessment) => assessment.routeId),
       )
+      const sourceRouteIdsByExecutionPriority = listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority()
+        .map((route) => route.routeId)
       const missingSourceRouteIds = listMurphAgeOrdinaryLabWearableSourceRoutes()
         .map((route) => route.routeId)
         .filter((routeId) => !readyRouteIds.has(routeId))
+      const nextExecutionSourceRouteIds = sourceRouteIdsByExecutionPriority
+        .filter((routeId) => !readyRouteIds.has(routeId))
+        .slice(0, 3)
       const routeSlots = options.includeTemplates
         ? listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates()
           .map((template) => ({
@@ -1196,18 +1543,29 @@ export function registerMurphAgeCommands(
             sourceRouteId: template.sourceRouteId,
           }))
         : []
+      const receiptSlots = options.includeTemplates
+        ? listMurphAgeWearableLabAggregateReceiptTemplates()
+          .map(({ artifactBoundary: _artifactBoundary, ...template }) => template)
+        : []
+      const benchmarkCards = options.includeBenchmarkCards
+        ? listMurphAgeWearableActivityBenchmarkCards()
+        : []
 
       return {
         assessments,
+        benchmarkCards,
         inputCardCount: candidates.length,
         missingSourceRouteIds,
+        nextExecutionSourceRouteIds,
         nextMissingSourceRouteIds: missingSourceRouteIds.slice(0, 3),
         readyCardCount: assessments.filter((assessment) => assessment.status === 'ready').length,
         readySourceRouteIds: listMurphAgeOrdinaryLabWearableSourceRoutes()
           .map((route) => route.routeId)
           .filter((routeId) => readyRouteIds.has(routeId)),
+        receiptSlots,
         routeSlots,
-        schemaVersion: 'murph.age.aggregate-evidence-status.v1' as const,
+        sourceRouteIdsByExecutionPriority,
+        schemaVersion: 'murph.age.aggregate-evidence-status.v4' as const,
         status: readyRouteIds.size > 0 ? 'ready' as const : 'blocked' as const,
       }
     },
@@ -1225,15 +1583,30 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
       { metricKey: 'HbA1c', unit: '%', value: 5.4 },
       { metricKey: 'HDL_C', unit: 'mg/dL', value: 58 },
       { metricKey: 'Triglycerides', unit: 'mg/dL', value: 95 },
+      { metricKey: 'albumin', unit: 'g/dL', value: 4.3 },
       { metricKey: 'creatinine', unit: 'mg/dL', value: 0.82 },
+      { metricKey: 'alkaline-phosphatase', unit: 'U/L', value: 70 },
+      { metricKey: 'white-blood-cell-count', unit: '10^3/uL', value: 5.8 },
+      { metricKey: 'lymphocyte-percentage', unit: 'percent', value: 32 },
+      { metricKey: 'red-cell-distribution-width', unit: 'percent', value: 12.8 },
       { metricKey: 'systolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 118 },
       { metricKey: 'diastolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 72 },
       { metricKey: 'body_mass_index', sourceKind: 'measurement', unit: 'kg/m2', value: 23.2 },
+      { metricKey: 'waist-circumference', sourceKind: 'measurement', unit: 'cm', value: 78 },
       { metricKey: 'steps', sourceKind: 'wearable-summary', unit: 'count', value: 9800 },
+      { metricKey: 'activity-minutes', sourceKind: 'wearable-summary', unit: 'minutes', value: 62 },
+      { metricKey: 'mvpa-minutes', sourceKind: 'wearable-summary', unit: 'minutes', value: 38 },
+      { metricKey: 'peak-30-minute-cadence', sourceKind: 'wearable-summary', unit: 'steps/min', value: 92 },
+      { metricKey: 'sedentary-minutes', sourceKind: 'wearable-summary', unit: 'minutes', value: 510 },
       { metricKey: 'total-sleep-minutes', sourceKind: 'sleep-summary', unit: 'minutes', value: 430 },
+      { metricKey: 'sleep-duration-variability-minutes', sourceKind: 'sleep-summary', unit: 'minutes', value: 42 },
+      { metricKey: 'sleep-regularity-score', sourceKind: 'sleep-summary', unit: 'score', value: 84 },
+      { metricKey: 'sleep-midpoint-variability-minutes', sourceKind: 'sleep-summary', unit: 'minutes', value: 36 },
       { metricKey: 'resting-heart-rate', sourceKind: 'wearable-summary', unit: 'bpm', value: 58 },
       { metricKey: 'hrv-rmssd', sourceKind: 'wearable-summary', unit: 'ms', value: 55 },
+      { metricKey: 'estimated-vo2-max', sourceKind: 'wearable-summary', unit: 'mL/kg/min', value: 45 },
       { metricKey: 'wearable_valid_day_count_28d', sourceKind: 'wearable-summary', unit: 'count', value: 24 },
+      { metricKey: 'wearable_valid_night_count_28d', sourceKind: 'sleep-summary', unit: 'count', value: 23 },
       { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.86 },
     ],
   }
@@ -1311,6 +1684,10 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
   if (Array.isArray(parsed.evidenceCards)) return parsed.evidenceCards
   if (Array.isArray(parsed.incrementEvaluationCards)) return parsed.incrementEvaluationCards
   return [parsed]
+}
+
+function normalizeMurphAgeAggregateEvidenceCandidateCard(candidate: unknown): unknown {
+  return buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt(candidate) ?? candidate
 }
 
 function summarizeMurphAgeAggregateEvidenceAssessment(input: {

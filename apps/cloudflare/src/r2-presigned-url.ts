@@ -59,6 +59,7 @@ export async function createHostedR2PresignedPutUrl(input: {
   environment: HostedR2PresignEnvironment;
   expiresSeconds?: number;
   key: string;
+  metadata?: Readonly<Record<string, string>>;
   now?: Date;
 }): Promise<{
   expiresAt: string;
@@ -71,7 +72,13 @@ export async function createHostedR2PresignedPutUrl(input: {
   const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
   const endpoint = new URL(input.environment.endpoint);
   const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
-  const signedHeaders = "content-type;host;if-none-match";
+  const metadataHeaders = normalizeHostedR2PresignMetadataHeaders(input.metadata ?? {});
+  const signedHeaders = [
+    "content-type",
+    "host",
+    "if-none-match",
+    ...metadataHeaders.map(([key]) => key),
+  ].join(";");
   const query = new URLSearchParams({
     "X-Amz-Algorithm": AWS4_ALGORITHM,
     "X-Amz-Content-Sha256": UNSIGNED_PAYLOAD,
@@ -85,6 +92,7 @@ export async function createHostedR2PresignedPutUrl(input: {
     `content-type:${input.contentType}`,
     `host:${endpoint.host}`,
     "if-none-match:*",
+    ...metadataHeaders.map(([key, value]) => `${key}:${value}`),
     "",
   ].join("\n");
   const canonicalRequest = [
@@ -111,6 +119,27 @@ export async function createHostedR2PresignedPutUrl(input: {
     expiresAt: new Date(now.getTime() + expiresSeconds * 1000).toISOString(),
     url: `${endpoint.origin}${canonicalUri}?${canonicalizeSearchParams(query)}`,
   };
+}
+
+function normalizeHostedR2PresignMetadataHeaders(
+  metadata: Readonly<Record<string, string>>,
+): [string, string][] {
+  return Object.entries(metadata)
+    .map(([key, value]) => {
+      const normalizedKey = key.trim().toLowerCase();
+      const normalizedValue = value.trim();
+      if (
+        !/^[a-z0-9][a-z0-9-]*$/u.test(normalizedKey)
+        || normalizedKey.startsWith("x-amz-meta-")
+      ) {
+        throw new TypeError("Hosted R2 presign metadata keys must be S3 metadata names without x-amz-meta-.");
+      }
+      if (normalizedValue.length === 0 || /[\r\n]/u.test(normalizedValue)) {
+        throw new TypeError("Hosted R2 presign metadata values must be non-empty single-line strings.");
+      }
+      return [`x-amz-meta-${normalizedKey}`, normalizedValue] as [string, string];
+    })
+    .sort(([left], [right]) => left.localeCompare(right));
 }
 
 function normalizeHostedR2PresignEndpoint(value: string | undefined, accountId: string): string {

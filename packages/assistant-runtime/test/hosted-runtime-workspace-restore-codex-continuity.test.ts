@@ -69,6 +69,9 @@ describe("hosted workspace restore Codex continuity", () => {
             async directPutEncryptedObject() {
               throw new Error("directPutEncryptedObject is not used during v2 restore.");
             },
+            async presignUploadedObject() {
+              throw new Error("presignUploadedObject is not used during v2 restore.");
+            },
             async restoreWorkspaceSnapshot(request) {
               restoreCalls.push(request);
               await mkdir(request.durableRoot, { recursive: true });

@@ -140,9 +140,11 @@ export type MurphAgeOrdinaryLabWearableAutoresearchRankReason =
   | "adult-lab-activity-transport"
   | "fastest-public-row-path"
   | "lab-activity-linked-outcome"
+  | "older-adult-sex-specific-stress"
   | "partial-age-band-fit"
   | "registry-linked-biobank"
   | "sensor-rich-clinical-fit"
+  | "sleep-autonomic-fit"
   | "young-adult-midlife-fit";
 
 export interface MurphAgeOrdinaryLabWearableAutoresearchSourcePriority {
@@ -265,11 +267,54 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
   },
   {
     blockedUntil: [
+      "human-admin workbench authority",
+      "frozen aggregate evaluator boundary",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 2,
+    nextAction: "Keep All of Us as the highest-fit consumer-like route for Fitbit, labs, EHR outcomes, and aggregate evaluator planning.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "all-of-us-fitbit-labs-ehr",
+  },
+  {
+    blockedUntil: [
+      "source activation labels",
+      "MESA core lab and sleep joinability check",
+      "aggregate output policy",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 8,
+    nextAction: "Keep MESA/NSRR as the first sleep-autonomic support route after activity-first consumer and accelerometry routes return aggregate evidence.",
+    rankReasonIds: [
+      "sleep-autonomic-fit",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "nsrr-mesa-sleep-autonomic",
+  },
+  {
+    blockedUntil: [
+      "human-admin workbench authority",
+      "source-rights promotion review",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 5,
+    nextAction: "Use UK Biobank as the high-powered wrist-accelerometry, biomarker, and outcome route for activity-shape priors and aggregate-only stress testing.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "partial-age-band-fit",
+    ],
+    routeId: "uk-biobank-integrated",
+  },
+  {
+    blockedUntil: [
       "source activation labels",
       "aggregate receipt requirements",
     ],
     executionMode: "free-registered-activation",
-    executionPriorityRank: 2,
+    executionPriorityRank: 6,
     nextAction: "Fill CARDIA activation labels for lab, vitals, activity, follow-up, and aggregate export boundaries.",
     rankReasonIds: [
       "young-adult-midlife-fit",
@@ -283,7 +328,7 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
       "aggregate receipt requirements",
     ],
     executionMode: "free-registered-activation",
-    executionPriorityRank: 3,
+    executionPriorityRank: 7,
     nextAction: "Fill HCHS/SOL activation labels for adult lab, activity, follow-up, and aggregate export boundaries.",
     rankReasonIds: [
       "adult-lab-activity-transport",
@@ -293,26 +338,12 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
   },
   {
     blockedUntil: [
-      "human-admin workbench authority",
-      "frozen aggregate evaluator boundary",
-    ],
-    executionMode: "human-admin-workbench",
-    executionPriorityRank: 4,
-    nextAction: "Keep All of Us as the high-fit workbench route; define aggregate evaluator needs before access work.",
-    rankReasonIds: [
-      "admin-heavy-high-fit",
-      "lab-activity-linked-outcome",
-    ],
-    routeId: "all-of-us-fitbit-labs-ehr",
-  },
-  {
-    blockedUntil: [
       "authorized data-holder collaboration",
       "aggregate output policy",
       "endpoint and denominator card",
     ],
     executionMode: "human-admin-workbench",
-    executionPriorityRank: 5,
+    executionPriorityRank: 3,
     nextAction: "Pursue MIPACT as a partner or authorized-data-holder aggregate route for Apple Watch plus clinical outcomes.",
     rankReasonIds: [
       "admin-heavy-high-fit",
@@ -323,11 +354,41 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
   {
     blockedUntil: [
       "scientific access approval",
+      "smartwatch and BP joinability check",
+      "aggregate output policy",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 4,
+    nextAction: "Scout Electronic Framingham as a smaller but high-value smartwatch, BP, and longitudinal phenotype transport route for the first activity residual pack.",
+    rankReasonIds: [
+      "partial-age-band-fit",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "framingham-activity-cvd",
+  },
+  {
+    blockedUntil: [
+      "scientific access approval",
+      "endpoint and denominator card",
+      "aggregate output policy",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 9,
+    nextAction: "Use WHI OPACH / Women's Health Study as an older-women supporting activity, labs, and outcome stress route with sex-specific calibration checks.",
+    rankReasonIds: [
+      "older-adult-sex-specific-stress",
+      "lab-activity-linked-outcome",
+    ],
+    routeId: "whi-opach-womens-health-activity",
+  },
+  {
+    blockedUntil: [
+      "scientific access approval",
       "aggregate output policy",
       "endpoint and denominator card",
     ],
     executionMode: "human-admin-workbench",
-    executionPriorityRank: 6,
+    executionPriorityRank: 10,
     nextAction: "Queue NAKO for an aggregate-runner request focused on accelerometry, labs, and cardiometabolic outcomes.",
     rankReasonIds: [
       "admin-heavy-high-fit",
@@ -342,7 +403,7 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
       "aggregate output policy",
     ],
     executionMode: "human-admin-workbench",
-    executionPriorityRank: 7,
+    executionPriorityRank: 11,
     nextAction: "Queue HUNT for an aggregate-runner request focused on activity sensors, biological material, and register-linked outcomes.",
     rankReasonIds: [
       "admin-heavy-high-fit",
@@ -357,27 +418,13 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
       "aggregate output policy",
     ],
     executionMode: "human-admin-workbench",
-    executionPriorityRank: 8,
+    executionPriorityRank: 12,
     nextAction: "Queue Lifelines ActiveLife for an aggregate-runner request focused on objective activity plus broad lab/body phenotyping.",
     rankReasonIds: [
       "admin-heavy-high-fit",
       "registry-linked-biobank",
     ],
     routeId: "lifelines-activelife-biobank",
-  },
-  {
-    blockedUntil: [
-      "human-admin workbench authority",
-      "source-rights promotion review",
-    ],
-    executionMode: "human-admin-workbench",
-    executionPriorityRank: 9,
-    nextAction: "Keep UK Biobank as a high-powered but partial-age-band workbench route.",
-    rankReasonIds: [
-      "admin-heavy-high-fit",
-      "partial-age-band-fit",
-    ],
-    routeId: "uk-biobank-integrated",
   },
 ] as const satisfies readonly {
   blockedUntil: readonly string[];
@@ -893,10 +940,24 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     ],
     displayName: "NSRR / MESA sleep-autonomic route",
     evidenceRole: "true-external-candidate",
-    featureFamilies: ["autonomic", "clinical-history", "sleep"],
-    layers: ["source-feasibility", "wearable-shadow-increment"],
+    featureFamilies: ["autonomic", "blood-pressure", "body-composition", "clinical-history", "labs", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
     modelUseStatus: "metadata-only-candidate",
-    nextAction: "Treat as institutional or partner aggregate route until access authority is explicit.",
+    nextAction: "Treat as institutional or partner aggregate route until MESA core clinical/lab plus NSRR sleep joinability is explicit.",
+    ordinarySubmitterFit: {
+      ageBandFit: "partial-16-50",
+      inputFamilies: [
+        "age-sex",
+        "autonomic",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "outcome-followup",
+        "sleep",
+      ],
+      rank: 12,
+    },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 60,
     routeId: "nsrr-mesa-sleep-autonomic",
@@ -1089,12 +1150,12 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
       "silent controlled-data access",
       "score-bearing product use",
     ],
-    displayName: "Framingham activity/CVD route",
+    displayName: "Electronic Framingham smartwatch/BP activity route",
     evidenceRole: "true-external-candidate",
-    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
-    layers: ["source-feasibility", "biomarker-increment", "transport-validation"],
+    featureFamilies: ["activity", "autonomic", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
     modelUseStatus: "metadata-only-candidate",
-    nextAction: "Confirm objective activity availability and aggregate export before ranking as a wearable route.",
+    nextAction: "Confirm smartwatch, BP cuff, longitudinal phenotype, and aggregate export availability before using as a wearable transport route.",
     ordinarySubmitterFit: {
       ageBandFit: "partial-16-50",
       inputFamilies: [
@@ -1144,7 +1205,7 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
         "function",
         "outcome-followup",
       ],
-      rank: null,
+      rank: 13,
     },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 78,

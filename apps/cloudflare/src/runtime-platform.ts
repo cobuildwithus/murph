@@ -1506,6 +1506,10 @@ function createCloudflareWorkspaceSnapshotPort(input: {
       if (source.size !== request.encryptedByteSize) {
         throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
       }
+      const expiresAtMs = Date.parse(request.expiresAt);
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+        throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
+      }
       const body = Readable.toWeb(createReadStream(request.sourceFilePath)) as BodyInit;
       const response = await fetchHostedResponse({
         description: "Hosted workspace snapshot direct R2 upload",
@@ -1517,14 +1521,37 @@ function createCloudflareWorkspaceSnapshotPort(input: {
             "content-length": String(request.encryptedByteSize),
             "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
             "if-none-match": "*",
+            "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
+            "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+            "x-amz-meta-snapshotid": request.snapshotId,
           },
           method: "PUT",
         } as RequestInit & { duplex: "half" },
         logFailures: false,
-        timeoutMs: input.timeoutMs,
+        timeoutMs: Math.max(1, expiresAtMs - Date.now()),
         url: new URL(request.putUrl),
       });
       assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+    },
+
+    async presignUploadedObject(request) {
+      const headers = await requireHostedRuntimeWriteFenceHeaders(
+        input.workspaceCheckpointBridge,
+        "Hosted workspace snapshot presign upload",
+      );
+      const payload = await fetchHostedJson({
+        body: request,
+        description: "Hosted workspace snapshot presign upload",
+        fetchImpl: input.fetchImpl,
+        headers,
+        method: "POST",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          `/workspace-snapshots/${encodeURIComponent(request.snapshotId)}/presign-put`,
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+        ),
+      });
+      return parseHostedWorkspaceSnapshotPresignedPutPayload(payload);
     },
 
     async restoreWorkspaceSnapshot(request) {
@@ -1664,7 +1691,6 @@ function parseHostedWorkspaceSnapshotStartPayload(
         "Hosted workspace snapshot wrappedDataKey",
       ),
     },
-    expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot expiresAt"),
     limits: {
       maxSinglePartEncryptedBytes: readRequiredHostedRuntimePositiveInteger(
         limitsRecord.maxSinglePartEncryptedBytes,
@@ -1676,8 +1702,20 @@ function parseHostedWorkspaceSnapshotStartPayload(
       ),
     },
     objectKey,
-    putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot putUrl"),
     snapshotId,
+  };
+}
+
+function parseHostedWorkspaceSnapshotPresignedPutPayload(
+  value: unknown,
+): { expiresAt: string; putUrl: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot presign response must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot presign expiresAt"),
+    putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot presign putUrl"),
   };
 }
 

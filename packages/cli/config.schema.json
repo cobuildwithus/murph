@@ -3497,6 +3497,11 @@
                           "default": false,
                           "description": "Include safe route-slot templates for the next aggregate receipts to collect.",
                           "type": "boolean"
+                        },
+                        "includeBenchmarkCards": {
+                          "default": false,
+                          "description": "Include locked aggregate-only public benchmark cards for local evaluator setup.",
+                          "type": "boolean"
                         }
                       }
                     }

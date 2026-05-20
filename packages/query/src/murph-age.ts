@@ -204,6 +204,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MURPH_AGE_WEARABLE_VALID_DAY_METRIC_KEYS = new Set([
   "activity-minutes",
   "estimated-vo2-max",
+  "peak-30-minute-cadence",
   "steps",
 ]);
 const MURPH_AGE_WEARABLE_VALID_NIGHT_METRIC_KEYS = new Set([
@@ -310,6 +311,7 @@ export async function calculateMurphAgeFromVaultInputBundle(
     models: { ...localModelCards.models, ...input.models },
     points,
     sex: input.sex,
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
   });
   return withPrependedWarnings(output, localModelCards.warnings);
 }
@@ -351,6 +353,7 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
     models: { ...localModelCards.models, ...input.models },
     sex: input.sex,
     submittedMetrics: input.submittedMetrics,
+    wearableResidualParameterPack: input.wearableResidualParameterPack,
   });
   return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
 }
@@ -1054,6 +1057,7 @@ function invalidCalculatorOutput(input: {
     schemaVersion: MURPH_AGE_RESULT_SCHEMA_VERSION,
     status: "abstain",
     warnings: [warning],
+    wearableResidualLayerApplication: null,
     wearableShadowIncrementAssessments: [],
   };
 }

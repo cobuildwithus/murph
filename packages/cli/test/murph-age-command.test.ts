@@ -10,6 +10,7 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
   normalizeMetricValue,
   type MetricPoint,
   type MurphAgePublicCalculatorReport,
@@ -141,11 +142,92 @@ interface MurphAgeAggregateEvidenceStatusReport {
     warningCodes: string[]
     warningCount: number
   }>
+  benchmarkCards: Array<{
+    accelerometryProtocol: string
+    architecturePattern: string
+    benchmarkId: string
+    benchmarkStatus: string
+    denominatorPolicy: {
+      adultAgeRangeYears: {
+        max: number
+        min: number
+      }
+      eligibleLinkedMortalityRequired: boolean
+      labBodyAnchorDenominatorRequired: boolean
+      objectiveActivityWindowRequired: boolean
+      publicUseRowsOnly: boolean
+      sameDenominatorRequired: boolean
+    }
+    endpoint: {
+      endpointFamily: string
+      horizonYears: number
+      indexDateRule: string
+      outcomeAscertainment: string
+      washoutDays: number
+    }
+    evidenceClass: string
+    featureFamilies: string[]
+    measurementMethod: string
+    modelLadder: Array<{
+      modelId: string
+      role: string
+    }>
+    outputBoundary: {
+      aggregateOnly: boolean
+      coefficientsExportAllowed: boolean
+      localArtifactPathExportAllowed: boolean
+      modelParametersExportAllowed: boolean
+      participantIdentifiersExportAllowed: boolean
+      participantLevelExportAllowed: boolean
+      predictionsExportAllowed: boolean
+      productDisplayExportAllowed: boolean
+      rowValuesExportAllowed: boolean
+      sourceTextExportAllowed: boolean
+      splitMembershipExportAllowed: boolean
+    }
+    productAuthorized: boolean
+    rowParsingAuthorized: boolean
+    schemaVersion: string
+    scoreBearing: boolean
+    scoreContributionAuthorized: boolean
+    sourceRouteId: string
+    splitPolicy: {
+      aggregateSplitCountsExportOnly: boolean
+      participantIdsExportAllowed: boolean
+      splitMembershipExportAllowed: boolean
+    }
+    transformIds: string[]
+  }>
   inputCardCount: number
   missingSourceRouteIds: string[]
+  nextExecutionSourceRouteIds: string[]
   nextMissingSourceRouteIds: string[]
   readyCardCount: number
   readySourceRouteIds: string[]
+  receiptSlots: Array<{
+    denominator: {
+      minimumEventCountForScienceDelta: number
+      requiredFields: string[]
+      smallCellSuppressionRequired: boolean
+    }
+    endpoint: {
+      acceptedEndpointFamilies: string[]
+      acceptedOutcomeAscertainments: string[]
+      outcomeLinkedRequired: boolean
+    }
+    evaluatorFrozenBeforeExecutionRequired: boolean
+    metricFields: string[]
+    modelIds: string[]
+    negativeControlFields: string[]
+    productAuthorized: boolean
+    receiptSchemaVersion: string
+    sameDenominatorRequired: boolean
+    schemaVersion: string
+    scoreBearing: boolean
+    scoreContributionAuthorized: boolean
+    sourceRouteAliases: string[]
+    sourceRouteId: string
+  }>
   routeSlots: Array<{
     acceptedAggregateMetricDeltaFields: string[]
     anchorCardId: string
@@ -156,6 +238,7 @@ interface MurphAgeAggregateEvidenceStatusReport {
     sourceRouteId: string
   }>
   schemaVersion: string
+  sourceRouteIdsByExecutionPriority: string[]
   status: string
 }
 
@@ -320,15 +403,64 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
   const templateStatus = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
     'age',
     'evidence',
+    '--include-benchmark-cards',
+    'true',
     '--include-templates',
     'true',
   ]))
 
-  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v1')
+  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v4')
   murphAgeAggregateEvidenceStatusResultSchema.parse(templateStatus)
   assert.equal(templateStatus.status, 'blocked')
   assert.equal(templateStatus.inputCardCount, 0)
   assert.equal(templateStatus.readyCardCount, 0)
+  assert.deepEqual(templateStatus.nextExecutionSourceRouteIds, [
+    'nhanes-activity-shadow-lmf',
+    'all-of-us-fitbit-labs-ehr',
+    'mipact-apple-watch-ehr',
+  ])
+  assert.equal(templateStatus.sourceRouteIdsByExecutionPriority[0], 'nhanes-activity-shadow-lmf')
+  assert.equal(templateStatus.benchmarkCards.length, 2)
+  assert.equal(templateStatus.benchmarkCards[0]?.schemaVersion, 'murph.age.wearable-activity-benchmark-card.v1')
+  assert.equal(templateStatus.benchmarkCards[0]?.benchmarkId, 'nhanes_2003_06_hip_activity_lmf_v1')
+  assert.equal(templateStatus.benchmarkCards[0]?.accelerometryProtocol, 'nhanes-2003-2006-hip-am7164-waking-7d')
+  assert.equal(templateStatus.benchmarkCards[0]?.sourceRouteId, 'nhanes-activity-shadow-lmf')
+  assert.equal(templateStatus.benchmarkCards[0]?.architecturePattern, 'anchor-plus-wearable-residual-shadow')
+  assert.equal(templateStatus.benchmarkCards[0]?.measurementMethod, 'research-actigraphy')
+  assert.equal(templateStatus.benchmarkCards[0]?.denominatorPolicy.publicUseRowsOnly, true)
+  assert.equal(templateStatus.benchmarkCards[0]?.denominatorPolicy.objectiveActivityWindowRequired, true)
+  assert.equal(templateStatus.benchmarkCards[0]?.endpoint.endpointFamily, 'all-cause-mortality')
+  assert.equal(templateStatus.benchmarkCards[0]?.endpoint.horizonYears, 10)
+  assert.equal(templateStatus.benchmarkCards[0]?.outputBoundary.rowValuesExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.outputBoundary.predictionsExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.outputBoundary.coefficientsExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.outputBoundary.modelParametersExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.outputBoundary.localArtifactPathExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.productAuthorized, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.scoreBearing, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.scoreContributionAuthorized, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.rowParsingAuthorized, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.modelLadder.at(-1)?.modelId, 'm5-residualized-wearable-after-controls')
+  assert.equal(templateStatus.benchmarkCards[0]?.featureFamilies.includes('activity-volume'), true)
+  assert.equal(templateStatus.benchmarkCards[0]?.featureFamilies.includes('wearable-coverage-quality'), true)
+  assert.equal(templateStatus.benchmarkCards[0]?.transformIds.includes('coverage-quality-control'), true)
+  assert.equal(templateStatus.benchmarkCards[0]?.splitPolicy.aggregateSplitCountsExportOnly, true)
+  assert.equal(templateStatus.benchmarkCards[0]?.splitPolicy.participantIdsExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[0]?.splitPolicy.splitMembershipExportAllowed, false)
+  assert.equal(templateStatus.benchmarkCards[1]?.benchmarkId, 'nhanes_2011_14_wrist_activity_lmf_v1')
+  assert.equal(templateStatus.benchmarkCards[1]?.accelerometryProtocol, 'nhanes-2011-2014-wrist-gt3x-plus-24h-7d')
+  const encodedBenchmarkCards = JSON.stringify(templateStatus.benchmarkCards)
+  for (const forbidden of [
+    '"coefficients":',
+    'localPath',
+    '"participantIds":',
+    '"predictions":',
+    '"rowValues":',
+    '"sourceText":',
+    'splitMembership":[',
+  ]) {
+    assert.equal(encodedBenchmarkCards.includes(forbidden), false, forbidden)
+  }
   assert.equal(templateStatus.routeSlots.length > 0, true)
   assert.equal(
     templateStatus.routeSlots.some((slot) => slot.sourceRouteId === 'cardia-biomarker-activity'),
@@ -348,6 +480,33 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     cardiaBiomarkerSlot?.candidateId,
     'cardia-biomarker-activity-biomarker-increment',
   )
+  assert.equal(templateStatus.receiptSlots.length > 0, true)
+  const allOfUsReceiptSlot = templateStatus.receiptSlots.find((slot) =>
+    slot.sourceRouteId === 'all-of-us-fitbit-labs-ehr'
+  )
+  assert.equal(allOfUsReceiptSlot?.schemaVersion, 'murph.age.wearable-lab-aggregate-receipt-template.v1')
+  assert.equal(allOfUsReceiptSlot?.receiptSchemaVersion, MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION)
+  assert.deepEqual(allOfUsReceiptSlot?.sourceRouteAliases, ['all_of_us_workbench_aggregate'])
+  assert.deepEqual(allOfUsReceiptSlot?.modelIds, [
+    'm0-anchor-only',
+    'm1-anchor-plus-lab-body-bp',
+    'm2-coverage-device-ehr-density-control',
+    'm3-wearable-residual',
+    'm4-wearable-plus-coverage',
+    'm5-residualized-wearable-after-controls',
+  ])
+  assert.equal(allOfUsReceiptSlot?.denominator.minimumEventCountForScienceDelta, 100)
+  assert.equal(allOfUsReceiptSlot?.denominator.smallCellSuppressionRequired, true)
+  assert.equal(allOfUsReceiptSlot?.endpoint.outcomeLinkedRequired, true)
+  assert.equal(allOfUsReceiptSlot?.evaluatorFrozenBeforeExecutionRequired, true)
+  assert.equal(allOfUsReceiptSlot?.sameDenominatorRequired, true)
+  assert.equal(allOfUsReceiptSlot?.productAuthorized, false)
+  assert.equal(allOfUsReceiptSlot?.scoreBearing, false)
+  assert.equal(allOfUsReceiptSlot?.scoreContributionAuthorized, false)
+  assert.equal(allOfUsReceiptSlot?.metricFields.includes('logLoss'), true)
+  assert.equal(allOfUsReceiptSlot?.negativeControlFields.includes('coverageOnlyBeatenByResidualWearable'), true)
+  assert.equal(allOfUsReceiptSlot?.endpoint.acceptedEndpointFamilies.includes('all-cause-mortality'), true)
+  assert.equal(allOfUsReceiptSlot?.endpoint.acceptedOutcomeAscertainments.includes('ehr-event'), true)
 
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-'))
   try {
@@ -358,6 +517,10 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
           candidateId: 'cardia-biomarker-activity-biomarker-increment',
           layer: 'biomarker-increment',
           sourceRouteId: 'cardia-biomarker-activity',
+        }),
+        wearableLabAggregateReceipt({
+          receiptId: 'all-of-us-fitbit-lab-wearable-aggregate-v0',
+          sourceRouteId: 'all_of_us_workbench_aggregate',
         }),
         {
           ...aggregateEvidenceReceipt({
@@ -394,9 +557,9 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
           },
         },
         aggregateEvidenceReceipt({
-          candidateId: 'spoofed-all-of-us-fitbit-labs-ehr-biomarker-increment',
+          candidateId: 'spoofed-mipact-apple-watch-ehr-biomarker-increment',
           layer: 'biomarker-increment',
-          sourceRouteId: 'all-of-us-fitbit-labs-ehr',
+          sourceRouteId: 'mipact-apple-watch-ehr',
         }),
       ],
     }, null, 2)}\n`)
@@ -410,15 +573,21 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
       'true',
     ]))
 
-    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v1')
+    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v4')
     murphAgeAggregateEvidenceStatusResultSchema.parse(status)
     assert.equal(status.status, 'ready')
-    assert.equal(status.inputCardCount, 3)
-    assert.equal(status.readyCardCount, 1)
-    assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity'])
+    assert.deepEqual(status.benchmarkCards, [])
+    assert.equal(status.inputCardCount, 4)
+    assert.equal(status.readyCardCount, 2)
+    assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity', 'all-of-us-fitbit-labs-ehr'])
+    assert.deepEqual(status.nextExecutionSourceRouteIds, [
+      'nhanes-activity-shadow-lmf',
+      'mipact-apple-watch-ehr',
+      'framingham-activity-cvd',
+    ])
     assert.equal(status.nextMissingSourceRouteIds.includes('cardia-biomarker-activity'), false)
     assert.equal(status.missingSourceRouteIds.includes('hchs-sol-biomarker-activity'), true)
-    assert.equal(status.missingSourceRouteIds.includes('all-of-us-fitbit-labs-ehr'), true)
+    assert.equal(status.missingSourceRouteIds.includes('all-of-us-fitbit-labs-ehr'), false)
 
     const readyAssessment = status.assessments.find((assessment) =>
       assessment.routeId === 'cardia-biomarker-activity'
@@ -426,6 +595,13 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     assert.equal(readyAssessment?.status, 'ready')
     assert.deepEqual(readyAssessment?.blockers, [])
     assert.equal(readyAssessment?.warningCount, 0)
+
+    const aggregateReceiptAssessment = status.assessments.find((assessment) =>
+      assessment.routeId === 'all-of-us-fitbit-labs-ehr'
+    )
+    assert.equal(aggregateReceiptAssessment?.status, 'ready')
+    assert.equal(aggregateReceiptAssessment?.layer, 'wearable-shadow-increment')
+    assert.deepEqual(aggregateReceiptAssessment?.blockers, [])
 
     const blockedAssessment = status.assessments.find((assessment) =>
       assessment.routeId === 'hchs-sol-biomarker-activity'
@@ -435,7 +611,7 @@ test('age evidence validates aggregate receipts without exposing unsafe receipt 
     assert.equal(blockedAssessment?.warningCodes.includes('MODEL_CARD_POLICY_VIOLATION'), true)
 
     const templateMismatchAssessment = status.assessments.find((assessment) =>
-      assessment.routeId === 'all-of-us-fitbit-labs-ehr'
+      assessment.routeId === 'mipact-apple-watch-ehr'
     )
     assert.equal(templateMismatchAssessment?.status, 'blocked')
     assert.equal(
@@ -568,10 +744,27 @@ test('age scaffold emits a submitted-data research preview payload', async () =>
   assert.equal(payload.chronologicalAgeYears, 45)
   assert.equal(payload.modelCardArtifactRoot, undefined)
   assert.equal(metricKeys.includes('HbA1c'), true)
+  assert.equal(metricKeys.includes('albumin'), true)
+  assert.equal(metricKeys.includes('alkaline-phosphatase'), true)
+  assert.equal(metricKeys.includes('white-blood-cell-count'), true)
+  assert.equal(metricKeys.includes('lymphocyte-percentage'), true)
+  assert.equal(metricKeys.includes('red-cell-distribution-width'), true)
+  assert.equal(metricKeys.includes('waist-circumference'), true)
   assert.equal(metricKeys.includes('steps'), true)
+  assert.equal(metricKeys.includes('activity-minutes'), true)
+  assert.equal(metricKeys.includes('mvpa-minutes'), true)
+  assert.equal(metricKeys.includes('peak-30-minute-cadence'), true)
+  assert.equal(metricKeys.includes('sedentary-minutes'), true)
   assert.equal(metricKeys.includes('total-sleep-minutes'), true)
+  assert.equal(metricKeys.includes('sleep-duration-variability-minutes'), true)
+  assert.equal(metricKeys.includes('sleep-regularity-score'), true)
+  assert.equal(metricKeys.includes('sleep-midpoint-variability-minutes'), true)
   assert.equal(metricKeys.includes('resting-heart-rate'), true)
   assert.equal(metricKeys.includes('hrv-rmssd'), true)
+  assert.equal(metricKeys.includes('estimated-vo2-max'), true)
+  assert.equal(metricKeys.includes('wearable_valid_day_count_28d'), true)
+  assert.equal(metricKeys.includes('wearable_valid_night_count_28d'), true)
+  assert.equal(metricKeys.includes('wearable_coverage_index'), true)
 })
 
 test('age preview scores submitted labs and wearable context without a vault', async () => {
@@ -610,6 +803,29 @@ test('age preview scores submitted labs and wearable context without a vault', a
         { metricKey: 'wearable_coverage_index', sourceKind: 'wearable-summary', unit: 'score', value: 0.8 },
         { metricKey: 'private metric', unit: 'count', value: 1 },
       ],
+      wearableResidualParameterPack: {
+        anchorCardId: 'lab5_bp_bmi_transport_research',
+        calibrationIntercept: 0,
+        calibrationSlope: 1,
+        deploymentRights: 'research-only',
+        endpoint: '10-year all-cause mortality',
+        evidenceTier: 'same-family-sanity',
+        family: 'activity',
+        featureWeights: [{
+          center: 8_000,
+          coefficient: -0.08,
+          metricKey: 'steps',
+          scale: 2_000,
+          transform: 'center-scale',
+        }],
+        globalWearableCapLogit: 0.2,
+        horizonYears: 10,
+        intercept: 0,
+        layerId: 'activity-residual-v1',
+        packHash: 'research-pack-activity-v1',
+        schemaVersion: 'murph.age.wearable-residual-parameter-pack.v1',
+        sourceRouteId: 'nhanes-activity-shadow-lmf',
+      },
     }))
     await writeFile(productPayloadPath, JSON.stringify({
       asOf: '2026-05-10T00:00:00.000Z',
@@ -646,6 +862,15 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'hba1c'), true)
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'steps'), false)
     assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.includes('activity-volume'), true)
+    assert.equal(report.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
+    assert.equal(report.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(report.wearableResidualLayer?.residualDeltaLogit, -0.08)
+    assert.equal(report.wearableResidualLayer?.scoreBearing, false)
+    assert.equal(
+      report.displaySummary.wearableBridge.features.find((feature) => feature.featureKey === 'activity-volume')
+        ?.measurementMethod,
+      'consumer-device',
+    )
     assert.equal(report.warnings.some((warning) => warning.code === 'INVALID_INPUT'), true)
 
     const encodedReport = JSON.stringify(report)
@@ -676,7 +901,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v7')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v9')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -688,8 +913,39 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
     assert.equal(view.arbiter.selectionReason, 'transport-fallback-selected')
+    assert.equal(view.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
+    assert.equal(view.wearableResidualLayer?.parameterizationAvailable, true)
+    assert.equal(view.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(view.wearableResidualLayer?.residualDeltaLogit, -0.08)
+    assert.equal(view.wearableResidualLayer?.scoreBearing, false)
+    assert.equal(view.wearableResidualLayer?.selectedMetricKeys.includes('steps'), true)
     assert.equal(view.wearable.scorePolicy.productStatus, 'context-only')
     assert.equal(view.wearable.scorePolicy.productWearableMultiplier, 0)
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.layerId, 'activity-residual-v1')
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.family, 'activity')
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.combinationScale, 'logit-residual')
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.residualDeltaStatus, 'zero-until-validated')
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.signalMetricKeys.includes('steps'), true)
+    assert.deepEqual(
+      view.wearable.scorePolicy.residualLayerContract.featureSetContract.activityVolumeCandidateMetricKeys,
+      ['steps', 'activity-minutes', 'mvpa-minutes', 'peak-30-minute-cadence', 'sedentary-minutes'],
+    )
+    assert.equal(
+      view.wearable.scorePolicy.residualLayerContract.featureSetContract.proprietaryDeviceScoresExcluded,
+      true,
+    )
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.qualityGateMetricKeys.includes('wearable-valid-day-count-28d'), true)
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.scoreContributionAuthorized, false)
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.parameterPackContract.requiredForResidualScoring, true)
+    assert.equal(view.wearable.scorePolicy.residualLayerContract.parameterPackContract.familyPriorityOrder[0], 'activity')
+    assert.equal(
+      view.wearable.scorePolicy.residualLayerContract.parameterPackContract.emptyPackBehavior,
+      'exact-current-zero-delta-behavior',
+    )
+    assert.equal(
+      view.wearable.scorePolicy.residualLayerContract.parameterPackContract.requiredFields.includes('packHash'),
+      true,
+    )
     const lab5ArbiterCandidate = view.arbiter.candidateCards.find((candidate) =>
       candidate.cardId === 'lab5_bp_bmi_transport_research'
     )
@@ -698,6 +954,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(lab5ArbiterCandidate.readyForResearchRun, true)
     assert.equal(lab5ArbiterCandidate.selected, true)
     assert.equal(view.model.currentModelFamily, 'frozen-nhis-r399-plus-research-increments')
+    assert.equal(view.model.composition.currentScoringMode, 'single-selected-research-card')
+    assert.equal(view.model.composition.anchorLayerStatus, 'available-as-research-anchor-and-fallback-not-layered')
     assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
     assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
     assert.equal(view.model.productUseAuthorized, false)
@@ -771,7 +1029,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.wearable.nextAction, 'run_external_or_partner_lab_wearable_aggregate_delta')
     assert.equal(
       view.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join('|'),
-      'cardia-biomarker-activity|hchs-sol-biomarker-activity|all-of-us-fitbit-labs-ehr|mipact-apple-watch-ehr|nako-accelerometer-biobank|hunt-activity-sensor-biobank|lifelines-activelife-biobank|uk-biobank-integrated',
+      'all-of-us-fitbit-labs-ehr|mipact-apple-watch-ehr|framingham-activity-cvd|uk-biobank-integrated|cardia-biomarker-activity|hchs-sol-biomarker-activity|nsrr-mesa-sleep-autonomic|whi-opach-womens-health-activity|nako-accelerometer-biobank|hunt-activity-sensor-biobank|lifelines-activelife-biobank',
     )
     assert.equal(
       view.model.wearable.shadowEvidencePacketIds.join('|'),
@@ -782,9 +1040,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(typeof view.risk.probability, 'number')
     assert.equal(view.featureContributions.some((feature) => feature.metricKey === 'hba1c'), true)
     assert.equal(view.featureContributions.some((feature) => feature.metricKey === 'steps'), false)
-    assert.equal(view.domainContributions.some((module) => module.moduleId === 'unknown'), true)
+    assert.equal(view.domainContributions.some((module) => module.moduleId === 'clinical'), true)
+    assert.equal(view.domainContributions.some((module) => module.moduleId === 'unknown'), false)
     assert.equal(view.wearable.scoreBearing, false)
-    assert.equal(view.wearable.candidateFeatureCount, 7)
+    assert.equal(view.wearable.candidateFeatureCount, 8)
     assert.equal(view.wearable.readyFeatureKeys.includes('activity-volume'), true)
     assert.equal(view.wearable.firstPriorityReadyFeatureKeys.includes('activity-volume'), true)
     assert.equal(view.wearable.firstPriorityIncompleteFeatureKeys.includes('sedentary-time'), true)
@@ -828,7 +1087,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgePublicCalculatorViewResultSchema.safeParse(productCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(productCalculatorView).success, true)
-    assert.equal(productCalculatorView.schemaVersion, 'murph.age.public-calculator-view.v3')
+    assert.equal(productCalculatorView.schemaVersion, 'murph.age.public-calculator-view.v4')
     assert.equal(productCalculatorView.mode, 'product')
     assert.equal(productCalculatorView.status, 'abstain')
     assert.equal(productCalculatorView.displayCategory, 'abstain')
@@ -837,10 +1096,12 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(productCalculatorView.risk.probability, null)
     assert.equal(productCalculatorView.selectedCardId, null)
     assert.deepEqual(productCalculatorView.selectedScoreBearingMetricKeys, [])
+    assert.equal(productCalculatorView.featureDrivers.older.length, 0)
+    assert.equal(productCalculatorView.featureDrivers.younger.length, 0)
     assert.equal(productCalculatorView.wearable.scoreBearing, false)
     assert.equal(productCalculatorView.wearable.scorePolicy.productStatus, 'context-only')
     assert.equal(productCalculatorView.wearable.scorePolicy.productWearableMultiplier, 0)
-    assert.equal(productCalculatorView.wearable.candidateFeatureCount, 7)
+    assert.equal(productCalculatorView.wearable.candidateFeatureCount, 8)
     assert.equal(productCalculatorView.wearable.readyFeatureKeys.includes('activity-volume'), true)
     assert.equal(productCalculatorView.wearable.features.some((feature) => feature.featureKey === 'resting-heart-rate'), true)
 
@@ -899,7 +1160,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v7')
+    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v9')
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
@@ -908,7 +1169,10 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(typeof researchCalculatorView.risk.probability, 'number')
     assert.equal(researchCalculatorView.featureContributions.some((feature) => feature.metricKey === 'hba1c'), true)
     assert.equal(researchCalculatorView.featureContributions.some((feature) => feature.metricKey === 'steps'), false)
-    assert.equal(researchCalculatorView.wearable.candidateFeatureCount, 7)
+    assert.equal(researchCalculatorView.featureDrivers.younger.some((driver) => driver.metricKey === 'hba1c'), true)
+    assert.equal(researchCalculatorView.featureDrivers.older.every((driver) => driver.direction === 'older'), true)
+    assert.equal(researchCalculatorView.featureDrivers.younger.every((driver) => driver.direction === 'younger'), true)
+    assert.equal(researchCalculatorView.wearable.candidateFeatureCount, 8)
     assert.equal(researchCalculatorView.wearable.readyFeatureKeys.includes('activity-volume'), true)
     assert.equal(
       researchCalculatorView.wearable.scorePolicy.requiredPromotionSignals.includes(
@@ -916,6 +1180,12 @@ test('age preview scores submitted labs and wearable context without a vault', a
       ),
       true,
     )
+    assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.layerId, 'activity-residual-v1')
+    assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.scoreBearing, false)
+    assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.productMultiplier, 0)
+    assert.equal(researchCalculatorView.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
+    assert.equal(researchCalculatorView.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(researchCalculatorView.wearableResidualLayer?.scoreBearing, false)
 
     for (const encodedCalculatorView of [
       JSON.stringify(productCalculatorView),
@@ -1088,6 +1358,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
       feature.featureKey === 'activity-volume'
         && feature.readyMetricKeys.includes('steps')
         && feature.status === 'ready'
+        && feature.measurementMethod === 'consumer-device'
         && feature.scoreBearing === false
         && feature.scoreContributionAuthorized === false
         && feature.productAuthorized === false
@@ -1252,9 +1523,10 @@ test('age report returns a product-mode public abstention instead of research-on
     ]))
 
     assert.equal(report.mode, 'product')
-    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v4')
+    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v5')
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
+    assert.equal(report.wearableResidualLayer, null)
     assert.equal(report.inputReadiness.bundle.bundleId, 'lab9-bp-body')
     assert.equal(report.inputReadiness.bundle.selectedMetricKeys.includes('hba1c'), true)
     assert.equal(report.inputReadiness.contextBundles[0]?.bundleId, 'wearable-context')
@@ -2194,6 +2466,11 @@ test('age report derives wearable coverage quality from canonical observations',
     }
     assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('activity-volume'), false)
     assert.equal(report.displaySummary.wearableBridge.partialFeatureKeys.includes('resting-heart-rate'), false)
+    assert.equal(
+      report.displaySummary.wearableBridge.features.find((feature) => feature.featureKey === 'estimated-vo2-max')
+        ?.measurementMethod,
+      'estimated-fitness',
+    )
     assert.equal(report.displaySummary.wearableBridge.features.some((feature) => hasOwnKey(feature, 'selectedPointIds')), false)
     assert.equal(report.displaySummary.wearableBridge.features.every((feature) => feature.productAuthorized === false), true)
     assert.equal(hasOwnKey(report, 'contextAssessments'), false)
@@ -2475,6 +2752,90 @@ function aggregateEvidenceReceipt(input: {
     productAuthorized: false,
     riskEffect: 'aggregate-estimated',
     schemaVersion: MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: input.sourceRouteId,
+  }
+}
+
+function wearableLabAggregateReceipt(input: {
+  receiptId: string
+  sourceRouteId: string
+}) {
+  return {
+    artifactBoundary: {
+      aggregateOnly: true,
+      coefficientsExportAllowed: false,
+      localArtifactPathExportAllowed: false,
+      modelParametersExportAllowed: false,
+      participantIdentifiersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      predictionsExportAllowed: false,
+      productDisplayExportAllowed: false,
+      rowValuesExportAllowed: false,
+      sourceTextExportAllowed: false,
+      splitMembershipExportAllowed: false,
+    },
+    denominator: {
+      evaluatedRowCount: 12_400,
+      eventCount: 130,
+      minimumCellCount: 25,
+      personYears: 96_000,
+      suppressedCellCount: 0,
+    },
+    endpoint: {
+      endpointFamily: 'all-cause-mortality',
+      endpointFrozenBeforeScoring: true,
+      horizonYears: 10,
+      indexDateRule: 'feature-window-end-before-risk-window',
+      outcomeAscertainment: 'death-registry',
+      outcomeLinked: true,
+      washoutDays: 365,
+    },
+    evaluatorFrozenBeforeExecution: true,
+    evidenceTier: 'partner-aggregate',
+    models: [
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.7, brier: 0.082, calibrationIntercept: 0.01, calibrationSlope: 1.01, logLoss: 0.31 },
+        modelId: 'm0-anchor-only',
+      },
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.75, brier: 0.064, calibrationIntercept: 0.005, calibrationSlope: 0.99, logLoss: 0.23 },
+        modelId: 'm1-anchor-plus-lab-body-bp',
+      },
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.752, brier: 0.0638, calibrationIntercept: 0.006, calibrationSlope: 0.98, logLoss: 0.229 },
+        modelId: 'm2-coverage-device-ehr-density-control',
+      },
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.755, brier: 0.063, calibrationIntercept: 0.004, calibrationSlope: 0.99, logLoss: 0.226 },
+        modelId: 'm3-wearable-residual',
+      },
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.758, brier: 0.0628, calibrationIntercept: 0.004, calibrationSlope: 0.99, logLoss: 0.225 },
+        modelId: 'm4-wearable-plus-coverage',
+      },
+      {
+        calibrationStatus: 'pass',
+        metrics: { auc: 0.763, brier: 0.062, calibrationIntercept: 0.003, calibrationSlope: 1, logLoss: 0.222 },
+        modelId: 'm5-residualized-wearable-after-controls',
+      },
+    ],
+    negativeControls: {
+      coverageOnlyBeatenByResidualWearable: true,
+      deviceOrEhrDensityDominates: false,
+      earlyEventSensitivityPassed: true,
+      reverseCausationWashoutPassed: true,
+    },
+    productAuthorized: false,
+    receiptId: input.receiptId,
+    sameDenominator: true,
+    schemaVersion: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
     scoreBearing: false,
     scoreContributionAuthorized: false,
     sourceRouteId: input.sourceRouteId,

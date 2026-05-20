@@ -71,11 +71,11 @@ export function readHostedRunnerInternalOperation(input: {
     return "browser_vault_replica_write";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
-    if (input.pathname.startsWith("/__test/r2-presigned-put/")) {
-      return "workspace_snapshot_test_presigned_put";
-    }
     if (input.pathname === "/workspace-snapshots/start") {
       return "workspace_snapshot_start";
+    }
+    if (/^\/workspace-snapshots\/[^/]+\/presign-put$/u.test(input.pathname)) {
+      return "workspace_snapshot_presign_put";
     }
     if (/^\/workspace-snapshots\/[^/]+\/complete$/u.test(input.pathname)) {
       return "workspace_snapshot_complete";

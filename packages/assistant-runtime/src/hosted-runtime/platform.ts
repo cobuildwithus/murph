@@ -238,14 +238,17 @@ export interface HostedRuntimeWorkspaceSnapshotDataKey {
 
 export interface HostedRuntimeWorkspaceSnapshotUploadStart {
   encryption: HostedRuntimeWorkspaceSnapshotDataKey;
-  expiresAt: string;
   limits: {
     maxSinglePartEncryptedBytes: number;
     warnEncryptedBytes: number;
   };
   objectKey: string;
-  putUrl: string;
   snapshotId: string;
+}
+
+export interface HostedRuntimeWorkspaceSnapshotPresignedPut {
+  expiresAt: string;
+  putUrl: string;
 }
 
 export interface HostedRuntimeWorkspaceSnapshotCompleteResult {
@@ -264,9 +267,18 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
   }): Promise<HostedRuntimeWorkspaceSnapshotCompleteResult>;
   directPutEncryptedObject(input: {
     encryptedByteSize: number;
+    encryptedObjectSha256: string;
+    expiresAt: string;
     putUrl: string;
     sourceFilePath: string;
+    snapshotId: string;
   }): Promise<void>;
+  presignUploadedObject(input: {
+    encryptedByteSize: number;
+    encryptedObjectSha256: string;
+    objectKey: string;
+    snapshotId: string;
+  }): Promise<HostedRuntimeWorkspaceSnapshotPresignedPut>;
   restoreWorkspaceSnapshot(input: {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
