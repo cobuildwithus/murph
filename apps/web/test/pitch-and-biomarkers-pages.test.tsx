@@ -111,7 +111,8 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
 
   const markup = renderToStaticMarkup(createElement(PitchPage));
 
-  assert.match(markup, /<main[^>]*>/);
+  assert.match(markup, /<main[^>]*data-pitch-deck="true"/);
+  assert.match(markup, /data-pitch-chrome="true"/);
   assert.match(markup, /aria-label="Slide 1: Title"/);
   assert.match(markup, /Murph turns group chats into health challenges\./);
   assert.match(markup, /Scroll or use arrow keys/);

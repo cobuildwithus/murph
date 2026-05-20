@@ -44,7 +44,10 @@ export function DeckChrome({
   return (
     <>
       {/* Top bar — logo + slide counter */}
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 flex items-center justify-between px-6 py-5 sm:px-10 lg:px-16">
+      <div
+        data-pitch-chrome
+        className="pointer-events-none fixed inset-x-0 top-0 z-40 flex items-center justify-between px-6 py-5 sm:px-10 lg:px-16"
+      >
         <Link
           href="/"
           className="pointer-events-auto inline-flex"
@@ -69,6 +72,7 @@ export function DeckChrome({
       {/* Right dot rail */}
       <nav
         aria-label="Slides"
+        data-pitch-chrome
         className="fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex lg:right-8"
       >
         {TONES.map((_, index) => {
@@ -92,6 +96,7 @@ export function DeckChrome({
 
       {/* Bottom progress line */}
       <div
+        data-pitch-chrome
         className={`fixed inset-x-0 bottom-0 z-40 h-[3px] ${
           dark ? "bg-[#f5f0e8]/10" : "bg-[#2d3436]/8"
         }`}
