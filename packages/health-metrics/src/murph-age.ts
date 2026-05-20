@@ -61,7 +61,7 @@ export const MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION =
 export const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION =
   "murph.age.wearable-residual-layer-contract.v2" as const;
 export const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION =
-  "murph.age.wearable-residual-layer-application.v1" as const;
+  "murph.age.wearable-residual-layer-application.v2" as const;
 export const MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION =
   "murph.age.wearable-parameter-pack-contract.v1" as const;
 export const MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION =
@@ -517,15 +517,18 @@ export interface MurphAgeWearableResidualLayerContract {
 
 export interface MurphAgeWearableResidualLayerApplication {
   anchorCardId: MurphAgeScoreBearingCardId;
+  anchorRiskAgeEquivalentYears: number | null;
   anchorCompatible: boolean;
   anchorLogit: number | null;
   eligibleForResidualResearch: boolean;
+  finalRiskAgeEquivalentYears: number | null;
   finalLogit: number | null;
   finalRiskProbability: number | null;
   layerId: MurphAgeWearableResidualLayerId;
   parameterPackHash: string | null;
   parameterizationAvailable: boolean;
   productAuthorized: false;
+  residualDeltaYears: number | null;
   residualDeltaLogit: number;
   schemaVersion: typeof MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION;
   scoreBearing: false;
@@ -1042,12 +1045,15 @@ export interface MurphAgePublicWearableCalculatorView {
 
 export interface MurphAgePublicWearableResidualLayerView {
   anchorCardId: MurphAgePublicAuthorization["cardId"];
+  anchorRiskAgeEquivalentYears: number | null;
   eligibleForResidualResearch: boolean;
+  finalRiskAgeEquivalentYears: number | null;
   finalRiskProbability: number | null;
   layerId: MurphAgeWearableResidualLayerId;
   parameterPackHash: string | null;
   parameterizationAvailable: boolean;
   productAuthorized: false;
+  residualDeltaYears: number | null;
   residualDeltaLogit: number;
   schemaVersion: typeof MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION;
   scoreBearing: false;
@@ -3623,6 +3629,7 @@ export function applyMurphAgeWearableResidualLayer(input: {
   contract?: MurphAgeWearableResidualLayerContract;
   parameterPack?: MurphAgeWearableResidualParameterPack | null;
   points?: readonly MetricPoint[];
+  referenceRiskCurve?: readonly MurphAgeReferenceRiskPoint[];
 }): MurphAgeWearableResidualLayerApplication {
   const contract = input.contract ?? summarizeMurphAgeWearableResidualLayerContract();
   const activityAssessment = input.assessments.find((assessment) => assessment.family === contract.family) ?? null;
@@ -3657,18 +3664,31 @@ export function applyMurphAgeWearableResidualLayer(input: {
   const finalLogit = anchorLogit === null ? null : roundContribution(anchorLogit + residualDeltaLogit);
   const finalRiskProbability = finalLogit === null ? input.anchorRiskProbability : roundProbability(logistic(finalLogit));
   const parameterizationAvailable = parameterized?.status === "valid";
+  const anchorRiskAgeEquivalentYears = mapRiskToReferenceAgeEquivalentOrNull({
+    referenceRiskCurve: input.referenceRiskCurve,
+    riskProbability: input.anchorRiskProbability,
+  });
+  const finalRiskAgeEquivalentYears = mapRiskToReferenceAgeEquivalentOrNull({
+    referenceRiskCurve: input.referenceRiskCurve,
+    riskProbability: finalRiskProbability,
+  });
 
   return {
     anchorCardId: input.anchorCardId,
+    anchorRiskAgeEquivalentYears,
     anchorCompatible,
     anchorLogit,
     eligibleForResidualResearch: status === "mechanics-ready-zero-delta",
+    finalRiskAgeEquivalentYears,
     finalLogit,
     finalRiskProbability,
     layerId: contract.layerId,
     parameterPackHash: parameterizationAvailable ? input.parameterPack?.packHash ?? null : null,
     parameterizationAvailable,
     productAuthorized: false,
+    residualDeltaYears: anchorRiskAgeEquivalentYears !== null && finalRiskAgeEquivalentYears !== null
+      ? roundYears(finalRiskAgeEquivalentYears - anchorRiskAgeEquivalentYears)
+      : null,
     residualDeltaLogit,
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
     scoreBearing: false,
@@ -6133,6 +6153,7 @@ export function calculateMurphAgeFromInputBundle(input: MurphAgeCalculatorInput)
     assessments: wearableShadowIncrementAssessments,
     parameterPack: mode === "research" ? input.wearableResidualParameterPack : null,
     points: input.points,
+    referenceRiskCurve: model.referenceRiskCurve,
   });
 
   return buildCalculatorOutput({
@@ -7047,12 +7068,15 @@ function toPublicMurphAgeWearableResidualLayerView(
   if (!application) return null;
   return {
     anchorCardId: application.anchorCardId,
+    anchorRiskAgeEquivalentYears: application.anchorRiskAgeEquivalentYears,
     eligibleForResidualResearch: application.eligibleForResidualResearch,
+    finalRiskAgeEquivalentYears: application.finalRiskAgeEquivalentYears,
     finalRiskProbability: application.finalRiskProbability,
     layerId: application.layerId,
     parameterPackHash: application.parameterPackHash,
     parameterizationAvailable: application.parameterizationAvailable,
     productAuthorized: false,
+    residualDeltaYears: application.residualDeltaYears,
     residualDeltaLogit: application.residualDeltaLogit,
     schemaVersion: application.schemaVersion,
     scoreBearing: false,
@@ -7822,6 +7846,22 @@ function mapRiskToReferenceAgeForAttribution(
     return extrapolateReferenceAgeByLogit(riskProbability, nextToLast, last);
   }
   return clamped.ageYears;
+}
+
+function mapRiskToReferenceAgeEquivalentOrNull(input: {
+  referenceRiskCurve?: readonly MurphAgeReferenceRiskPoint[];
+  riskProbability: number | null;
+}): number | null {
+  if (
+    !input.referenceRiskCurve
+    || input.riskProbability === null
+    || !Number.isFinite(input.riskProbability)
+    || input.riskProbability < 0
+    || input.riskProbability > 1
+  ) {
+    return null;
+  }
+  return roundYears(mapRiskToReferenceAgeForAttribution(input.riskProbability, input.referenceRiskCurve));
 }
 
 function extrapolateReferenceAgeByLogit(

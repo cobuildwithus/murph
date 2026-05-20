@@ -879,10 +879,22 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'hba1c'), true)
     assert.equal(report.result?.featureAttributions.some((feature) => feature.metricKey === 'steps'), false)
     assert.equal(report.displaySummary.wearableBridge.readyFeatureKeys.includes('activity-volume'), true)
-    assert.equal(report.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
-    assert.equal(report.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
-    assert.equal(report.wearableResidualLayer?.residualDeltaLogit, -0.08)
-    assert.equal(report.wearableResidualLayer?.scoreBearing, false)
+    const reportResidualLayer = report.wearableResidualLayer
+    assert.ok(reportResidualLayer)
+    assert.equal(reportResidualLayer.status, 'research-parameterized-shadow-delta')
+    assert.equal(reportResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(reportResidualLayer.residualDeltaLogit, -0.08)
+    assert.equal(typeof reportResidualLayer.anchorRiskAgeEquivalentYears, 'number')
+    assert.equal(typeof reportResidualLayer.finalRiskAgeEquivalentYears, 'number')
+    assert.equal(typeof reportResidualLayer.residualDeltaYears, 'number')
+    assert.equal(
+      reportResidualLayer.finalRiskAgeEquivalentYears !== null
+        && reportResidualLayer.anchorRiskAgeEquivalentYears !== null
+        && reportResidualLayer.finalRiskAgeEquivalentYears < reportResidualLayer.anchorRiskAgeEquivalentYears,
+      true,
+    )
+    assert.equal(reportResidualLayer.residualDeltaYears !== null && reportResidualLayer.residualDeltaYears < 0, true)
+    assert.equal(reportResidualLayer.scoreBearing, false)
     assert.equal(
       report.displaySummary.wearableBridge.features.find((feature) => feature.featureKey === 'activity-volume')
         ?.measurementMethod,
@@ -930,12 +942,17 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
     assert.equal(view.arbiter.selectionReason, 'transport-fallback-selected')
-    assert.equal(view.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
-    assert.equal(view.wearableResidualLayer?.parameterizationAvailable, true)
-    assert.equal(view.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
-    assert.equal(view.wearableResidualLayer?.residualDeltaLogit, -0.08)
-    assert.equal(view.wearableResidualLayer?.scoreBearing, false)
-    assert.equal(view.wearableResidualLayer?.selectedMetricKeys.includes('steps'), true)
+    const viewResidualLayer = view.wearableResidualLayer
+    assert.ok(viewResidualLayer)
+    assert.equal(viewResidualLayer.status, 'research-parameterized-shadow-delta')
+    assert.equal(viewResidualLayer.parameterizationAvailable, true)
+    assert.equal(viewResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(viewResidualLayer.residualDeltaLogit, -0.08)
+    assert.equal(viewResidualLayer.anchorRiskAgeEquivalentYears, reportResidualLayer.anchorRiskAgeEquivalentYears)
+    assert.equal(viewResidualLayer.finalRiskAgeEquivalentYears, reportResidualLayer.finalRiskAgeEquivalentYears)
+    assert.equal(viewResidualLayer.residualDeltaYears, reportResidualLayer.residualDeltaYears)
+    assert.equal(viewResidualLayer.scoreBearing, false)
+    assert.equal(viewResidualLayer.selectedMetricKeys.includes('steps'), true)
     assert.equal(view.wearable.scorePolicy.productStatus, 'context-only')
     assert.equal(view.wearable.scorePolicy.productWearableMultiplier, 0)
     assert.equal(view.wearable.scorePolicy.residualLayerContract.layerId, 'activity-residual-v1')
@@ -1213,9 +1230,14 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.layerId, 'activity-residual-v1')
     assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.scoreBearing, false)
     assert.equal(researchCalculatorView.wearable.scorePolicy.residualLayerContract.productMultiplier, 0)
-    assert.equal(researchCalculatorView.wearableResidualLayer?.status, 'research-parameterized-shadow-delta')
-    assert.equal(researchCalculatorView.wearableResidualLayer?.parameterPackHash, 'research-pack-activity-v1')
-    assert.equal(researchCalculatorView.wearableResidualLayer?.scoreBearing, false)
+    const calculatorResidualLayer = researchCalculatorView.wearableResidualLayer
+    assert.ok(calculatorResidualLayer)
+    assert.equal(calculatorResidualLayer.status, 'research-parameterized-shadow-delta')
+    assert.equal(calculatorResidualLayer.parameterPackHash, 'research-pack-activity-v1')
+    assert.equal(typeof calculatorResidualLayer.anchorRiskAgeEquivalentYears, 'number')
+    assert.equal(typeof calculatorResidualLayer.finalRiskAgeEquivalentYears, 'number')
+    assert.equal(typeof calculatorResidualLayer.residualDeltaYears, 'number')
+    assert.equal(calculatorResidualLayer.scoreBearing, false)
 
     for (const encodedCalculatorView of [
       JSON.stringify(productCalculatorView),
