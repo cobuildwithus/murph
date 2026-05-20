@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { test } from "vitest";
 
@@ -17,39 +17,45 @@ const removedSubpaths = [
   "./telegram-webhook",
 ] as const;
 
-const publishedSubpaths = [
-  {
-    exportKey: "./connectors/linq/normalize",
-    label: "linq normalize",
-    packageImport: "@murphai/inboxd/connectors/linq/normalize",
-    sourceFile: "src/connectors/linq/normalize.ts",
+const expectedExports = {
+  ".": {
+    types: "./dist/index.d.ts",
+    default: "./dist/index.js",
   },
-  {
-    exportKey: "./connectors/telegram/normalize",
-    label: "telegram normalize",
-    packageImport: "@murphai/inboxd/connectors/telegram/normalize",
-    sourceFile: "src/connectors/telegram/normalize.ts",
+  "./connectors/email/normalize-parsed": {
+    types: "./dist/connectors/email/normalize-parsed.d.ts",
+    default: "./dist/connectors/email/normalize-parsed.js",
   },
-  {
-    exportKey: "./connectors/hosted-conversation",
-    label: "hosted conversation connector",
-    packageImport: "@murphai/inboxd/connectors/hosted-conversation",
-    sourceFile: "src/connectors/hosted-conversation.ts",
+  "./connectors/email/parsed": {
+    types: "./dist/connectors/email/parsed.d.ts",
+    default: "./dist/connectors/email/parsed.js",
   },
-] as const;
+  "./connectors/linq/normalize": {
+    types: "./dist/connectors/linq/normalize.d.ts",
+    default: "./dist/connectors/linq/normalize.js",
+  },
+  "./connectors/telegram/normalize": {
+    types: "./dist/connectors/telegram/normalize.d.ts",
+    default: "./dist/connectors/telegram/normalize.js",
+  },
+  "./runtime": {
+    types: "./dist/runtime.d.ts",
+    default: "./dist/runtime.js",
+  },
+  "./connectors/hosted-conversation": {
+    types: "./dist/connectors/hosted-conversation.d.ts",
+    default: "./dist/connectors/hosted-conversation.js",
+  },
+} as const;
 
 type InboxdPackageManifest = {
-  exports?: Record<string, { default?: string; types?: string } | undefined>;
+  exports?: Record<string, PackageExportEntry | undefined>;
 };
 
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
+type PackageExportEntry = {
+  default?: string;
+  types?: string;
+};
 
 async function readPackageManifest(): Promise<InboxdPackageManifest> {
   return JSON.parse(
@@ -57,68 +63,87 @@ async function readPackageManifest(): Promise<InboxdPackageManifest> {
   ) as InboxdPackageManifest;
 }
 
-async function resolveImportSpecifier(input: {
-  exportKey: (typeof publishedSubpaths)[number]["exportKey"] | ".";
-  packageImport: (typeof publishedSubpaths)[number]["packageImport"] | "@murphai/inboxd";
-  sourceFile: (typeof publishedSubpaths)[number]["sourceFile"] | "src/index.ts";
-}): Promise<string> {
-  const packageManifest = await readPackageManifest();
-  const exportEntry = packageManifest.exports?.[input.exportKey];
-
-  assert.ok(exportEntry, `expected ${input.exportKey} export entry`);
-  const defaultExport = exportEntry.default;
-  assert.equal(typeof defaultExport, "string");
-  if (typeof defaultExport !== "string") {
-    throw new Error(`expected ${input.exportKey} default export path`);
+function packageImportForExportKey(exportKey: string): string {
+  if (exportKey === ".") {
+    return "@murphai/inboxd";
   }
 
-  const distPath = path.join(packageDir, defaultExport);
-  if (await pathExists(distPath)) {
-    return input.packageImport;
-  }
-
-  return pathToFileURL(path.join(packageDir, input.sourceFile)).href;
+  assert.ok(exportKey.startsWith("./"), `unexpected export key: ${exportKey}`);
+  return `@murphai/inboxd/${exportKey.slice(2)}`;
 }
 
-test("@murphai/inboxd no longer publishes the removed Linq and Telegram compatibility subpaths", async () => {
+function assertBuiltExportEntry(
+  exportKey: string,
+  exportEntry: PackageExportEntry | undefined,
+): asserts exportEntry is Required<PackageExportEntry> {
+  assert.ok(exportEntry, `expected ${exportKey} export entry`);
+  assert.equal(typeof exportEntry.default, "string", `expected ${exportKey} default target`);
+  assert.equal(typeof exportEntry.types, "string", `expected ${exportKey} types target`);
+}
+
+test("@murphai/inboxd manifest declares the full narrow built export contract", async () => {
   const packageManifest = await readPackageManifest();
 
+  assert.deepEqual(packageManifest.exports, expectedExports);
+
   for (const exportKey of removedSubpaths) {
-    assert.equal(packageManifest.exports?.[exportKey], undefined);
+    assert.equal(Object.hasOwn(packageManifest.exports ?? {}, exportKey), false);
   }
 });
 
-for (const subpath of publishedSubpaths) {
-  test(`${subpath.label} subpath stays published and importable`, async () => {
-    const modulePath = await resolveImportSpecifier(subpath);
+test("@murphai/inboxd declared export targets exist in the built dist contract", async () => {
+  const packageManifest = await readPackageManifest();
+
+  for (const [exportKey, exportEntry] of Object.entries(packageManifest.exports ?? {})) {
+    assertBuiltExportEntry(exportKey, exportEntry);
+    assert.match(exportEntry.default, /^\.\/dist\/.+\.js$/u);
+    assert.match(exportEntry.types, /^\.\/dist\/.+\.d\.ts$/u);
+
+    await access(path.join(packageDir, exportEntry.default));
+    await access(path.join(packageDir, exportEntry.types));
+  }
+});
+
+test("@murphai/inboxd declared exports import through built package resolution", async () => {
+  const packageManifest = await readPackageManifest();
+
+  for (const exportKey of Object.keys(packageManifest.exports ?? {})) {
+    const packageImport = packageImportForExportKey(exportKey);
     const result = await execFileAsync(process.execPath, [
-      "--import",
-      "tsx",
       "--input-type=module",
       "-e",
-      `import(${JSON.stringify(modulePath)})`,
+      `import(${JSON.stringify(packageImport)})`,
     ], {
       cwd: packageDir,
     });
 
     assert.equal(result.stdout.trim(), "");
     assert.doesNotMatch(result.stderr, /SQLite is an experimental feature/u);
+  }
+});
+
+for (const removedSubpath of removedSubpaths) {
+  test(`@murphai/inboxd rejects removed ${removedSubpath} compatibility subpath`, async () => {
+    const packageImport = packageImportForExportKey(removedSubpath);
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        "--input-type=module",
+        "-e",
+        `import(${JSON.stringify(packageImport)})`,
+      ], {
+        cwd: packageDir,
+      }),
+      /ERR_PACKAGE_PATH_NOT_EXPORTED/u,
+    );
   });
 }
 
 test("@murphai/inboxd root barrel no longer exposes removed compatibility or raw-only helpers", async () => {
-  const modulePath = await resolveImportSpecifier({
-    exportKey: ".",
-    packageImport: "@murphai/inboxd",
-    sourceFile: "src/index.ts",
-  });
   const result = await execFileAsync(process.execPath, [
-    "--import",
-    "tsx",
     "--input-type=module",
     "-e",
     [
-      `const mod = await import(${JSON.stringify(modulePath)});`,
+      `const mod = await import(${JSON.stringify("@murphai/inboxd")});`,
       `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "createLinqWebhookConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
       "  if (key in mod) {",
       '    throw new Error(`unexpected removed export: ${key}`);',

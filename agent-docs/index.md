@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-05-13
+Last verified: 2026-05-20
 
 ## Purpose
 
@@ -56,7 +56,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/giant-file-composability-seams.md` | Current split-now, worth-planning, and keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-04-14 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, and commit paths. | Agent workflow routing | High | 2026-04-09 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification rules, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-05-13 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification rules, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-05-20 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-04-09 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |

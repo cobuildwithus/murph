@@ -20,7 +20,7 @@ const BUILD_ARTIFACTS = {
   "packages/health-commons": ".tsbuildinfo",
   "packages/health-metrics": ".tsbuildinfo",
   "packages/core": "tsconfig.build.tsbuildinfo",
-  "packages/importers": ".tsbuildinfo",
+  "packages/importers": [".tsbuildinfo", ".dist-next"],
   "packages/device-syncd": ".tsbuildinfo",
   "packages/query": ".tsbuildinfo",
   "packages/inboxd": ".tsbuildinfo",
@@ -88,6 +88,12 @@ const CLEAN_GROUPS = {
   ],
 };
 
+const PRESERVE_DIST_ON_CLEAN = new Set([
+  // @murphai/importers has package.json entrypoints that other release checks can
+  // load directly; its package build safely replaces dist after TypeScript passes.
+  "packages/importers",
+]);
+
 const args = process.argv.slice(2);
 const printOnly = args.includes("--print");
 const groupName = args.find((argument) => !argument.startsWith("-"));
@@ -98,10 +104,15 @@ if (!groupName || !(groupName in CLEAN_GROUPS)) {
   );
   process.exitCode = 1;
 } else {
-  const paths = CLEAN_GROUPS[groupName].flatMap((packageDir) => [
-    `${packageDir}/dist`,
-    `${packageDir}/${BUILD_ARTIFACTS[packageDir]}`,
-  ]);
+  const paths = CLEAN_GROUPS[groupName].flatMap((packageDir) => {
+    const buildArtifacts = BUILD_ARTIFACTS[packageDir];
+    const artifactPaths = Array.isArray(buildArtifacts) ? buildArtifacts : [buildArtifacts];
+
+    return [
+      ...(PRESERVE_DIST_ON_CLEAN.has(packageDir) ? [] : [`${packageDir}/dist`]),
+      ...artifactPaths.map((artifactPath) => `${packageDir}/${artifactPath}`),
+    ];
+  });
 
   if (printOnly) {
     for (const targetPath of paths) {

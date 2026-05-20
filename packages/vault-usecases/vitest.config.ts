@@ -1,5 +1,10 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from "../../config/vitest-coverage.js";
 import { createMurphPackageVitestConfig } from "../../config/vitest-package.js";
 
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
@@ -11,6 +16,9 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
+
+const PACKAGE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
 export default createMurphPackageVitestConfig({
   configUrl: import.meta.url,
   name: "vault-usecases",
@@ -45,31 +53,15 @@ export default createMurphPackageVitestConfig({
       replacement: path.resolve(packageDir, "./src/workouts.ts"),
     },
   ],
-  coverageInclude: [
-    "src/index.ts",
-    "src/helpers.ts",
-    "src/json-input.ts",
-    "src/option-utils.ts",
-    "src/query-runtime.ts",
-    "src/record-metadata.ts",
-    "src/runtime-errors.ts",
-    "src/runtime.ts",
-    "src/records.ts",
-    "src/testing.ts",
-    "src/vault-services.ts",
-    "src/workouts.ts",
-    "src/health-cli-descriptors.ts",
-    "src/health-registry-command-metadata.ts",
-    "src/health-registry-families.ts",
-    "src/health-cli-method-types.ts",
-    "src/commands/command-helpers.ts",
-    "src/commands/query-record-command-helpers.ts",
-    "src/usecases/runtime.ts",
-    "src/usecases/shared.ts",
-    "src/usecases/text-duration.ts",
-    "src/usecases/vault-usecase-helpers.ts",
-    "src/usecases/capture.ts",
-    "src/captures.ts",
-    "src/usecases/workout-model.ts",
-  ],
+  coverage: createMurphVitestCoverage({
+    customProviderModule: resolveMurphVitestCoverageProviderModule(PACKAGE_DIR),
+    include: ["src/**/*.ts"],
+    thresholds: {
+      perFile: false,
+      lines: 54,
+      functions: 59,
+      branches: 47,
+      statements: 54,
+    },
+  }),
 });
