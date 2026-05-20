@@ -2,10 +2,14 @@ import type { CanonicalEntity, CanonicalEntityFamily } from "../canonical-entiti
 import {
   buildOverviewMetrics,
   type OverviewExperiment,
+  type OverviewExperimentSummary,
   summarizeRecentOverviewJournals,
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
-import { selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica } from "./tracked-experiments.ts";
+import {
+  selectBrowserVaultExperimentSummary as selectExperimentSummaryFromReplica,
+  selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica,
+} from "./tracked-experiments.ts";
 import {
   RECENT_JOURNAL_LIMIT,
   TIMELINE_LIMIT,
@@ -19,6 +23,7 @@ import {
 export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): BrowserVaultOverviewView {
   const vault = vaultViewFromReplica(client.replica);
   return {
+    experimentSummary: selectExperimentSummaryFromReplica(client),
     metrics: buildOverviewMetrics(vault),
     recentJournals: summarizeRecentOverviewJournals(vault, RECENT_JOURNAL_LIMIT),
     trackedExperiments: selectTrackedExperimentsFromReplica(client),
@@ -32,6 +37,10 @@ export function selectBrowserVaultHistory(client: BrowserVaultQueryClient): { ti
 
 export function selectBrowserVaultTrackedExperiments(client: BrowserVaultQueryClient): OverviewExperiment[] {
   return selectTrackedExperimentsFromReplica(client);
+}
+
+export function selectBrowserVaultExperimentSummary(client: BrowserVaultQueryClient): OverviewExperimentSummary {
+  return selectExperimentSummaryFromReplica(client);
 }
 
 function vaultViewFromReplica(replica: BrowserVaultReplica): VaultReadModel {

@@ -31,3 +31,6 @@ Fix the remaining low-severity Clawpatch findings with the smallest durable chan
 - `bash scripts/workspace-verify.sh test:diff ...` for touched files if it remains truthful.
 - `pnpm typecheck` or the required app verification lane if the scoped diff lane is not sufficient.
 - `git diff --check`.
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20

@@ -2,9 +2,15 @@ export {
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
 } from "./browser-replica/client-overview.ts";
-export { selectBrowserVaultTrackedExperiments } from "./browser-replica/tracked-experiments.ts";
+export {
+  selectBrowserVaultExperimentSummary,
+  selectBrowserVaultTrackedExperiments,
+} from "./browser-replica/tracked-experiments.ts";
 export { buildOverviewWeeklyStatsFromDailySampleSummaries } from "./overview-weekly-stats.ts";
-export { isActiveOverviewExperimentStatus } from "./overview-status.ts";
+export {
+  isActiveOverviewExperimentStatus,
+  isCompletedOverviewExperimentStatus,
+} from "./overview-status.ts";
 export type {
   BrowserVaultOverviewView,
   BrowserVaultQueryClient,
@@ -12,6 +18,7 @@ export type {
 } from "./browser-replica/shared.ts";
 export type {
   OverviewExperiment,
+  OverviewExperimentSummary,
   OverviewJournalEntry,
   OverviewMetric,
 } from "./overview.ts";

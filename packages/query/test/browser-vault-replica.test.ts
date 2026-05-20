@@ -80,6 +80,60 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
 });
 
+test("browser vault overview experiment summary is uncapped and completed-status specific", async () => {
+  const activeExperiments = Array.from({ length: 25 }, (_, index) => {
+    const day = String(30 - index).padStart(2, "0");
+    return createEntity("experiment", `active_${index}`, {
+      date: `2026-05-${day}`,
+      occurredAt: `2026-05-${day}T08:00:00.000Z`,
+      status: "active",
+      title: `Active ${index}`,
+    });
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-05-31T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        ...activeExperiments,
+        createEntity("experiment", "done_old", {
+          date: "2026-04-02",
+          occurredAt: "2026-04-02T08:00:00.000Z",
+          status: "done",
+          title: "Finished repeat",
+        }),
+        createEntity("experiment", "completed_old", {
+          date: "2026-04-01",
+          occurredAt: "2026-04-01T08:00:00.000Z",
+          status: "completed",
+          title: "Finished hydration",
+        }),
+        createEntity("experiment", "paused_old", {
+          date: "2026-03-31",
+          occurredAt: "2026-03-31T08:00:00.000Z",
+          status: "paused",
+          title: "Paused baseline",
+        }),
+      ],
+      metadata: {
+        title: "Browser vault fixture",
+      },
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const overview = selectBrowserVaultOverview(createBrowserVaultQueryClient(replica));
+
+  assert.equal(overview.trackedExperiments.length, 24);
+  assert.equal(overview.experimentSummary.activeCount, 25);
+  assert.equal(overview.experimentSummary.activePreview.length, 4);
+  assert.equal(overview.experimentSummary.completedCount, 2);
+  assert.equal(overview.experimentSummary.latestCompleted?.title, "Finished repeat");
+  assert.equal(
+    overview.trackedExperiments.some((entry) => entry.id === "done_old"),
+    false,
+  );
+});
+
 test("browser vault replica dataVersion stays stable when only generatedAt changes", async () => {
   const vault = createVaultReadModel({
     entities: [

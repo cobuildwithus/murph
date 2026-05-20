@@ -1,6 +1,7 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
   OverviewExperiment,
+  OverviewExperimentSummary,
   OverviewJournalEntry,
   OverviewMetric,
   OverviewWeeklySampleSummary,
@@ -279,6 +280,7 @@ export interface BrowserVaultQueryClient {
 }
 
 export interface BrowserVaultOverviewView {
+  experimentSummary: OverviewExperimentSummary;
   metrics: OverviewMetric[];
   recentJournals: OverviewJournalEntry[];
   trackedExperiments: OverviewExperiment[];

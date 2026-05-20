@@ -13,7 +13,10 @@ import {
   type OverviewWeeklyStat,
 } from "./overview-weekly-stats.ts";
 
-export { isActiveOverviewExperimentStatus } from "./overview-status.ts";
+export {
+  isActiveOverviewExperimentStatus,
+  isCompletedOverviewExperimentStatus,
+} from "./overview-status.ts";
 export { buildOverviewWeeklyStatsFromDailySampleSummaries } from "./overview-weekly-stats.ts";
 export type { OverviewWeeklySampleSummary, OverviewWeeklyStat } from "./overview-weekly-stats.ts";
 
@@ -48,6 +51,13 @@ export interface OverviewExperiment {
   summary: string | null;
   tags: string[];
   title: string;
+}
+
+export interface OverviewExperimentSummary {
+  activeCount: number;
+  activePreview: OverviewExperiment[];
+  completedCount: number;
+  latestCompleted: OverviewExperiment | null;
 }
 
 export function buildOverviewMetrics(vault: VaultReadModel): OverviewMetric[] {
