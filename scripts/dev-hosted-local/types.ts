@@ -25,6 +25,7 @@ export type HostedLocalChildProcessName =
   | "cloudflare"
   | "health-commons"
   | "linq-tunnel"
+  | "minio"
   | "stripe"
   | "web";
 

@@ -45,6 +45,11 @@ import {
   waitForHostedLocalLinqWebhookTarget,
 } from "./linq-webhook-tunnel.ts";
 import {
+  cleanupHostedLocalMinioContainerBestEffort,
+  maybeStartHostedLocalMinio,
+  type HostedLocalMinioServer,
+} from "./minio.ts";
+import {
   assertHostedWebDevServerAvailable,
   assertHostedWebPortAvailable,
   cleanupHostedRunnerContainerLocalState,
@@ -98,6 +103,7 @@ export interface HostedLocalDevStack {
     cloudflare: BufferedNamedChildProcess | null;
     healthCommons: BufferedNamedChildProcess | null;
     linqTunnel: BufferedNamedChildProcess | null;
+    minio: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
@@ -193,6 +199,8 @@ export async function startHostedLocalDevStack(input: {
   let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
   let linqTunnelProcess: BufferedNamedChildProcess | null = null;
   let linqWebhookSetup: HostedLocalLinqWebhookSetup | null = null;
+  let minioServer: HostedLocalMinioServer | null = null;
+  let minioProcess: BufferedNamedChildProcess | null = null;
   let stripeListener: BufferedNamedChildProcess | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
@@ -263,15 +271,39 @@ export async function startHostedLocalDevStack(input: {
     });
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
+    if (isolatedDockerConfigDir !== null) {
+      await prepareIsolatedDockerConfig({
+        configDir: isolatedDockerConfigDir,
+        sourceEnv: initialEnv,
+      });
+    }
+    const containerReachableHost = new URL(resolveContainerReachableWorkerOrigin(
+      config,
+      initialEnv,
+    )).hostname;
+    minioServer = await maybeStartHostedLocalMinio({
+      buildId: hostedRunnerLocalBuildId,
+      containerHost: containerReachableHost,
+      env: {
+        ...initialProcessEnv,
+        ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
+      },
+      pipeOutput: input.pipeOutput,
+      stderrTarget: input.stderrTarget,
+      stdoutTarget: input.stdoutTarget,
+      tempDir,
+    });
+    if (minioServer !== null) {
+      minioProcess = minioServer.process;
+      children.push(minioProcess);
+    }
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
       overrides: {
         ...vercelEnv,
-        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: new URL(resolveContainerReachableWorkerOrigin(
-          config,
-          initialEnv,
-        )).hostname,
+        ...(minioServer?.env ?? {}),
+        HOSTED_EXECUTION_RUNNER_HOST_ALIAS: containerReachableHost,
         ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
       },
     });
@@ -295,7 +327,7 @@ export async function startHostedLocalDevStack(input: {
       : null;
     workerProcessEnv = workerRuntimeEnv === null ? null : { ...workerRuntimeEnv };
     if (workerRuntimeEnv !== null) {
-      if (isolatedDockerConfigDir !== null) {
+      if (isolatedDockerConfigDir !== null && minioServer === null) {
         await prepareIsolatedDockerConfig({
           configDir: isolatedDockerConfigDir,
           sourceEnv: initialEnv,
@@ -649,6 +681,12 @@ export async function startHostedLocalDevStack(input: {
             ignoreErrors: true,
           });
         }
+        if (minioServer !== null) {
+          await cleanupHostedLocalMinioContainerBestEffort(
+            workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
+            minioServer.containerName,
+          );
+        }
         await cleanupTemporaryInputs();
         if (terminationFailure) {
           throw terminationFailure.reason;
@@ -730,6 +768,7 @@ export async function startHostedLocalDevStack(input: {
         cloudflare: cloudflareProcess,
         healthCommons: healthCommonsWatcher,
         linqTunnel: linqTunnelProcess,
+        minio: minioProcess,
         stripe: stripeListener,
         web: webProcess,
       },
@@ -772,6 +811,12 @@ export async function startHostedLocalDevStack(input: {
         env: workerProcessEnv ?? workerRuntimeEnv,
         ignoreErrors: true,
       }).catch(() => {});
+    }
+    if (minioServer !== null) {
+      await cleanupHostedLocalMinioContainerBestEffort(
+        workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
+        minioServer.containerName,
+      ).catch(() => {});
     }
     if (!stopped) {
       await rm(workerConfigPath, { force: true }).catch(() => {});
