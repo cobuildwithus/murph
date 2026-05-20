@@ -204,6 +204,19 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (cloudflareAccountId && presignAccountId && presignAccountId !== cloudflareAccountId) {
     errors.push("HOSTED_R2_PRESIGN_ACCOUNT_ID must match CLOUDFLARE_ACCOUNT_ID.");
   }
+  if (normalizeOptionalString(source.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT)) {
+    errors.push("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT must not be set for deploys.");
+  }
+  if (normalizeOptionalString(source.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT)) {
+    errors.push("HOSTED_R2_PRESIGN_CONTROL_ENDPOINT must not be set for deploys.");
+  }
+  const endpointError = readHostedR2PresignEndpointInvariantError({
+    accountId: presignAccountId ?? cloudflareAccountId,
+    endpoint: source.HOSTED_R2_PRESIGN_ENDPOINT,
+  });
+  if (endpointError) {
+    errors.push(endpointError);
+  }
 
   const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
   const hostedAssistantProvider = normalizeOptionalString(source.HOSTED_ASSISTANT_PROVIDER);
@@ -326,6 +339,34 @@ export function listHostedDeployEnvironmentInvariantErrors(
   }
 
   return errors;
+}
+
+function readHostedR2PresignEndpointInvariantError(input: {
+  accountId: string | null;
+  endpoint: string | undefined;
+}): string | null {
+  const endpoint = normalizeOptionalString(input.endpoint);
+  if (!endpoint) {
+    return null;
+  }
+  const expectedHostname = input.accountId
+    ? `${input.accountId}.r2.cloudflarestorage.com`
+    : null;
+  try {
+    const url = new URL(endpoint);
+    if (
+      url.protocol !== "https:"
+      || url.pathname !== "/"
+      || url.search
+      || url.hash
+      || (expectedHostname !== null && url.hostname !== expectedHostname)
+    ) {
+      return "HOSTED_R2_PRESIGN_ENDPOINT must be the account-level R2 HTTPS origin.";
+    }
+  } catch {
+    return "HOSTED_R2_PRESIGN_ENDPOINT must be the account-level R2 HTTPS origin.";
+  }
+  return null;
 }
 
 export async function listHostedDeployEnvironmentInvariantErrorsAsync(

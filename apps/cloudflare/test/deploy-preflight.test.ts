@@ -144,6 +144,32 @@ describe("deploy preflight helpers", () => {
     );
   });
 
+  it("rejects local or non-account direct-R2 endpoint overrides for deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://127.0.0.1:9000",
+    }), { deployWorker: true })).toEqual(expect.arrayContaining([
+      "HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT must not be set for deploys.",
+      "HOSTED_R2_PRESIGN_CONTROL_ENDPOINT must not be set for deploys.",
+      "HOSTED_R2_PRESIGN_ENDPOINT must be the account-level R2 HTTPS origin.",
+    ]));
+
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_ENDPOINT: "https://other-account.r2.cloudflarestorage.com",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PRESIGN_ENDPOINT must be the account-level R2 HTTPS origin.",
+    );
+  });
+
+  it("allows the explicit account-scoped direct-R2 endpoint override for deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_ENDPOINT: "https://r2-account.r2.cloudflarestorage.com",
+    }), { deployWorker: true })).not.toContain(
+      "HOSTED_R2_PRESIGN_ENDPOINT must be the account-level R2 HTTPS origin.",
+    );
+  });
+
   it("rejects production worker deploys that point at preview or development web origins", () => {
     expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       HOSTED_WEB_BASE_URL: "https://preview.example.test",

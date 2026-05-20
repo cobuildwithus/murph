@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -2756,6 +2756,13 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
     const env = createRunnerOutboundEnv({
       USER_RUNNER: {
         getByName: runner.getByName,
@@ -2765,6 +2772,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotPresignGetRequest({
         objectKey,
+        snapshotRef,
         snapshotId,
         workspaceVersion: "4",
       }),
@@ -2797,6 +2805,156 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(workerBodyResponse.status).toBe(405);
+  });
+
+  it("rejects direct-R2 workspace snapshot GET presigns without a matching v2 ref", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_read_ref_bound";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const missingRefResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(missingRefResponse.status).toBe(400);
+    await expect(missingRefResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot presign ref is invalid.",
+    });
+
+    const mismatchedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "other_member",
+    });
+    const mismatchedRefResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey: mismatchedObjectKey,
+        snapshotRef: createWorkspaceSnapshotV2Ref({
+          encryptedByteSize: 4,
+          encryptedObjectSha256: "a".repeat(64),
+          objectKey,
+          snapshotId,
+          userId: "member_123",
+        }),
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(mismatchedRefResponse.status).toBe(403);
+    await expect(mismatchedRefResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot presign ref does not match its route.",
+    });
+
+    const mismatchedUserResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotRef: createWorkspaceSnapshotV2Ref({
+          encryptedByteSize: 4,
+          encryptedObjectSha256: "a".repeat(64),
+          objectKey,
+          snapshotId,
+          userId: "other_member",
+        }),
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+    expect(mismatchedUserResponse.status).toBe(403);
+    await expect(mismatchedUserResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot presign ref does not match its route.",
+    });
+
+    const mismatchedAadRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const mismatchedAadResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignGetRequest({
+        objectKey,
+        snapshotRef: {
+          ...mismatchedAadRef,
+          encryption: {
+            ...mismatchedAadRef.encryption,
+            aad: {
+              ...mismatchedAadRef.encryption.aad,
+              objectKey: mismatchedObjectKey,
+            },
+          },
+        },
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+    expect(mismatchedAadResponse.status).toBe(400);
+    await expect(mismatchedAadResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot presign ref is invalid.",
+    });
+
+    const routeMismatchResponse = await handleRunnerOutboundRequest(
+      new Request("http://workspace-snapshots.worker/workspace-snapshots/snapshot_other/presign-get", {
+        body: JSON.stringify({
+          objectKey,
+          ref: createWorkspaceSnapshotV2Ref({
+            encryptedByteSize: 4,
+            encryptedObjectSha256: "a".repeat(64),
+            objectKey,
+            snapshotId,
+            userId: "member_123",
+          }),
+          snapshotId,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+    expect(routeMismatchResponse.status).toBe(400);
+    await expect(routeMismatchResponse.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot presign snapshotId does not match its route.",
+    });
   });
 
   it("rejects direct-R2 workspace snapshot GET presigns without a fresh workspace version fence", async () => {
@@ -2990,10 +3148,14 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
     const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
+      ...args: Parameters<typeof fetch>
     ): Promise<Response> => {
+      const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
       return new Response(
-        JSON.stringify(createHostedWorkspaceCheckpointResponse("5", snapshotRef)),
+        JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+          "5",
+          checkpointRequest.snapshotRef,
+        )),
         {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -3015,17 +3177,23 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      checkpoint: createHostedWorkspaceCheckpointResponse("5", snapshotRef),
-      ok: true,
-      snapshotRef: expect.objectContaining({
-        archive: snapshotRef.archive,
-        objectKey,
-        schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-        snapshotId,
-        upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    const responseBody = requireTestObject(await response.json(), "workspace snapshot complete response");
+    expect(responseBody.ok).toBe(true);
+    expect(responseBody.snapshotRef).toEqual(expect.objectContaining({
+      archive: snapshotRef.archive,
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+      snapshotId,
+      upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    }));
+    expect(responseBody.checkpoint).toEqual(expect.objectContaining({
+      checkpointed: true,
+      workspace: expect.objectContaining({
+        snapshotRef: responseBody.snapshotRef,
+        userId: "member_123",
+        version: "5",
       }),
-    });
+    }));
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
@@ -3044,6 +3212,367 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
+  });
+
+  it("verifies hosted-local direct-R2 snapshot objects through the local S3-compatible endpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_local_s3";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const encryptedObjectSha256 = sha256Hex(bytes);
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256,
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const bindingHead = vi.fn(async () => {
+      throw new Error("hosted-local completion should use local S3 HEAD");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        bindingHead,
+      ),
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+      if (url.origin === "http://127.0.0.1:39000" && method === "HEAD") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "HEAD",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, {
+          headers: {
+            "content-length": String(bytes.byteLength),
+            "x-amz-checksum-sha256": encryptedObjectSha256,
+            "x-amz-meta-encryptedsha256": encryptedObjectSha256,
+            "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+            "x-amz-meta-snapshotid": snapshotId,
+          },
+          status: 200,
+        });
+      }
+      if (
+        url.href === "https://web.example.test/api/internal/hosted-workspace/checkpoint"
+        && method === "POST"
+      ) {
+        const checkpointRequest = readTestFetchBodyObject(
+          [request, init] as Parameters<typeof fetch>,
+          "hosted-local workspace snapshot checkpoint request",
+        );
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            checkpointRequest.snapshotRef,
+          )),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      throw new Error(`Unexpected hosted-local snapshot fetch ${method} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(bindingHead).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const headUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    verifyLocalS3SigV4QueryUrl({
+      accessKeyId: "r2_access_fixture_test",
+      amzDate: "20260520T123456Z",
+      bucketName: "bundles-test",
+      endpoint: "http://127.0.0.1:39000",
+      expiresSeconds: 60,
+      key: objectKey,
+      method: "HEAD",
+      secretAccessKey: "r2_signing_fixture_test",
+      url: headUrl,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      method: "HEAD",
+    }));
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("rejects hosted-local workspace snapshot completion when HEAD omits the checksum header", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_local_s3_missing_checksum";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const encryptedObjectSha256 = sha256Hex(bytes);
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256,
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const bindingHead = vi.fn(async () => {
+      throw new Error("hosted-local completion should use local S3 HEAD");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        bindingHead,
+      ),
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+      if (url.origin === "http://127.0.0.1:39000" && method === "HEAD") {
+        return new Response(null, {
+          headers: {
+            "content-length": String(bytes.byteLength),
+            "x-amz-meta-encryptedsha256": encryptedObjectSha256,
+            "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+            "x-amz-meta-snapshotid": snapshotId,
+          },
+          status: 200,
+        });
+      }
+      if (url.origin === "http://127.0.0.1:39000" && method === "DELETE") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "DELETE",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected hosted-local missing checksum fetch ${method} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot object metadata does not match its ref.",
+    });
+    expect(bindingHead).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("does not fall back to the R2 binding when hosted-local S3 control endpoint is missing", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_local_s3_missing_control";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const encryptedObjectSha256 = sha256Hex(bytes);
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256,
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const bindingHead = vi.fn(async () => ({
+      checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+      customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+      key: objectKey,
+      size: bytes.byteLength,
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      createRunnerOutboundEnv({
+        BUNDLES: createWorkspaceSnapshotBucket(
+          async (key) => ({ key, size: bytes.byteLength }),
+          bindingHead,
+        ),
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        USER_RUNNER: {
+          getByName: runner.getByName,
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Hosted workspace snapshot local S3 control endpoint is required when local R2 presign endpoint mode is enabled.",
+    });
+    expect(bindingHead).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+  });
+
+  it("rejects malformed hosted-local S3 content-length values before checkpointing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_local_s3_bad_length";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+      ),
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+      if (url.origin === "http://127.0.0.1:39000" && method === "HEAD") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "HEAD",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, {
+          headers: {
+            "content-length": "4abc",
+            "x-amz-meta-encryptedsha256": snapshotRef.archive.encryptedObjectSha256,
+            "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+            "x-amz-meta-snapshotid": snapshotId,
+          },
+          status: 200,
+        });
+      }
+      if (url.origin === "http://127.0.0.1:39000" && method === "DELETE") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "DELETE",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected hosted-local malformed length fetch ${method} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot object size is unavailable.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
   it("aborts workspace snapshot upload sessions and deletes any uploaded object", async () => {
@@ -3091,6 +3620,96 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(deleteObject).toHaveBeenCalledWith(objectKey);
+  });
+
+  it("aborts hosted-local workspace snapshot upload sessions through local S3-compatible DELETE", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:34:56.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_abort_local_s3";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const bindingDelete = vi.fn(async () => {
+      throw new Error("hosted-local abort should use local S3 DELETE");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({ key, size: 4 }),
+        bindingDelete,
+      ),
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (
+      request: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const method = init?.method ?? (request instanceof Request ? request.method : "GET");
+      if (url.origin === "http://127.0.0.1:39000" && method === "DELETE") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "DELETE",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
+        return new Response(null, { status: 404 });
+      }
+      throw new Error(`Unexpected hosted-local abort fetch ${method} ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotAbortRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(bindingDelete).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const deleteUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    verifyLocalS3SigV4QueryUrl({
+      accessKeyId: "r2_access_fixture_test",
+      amzDate: "20260520T123456Z",
+      bucketName: "bundles-test",
+      endpoint: "http://127.0.0.1:39000",
+      expiresSeconds: 60,
+      key: objectKey,
+      method: "DELETE",
+      secretAccessKey: "r2_signing_fixture_test",
+      url: deleteUrl,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      method: "DELETE",
+    }));
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
   it("retires workspace snapshot upload sessions when complete sees stale session state", async () => {
@@ -3340,6 +3959,86 @@ describe("handleRunnerOutboundRequest", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint CAS failed.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    }));
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects workspace snapshot completion when checkpoint returns a mutated v2 ref", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_checkpoint_ref_mutated";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const checkpointRequest = readTestFetchBodyObject(args, "mutated checkpoint request");
+      const publishedRef = requireTestObject(checkpointRequest.snapshotRef, "mutated checkpoint ref");
+      const archive = requireTestObject(publishedRef.archive, "mutated checkpoint ref archive");
+      const mutatedRef = {
+        ...publishedRef,
+        archive: {
+          ...archive,
+          plaintextArchiveSha256: "d".repeat(64),
+        },
+      };
+      return new Response(
+        JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef("5", mutatedRef)),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint ref mismatch.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
@@ -4489,6 +5188,7 @@ function createWorkspaceSnapshotPresignPutRequest(input: {
 
 function createWorkspaceSnapshotPresignGetRequest(input: {
   objectKey: string;
+  snapshotRef?: HostedWorkspaceSnapshotV2Ref;
   snapshotId: string;
   workspaceVersion: string;
 }): Request {
@@ -4497,6 +5197,7 @@ function createWorkspaceSnapshotPresignGetRequest(input: {
     {
       body: JSON.stringify({
         objectKey: input.objectKey,
+        ...(input.snapshotRef === undefined ? {} : { ref: input.snapshotRef }),
         snapshotId: input.snapshotId,
       }),
       headers: createRunnerProxyHeaders({
@@ -4799,6 +5500,100 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function verifyLocalS3SigV4QueryUrl(input: {
+  accessKeyId: string;
+  amzDate: string;
+  bucketName: string;
+  endpoint: string;
+  expiresSeconds: number;
+  key: string;
+  method: "DELETE" | "HEAD";
+  secretAccessKey: string;
+  url: URL;
+}): void {
+  const endpoint = new URL(input.endpoint);
+  const canonicalUri = `/${encodeSigV4PathSegment(input.bucketName)}/${encodeSigV4ObjectKey(input.key)}`;
+  const credentialScope = `${input.amzDate.slice(0, 8)}/auto/s3/aws4_request`;
+  const credential = `${input.accessKeyId}/${credentialScope}`;
+  const expectedQuery = new URLSearchParams({
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
+    "X-Amz-Credential": credential,
+    "X-Amz-Date": input.amzDate,
+    "X-Amz-Expires": String(input.expiresSeconds),
+    "X-Amz-SignedHeaders": "host",
+  });
+  const canonicalQuery = canonicalizeSigV4SearchParams(expectedQuery);
+  const canonicalRequest = [
+    input.method,
+    canonicalUri,
+    canonicalQuery,
+    [`host:${input.url.host}`, ""].join("\n"),
+    "host",
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    input.amzDate,
+    credentialScope,
+    createHash("sha256").update(canonicalRequest).digest("hex"),
+  ].join("\n");
+  const signature = createHmac("sha256", deriveSigV4SigningKey({
+    dateStamp: input.amzDate.slice(0, 8),
+    secretAccessKey: input.secretAccessKey,
+  })).update(stringToSign).digest("hex");
+
+  expect(input.url.origin).toBe(endpoint.origin);
+  expect(input.url.pathname).toBe(canonicalUri);
+  expect(input.url.host).toBe(endpoint.host);
+  expect(input.url.searchParams.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+  expect(input.url.searchParams.get("X-Amz-Content-Sha256")).toBe("UNSIGNED-PAYLOAD");
+  expect(input.url.searchParams.get("X-Amz-Credential")).toBe(credential);
+  expect(input.url.searchParams.get("X-Amz-Date")).toBe(input.amzDate);
+  expect(input.url.searchParams.get("X-Amz-Expires")).toBe(String(input.expiresSeconds));
+  expect(input.url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+  expect(canonicalizeSigV4SearchParamsWithoutSignature(input.url.searchParams)).toBe(canonicalQuery);
+  expect(input.url.searchParams.get("X-Amz-Signature")).toBe(signature);
+}
+
+function deriveSigV4SigningKey(input: {
+  dateStamp: string;
+  secretAccessKey: string;
+}): Buffer {
+  const dateKey = createHmac("sha256", `AWS4${input.secretAccessKey}`).update(input.dateStamp).digest();
+  const regionKey = createHmac("sha256", dateKey).update("auto").digest();
+  const serviceKey = createHmac("sha256", regionKey).update("s3").digest();
+  return createHmac("sha256", serviceKey).update("aws4_request").digest();
+}
+
+function canonicalizeSigV4SearchParamsWithoutSignature(params: URLSearchParams): string {
+  const unsignedParams = new URLSearchParams();
+  for (const [key, value] of params.entries()) {
+    if (key !== "X-Amz-Signature") {
+      unsignedParams.append(key, value);
+    }
+  }
+  return canonicalizeSigV4SearchParams(unsignedParams);
+}
+
+function canonicalizeSigV4SearchParams(params: URLSearchParams): string {
+  return [...params.entries()]
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+      leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey))
+    .map(([key, value]) => `${encodeSigV4PathSegment(key)}=${encodeSigV4PathSegment(value)}`)
+    .join("&");
+}
+
+function encodeSigV4ObjectKey(key: string): string {
+  return key.split("/").map(encodeSigV4PathSegment).join("/");
+}
+
+function encodeSigV4PathSegment(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/gu, (character) =>
+      `%${character.charCodeAt(0).toString(16).padStart(2, "0").toUpperCase()}`);
+}
+
 function requireTestObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -4937,6 +5732,31 @@ function createHostedWorkspaceCheckpointResponse(
       version,
     },
   };
+}
+
+function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+  version: string,
+  snapshotRef: unknown,
+) {
+  const response = createHostedWorkspaceCheckpointResponse(version, null);
+  return {
+    ...response,
+    workspace: {
+      ...response.workspace,
+      snapshotRef,
+    },
+  };
+}
+
+function readTestFetchBodyObject(
+  args: Parameters<typeof fetch>,
+  label: string,
+): Record<string, unknown> {
+  const init = args[1];
+  if (!init || typeof init !== "object" || !("body" in init)) {
+    throw new TypeError(`${label} fetch init must include a body.`);
+  }
+  return requireTestObject(JSON.parse(String(init.body)), label);
 }
 
 function createDirectRunnerOutboundEnv(

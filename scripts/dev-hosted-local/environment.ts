@@ -8,6 +8,10 @@ import {
   DEFAULT_STRIPE_ENV_FILE,
   HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+  HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
+  HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
+  HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
+  HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
   HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
@@ -340,20 +344,28 @@ function resolveHostedLocalTestR2PresignEnvironment(
   if (!isHostedLocalE2eEnvironment(env) && !testRoutesEnabled) {
     return {};
   }
+  const allowLocalEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT);
+  const controlEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT);
+  const dockerBridgeHost = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST);
+  const endpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_ENDPOINT);
 
   return {
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_ACCESS_KEY_ID)
-      ?? "hosted-local-r2-access-key",
+      ?? HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
     HOSTED_R2_PRESIGN_ACCOUNT_ID:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_ACCOUNT_ID)
-      ?? "hosted-local-r2-account",
+      ?? HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
+    ...(allowLocalEndpoint ? { HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: allowLocalEndpoint } : {}),
     HOSTED_R2_PRESIGN_BUCKET_NAME:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_BUCKET_NAME)
-      ?? "hosted-local-r2-bundles",
+      ?? HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
+    ...(controlEndpoint ? { HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: controlEndpoint } : {}),
+    ...(endpoint ? { HOSTED_R2_PRESIGN_ENDPOINT: endpoint } : {}),
+    ...(dockerBridgeHost ? { MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: dockerBridgeHost } : {}),
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY:
       normalizeOptionalString(env.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY)
-      ?? "hosted-local-r2-secret-key",
+      ?? HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
   };
 }
 

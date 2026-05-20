@@ -296,6 +296,25 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
   });
 
+  it("passes hosted-local MinIO endpoint overrides through only with local e2e R2 placeholders", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+    });
+
+    expect(merged.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT).toBe("1");
+    expect(merged.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT).toBe("http://127.0.0.1:9000");
+    expect(merged.HOSTED_R2_PRESIGN_ENDPOINT).toBe("http://host.docker.internal:9000");
+    expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+  });
+
   it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,

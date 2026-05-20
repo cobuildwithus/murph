@@ -1569,6 +1569,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         const presignedGet = await presignWorkspaceSnapshotGet({
           fetchImpl: input.fetchImpl,
           objectKey: request.ref.objectKey,
+          ref: request.ref,
           snapshotId: request.ref.snapshotId,
           timeoutMs: input.timeoutMs,
           workspaceCheckpointBridge: input.workspaceCheckpointBridge,
@@ -1616,7 +1617,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
         ),
       });
-      return parseHostedWorkspaceSnapshotStartPayload(payload);
+      return parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
     },
   };
   return port;
@@ -1624,6 +1625,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
 
 function parseHostedWorkspaceSnapshotStartPayload(
   value: unknown,
+  boundUserId: string,
 ): HostedRuntimeWorkspaceSnapshotSessionStart {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted workspace snapshot session start response must be an object.");
@@ -1649,6 +1651,9 @@ function parseHostedWorkspaceSnapshotStartPayload(
   const snapshotId = readRequiredHostedRuntimeString(record.snapshotId, "Hosted workspace snapshot snapshotId");
   if (aad.objectKey !== objectKey || aad.snapshotId !== snapshotId) {
     throw new TypeError("Hosted workspace snapshot session start response AAD does not match its object binding.");
+  }
+  if (aad.userId !== boundUserId) {
+    throw new TypeError("Hosted workspace snapshot session start response AAD does not match its user binding.");
   }
   return {
     encryption: {
@@ -1735,6 +1740,7 @@ async function presignWorkspaceSnapshotPut(input: {
 async function presignWorkspaceSnapshotGet(input: {
   fetchImpl: typeof fetch;
   objectKey: string;
+  ref: HostedWorkspaceSnapshotV2Ref;
   snapshotId: string;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
@@ -1746,6 +1752,7 @@ async function presignWorkspaceSnapshotGet(input: {
   const payload = await fetchHostedJson({
     body: {
       objectKey: input.objectKey,
+      ref: input.ref,
       snapshotId: input.snapshotId,
     },
     description: "Hosted workspace snapshot presign download",
@@ -2530,7 +2537,6 @@ async function fetchHostedResponse(input: {
   description: string;
   fetchImpl: typeof fetch;
   init?: RequestInit;
-  logFailures?: boolean;
   logPath?: string;
   signal?: AbortSignal | null;
   timeoutMs: number;
@@ -2560,22 +2566,20 @@ async function fetchHostedResponse(input: {
       },
     });
 
-    if (input.logFailures !== false) {
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: {
-          description: input.description,
-          method: input.init?.method ?? "GET",
-          path: input.logPath ?? input.url.pathname,
-          responseOrigin: input.url.origin,
-          ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
-        },
-        level: "warn",
-        message: "Hosted runtime upstream request failed.",
-        phase: "outbox",
-        userId: null,
-      });
-    }
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: {
+        description: input.description,
+        method: input.init?.method ?? "GET",
+        path: input.logPath ?? input.url.pathname,
+        responseOrigin: input.url.origin,
+        ...buildHostedRuntimeControlPlaneSafeErrorMetadata(wrappedError),
+      },
+      level: "warn",
+      message: "Hosted runtime upstream request failed.",
+      phase: "outbox",
+      userId: null,
+    });
     throw wrappedError;
   }
 }

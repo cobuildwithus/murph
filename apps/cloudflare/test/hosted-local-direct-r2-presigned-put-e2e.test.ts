@@ -3,6 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
   createHostedR2PresignedDeleteUrl,
   createHostedR2PresignedHeadUrl,
   createHostedR2PresignedPutUrl,
@@ -17,7 +20,8 @@ import {
 const directR2PresignedPutDefaultBytes = 150 * 1024 * 1024;
 const directR2PresignedPutTimeoutMs = 420_000;
 const directR2ContentType = "application/octet-stream";
-const directR2MetadataSchema = "murph.direct-r2-presigned-put.e2e";
+const directR2SignedHeaders =
+  "content-type;host;if-none-match;x-amz-checksum-sha256;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid";
 const userId = `member_direct_r2_${randomUUID()}`;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -51,13 +55,32 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
     const activeScenario = requireScenario();
     const environment = readHostedLocalR2ControlEnvironment(activeScenario);
     const payload = createDeterministicPayload(readDirectR2PresignedPutByteLength());
+    const snapshotId = `snapshot-${randomUUID()}`;
     const objectKey = `direct-r2-presigned-put/${userId}/${randomUUID()}.bin`;
-    const negativeObjectKey = `direct-r2-presigned-put/${userId}/${randomUUID()}-negative.bin`;
+    const negativeMissingMetadataObjectKey =
+      `direct-r2-presigned-put/${userId}/${randomUUID()}-missing-metadata.bin`;
+    const negativeChangedMetadataObjectKey =
+      `direct-r2-presigned-put/${userId}/${randomUUID()}-changed-metadata.bin`;
+    const negativeMissingChecksumObjectKey =
+      `direct-r2-presigned-put/${userId}/${randomUUID()}-missing-checksum.bin`;
     const metadata = {
-      payloadsha256: payload.sha256Hex,
-      schema: directR2MetadataSchema,
-      testid: userId,
+      encryptedsha256: payload.sha256Hex,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+      snapshotid: snapshotId,
     };
+    const requestHeaders = buildPresignedPutHeaders({
+      metadata,
+      sha256Base64: payload.sha256Base64,
+    });
+
+    expect(requestHeaders).toMatchObject({
+      "content-type": directR2ContentType,
+      "if-none-match": "*",
+      "x-amz-checksum-sha256": payload.sha256Base64,
+      "x-amz-meta-encryptedsha256": payload.sha256Hex,
+      "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+      "x-amz-meta-snapshotid": snapshotId,
+    });
 
     try {
       const putUrl = await createHostedR2PresignedPutUrl({
@@ -68,10 +91,12 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
         key: objectKey,
         metadata,
       });
+      expect(new URL(putUrl.url).searchParams.get("X-Amz-SignedHeaders")).toBe(
+        directR2SignedHeaders,
+      );
       const putResponse = await putPresignedObject({
-        metadata,
+        headers: requestHeaders,
         payload: payload.bytes,
-        sha256Base64: payload.sha256Base64,
         url: putUrl.url,
       });
 
@@ -91,54 +116,92 @@ describe("hosted local direct R2 presigned PUT e2e", () => {
       expect(headResponse.status).toBe(200);
       expect(headResponse.headers.get("content-length")).toBe(String(payload.bytes.byteLength));
       expect(headResponse.headers.get("content-type")).toContain(directR2ContentType);
-      expect(headResponse.headers.get("x-amz-meta-payloadsha256")).toBe(payload.sha256Hex);
-      expect(headResponse.headers.get("x-amz-meta-schema")).toBe(directR2MetadataSchema);
-      expect(headResponse.headers.get("x-amz-meta-testid")).toBe(userId);
+      expect(headResponse.headers.get("x-amz-meta-encryptedsha256")).toBe(payload.sha256Hex);
+      expect(headResponse.headers.get("x-amz-meta-schema")).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+      expect(headResponse.headers.get("x-amz-meta-snapshotid")).toBe(snapshotId);
 
-      const negativePutUrl = await createHostedR2PresignedPutUrl({
+      const missingMetadataPutUrl = await createHostedR2PresignedPutUrl({
         checksumSha256Base64: payload.sha256Base64,
         contentType: directR2ContentType,
         environment,
         expiresSeconds: 300,
-        key: negativeObjectKey,
+        key: negativeMissingMetadataObjectKey,
         metadata,
       });
 
       const missingMetadataResponse = await putPresignedObject({
-        metadata: {
-          payloadsha256: payload.sha256Hex,
-          schema: directR2MetadataSchema,
-        },
+        headers: buildPresignedPutHeaders({
+          metadata: {
+            encryptedsha256: payload.sha256Hex,
+            schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+          },
+          sha256Base64: payload.sha256Base64,
+        }),
         payload: payload.bytes,
-        sha256Base64: payload.sha256Base64,
-        url: negativePutUrl.url,
+        url: missingMetadataPutUrl.url,
       });
       expect(missingMetadataResponse.ok).toBe(false);
 
+      const changedMetadataPutUrl = await createHostedR2PresignedPutUrl({
+        checksumSha256Base64: payload.sha256Base64,
+        contentType: directR2ContentType,
+        environment,
+        expiresSeconds: 300,
+        key: negativeChangedMetadataObjectKey,
+        metadata,
+      });
       const changedMetadataResponse = await putPresignedObject({
-        metadata: {
-          ...metadata,
-          testid: `${userId}-changed`,
-        },
+        headers: buildPresignedPutHeaders({
+          metadata: {
+            ...metadata,
+            snapshotid: `${snapshotId}-changed`,
+          },
+          sha256Base64: payload.sha256Base64,
+        }),
         payload: payload.bytes,
-        sha256Base64: payload.sha256Base64,
-        url: negativePutUrl.url,
+        url: changedMetadataPutUrl.url,
       });
       expect(changedMetadataResponse.ok).toBe(false);
 
-      const negativeHeadUrl = await createHostedR2PresignedHeadUrl({
+      const missingChecksumPutUrl = await createHostedR2PresignedPutUrl({
+        checksumSha256Base64: payload.sha256Base64,
+        contentType: directR2ContentType,
         environment,
         expiresSeconds: 300,
-        key: negativeObjectKey,
+        key: negativeMissingChecksumObjectKey,
+        metadata,
       });
-      const negativeHeadResponse = await fetch(negativeHeadUrl.url, {
-        method: "HEAD",
-        signal: AbortSignal.timeout(directR2PresignedPutTimeoutMs),
+      const missingChecksumResponse = await putPresignedObject({
+        headers: buildPresignedPutHeaders({
+          metadata,
+          sha256Base64: null,
+        }),
+        payload: payload.bytes,
+        url: missingChecksumPutUrl.url,
       });
-      expect(negativeHeadResponse.status).toBe(404);
+      expect(missingChecksumResponse.ok).toBe(false);
+
+      for (const negativeObjectKey of [
+        negativeMissingMetadataObjectKey,
+        negativeChangedMetadataObjectKey,
+        negativeMissingChecksumObjectKey,
+      ]) {
+        const negativeHeadUrl = await createHostedR2PresignedHeadUrl({
+          environment,
+          expiresSeconds: 300,
+          key: negativeObjectKey,
+        });
+        const negativeHeadResponse = await fetch(negativeHeadUrl.url, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(directR2PresignedPutTimeoutMs),
+        });
+        expect(negativeHeadResponse.status).toBe(404);
+      }
     } finally {
       await deletePresignedObjectBestEffort(environment, objectKey);
-      await deletePresignedObjectBestEffort(environment, negativeObjectKey);
+      await deletePresignedObjectBestEffort(environment, negativeMissingMetadataObjectKey);
+      await deletePresignedObjectBestEffort(environment, negativeChangedMetadataObjectKey);
+      await deletePresignedObjectBestEffort(environment, negativeMissingChecksumObjectKey);
     }
   }, directR2PresignedPutTimeoutMs);
 });
@@ -181,23 +244,31 @@ function createDeterministicPayload(byteLength: number): {
   };
 }
 
-async function putPresignedObject(input: {
+function buildPresignedPutHeaders(input: {
   metadata: Readonly<Record<string, string>>;
+  sha256Base64: string | null;
+}): Record<string, string> {
+  return {
+    "content-type": directR2ContentType,
+    "if-none-match": "*",
+    ...(input.sha256Base64 === null ? {} : {
+      "x-amz-checksum-sha256": input.sha256Base64,
+    }),
+    ...Object.fromEntries(
+      Object.entries(input.metadata)
+        .map(([key, value]) => [`x-amz-meta-${key}`, value]),
+    ),
+  };
+}
+
+async function putPresignedObject(input: {
+  headers: HeadersInit;
   payload: ArrayBuffer;
-  sha256Base64: string;
   url: string;
 }): Promise<Response> {
   return await fetch(input.url, {
     body: input.payload,
-    headers: {
-      "content-type": directR2ContentType,
-      "if-none-match": "*",
-      "x-amz-checksum-sha256": input.sha256Base64,
-      ...Object.fromEntries(
-        Object.entries(input.metadata)
-          .map(([key, value]) => [`x-amz-meta-${key}`, value]),
-      ),
-    },
+    headers: input.headers,
     method: "PUT",
     signal: AbortSignal.timeout(directR2PresignedPutTimeoutMs),
   });

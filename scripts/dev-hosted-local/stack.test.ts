@@ -167,6 +167,14 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
+const maybeStartHostedLocalMinio = vi.fn<
+  (input: unknown) => Promise<{
+    containerName: string;
+    env: Record<string, string>;
+    process: BufferedNamedChildProcess;
+  } | null>
+>(async () => null);
+const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {
@@ -279,6 +287,11 @@ vi.mock("./linq-webhook-tunnel.ts", () => ({
   registerHostedLocalLinqWebhookSubscription,
   resolveHostedLocalLinqWebhookSetup,
   waitForHostedLocalLinqWebhookTarget,
+}));
+
+vi.mock("./minio.ts", () => ({
+  cleanupHostedLocalMinioContainerBestEffort,
+  maybeStartHostedLocalMinio,
 }));
 
 vi.mock("./runtime.ts", () => ({
@@ -655,6 +668,64 @@ describe("hosted local dev stack", () => {
       ignoreErrors: true,
       scope: "current-build",
     }));
+    expect(maybeStartHostedLocalMinio).toHaveBeenCalledWith(expect.objectContaining({
+      containerHost: expect.any(String),
+      tempDir: "/tmp/murph-dev-env-test",
+    }));
+  });
+
+  it("wires hosted-local MinIO endpoints into the Worker env before Cloudflare starts", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const minioChild = createBufferedChild({ exitCode: null, name: "minio", pid: 102 });
+    maybeStartHostedLocalMinio.mockResolvedValueOnce({
+      containerName: "murph-hosted-local-r2-test",
+      env: {
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      },
+      process: minioChild,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const environmentModule = await import("./environment.ts");
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(stack.processes.minio).toBe(minioChild);
+    expect(vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0].overrides)
+      .toEqual(expect.objectContaining({
+        HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+        HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      }));
   });
 
   it("signals all child processes during stop before waiting for the first one to exit", async () => {

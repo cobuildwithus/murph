@@ -73,6 +73,16 @@ describe("workspace snapshot local restore", () => {
       unwrittenRelativePath: "safe/inside.txt",
     });
   });
+
+  it("rejects tar archives with too many empty directories before extraction", async () => {
+    await expectUnsafeTarArchive({
+      entries: Array.from({ length: 20_001 }, (_, index) => ({
+        name: `empty-${index}/`,
+        typeFlag: "5",
+      })),
+      expectedError: "Hosted workspace snapshot tar entry count is unsafe.",
+    });
+  });
 });
 
 async function expectUnsafeTarArchive(input: {

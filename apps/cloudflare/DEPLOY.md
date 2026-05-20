@@ -51,7 +51,7 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
 `CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
-`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload through presigned URLs and are verified through the Worker R2 binding.
+`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the Worker R2 binding. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -105,6 +105,10 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/deadline/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
+- `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
+  R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
+  set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
+  The local MinIO flags are hosted-local E2E only and must not be set for deploys.
 
 `CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is
 the per-user Durable Object consecutive failure cap. Exhausted runners stop
@@ -249,12 +253,21 @@ export HOSTED_EXECUTION_DEPLOY_CONTEXT=preview
 export HOSTED_WEB_BASE_URL=https://web.example.test
 export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
 export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
-export HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION=...
-export HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM=...
+export HOSTED_R2_PRESIGN_ACCOUNT_ID=your-cloudflare-account-id
+export HOSTED_R2_PRESIGN_BUCKET_NAME=hosted-execution-bundles-staging
 export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
-export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK=...
-export HOSTED_CRYPTO_ENV=prod
-export HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=...
+export HOSTED_CRYPTO_ENV=preview
+export HOSTED_ASSISTANT_PROVIDER=openai
+export HOSTED_ASSISTANT_MODEL=gpt-5.5
+export HOSTED_ASSISTANT_REASONING_EFFORT=low
+
+# Set required secret-valued variables outside this snippet before running:
+# HOSTED_R2_PRESIGN_ACCESS_KEY_ID, HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY,
+# HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+# HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
+# HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
+# HOSTED_LOG_FINGERPRINT_SECRET, HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK,
+# OPENAI_API_KEY.
 
 pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:config:render

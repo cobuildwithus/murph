@@ -347,6 +347,62 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("rejects workspace snapshot start payloads whose AAD user is not the bound runner user", async () => {
+    const snapshotId = "snapshot_runner_platform_start";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot start");
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey,
+                snapshotId,
+                userId: "other_member",
+              }),
+              dataKeyBase64,
+              ivBase64: "AQIDBAUGBwgJCgsM",
+              rootKeyId: "root_key_test",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: "wrapped_data_key_test",
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey,
+            snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "6",
+      reason: "idle_shutdown",
+    })).rejects.toThrow(
+      "Hosted workspace snapshot session start response AAD does not match its user binding.",
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
     const sourceRoot = path.join(tempRoot, "source");
@@ -477,6 +533,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       );
       await expect(presignRequest.json()).resolves.toEqual({
         objectKey,
+        ref: expect.objectContaining({
+          objectKey,
+          snapshotId,
+          userId: "member_123",
+        }),
         snapshotId,
       });
       expect(requireFetchRequest(fetchMock.mock.calls[2], "direct R2 workspace snapshot GET").url).toBe(getUrl);

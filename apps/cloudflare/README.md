@@ -42,7 +42,7 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 
 ## Storage Contract
 
-- The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to R2 through a short-lived presigned `PUT` URL minted by the Worker; Worker routes carry JSON start/complete metadata only and never receive the snapshot body.
+- The live v2 workspace snapshot is one encrypted zstd-compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to R2 through a short-lived presigned `PUT` URL minted by the Worker, and restores through a presigned `GET`; Worker routes carry JSON session/presign/complete metadata only and never receive the snapshot body. This v2 format is a greenfield zstd hard cut: gzip v2 refs are not produced or restored.
 - Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
 - Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
@@ -123,7 +123,7 @@ Optional execution vars and secrets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the child runner receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
-- `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot PUT URL generation. It must be an HTTPS origin when configured.
+- `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local E2E starts a MinIO sidecar and injects local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the child runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.

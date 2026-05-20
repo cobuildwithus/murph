@@ -316,7 +316,9 @@ tar object uploaded directly from the container to R2 through a short-lived
 presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
 abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
-receives the snapshot body. The bridge no longer writes foreground working
+receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
+gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
+limited to pre-v2 workspace refs. The bridge no longer writes foreground working
 commits. Mailbox import, active-turn acceptance, `canonical_runtime_commit`,
 assistant-runtime commits, provider cleanup, system-mailbox receipts, and
 pre-delivery outbox state must not enter workspace snapshot construction; the

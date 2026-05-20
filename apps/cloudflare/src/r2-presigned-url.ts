@@ -4,9 +4,12 @@ import {
 
 export const HOSTED_R2_PRESIGN_ACCOUNT_ID_ENV = "HOSTED_R2_PRESIGN_ACCOUNT_ID";
 export const HOSTED_R2_PRESIGN_ACCESS_KEY_ID_ENV = "HOSTED_R2_PRESIGN_ACCESS_KEY_ID";
+export const HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT";
 export const HOSTED_R2_PRESIGN_BUCKET_NAME_ENV = "HOSTED_R2_PRESIGN_BUCKET_NAME";
+export const HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_CONTROL_ENDPOINT";
 export const HOSTED_R2_PRESIGN_ENDPOINT_ENV = "HOSTED_R2_PRESIGN_ENDPOINT";
 export const HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV = "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY";
+export const MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
 
 const AWS4_ALGORITHM = "AWS4-HMAC-SHA256";
 const AWS4_REQUEST = "aws4_request";
@@ -21,7 +24,9 @@ const textEncoder = new TextEncoder();
 export interface HostedR2PresignEnvironment {
   accessKeyId: string;
   bucketName: string;
+  controlEndpoint?: string | null;
   endpoint: string;
+  localEndpointAllowed?: boolean;
   secretAccessKey: string;
 }
 
@@ -32,9 +37,33 @@ export function readHostedR2PresignEnvironment(
     source[HOSTED_R2_PRESIGN_ACCOUNT_ID_ENV],
     HOSTED_R2_PRESIGN_ACCOUNT_ID_ENV,
   );
+  const localEndpointAllowed =
+    source[HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV]?.trim() === "1";
+  if (localEndpointAllowed && isHostedR2ProductionPresignSource(source)) {
+    throw new TypeError(
+      `${HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV} is not supported in production environments.`,
+    );
+  }
+  if (localEndpointAllowed && !isHostedR2LocalPresignSource(source)) {
+    throw new TypeError(
+      `${HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV} requires hosted-local test isolation.`,
+    );
+  }
   const endpoint = normalizeHostedR2PresignEndpoint(
     source[HOSTED_R2_PRESIGN_ENDPOINT_ENV],
     accountId,
+    {
+      dockerBridgeHost: source[MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV],
+      label: HOSTED_R2_PRESIGN_ENDPOINT_ENV,
+      localEndpointAllowed,
+    },
+  );
+  const controlEndpoint = normalizeHostedR2PresignControlEndpoint(
+    source[HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV],
+    {
+      dockerBridgeHost: source[MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV],
+      localEndpointAllowed,
+    },
   );
 
   return {
@@ -46,7 +75,9 @@ export function readHostedR2PresignEnvironment(
       source[HOSTED_R2_PRESIGN_BUCKET_NAME_ENV],
       HOSTED_R2_PRESIGN_BUCKET_NAME_ENV,
     ),
+    controlEndpoint,
     endpoint,
+    localEndpointAllowed,
     secretAccessKey: requireHostedR2PresignString(
       source[HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV],
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY_ENV,
@@ -68,9 +99,6 @@ export async function createHostedR2PresignedPutUrl(input: {
 }> {
   const expiresSeconds = normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds);
   const now = input.now ?? new Date();
-  const amzDate = formatAmzDate(now);
-  const dateStamp = amzDate.slice(0, 8);
-  const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
   const endpoint = new URL(input.environment.endpoint);
   const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
   const checksumSha256Base64 = input.checksumSha256Base64 === undefined
@@ -84,15 +112,6 @@ export async function createHostedR2PresignedPutUrl(input: {
     ...(checksumSha256Base64 === null ? [] : ["x-amz-checksum-sha256"]),
     ...metadataHeaders.map(([key]) => key),
   ].join(";");
-  const query = new URLSearchParams({
-    "X-Amz-Algorithm": AWS4_ALGORITHM,
-    "X-Amz-Content-Sha256": UNSIGNED_PAYLOAD,
-    "X-Amz-Credential": `${input.environment.accessKeyId}/${credentialScope}`,
-    "X-Amz-Date": amzDate,
-    "X-Amz-Expires": String(expiresSeconds),
-    "X-Amz-SignedHeaders": signedHeaders,
-  });
-  const canonicalQuery = canonicalizeSearchParams(query);
   const canonicalHeaders = [
     `content-type:${input.contentType}`,
     `host:${endpoint.host}`,
@@ -101,30 +120,16 @@ export async function createHostedR2PresignedPutUrl(input: {
     ...metadataHeaders.map(([key, value]) => `${key}:${value}`),
     "",
   ].join("\n");
-  const canonicalRequest = [
-    "PUT",
-    canonicalUri,
-    canonicalQuery,
+  return createHostedR2PresignedObjectUrl({
     canonicalHeaders,
+    canonicalUri,
+    endpoint,
+    environment: input.environment,
+    expiresSeconds,
+    method: "PUT",
+    now,
     signedHeaders,
-    UNSIGNED_PAYLOAD,
-  ].join("\n");
-  const stringToSign = [
-    AWS4_ALGORITHM,
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await deriveAws4SigningKey({
-    dateStamp,
-    secretAccessKey: input.environment.secretAccessKey,
   });
-  query.set("X-Amz-Signature", await hmacHex(signingKey, stringToSign));
-
-  return {
-    expiresAt: new Date(now.getTime() + expiresSeconds * 1000).toISOString(),
-    url: `${endpoint.origin}${canonicalUri}?${canonicalizeSearchParams(query)}`,
-  };
 }
 
 function normalizeHostedR2Sha256ChecksumBase64(value: string): string {
@@ -148,51 +153,49 @@ export async function createHostedR2PresignedGetUrl(input: {
   expiresAt: string;
   url: string;
 }> {
-  const expiresSeconds = normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds);
-  const now = input.now ?? new Date();
-  const amzDate = formatAmzDate(now);
-  const dateStamp = amzDate.slice(0, 8);
-  const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
-  const endpoint = new URL(input.environment.endpoint);
-  const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
-  const signedHeaders = "host";
-  const query = new URLSearchParams({
-    "X-Amz-Algorithm": AWS4_ALGORITHM,
-    "X-Amz-Content-Sha256": UNSIGNED_PAYLOAD,
-    "X-Amz-Credential": `${input.environment.accessKeyId}/${credentialScope}`,
-    "X-Amz-Date": amzDate,
-    "X-Amz-Expires": String(expiresSeconds),
-    "X-Amz-SignedHeaders": signedHeaders,
+  return createHostedR2PresignedReadLikeUrl({
+    environment: input.environment,
+    expiresSeconds: input.expiresSeconds,
+    key: input.key,
+    method: "GET",
+    now: input.now,
   });
-  const canonicalQuery = canonicalizeSearchParams(query);
-  const canonicalHeaders = [
-    `host:${endpoint.host}`,
-    "",
-  ].join("\n");
-  const canonicalRequest = [
-    "GET",
-    canonicalUri,
-    canonicalQuery,
-    canonicalHeaders,
-    signedHeaders,
-    UNSIGNED_PAYLOAD,
-  ].join("\n");
-  const stringToSign = [
-    AWS4_ALGORITHM,
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await deriveAws4SigningKey({
-    dateStamp,
-    secretAccessKey: input.environment.secretAccessKey,
-  });
-  query.set("X-Amz-Signature", await hmacHex(signingKey, stringToSign));
+}
 
-  return {
-    expiresAt: new Date(now.getTime() + expiresSeconds * 1000).toISOString(),
-    url: `${endpoint.origin}${canonicalUri}?${canonicalizeSearchParams(query)}`,
-  };
+export async function createHostedR2PresignedHeadUrl(input: {
+  environment: HostedR2PresignEnvironment;
+  expiresSeconds?: number;
+  key: string;
+  now?: Date;
+}): Promise<{
+  expiresAt: string;
+  url: string;
+}> {
+  return createHostedR2PresignedReadLikeUrl({
+    environment: input.environment,
+    expiresSeconds: input.expiresSeconds,
+    key: input.key,
+    method: "HEAD",
+    now: input.now,
+  });
+}
+
+export async function createHostedR2PresignedDeleteUrl(input: {
+  environment: HostedR2PresignEnvironment;
+  expiresSeconds?: number;
+  key: string;
+  now?: Date;
+}): Promise<{
+  expiresAt: string;
+  url: string;
+}> {
+  return createHostedR2PresignedReadLikeUrl({
+    environment: input.environment,
+    expiresSeconds: input.expiresSeconds,
+    key: input.key,
+    method: "DELETE",
+    now: input.now,
+  });
 }
 
 function normalizeHostedR2PresignMetadataHeaders(
@@ -201,7 +204,7 @@ function normalizeHostedR2PresignMetadataHeaders(
   return Object.entries(metadata)
     .map(([key, value]) => {
       const normalizedKey = key.trim().toLowerCase();
-      const normalizedValue = value.trim();
+      const normalizedValue = value.trim().replace(/[ \t]+/gu, " ");
       if (
         !/^[a-z0-9][a-z0-9-]*$/u.test(normalizedKey)
         || normalizedKey.startsWith("x-amz-meta-")
@@ -216,23 +219,161 @@ function normalizeHostedR2PresignMetadataHeaders(
     .sort(([left], [right]) => left.localeCompare(right));
 }
 
-function normalizeHostedR2PresignEndpoint(value: string | undefined, accountId: string): string {
+function normalizeHostedR2PresignEndpoint(
+  value: string | undefined,
+  accountId: string,
+  options: {
+    dockerBridgeHost?: string | undefined;
+    label: string;
+    localEndpointAllowed: boolean;
+  },
+): string {
   const expectedHostname = `${accountId}.r2.cloudflarestorage.com`;
   const normalized = normalizeHostedExecutionString(value)
     ?? `https://${expectedHostname}`;
   const url = new URL(normalized);
   if (
-    url.protocol !== "https:"
-    || url.hostname !== expectedHostname
-    || url.pathname !== "/"
-    || url.search
-    || url.hash
+    url.protocol === "https:"
+    && url.hostname === expectedHostname
+    && url.pathname === "/"
+    && !url.search
+    && !url.hash
   ) {
+    return url.origin;
+  }
+
+  if (
+    options.localEndpointAllowed
+    && isHostedR2LocalPresignEndpoint(url, options)
+  ) {
+    return url.origin;
+  }
+
+  throw new TypeError(
+    `${options.label} must be the account-level R2 HTTPS origin when configured.`,
+  );
+}
+
+function normalizeHostedR2PresignControlEndpoint(
+  value: string | undefined,
+  options: {
+    dockerBridgeHost?: string | undefined;
+    localEndpointAllowed: boolean;
+  },
+): string | null {
+  const normalized = normalizeHostedExecutionString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (!options.localEndpointAllowed) {
     throw new TypeError(
-      `${HOSTED_R2_PRESIGN_ENDPOINT_ENV} must be the account-level R2 HTTPS origin when configured.`,
+      `${HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV} is only supported for hosted-local R2 presign endpoints.`,
+    );
+  }
+  const url = new URL(normalized);
+  if (!isHostedR2LocalPresignEndpoint(url, options)) {
+    throw new TypeError(
+      `${HOSTED_R2_PRESIGN_CONTROL_ENDPOINT_ENV} must be a hosted-local S3-compatible origin when configured.`,
     );
   }
   return url.origin;
+}
+
+function isHostedR2LocalPresignEndpoint(
+  url: URL,
+  options: {
+    dockerBridgeHost?: string | undefined;
+  } = {},
+): boolean {
+  if (
+    url.pathname !== "/"
+    || url.search
+    || url.hash
+    || (url.protocol !== "http:" && url.protocol !== "https:")
+  ) {
+    return false;
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  return hostname === "localhost"
+    || hostname === "host.docker.internal"
+    || hostname === "host.containers.internal"
+    || hostname === "::1"
+    || hostname === "[::1]"
+    || isLoopbackIpv4Host(hostname)
+    || isExplicitHostedLocalDockerBridgeHost(hostname, options.dockerBridgeHost);
+}
+
+function isHostedR2ProductionPresignSource(
+  source: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return normalizeHostedR2PresignMarker(source.NODE_ENV) === "production"
+    || normalizeHostedR2PresignMarker(source.VERCEL_ENV) === "production"
+    || normalizeHostedR2PresignMarker(source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT) === "production"
+    || normalizeHostedR2PresignMarker(source.HOSTED_CRYPTO_ENV) === "production"
+    || normalizeHostedR2PresignMarker(source.HOSTED_CRYPTO_ENV) === "prod";
+}
+
+function isHostedR2LocalPresignSource(
+  source: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const profile = normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_PROFILE);
+  const testRoutesEnabled =
+    normalizeHostedR2PresignMarker(source.NODE_ENV) === "test"
+    && normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_TEST_ROUTES) === "1";
+  return normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED) === "1"
+    || testRoutesEnabled
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
+}
+
+function normalizeHostedR2PresignMarker(value: string | undefined): string | null {
+  return value?.trim().toLowerCase() || null;
+}
+
+function isExplicitHostedLocalDockerBridgeHost(
+  hostname: string,
+  dockerBridgeHost: string | undefined,
+): boolean {
+  const normalizedBridgeHost = normalizeHostedR2PresignMarker(dockerBridgeHost);
+  return normalizedBridgeHost !== null
+    && hostname === normalizedBridgeHost
+    && isPrivateIpv4Host(hostname);
+}
+
+function isLoopbackIpv4Host(hostname: string): boolean {
+  const octets = parseIpv4Host(hostname);
+  return octets !== null && octets[0] === 127;
+}
+
+function isPrivateIpv4Host(hostname: string): boolean {
+  const octets = parseIpv4Host(hostname);
+  if (octets === null) {
+    return false;
+  }
+  const [first = -1, second = -1] = octets;
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
+function parseIpv4Host(hostname: string): [number, number, number, number] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const octets = parts.map((part) => Number.parseInt(part, 10));
+  if (
+    octets.some((octet, index) =>
+      !Number.isInteger(octet)
+      || octet < 0
+      || octet > 255
+      || String(octet) !== parts[index])
+  ) {
+    return null;
+  }
+
+  return [octets[0] ?? 0, octets[1] ?? 0, octets[2] ?? 0, octets[3] ?? 0];
 }
 
 function normalizeHostedR2PresignExpiresSeconds(value: number | undefined): number {
@@ -277,6 +418,88 @@ function canonicalizeSearchParams(params: URLSearchParams): string {
       leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey))
     .map(([key, value]) => `${encodeR2PathSegment(key)}=${encodeR2PathSegment(value)}`)
     .join("&");
+}
+
+async function createHostedR2PresignedReadLikeUrl(input: {
+  environment: HostedR2PresignEnvironment;
+  expiresSeconds?: number;
+  key: string;
+  method: "DELETE" | "GET" | "HEAD";
+  now?: Date;
+}): Promise<{
+  expiresAt: string;
+  url: string;
+}> {
+  const expiresSeconds = normalizeHostedR2PresignExpiresSeconds(input.expiresSeconds);
+  const now = input.now ?? new Date();
+  const endpoint = new URL(input.environment.endpoint);
+  const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
+  const signedHeaders = "host";
+  const canonicalHeaders = [
+    `host:${endpoint.host}`,
+    "",
+  ].join("\n");
+  return createHostedR2PresignedObjectUrl({
+    canonicalHeaders,
+    canonicalUri,
+    endpoint,
+    environment: input.environment,
+    expiresSeconds,
+    method: input.method,
+    now,
+    signedHeaders,
+  });
+}
+
+async function createHostedR2PresignedObjectUrl(input: {
+  canonicalHeaders: string;
+  canonicalUri: string;
+  endpoint: URL;
+  environment: HostedR2PresignEnvironment;
+  expiresSeconds: number;
+  method: "DELETE" | "GET" | "HEAD" | "PUT";
+  now: Date;
+  signedHeaders: string;
+}): Promise<{
+  expiresAt: string;
+  url: string;
+}> {
+  const amzDate = formatAmzDate(input.now);
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
+  const query = new URLSearchParams({
+    "X-Amz-Algorithm": AWS4_ALGORITHM,
+    "X-Amz-Content-Sha256": UNSIGNED_PAYLOAD,
+    "X-Amz-Credential": `${input.environment.accessKeyId}/${credentialScope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(input.expiresSeconds),
+    "X-Amz-SignedHeaders": input.signedHeaders,
+  });
+  const canonicalQuery = canonicalizeSearchParams(query);
+  const canonicalRequest = [
+    input.method,
+    input.canonicalUri,
+    canonicalQuery,
+    input.canonicalHeaders,
+    input.signedHeaders,
+    UNSIGNED_PAYLOAD,
+  ].join("\n");
+  const stringToSign = [
+    AWS4_ALGORITHM,
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+  const signingKey = await deriveAws4SigningKey({
+    dateStamp,
+    secretAccessKey: input.environment.secretAccessKey,
+  });
+  query.set("X-Amz-Signature", await hmacHex(signingKey, stringToSign));
+
+  return {
+    expiresAt: new Date(input.now.getTime() + input.expiresSeconds * 1000).toISOString(),
+    url: `${input.endpoint.origin}${input.canonicalUri}?${canonicalizeSearchParams(query)}`,
+  };
 }
 
 async function deriveAws4SigningKey(input: {
