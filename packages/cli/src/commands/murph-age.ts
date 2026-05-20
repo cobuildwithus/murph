@@ -531,6 +531,37 @@ const murphAgePublicWearableCalculatorViewSchema = z.object({
   scoreBearing: z.literal(false),
   scoreContributionAuthorized: z.literal(false),
 })
+const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
+  bundleId: z.enum([
+    'function-context',
+    'insufficient',
+    'lab5-bp-bmi',
+    'lab9-bp-body',
+    'r399-nhis-proxy-anchor',
+    'wearable-context',
+  ]).optional(),
+  cohortLabel: z.enum(['CRELES', 'HAALSI', 'MIDUS', 'NSHAP', 'wearables']),
+  evidenceId: z.enum([
+    'creles-glycemia-transport-local-run',
+    'haalsi-glucose-transport-local-run',
+    'midus-lab-lift-local-run',
+    'nshap-hba1c-transport-local-run',
+    'wearables-context-only-local-run',
+  ]),
+  productAuthorizationChanged: z.literal(false),
+  scoringMathChanged: z.literal(false),
+  signal: z.enum([
+    'context-only',
+    'glycemia-only-better',
+    'partial',
+    'slight-lift',
+    'supported',
+    'weak',
+  ]),
+  sourceRouteId: z.string().min(1).optional(),
+  summary: z.string().min(1),
+  supportedMetricKeys: z.array(z.string().min(1)),
+})
 const murphAgeResearchModelStatusViewSchema = z.object({
   blockers: z.array(z.enum([
     'biomarker-transport-not-confirmed',
@@ -549,6 +580,8 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     nextAction: z.literal('validate-transport-before-product-use'),
     transportStatus: z.literal('internal-promising-transport-not-confirmed'),
   }),
+  latestLocalRunEvidence: z.array(murphAgeResearchLocalRunEvidenceItemSchema),
+  latestLocalRunEvidenceStatus: z.literal('mixed-research-only-no-product-promotion'),
   productUseAuthorized: z.literal(false),
   scoreBearingFeatureKeys: z.array(z.string().min(1)),
   scoreBearingMetricKeys: z.array(z.string().min(1)),

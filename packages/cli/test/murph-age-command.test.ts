@@ -443,7 +443,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v3')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v4')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -466,6 +466,45 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.labBody.currentUse, 'score-bearing-research-when-selected')
     assert.equal(view.model.labBody.nextAction, 'validate-transport-before-product-use')
     assert.equal(view.model.labBody.transportStatus, 'internal-promising-transport-not-confirmed')
+    assert.equal(view.model.latestLocalRunEvidenceStatus, 'mixed-research-only-no-product-promotion')
+    assert.equal(
+      view.model.latestLocalRunEvidence.map((item) => item.evidenceId).join('|'),
+      'midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|wearables-context-only-local-run',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'midus-lab-lift-local-run')?.signal,
+      'slight-lift',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'midus-lab-lift-local-run')?.supportedMetricKeys.join('|'),
+      'glucose|egfr|bmi',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'creles-glycemia-transport-local-run')?.signal,
+      'glycemia-only-better',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'creles-glycemia-transport-local-run')?.supportedMetricKeys.join('|'),
+      'glucose',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'nshap-hba1c-transport-local-run')?.signal,
+      'partial',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'nshap-hba1c-transport-local-run')?.supportedMetricKeys.join('|'),
+      'hba1c',
+    )
+    assert.equal(view.model.latestLocalRunEvidence.every((item) => item.scoringMathChanged === false), true)
+    assert.equal(view.model.latestLocalRunEvidence.every((item) => item.productAuthorizationChanged === false), true)
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'haalsi-glucose-transport-local-run')?.supportedMetricKeys.join('|'),
+      'glucose',
+    )
+    assert.equal(
+      view.model.latestLocalRunEvidence.find((item) => item.evidenceId === 'wearables-context-only-local-run')?.signal,
+      'context-only',
+    )
     assert.equal(
       view.model.scoreBearingFeatureKeys.join('|'),
       'creatinine|hba1c|hdl-c|triglycerides|systolic-blood-pressure|diastolic-blood-pressure|bmi',
