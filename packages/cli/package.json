@@ -65,6 +65,7 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/gateway-local": "workspace:*",
     "@murphai/health-commons": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
@@ -86,11 +87,9 @@
     "zod": "^4.4.3",
     "zxing-wasm": "3.0.3"
   },
-  "optionalDependencies": {
-    "@murphai/gateway-core": "workspace:*"
-  },
   "devDependencies": {
-    "@types/react": "^19.2.14"
+    "@types/react": "^19.2.14",
+    "typescript": "^5.9.3"
   },
   "bundleDependencies": [
     "@murphai/assistant-cli",

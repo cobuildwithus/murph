@@ -11,6 +11,7 @@ interface PackageJsonShape {
   name?: string
   private?: boolean
   dependencies?: Record<string, string | undefined>
+  optionalDependencies?: Record<string, string | undefined>
   bundleDependencies?: string[]
   main?: string
   types?: string
@@ -149,8 +150,12 @@ assert(
   'package.json must expose only the CLI root entrypoint.',
 )
 assert(
-  packageJson.dependencies?.['@murphai/gateway-core'] === undefined,
-  'package.json must not keep a runtime dependency on @murphai/gateway-core after the hard cut.',
+  packageJson.dependencies?.['@murphai/gateway-core'] === 'workspace:*',
+  'package.json must depend on @murphai/gateway-core so the published CLI installs the required gateway contract package.',
+)
+assert(
+  packageJson.optionalDependencies?.['@murphai/gateway-core'] === undefined,
+  'package.json must not mark @murphai/gateway-core optional because CLI gateway imports require it at runtime.',
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===

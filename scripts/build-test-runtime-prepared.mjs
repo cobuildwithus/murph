@@ -303,7 +303,12 @@ function runPreparedBuild(force = false) {
   }
 
   args.push("--pretty", "false");
-  return runCommand("pnpm", args);
+  const buildStatus = runCommand("pnpm", args);
+  if (buildStatus !== 0) {
+    return buildStatus;
+  }
+
+  return runCommand("pnpm", ["--dir", "packages/importers", "build"]);
 }
 
 async function sleep(delayMs) {

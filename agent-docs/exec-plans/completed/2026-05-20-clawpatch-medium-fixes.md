@@ -2,40 +2,42 @@
 
 ## Goal
 
-Resolve the six selected medium Clawpatch findings with minimal, app-owned changes:
+Fix the remaining medium-severity Clawpatch findings across package build, package-contract, and coverage surfaces.
 
-- verify whether generated workflow step path artifacts are a real exposure path before changing build flow
-- align hosted email `selfAddress` limits across producer and parser
-- make phone sync enqueue decisions use current transactional state
-- avoid connected-success messaging on device-sync error returns
-- show denied usage-gate notices on home when a user notice exists
-- reject missing or blank hosted invite abort `sendAttemptId`
+## Scope
+
+- `packages/assistant-cli`
+- `packages/cli`
+- `packages/gateway-core`
+- `packages/importers`
+- `packages/inboxd`
+- `packages/messaging-ingress`
+- `packages/setup-cli`
+- `packages/vault-usecases`
 
 ## Constraints
 
-- Preserve unrelated dirty work and active ledger rows.
-- Do not patch third-party libraries or add dependency overrides.
-- Prefer existing seams, shared constants, and route-local validation over new architecture.
-- Do not write local paths, local usernames, secrets, raw payloads, or personal identifiers into code, tests, docs, logs, or generated artifacts.
-- Treat the generated workflow finding as unconfirmed until the actual runtime/deploy exposure path is proven.
+- Preserve unrelated dirty work in the checkout.
+- Keep fixes simple and package-local where possible.
+- Do not add broad compatibility shims or weaken package boundaries.
+- Avoid exposing local paths, personal identifiers, secrets, or raw authorization headers in code, tests, docs, or logs.
 
-## Plan
+## Verification Plan
 
-1. Inspect the six findings and touched code/tests, including current dirty overlap.
-2. Verify the workflow artifact exposure path and either fix a real app-owned leak or document/revalidate a non-exposed generated-artifact finding.
-3. Implement focused fixes for confirmed route/contract bugs.
-4. Add or update focused tests for each confirmed behavior.
-5. Run scoped verification, Clawpatch revalidation, required repo audits, and close with the scoped commit path if the worktree allows it.
+- Run package-local typecheck/test/coverage commands for touched packages where available.
+- Run `pnpm typecheck` or scoped `test:diff` if the dirty worktree makes a full diff lane too broad.
+- Revalidate the fixed Clawpatch finding ids.
+- Run required completion audits before handoff.
 
 ## Progress
 
-- Registered plan and ledger row.
-- Confirmed the Workflow path finding is generated source output, not request-time route behavior. Added an app-owned post-build cleanup path instead of patching the Workflow package or mutating artifacts before the loader uses them.
-- Implemented focused fixes for hosted email self-address bounds, phone/Telegram transactional channel snapshots, device-sync error return copy/actions, denied gate notices, and invite abort request validation.
-- Ran focused route/package/script tests and typechecks. Clawpatch revalidated all six selected findings as fixed.
-- Frontend audit found a low-severity banner label mismatch; changed the usage gate banner region label to a generic account notice.
-- Security/privacy audit found the Workflow cleanup missed `.next` cache/source-map artifacts; expanded cleanup to remove Workflow cache/socket files and marker-bearing server sourcemaps. Follow-up security review reported no findings.
-- Repo `test:diff` passed repo tools and several package lanes, then stopped in `packages/cli` tests on an unrelated dirty parse error in `packages/device-syncd/src/providers/oura.ts`.
+- Worker fixes integrated across package scripts, package boundary tests, importers build safety, and coverage config.
+- All 11 medium Clawpatch findings revalidated as fixed.
+- Simplify and security audit findings on the importers safe-build writer were addressed by staging importers TypeScript output under `.dist-next`, refreshing published `dist` only through the package safe build, and hardening safe-build sync against symlink traversal.
+- Coverage audit added safe-build symlink regression proof.
+- Final completion audit found and rechecked a safe-build temp-symlink issue; the copy path now uses a fresh `.dist-publish-*` directory outside `dist`, with regression coverage.
+- Required verification passed except `pnpm deps:audit`, which remains blocked by unrelated pre-existing transitive advisories in `apps/web` dependencies. A final broad `pnpm test:diff` rerun was also blocked by unrelated dirty Cloudflare test work after the focused safe-build fix.
+- Final completion audit passed with no remaining blocking findings.
 Status: completed
-Updated: 2026-05-19
-Completed: 2026-05-19
+Updated: 2026-05-20
+Completed: 2026-05-20
