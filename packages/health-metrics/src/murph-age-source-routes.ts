@@ -41,11 +41,13 @@ export type MurphAgeSourceRouteId =
   | "nhanes-iii-lmf-sanity"
   | "nhis-r399-outcome-anchor"
   | "nshap-integrated-aging"
+  | "nsrr-haassa-sleep-aging"
   | "nsrr-hchs-sol-sleep-actigraphy"
   | "nsrr-mesa-sleep-autonomic"
   | "nsrr-mros-sleep-aging"
   | "nsrr-shhs-sleep-heart-health"
   | "nsrr-sof-sleep-aging"
+  | "nsrr-wsc-sleep-longitudinal"
   | "partner-aggregate-evaluator"
   | "project-baseline-sensor-clinical"
   | "uk-biobank-integrated"
@@ -1058,6 +1060,54 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 64,
     routeId: "nsrr-sof-sleep-aging",
     sourceFamily: "NSRR SOF",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "longitudinal adult sleep transport feasibility",
+      "repeated sleep-study calibration stress",
+      "sleep-autonomic aggregate receipt design",
+    ],
+    blockedCurrentUses: [
+      "assuming sleep cohort data proves consumer wearable validity",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR Wisconsin Sleep Cohort route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["autonomic", "clinical-history", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, sleep, and follow-up tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "mortality-or-followup-candidate",
+    priorityRank: 65,
+    routeId: "nsrr-wsc-sleep-longitudinal",
+    sourceFamily: "NSRR Wisconsin Sleep Cohort",
+  },
+  {
+    accessMode: "free-registered",
+    activationStatus: "terms-activation-required",
+    allowedResearchUses: [
+      "older-adult male sleep apnea transport feasibility",
+      "late-life sleep and cognition stress testing",
+      "sleep-autonomic aggregate receipt design",
+    ],
+    blockedCurrentUses: [
+      "assuming single-demographic sleep evidence generalizes to ordinary users",
+      "row-level export",
+      "score-bearing sleep or autonomic increments",
+    ],
+    displayName: "NSRR Honolulu-Asia Aging Study of Sleep Apnea route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["autonomic", "clinical-history", "function", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Download derived covariate, sleep, cognition or function, and follow-up tables, then fill the NSRR aggregate receipt only if all role families are present.",
+    outcomeSignal: "mortality-or-followup-candidate",
+    priorityRank: 66,
+    routeId: "nsrr-haassa-sleep-aging",
+    sourceFamily: "NSRR HAASSA",
   },
   {
     accessMode: "human-admin-workbench",
