@@ -1191,7 +1191,128 @@ export function MoatSlide() {
   );
 }
 
-/* ━━━ 10 · TEAM / ROADMAP ━━━ */
+/* ━━━ 10 · BUSINESS MODEL ━━━ */
+
+// Sponsor cohort examples, shown as chips on the sponsor card.
+const SPONSOR_EXAMPLES = [
+  "XYZ Prebiotic Cohort",
+  "30-Day Recovery Challenge",
+  "Step Count Challenge",
+  "Sleep Consistency Cohort",
+] as const;
+
+// The full-width usage rail beneath the two buyer cards. Each item is
+// an overage Murph charges for on top of included usage.
+const USAGE_OVERAGES = [
+  "Extra challenge runs",
+  "Large groups",
+  "Advanced analysis",
+  "Sponsor-grade verification",
+  "Outcome reports",
+] as const;
+
+export function BusinessModelSlide() {
+  return (
+    <Slide index={10} tone="cream" label="Business model">
+      <Eyebrow>Business Model</Eyebrow>
+      <SlideHeading wide>
+        Members subscribe.
+        <br />
+        Sponsors fund cohorts.
+        <br />
+        Usage protects margins.
+      </SlideHeading>
+      <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
+        Plus and Edge include normal cohort usage. Heavy users, large groups,
+        advanced analyses, and sponsor-grade reporting pay for more.
+      </p>
+
+      {/* Two buyers — members and sponsors */}
+      <div className="mt-10 grid items-stretch gap-4 lg:grid-cols-2">
+        {/* Member plans */}
+        <div className="flex flex-col rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+            Member plans
+          </p>
+          <div className="mt-4 flex flex-col">
+            {[
+              { tier: "Plus", price: "$8 / mo" },
+              { tier: "Edge", price: "$20 / mo" },
+            ].map((row, index, rows) => (
+              <div
+                key={row.tier}
+                className={`flex items-baseline justify-between gap-3 py-3 ${
+                  index < rows.length - 1
+                    ? "border-b border-[#c4a882]/20"
+                    : ""
+                }`}
+              >
+                <span className="font-serif text-[1.3rem] font-semibold leading-none tracking-[-0.01em] text-[#2d3436]">
+                  {row.tier}
+                </span>
+                <span className="font-serif text-[1.1rem] font-semibold tabular-nums text-[#5a6e32]">
+                  {row.price}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-auto pt-5 text-[14px] leading-[1.55] text-[#635a48]">
+            Includes cohorts, challenges, health vaults, baselines, and AI
+            insights.
+          </p>
+        </div>
+
+        {/* Sponsored cohorts */}
+        <div className="flex flex-col rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+            Sponsored cohorts
+          </p>
+          <p className="mt-3 font-serif text-[1.3rem] font-semibold leading-tight text-[#2d3436]">
+            Brands, employers, insurers
+          </p>
+          <p className="mt-2.5 text-[14px] leading-[1.55] text-[#635a48]">
+            Sponsors fund product, habit, and rewards-based cohorts. Murph runs
+            and verifies them.
+          </p>
+          <div className="mt-auto flex flex-wrap gap-1.5 pt-5">
+            {SPONSOR_EXAMPLES.map((example) => (
+              <span
+                key={example}
+                className="rounded-md border border-[#c4a882]/30 bg-[#f5f0e8]/60 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#736a58]"
+              >
+                {example}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* One pricing guardrail — applies to both buyers */}
+      <div className="mt-4 rounded-xl border border-[#5a6e32]/30 bg-[#5a6e32]/[0.06] p-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+            Included usage + overages
+          </p>
+          <p className="text-[13px] leading-[1.55] text-[#3d5028]">
+            Applies to both member plans and sponsor campaigns.
+          </p>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {USAGE_OVERAGES.map((item) => (
+            <span
+              key={item}
+              className="rounded-md bg-[#5a6e32]/12 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#5a6e32]"
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+    </Slide>
+  );
+}
+
+/* ━━━ 11 · TEAM / ROADMAP ━━━ */
 const TEAM_STATS = [
   { label: "products to product-market fit", value: "5" },
   { label: "monthly active users", value: "50K+" },
@@ -1236,7 +1357,7 @@ export function TeamSlide() {
   const [activeFounder, setActiveFounder] = useState<string | null>(null);
   const active = FOUNDERS.find((founder) => founder.name === activeFounder);
   return (
-    <Slide index={10} tone="dark" label="Team and roadmap">
+    <Slide index={11} tone="dark" label="Team and roadmap">
       <Eyebrow dark>Team &amp; Roadmap</Eyebrow>
       <SlideHeading dark>
         Built by founders who ship social coordination products.
@@ -1311,10 +1432,10 @@ export function TeamSlide() {
   );
 }
 
-/* ━━━ 11 · THE ASK ━━━ */
+/* ━━━ 12 · THE ASK ━━━ */
 export function AskSlide() {
   return (
-    <Slide index={11} tone="dark" label="The ask">
+    <Slide index={12} tone="dark" label="The ask">
       <div className="mx-auto max-w-[760px] text-center">
         <Eyebrow dark>The Ask</Eyebrow>
         <h2 className="mx-auto mt-6 max-w-[20ch] font-serif text-[clamp(2.2rem,4.6vw,3.6rem)] font-semibold leading-[1.08] tracking-[-0.035em] text-[#f5f0e8]">

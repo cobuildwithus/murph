@@ -24,8 +24,9 @@ export const TONES: readonly Tone[] = [
   "sand", // 07 early validation
   "cream", // 08 competition
   "dark", // 09 moat
-  "dark", // 10 team / roadmap
-  "dark", // 11 the ask
+  "cream", // 10 business model
+  "dark", // 11 team / roadmap
+  "dark", // 12 the ask
 ];
 export const TOTAL = TONES.length;
 
