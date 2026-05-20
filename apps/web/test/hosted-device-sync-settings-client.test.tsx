@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   HostedDeviceSyncSettingsContent: vi.fn((props: {
+    onReconnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
     sources: HostedDeviceSyncSettingsSource[];
   }) =>
     createElement(
@@ -24,7 +25,34 @@ const mocks = vi.hoisted(() => ({
         "data-hosted-device-sync-settings-content": "true",
       },
       props.sources.length,
+      props.sources[0]?.primaryAction?.kind === "reconnect"
+        ? createElement(
+            "button",
+            {
+              "data-hosted-device-sync-reconnect": "true",
+              onClick: () => void props.onReconnect(props.sources[0] as HostedDeviceSyncSettingsSource),
+              type: "button",
+            },
+            "Reconnect",
+          )
+        : null,
     ),
+  ),
+  HostedDeviceSyncReconnectConsentDialog: vi.fn((props: {
+    onAccepted: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
+    source: HostedDeviceSyncSettingsSource | null;
+  }) =>
+    props.source
+      ? createElement(
+          "button",
+          {
+            "data-hosted-device-sync-reconnect-consent": "true",
+            onClick: () => void props.onAccepted(props.source as HostedDeviceSyncSettingsSource),
+            type: "button",
+          },
+          "Accept consent",
+        )
+      : null
   ),
   HostedDeviceSyncSettingsStatusCard: vi.fn((props: { description: string; title: string }) =>
     createElement(
@@ -55,6 +83,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 
 vi.mock("@/src/components/settings/hosted-device-sync-settings-sections", () => ({
   HostedDeviceSyncDisconnectDialog: mocks.HostedDeviceSyncDisconnectDialog,
+  HostedDeviceSyncReconnectConsentDialog: mocks.HostedDeviceSyncReconnectConsentDialog,
   HostedDeviceSyncSettingsContent: mocks.HostedDeviceSyncSettingsContent,
   HostedDeviceSyncSettingsStatusCard: mocks.HostedDeviceSyncSettingsStatusCard,
 }));
@@ -219,6 +248,149 @@ test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the
   expect(mocks.HostedDeviceSyncSettingsContent).not.toHaveBeenCalled();
 });
 
+test("HostedDeviceSyncSettingsClient retries reconnect after consent is accepted", async () => {
+  const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+  const source = createReconnectSource();
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      message: "Accept the current Murph legal consent before continuing.",
+    }))
+    .mockResolvedValueOnce({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  const assign = mockWindowLocation(window, "https://app.example.test/settings");
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [source],
+        },
+      }),
+    );
+  });
+
+  const reconnectButton = container.querySelector("[data-hosted-device-sync-reconnect='true']");
+  assert.ok(reconnectButton instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    reconnectButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.HostedDeviceSyncReconnectConsentDialog).toHaveBeenCalledWith(expect.objectContaining({
+      source,
+    }), undefined);
+  });
+
+  const consentButton = container.querySelector("[data-hosted-device-sync-reconnect-consent='true']");
+  assert.ok(consentButton instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    consentButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(assign).toHaveBeenCalledWith("https://provider.example.test/oauth/start");
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+    method: "POST",
+    url: "/api/connect-sources/whoop/start",
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+    method: "POST",
+    url: "/api/connect-sources/whoop/start",
+  });
+});
+
+test("HostedDeviceSyncSettingsClient closes reconnect consent dialog when retry fails normally", async () => {
+  const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+  const source = createReconnectSource();
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      message: "Accept the current Murph legal consent before continuing.",
+    }))
+    .mockRejectedValueOnce(new HostedOnboardingApiError({
+      code: "DEVICE_SYNC_CONNECT_START_FAILED",
+      message: "Provider authorization could not start.",
+    }));
+
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  const assign = mockWindowLocation(window, "https://app.example.test/settings");
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: null,
+        initialResponse: {
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          ok: true,
+          sources: [source],
+        },
+      }),
+    );
+  });
+
+  const reconnectButton = container.querySelector("[data-hosted-device-sync-reconnect='true']");
+  assert.ok(reconnectButton instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    reconnectButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.querySelector("[data-hosted-device-sync-reconnect-consent='true']")).not.toBeNull();
+  });
+  const consentButton = container.querySelector("[data-hosted-device-sync-reconnect-consent='true']");
+  assert.ok(consentButton instanceof window.HTMLButtonElement);
+
+  await act(async () => {
+    consentButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.querySelector("[data-hosted-device-sync-reconnect-consent='true']")).toBeNull();
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(assign).not.toHaveBeenCalled();
+});
+
 function loadLinkedom(): {
   parseHTML: (html: string) => { document: Document; window: Window & typeof globalThis };
 } {
@@ -266,12 +438,15 @@ function mockWindowLocation(
   window: Window & typeof globalThis,
   href: string,
 ) {
+  const assign = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
+      assign,
       href,
     },
   });
+  return assign;
 }
 
 function createConnectedSource(): HostedDeviceSyncSettingsSource {
@@ -299,5 +474,25 @@ function createConnectedSource(): HostedDeviceSyncSettingsSource {
     tone: "calm",
     updatedAt: "2026-05-01T00:00:00.000Z",
     upstreamSources: [],
+  };
+}
+
+function createReconnectSource(): HostedDeviceSyncSettingsSource {
+  return {
+    ...createConnectedSource(),
+    connectSourceId: "whoop",
+    connectTarget: "whoop",
+    connectionId: "dspc_whoop_123",
+    detail: "The provider asked Murph to renew access before it can keep syncing.",
+    headline: "Access needs attention",
+    primaryAction: {
+      kind: "reconnect",
+      label: "Reconnect",
+    },
+    provider: "whoop",
+    providerLabel: "WHOOP",
+    state: "reauthorization_required",
+    statusLabel: "Needs access",
+    tone: "attention",
   };
 }

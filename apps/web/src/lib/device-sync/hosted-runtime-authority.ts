@@ -44,6 +44,10 @@ import {
   normalizeHostedDeviceSyncLifecycleStatus,
 } from "./prisma-store/connection-records";
 import { toPrismaJsonObject } from "./prisma-store/prisma-json";
+import {
+  appendHostedDeviceSyncReconnectNoticeTx,
+  startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
+} from "./reconnect-notice";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -131,8 +135,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
   }
 
   const updates = await Promise.all(
-    parsed.updates.map(async (update) =>
-      controlPlane.store.withConnectionMutationLock(update.connectionId, async (tx) => {
+    parsed.updates.map(async (update) => {
+      let reconnectNoticeMailboxItemId: string | null = null;
+      const result = await controlPlane.store.withConnectionMutationLock(update.connectionId, async (tx) => {
         const record = await tx.deviceConnection.findFirst({
           where: {
             id: update.connectionId,
@@ -303,6 +308,25 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             update,
             userId: input.trustedUserId,
           });
+          if (shouldAppendHostedDeviceSyncReconnectNotice({
+            baseline,
+            nextAccount,
+            update,
+          })) {
+            const noticeAppend = await appendHostedDeviceSyncReconnectNoticeTx({
+              appliedAt,
+              connection: nextAccount,
+              failureCode: nextAccount.lastErrorCode ?? update.failureDiagnostic?.code ?? null,
+              observedTokenVersion: update.observedTokenVersion ?? null,
+              request: input.request,
+              tx,
+              userId: input.trustedUserId,
+            });
+
+            if (noticeAppend.inserted && noticeAppend.mailboxItemId) {
+              reconnectNoticeMailboxItemId = noticeAppend.mailboxItemId;
+            }
+          }
         }
 
         const refreshedRecord = await tx.deviceConnection.findFirst({
@@ -333,7 +357,14 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           tokenUpdate,
           writeUpdate,
         } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
-      })),
+      });
+
+      if (reconnectNoticeMailboxItemId) {
+        await startHostedDeviceSyncReconnectNoticeWorkflowBestEffort(reconnectNoticeMailboxItemId);
+      }
+
+      return result;
+    }),
   );
 
   return {
@@ -626,6 +657,23 @@ async function recordHostedRuntimeFailureApplyDiagnostic(input: {
       provider,
     });
   }
+}
+
+function shouldAppendHostedDeviceSyncReconnectNotice(input: {
+  baseline: HostedRuntimeConnectionSnapshot;
+  nextAccount: PublicDeviceSyncAccount;
+  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
+}): boolean {
+  if (input.nextAccount.status !== "reauthorization_required") {
+    return false;
+  }
+
+  return input.baseline.connection.status !== "reauthorization_required"
+    || didHostedRuntimeFailureStateAdvance(
+      input.baseline.localState.lastSyncErrorAt,
+      input.nextAccount.lastSyncErrorAt,
+    )
+    || input.update.failureDiagnostic?.accountStatus === "reauthorization_required";
 }
 
 function buildHostedRuntimeFailureApplyRedactedJson(input: {

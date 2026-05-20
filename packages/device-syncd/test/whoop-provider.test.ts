@@ -557,7 +557,7 @@ test("WHOOP provider includes safe request-shape diagnostics for auth-code token
   assert.equal(new URLSearchParams(requestBody ?? "").get("redirect_uri"), "https://sync.example.test/device-sync/oauth/whoop/callback");
 });
 
-test("WHOOP provider does not mark other refresh-token OAuth errors as reauthorization required", async () => {
+test("WHOOP provider treats token-specific refresh invalid_request errors as reauthorization required", async () => {
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
@@ -586,11 +586,11 @@ test("WHOOP provider does not mark other refresh-token OAuth errors as reauthori
       assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
       assert.equal(error.httpStatus, 400);
       assert.equal(error.retryable, false);
-      assert.equal(error.accountStatus, null);
+      assert.equal(error.accountStatus, "reauthorization_required");
       assert.deepEqual(error.details, {
         status: 400,
         retryable: false,
-        accountStatus: null,
+        accountStatus: "reauthorization_required",
         oauthErrorCode: "invalid_request",
         oauthErrorDescription: "The token request is malformed.",
         responseErrorCode: "invalid_request",

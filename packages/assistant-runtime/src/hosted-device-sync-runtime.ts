@@ -59,7 +59,8 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "connection_missing"
   | "local_account_missing"
   | "provider_mismatch"
-  | "provider_not_registered";
+  | "provider_not_registered"
+  | "reauthorization_required";
 
 const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
 
@@ -254,8 +255,15 @@ async function applyHostedDeviceSyncWakeHint(input: {
 
   if (input.wake.reason === "reauthorization_required") {
     store.patchAccount(localAccountId, {
+      nextReconcileAt: null,
       status: "reauthorization_required",
     });
+    store.markPendingJobsDeadForAccount(
+      localAccountId,
+      input.wake.occurredAt,
+      "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
+      "Hosted device-sync wake marked the connection as requiring reconnection.",
+    );
     return;
   }
 
@@ -354,6 +362,21 @@ function applyHostedDirtyDeviceSyncState(input: {
       wake: input.wake,
     });
     return null;
+  }
+
+  if (account.status === "reauthorization_required") {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      account,
+      dirtyState: input.dirtyState,
+      reason: "reauthorization_required",
+      wake: input.wake,
+    });
+    return {
+      connectionId: input.dirtyState.connectionId,
+      localAccountId,
+      nextWakeAt: input.nextWakeAt,
+      processedRevision: input.dirtyState.dirtyRevision,
+    };
   }
 
   for (const job of buildHostedDirtyDeviceSyncJobs(input.dirtyState, input.wake.occurredAt)) {
@@ -563,6 +586,12 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     }
 
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
+    assignNextReconcileAtUpdate(
+      update,
+      input.account.status,
+      input.account.nextReconcileAt ?? null,
+      baselineLocalState?.nextReconcileAt ?? null,
+    );
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -615,8 +644,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  assignForwardOnlyNextReconcileAtUpdate(
+  assignNextReconcileAtUpdate(
     update,
+    input.account.status,
     input.account.nextReconcileAt ?? null,
     baselineLocalState?.nextReconcileAt ?? null,
   );
@@ -1414,11 +1444,24 @@ function resolveHostedWakeNextReconcileAt(
     : null;
 }
 
-function assignForwardOnlyNextReconcileAtUpdate(
+function assignNextReconcileAtUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
+  status: StoredDeviceSyncAccount["status"],
   localValue: string | null,
   baselineValue: string | null,
 ): void {
+  if (
+    (status === "reauthorization_required" || status === "disconnected")
+    && localValue === null
+    && baselineValue !== null
+  ) {
+    update.localState = {
+      ...(update.localState ?? {}),
+      nextReconcileAt: null,
+    } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
+    return;
+  }
+
   if (!localValue || localValue === baselineValue) {
     return;
   }

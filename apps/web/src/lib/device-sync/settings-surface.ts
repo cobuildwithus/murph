@@ -1,4 +1,5 @@
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
+import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/connect-config";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 
@@ -14,8 +15,15 @@ import {
 export { formatHostedDeviceSyncProviderLabel };
 
 export interface HostedDeviceSyncSettingsAction {
-  kind: "disconnect";
+  kind: "disconnect" | "reconnect";
   label: string;
+}
+
+export interface HostedDeviceSyncSettingsConnectTarget {
+  connectSourceId: string;
+  connectTarget: string;
+  provider: ConfiguredDeviceSyncProviderKey;
+  sourceProviderSlug?: string | null;
 }
 
 export type HostedDeviceSyncSettingsTone = "attention" | "calm" | "muted";
@@ -27,6 +35,8 @@ export type HostedDeviceSyncSettingsSourceState =
 export interface HostedDeviceSyncSettingsSource {
   connectionId: string | null;
   connectedAt: string | null;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
   detail: string;
   displayName: string | null;
   guidance: string;
@@ -86,12 +96,14 @@ const CONNECTION_LABEL_FORMATTER = new Intl.DateTimeFormat("en-US", {
 export function buildHostedDeviceSyncSettingsSources(input: {
   connectionSources?: readonly HostedBrowserDeviceSyncConnectionSource[];
   connections: readonly HostedBrowserDeviceSyncConnection[];
+  connectTargets?: readonly HostedDeviceSyncSettingsConnectTarget[];
   now?: Date;
   providers: readonly PublicProviderDescriptor[];
 }): HostedDeviceSyncSettingsSource[] {
   const now = input.now ?? new Date();
   const connectionsByProvider = new Map<string, HostedBrowserDeviceSyncConnection[]>();
   const upstreamSourcesByConnectionId = groupUpstreamSourcesByConnectionId(input.connectionSources ?? []);
+  const connectTargets = input.connectTargets ?? [];
 
   for (const connection of input.connections) {
     const key = connection.provider.trim().toLowerCase();
@@ -125,6 +137,11 @@ export function buildHostedDeviceSyncSettingsSources(input: {
       sources.push(buildConnectedSource({
         connection,
         connectionIndex,
+        connectTarget: resolveHostedDeviceSyncConnectTargetForConnection({
+          connection,
+          targets: connectTargets,
+          upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+        }),
         duplicateCount: connections.length,
         now,
         provider,
@@ -141,6 +158,11 @@ export function buildHostedDeviceSyncSettingsSources(input: {
     for (const [connectionIndex, connection] of connections.entries()) {
       sources.push(buildUnavailableSource(connection, {
         connectionIndex,
+        connectTarget: resolveHostedDeviceSyncConnectTargetForConnection({
+          connection,
+          targets: connectTargets,
+          upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+        }),
         duplicateCount: connections.length,
         upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
       }));
@@ -153,6 +175,7 @@ export function buildHostedDeviceSyncSettingsSources(input: {
 function buildConnectedSource(input: {
   connection: HostedBrowserDeviceSyncConnection;
   connectionIndex: number;
+  connectTarget: HostedDeviceSyncSettingsConnectTarget | null;
   duplicateCount: number;
   now: Date;
   provider: PublicProviderDescriptor;
@@ -190,6 +213,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail: lastSuccessfulSyncAt
         ? "This source is disconnected. Your past history stays in place."
         : "This source is disconnected.",
@@ -221,6 +246,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail: setupNeedsAttention
         ? "The provider connection setup did not finish cleanly."
         : "Waiting for the provider to confirm the source.",
@@ -253,6 +280,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail: "The provider asked Murph to renew access before it can keep syncing.",
       displayName,
       guidance: lastSuccessfulSyncAt
@@ -263,7 +292,12 @@ function buildConnectedSource(input: {
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: null,
+      primaryAction: input.connectTarget
+        ? {
+            kind: "reconnect",
+            label: "Reconnect",
+          }
+        : null,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -293,6 +327,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail,
       displayName,
       guidance,
@@ -321,6 +357,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail: "Murph has a fresh sync from this source.",
       displayName,
       guidance: "Nothing to do here.",
@@ -349,6 +387,8 @@ function buildConnectedSource(input: {
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
       detail: "Murph has a recent sync from this source.",
       displayName,
       guidance: "Nothing urgent here. It may update again on the next quiet background check.",
@@ -376,6 +416,8 @@ function buildConnectedSource(input: {
   return {
     connectionId: connection.id,
     connectedAt: connection.connectedAt,
+    connectSourceId: input.connectTarget?.connectSourceId ?? null,
+    connectTarget: input.connectTarget?.connectTarget ?? null,
     detail: "Murph has not seen a fresh sync from this source recently.",
     displayName,
     guidance: hasRecentError
@@ -406,6 +448,7 @@ function buildUnavailableSource(
   connection: HostedBrowserDeviceSyncConnection,
   input: {
     connectionIndex: number;
+    connectTarget: HostedDeviceSyncSettingsConnectTarget | null;
     duplicateCount: number;
     upstreamSources: HostedDeviceSyncSettingsUpstreamSource[];
   },
@@ -435,6 +478,8 @@ function buildUnavailableSource(
   return {
     connectionId: connection.id,
     connectedAt: connection.connectedAt,
+    connectSourceId: input.connectTarget?.connectSourceId ?? null,
+    connectTarget: input.connectTarget?.connectTarget ?? null,
     detail: "This source exists on your account, but it is not enabled in this environment right now.",
     displayName,
     guidance: "If you still need it, this provider has to be enabled in the active environment first.",
@@ -538,6 +583,36 @@ function groupUpstreamSourcesByConnectionId(
   return grouped;
 }
 
+export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
+  connection: Pick<HostedBrowserDeviceSyncConnection, "provider">;
+  targets: readonly HostedDeviceSyncSettingsConnectTarget[];
+  upstreamSources: readonly Pick<HostedDeviceSyncSettingsUpstreamSource, "sourceProviderSlug">[];
+}): HostedDeviceSyncSettingsConnectTarget | null {
+  const provider = normalizeProviderKey(input.connection.provider);
+  const directTarget = input.targets.find((target) =>
+    normalizeProviderKey(target.provider) === provider
+    && normalizeProviderKey(target.connectTarget) === provider
+  );
+
+  if (directTarget) {
+    return directTarget;
+  }
+
+  for (const upstreamSource of input.upstreamSources) {
+    const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
+    const target = input.targets.find((candidate) =>
+      normalizeProviderKey(candidate.provider) === provider
+      && normalizeProviderKey(candidate.sourceProviderSlug ?? null) === sourceProviderSlug
+    );
+
+    if (target) {
+      return target;
+    }
+  }
+
+  return null;
+}
+
 function toSettingsUpstreamSource(
   source: HostedBrowserDeviceSyncConnectionSource,
 ): HostedDeviceSyncSettingsUpstreamSource {
@@ -634,6 +709,11 @@ function isIsoTimestampNewer(left: string | null | undefined, right: string | nu
   }
 
   return leftTime > rightTime;
+}
+
+function normalizeProviderKey(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function compareDescendingIsoTimestamps(left: string | null | undefined, right: string | null | undefined): number {

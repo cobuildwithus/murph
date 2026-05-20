@@ -4,7 +4,7 @@ export function sourceCardKey(source: HostedDeviceSyncSettingsSource): string {
   return source.connectionId ?? `${source.provider}:available`;
 }
 
-export function sourceKey(source: HostedDeviceSyncSettingsSource, action: "disconnect"): string {
+export function sourceKey(source: HostedDeviceSyncSettingsSource, action: "disconnect" | "reconnect"): string {
   return `${sourceCardKey(source)}:${action}`;
 }
 

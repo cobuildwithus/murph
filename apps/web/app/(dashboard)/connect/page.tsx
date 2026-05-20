@@ -41,6 +41,7 @@ type ConnectSource = {
   id: string;
   logo: LogoAsset;
   name: string;
+  requiresReconnect?: boolean;
 };
 
 type ConnectPageInitialLoadError = {
@@ -231,6 +232,7 @@ export default async function ConnectPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedPageAuthSnapshot();
   const connectedSourceIds = new Set<string>();
+  const reconnectSourceIds = new Set<string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
 
@@ -239,9 +241,13 @@ export default async function ConnectPage({
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });
-      for (const connection of resolveConnectedConnectSourceConnections(CONNECT_SOURCES, response.sources)) {
+      for (const connection of resolveConnectSourceConnectionStates(CONNECT_SOURCES, response.sources)) {
         const sourceId = connection.sourceId;
-        connectedSourceIds.add(sourceId);
+        if (connection.state === "active") {
+          connectedSourceIds.add(sourceId);
+        } else if (connection.state === "reauthorization_required") {
+          reconnectSourceIds.add(sourceId);
+        }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
         }
@@ -260,6 +266,7 @@ export default async function ConnectPage({
   const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
+    reconnectSourceIds,
   });
 
   return (
@@ -309,6 +316,7 @@ export function resolveConfiguredConnectSources(
   options: {
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
+    reconnectSourceIds?: ReadonlySet<string>;
   } = {},
 ): ConnectSource[] {
   const connectTargetBySourceId = new Map(
@@ -321,22 +329,27 @@ export function resolveConfiguredConnectSources(
     sources.map((source) => {
       const connectTarget = connectTargetBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
+      const requiresReconnect = !connected && options.reconnectSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
 
       return {
         ...source,
         ...(connectTarget ? { connectTarget } : {}),
-        ...(connected
-          ? {
-              connected,
-              ...(disconnectConnectionId
-                ? { disconnectConnectionId }
-                : {}),
-            }
-          : {}),
+        ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
+        ...(requiresReconnect ? { requiresReconnect } : {}),
+        ...(connected ? { connected } : {}),
       };
     }),
   );
+}
+
+export function resolveConnectSourceConnectionStates(
+  sources: readonly Pick<ConnectSource, "id">[],
+  settingsSources: readonly ConnectSettingsSourceMatch[],
+): { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] {
+  return resolveConnectSourceConnectionMatches(sources, settingsSources, {
+    includeReauthorizationRequired: true,
+  });
 }
 
 export function resolveConnectedConnectSourceIds(
@@ -356,8 +369,19 @@ export function resolveConnectedConnectSourceConnections(
   sources: readonly Pick<ConnectSource, "id">[],
   settingsSources: readonly ConnectSettingsSourceMatch[],
 ): { connectionId: string | null; sourceId: string }[] {
+  return resolveConnectSourceConnectionMatches(sources, settingsSources).map((connection) => ({
+    connectionId: connection.connectionId,
+    sourceId: connection.sourceId,
+  }));
+}
+
+function resolveConnectSourceConnectionMatches(
+  sources: readonly Pick<ConnectSource, "id">[],
+  settingsSources: readonly ConnectSettingsSourceMatch[],
+  options: { includeReauthorizationRequired?: boolean } = {},
+): { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] {
   const connectedSourceIds = new Set<string>();
-  const connectedConnections: { connectionId: string | null; sourceId: string }[] = [];
+  const connectedConnections: { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] = [];
   const sourceIdByDirectProvider = new Map<string, string>();
   const sourceIdByJunctionTarget = new Map<string, string>();
 
@@ -375,7 +399,14 @@ export function resolveConnectedConnectSourceConnections(
 
   for (const source of settingsSources) {
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
-    if (source.state === "active" && provider) {
+    const sourceState = source.state === "active" || (
+      options.includeReauthorizationRequired === true
+      && source.state === "reauthorization_required"
+    )
+      ? source.state
+      : null;
+
+    if (sourceState && provider) {
       const sourceId = sourceIdByDirectProvider.get(provider);
       if (sourceId && !connectedSourceIds.has(sourceId)) {
         connectedSourceIds.add(sourceId);
@@ -384,11 +415,12 @@ export function resolveConnectedConnectSourceConnections(
             ? source.connectionId
             : null,
           sourceId,
+          state: sourceState,
         });
       }
     }
 
-    if (provider !== "junction" || source.state !== "active") {
+    if (provider !== "junction" || !sourceState) {
       continue;
     }
 
@@ -408,6 +440,7 @@ export function resolveConnectedConnectSourceConnections(
             ? source.connectionId
             : null,
           sourceId,
+          state: sourceState,
         });
       }
     }

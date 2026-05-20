@@ -9,6 +9,7 @@ import {
 
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
+import type { HostedPrismaTransactionClient } from "./prisma-store";
 
 export interface HostedDeviceConnectIntentRecord {
   claimHash: string;
@@ -33,6 +34,7 @@ export type HostedDeviceConnectIntentClaimResult =
 const HOSTED_DEVICE_CONNECT_INTENT_CLAIM_PREFIX = "dc_";
 const HOSTED_DEVICE_CONNECT_INTENT_CLAIM_BYTES = 24;
 const HOSTED_DEVICE_CONNECT_INTENT_TTL_MS = 15 * 60 * 1000;
+export const HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS = 72 * 60 * 60 * 1000;
 
 export async function createHostedDeviceConnectIntent(input: {
   connectSourceId: string;
@@ -45,34 +47,57 @@ export async function createHostedDeviceConnectIntent(input: {
 }): Promise<{
   claim: string;
   connectUrl: string;
+  deviceConnectUrl: string;
+  expiresAt: string;
+}> {
+  return getPrisma().$transaction((tx) =>
+    createHostedDeviceConnectIntentTx({
+      ...input,
+      tx,
+    })
+  );
+}
+
+export async function createHostedDeviceConnectIntentTx(input: {
+  connectSourceId: string;
+  connectTarget: string;
+  memberId: string;
+  now?: Date;
+  provider: ConfiguredDeviceSyncProviderKey;
+  request: Request;
+  sourceProviderSlug: string | null;
+  ttlMs?: number;
+  tx: HostedPrismaTransactionClient;
+}): Promise<{
+  claim: string;
+  connectUrl: string;
+  deviceConnectUrl: string;
   expiresAt: string;
 }> {
   const now = input.now ?? new Date();
-  const expiresAt = new Date(now.getTime() + HOSTED_DEVICE_CONNECT_INTENT_TTL_MS);
+  const expiresAt = new Date(now.getTime() + normalizeHostedDeviceConnectIntentTtlMs(input.ttlMs));
   const claim = generateHostedDeviceConnectIntentClaim();
   const claimHash = hashHostedDeviceConnectIntentClaim(claim);
 
-  await getPrisma().$transaction(async (tx) => {
-    await tx.deviceConnectIntent.deleteMany({
-      where: {
-        expiresAt: {
-          lte: now,
-        },
+  await input.tx.deviceConnectIntent.deleteMany({
+    where: {
+      expiresAt: {
+        lte: now,
       },
-    });
+    },
+  });
 
-    await tx.deviceConnectIntent.create({
-      data: {
-        claimHash,
-        memberId: input.memberId,
-        provider: input.provider,
-        connectSourceId: input.connectSourceId,
-        connectTarget: input.connectTarget,
-        sourceProviderSlug: input.sourceProviderSlug,
-        createdAt: now,
-        expiresAt,
-      },
-    });
+  await input.tx.deviceConnectIntent.create({
+    data: {
+      claimHash,
+      memberId: input.memberId,
+      provider: input.provider,
+      connectSourceId: input.connectSourceId,
+      connectTarget: input.connectTarget,
+      sourceProviderSlug: input.sourceProviderSlug,
+      createdAt: now,
+      expiresAt,
+    },
   });
 
   return {
@@ -80,6 +105,10 @@ export async function createHostedDeviceConnectIntent(input: {
     connectUrl: buildHostedDeviceConnectIntentUrl({
       claim,
       connectSourceId: input.connectSourceId,
+      request: input.request,
+    }),
+    deviceConnectUrl: buildHostedDeviceConnectIntentDirectUrl({
+      claim,
       request: input.request,
     }),
     expiresAt: expiresAt.toISOString(),
@@ -235,6 +264,23 @@ function buildHostedDeviceConnectIntentUrl(input: {
   fragment.set("connectSource", input.connectSourceId);
   url.hash = fragment.toString();
   return url.toString();
+}
+
+function buildHostedDeviceConnectIntentDirectUrl(input: {
+  claim: string;
+  request: Request;
+}): string {
+  const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
+  const url = new URL(`/device/connect/${encodeURIComponent(input.claim)}`, `${baseUrl}/`);
+  return url.toString();
+}
+
+function normalizeHostedDeviceConnectIntentTtlMs(value: number | null | undefined): number {
+  if (!Number.isFinite(value) || value === undefined || value === null) {
+    return HOSTED_DEVICE_CONNECT_INTENT_TTL_MS;
+  }
+
+  return Math.max(60_000, Math.min(Math.trunc(value), HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS));
 }
 
 function generateHostedDeviceConnectIntentClaim(): string {

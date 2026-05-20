@@ -2357,7 +2357,7 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
   close();
 });
 
-test("device sync service requeues retryable provider failures and marks the account for reauthorization", async () => {
+test("device sync service stops queued work when a provider failure requires reauthorization", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-retry");
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -2397,12 +2397,16 @@ test("device sync service requeues retryable provider failures and marks the acc
   assert.equal(storedAccount?.status, "reauthorization_required");
   assert.equal(storedAccount?.lastErrorCode, "TOKEN_REFRESH_FAILED");
   assert.equal(storedAccount?.lastErrorMessage, "Reconnect required.");
-  assert.equal(service.summarize().jobsQueued, 1);
-  assert.equal(service.summarize().jobsDead, 0);
-  assert.equal(queuedJobs[0]?.status, "queued");
+  assert.equal(storedAccount?.nextReconcileAt, null);
+  assert.equal(service.summarize().jobsQueued, 0);
+  assert.equal(service.summarize().jobsDead, 1);
+  assert.equal(queuedJobs[0]?.status, "dead");
   assert.equal(queuedJobs[0]?.attempts, 1);
-  assert.equal(queuedJobs[0]?.last_error_code, "TOKEN_REFRESH_FAILED");
-  assert.equal(queuedJobs[0]?.last_error_message, "Reconnect required.");
+  assert.equal(queuedJobs[0]?.last_error_code, "ACCOUNT_REAUTHORIZATION_REQUIRED");
+  assert.equal(
+    queuedJobs[0]?.last_error_message,
+    "Device sync account requires reconnection before queued jobs can run.",
+  );
 
   close();
 });
@@ -3411,7 +3415,7 @@ test("sqlite store splits connection, credential, and observation state into exp
   assert.equal(observationRow.local_token_revision, 0);
   assert.equal(observationRow.last_webhook_at, "2026-03-20T11:00:00.000Z");
   assert.equal(observationRow.last_error_code, "SYNC_FAILED");
-  assert.equal(observationRow.next_reconcile_at, "2026-03-28T00:00:00.000Z");
+  assert.equal(observationRow.next_reconcile_at, null);
 
   store.close();
 });

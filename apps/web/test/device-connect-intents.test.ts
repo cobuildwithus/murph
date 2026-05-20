@@ -49,6 +49,7 @@ describe("hosted device connect intents", () => {
     expect(fragment.get("deviceConnectIntent")).toBe(result.claim);
     expect(fragment.get("connectSource")).toBe("whoop");
     expect(fragment.get("deviceConnectIntent")).toMatch(/^dc_[A-Za-z0-9_-]{32}$/u);
+    expect(result.deviceConnectUrl).toBe(`https://join.example.test/device/connect/${result.claim}`);
     expect(result.expiresAt).toBe("2026-05-10T12:15:00.000Z");
     expect(mocks.tx.deviceConnectIntent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

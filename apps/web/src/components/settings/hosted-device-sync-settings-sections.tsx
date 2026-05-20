@@ -12,6 +12,7 @@ import {
   formatAbsoluteTime,
   formatRelativeTime,
 } from "@/src/components/settings/hosted-device-sync-settings-time";
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 
 import { ConnectedAccountCard } from "./connected-account-card";
@@ -24,6 +25,7 @@ export function HostedDeviceSyncSettingsContent(props: {
   sources: HostedDeviceSyncSettingsSource[];
   onDisconnectTargetChange: (source: HostedDeviceSyncSettingsSource | null) => void;
   onRefresh: () => Promise<void>;
+  onReconnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
 }) {
   return (
     <>
@@ -57,6 +59,7 @@ export function HostedDeviceSyncSettingsContent(props: {
               pendingActionKey={props.pendingActionKey}
               source={source}
               onDisconnectTargetChange={props.onDisconnectTargetChange}
+              onReconnect={props.onReconnect}
             />
           ))}
         </div>
@@ -93,8 +96,16 @@ function HostedDeviceSyncSourceCard(props: {
   pendingActionKey: string | null;
   source: HostedDeviceSyncSettingsSource;
   onDisconnectTargetChange: (source: HostedDeviceSyncSettingsSource | null) => void;
+  onReconnect: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
 }) {
   const disconnectBusy = props.pendingActionKey === sourceKey(props.source, "disconnect");
+  const reconnectBusy = props.pendingActionKey === sourceKey(props.source, "reconnect");
+  const disconnectAction = props.source.secondaryAction?.kind === "disconnect" && props.source.connectionId
+    ? props.source.secondaryAction
+    : null;
+  const reconnectAction = props.source.primaryAction?.kind === "reconnect" && props.source.connectSourceId
+    ? props.source.primaryAction
+    : null;
   const displayName = props.source.displayName
     ? `${props.source.providerLabel} - ${props.source.displayName}`
     : props.source.providerLabel;
@@ -106,16 +117,30 @@ function HostedDeviceSyncSourceCard(props: {
       value={displayName}
       meta={timing}
       action={
-        props.source.secondaryAction?.kind === "disconnect" && props.source.connectionId ? (
-          <Button
-            type="button"
-            onClick={() => props.onDisconnectTargetChange(props.source)}
-            disabled={disconnectBusy}
-            size="sm"
-            variant="outline"
-          >
-            {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
-          </Button>
+        disconnectAction || reconnectAction ? (
+          <div className="flex flex-wrap justify-end gap-2">
+          {reconnectAction ? (
+            <Button
+              type="button"
+              onClick={() => void props.onReconnect(props.source)}
+              disabled={reconnectBusy}
+              size="sm"
+            >
+              {reconnectBusy ? "Opening..." : reconnectAction.label}
+            </Button>
+          ) : null}
+          {disconnectAction ? (
+            <Button
+              type="button"
+              onClick={() => props.onDisconnectTargetChange(props.source)}
+              disabled={disconnectBusy || reconnectBusy}
+              size="sm"
+              variant="outline"
+            >
+              {disconnectBusy ? "Disconnecting..." : disconnectAction.label}
+            </Button>
+          ) : null}
+          </div>
         ) : null
       }
     />
@@ -146,6 +171,40 @@ export function HostedDeviceSyncDisconnectDialog(props: {
             {props.disconnectPending ? "Disconnecting..." : "Disconnect"}
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function HostedDeviceSyncReconnectConsentDialog(props: {
+  source: HostedDeviceSyncSettingsSource | null;
+  onAccepted: (source: HostedDeviceSyncSettingsSource) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const open = Boolean(props.source);
+
+  return (
+    <Dialog open={open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+        <DialogHeader className="pr-10">
+          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
+            {props.source ? `Before you reconnect ${props.source.providerLabel}` : "Before you reconnect"}
+          </DialogTitle>
+          <DialogDescription>
+            Review Murph&apos;s current legal and health-data consent before continuing.
+          </DialogDescription>
+        </DialogHeader>
+        {props.source ? (
+          <HostedLegalConsentCard
+            mode="compact"
+            source="settings-device-sync"
+            onAccepted={async () => {
+              if (props.source) {
+                await props.onAccepted(props.source);
+              }
+            }}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
