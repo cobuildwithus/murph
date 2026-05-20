@@ -78,6 +78,11 @@ accounting is wrong.
   by request JSON size, traversal depth, traversal node count, runtime-log
   field count, and runtime-log array length; subtree byte measurement is
   best-effort so extreme nesting cannot drop the whole diagnostic.
+- Production OpenAI egress diagnostics also summarize the bounded input tail
+  with item indexes, reverse indexes, role/type buckets, JSON byte sizes,
+  `content`/`output`/string byte totals, and optional HMAC fingerprints. This
+  lets a warm-cache uncached suffix be traced to recent message/tool/provider
+  items without logging prompt or message content.
 - Provider prompt-size diagnostics live at the Codex provider prompt
   composition boundary and emit only byte counts, presence booleans, and
   prompt-plan enums. Prompt text, developer instructions, message bodies,
@@ -146,3 +151,15 @@ accounting is wrong.
 - `pnpm logs:guard` passed.
 - `git diff --check -- apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts packages/assistant-engine/src/assistant/providers/codex-cli.ts packages/assistant-engine/src/assistant/providers/helpers.ts packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts` passed.
 - `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts packages/assistant-engine/src/assistant/providers/codex-cli.ts packages/assistant-engine/src/assistant/providers/helpers.ts packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts` was attempted after the final diagnostics update. It reached the packages/cli test lane and failed on unrelated dirty Murph Age CLI/schema expectations in `packages/cli/test/murph-age-command.test.ts` and `packages/cli/test/cli-typed-agent-inputs-schema.test.ts`; the diagnostics diff does not touch those files or the Murph Age feature.
+- OpenAI docs checked for the final warm-cache suffix diagnosis: prompt caching
+  is exact-prefix based, stable content should stay at the beginning, dynamic
+  user-specific context should stay near the end, and cached-token metrics are
+  the right signal to monitor.
+- `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts test/runner-egress-intercept.test.ts` passed after adding tail-item diagnostics.
+- `pnpm --dir apps/cloudflare typecheck` passed after adding tail-item diagnostics.
+- `pnpm logs:guard` passed after adding tail-item diagnostics.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts` initially passed after adding tail-item diagnostics, including `apps/cloudflare verify` with 77 test files and 1040 tests passing. After the coverage worker added the explicit tail-bound test, rerunning the same command reached `apps/cloudflare verify` and failed on unrelated dirty direct-R2 snapshot-session work in `apps/cloudflare/test/user-runner-alarm.test.ts` (`best-effort deletes the previous workspace snapshot object when replacing the active upload session` expected the previous object key in `bucket.deleted` but saw `[]`); the prompt-cache diagnostic diff does not touch that snapshot-session path.
+- `pnpm typecheck` passed after adding tail-item diagnostics.
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20

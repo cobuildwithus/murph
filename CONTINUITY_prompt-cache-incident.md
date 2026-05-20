@@ -12,7 +12,9 @@ Key decisions:
 - Use current OpenAI docs for prompt-cache behavior.
 
 State:
-- Incident fix implemented and verified; final scoped commit in progress.
+- Production cache-bust fix implemented. Follow-up diagnostics now target the
+  remaining warm-cache uncached suffix by summarizing the final OpenAI input
+  items with metadata-only byte/count/fingerprint fields.
 
 Done:
 - Loaded required repo routing, architecture, security, reliability, verification, OpenAI, and Cloudflare skill guidance.
@@ -32,13 +34,17 @@ Done:
   owner/reverse-dependent verification successfully.
 - Completed required security/privacy, simplify, coverage-write, and final
   completion reviews.
+- Added bounded Cloudflare OpenAI input-tail diagnostics for warm-cache suffix
+  analysis and verified focused egress tests, log guard, Cloudflare typecheck,
+  and repo typecheck.
 
 Now:
-- Commit remaining final-review/test proof changes and close the plan.
+- Land the scoped diagnostic commit and close the prompt-cache debugging plan.
 
 Next:
-- Monitor hosted usage rows after deploy for non-null token usage and reduced
-  repeated cold starts.
+- Deploy and monitor hosted usage/runtime logs for warm-cache auto-reply rows:
+  compare `cached_tokens` with the new `inputTailItem*` metadata to identify
+  the item(s) making up the uncached suffix.
 
 Open questions (UNCONFIRMED if needed):
 - Whether Vercel AI Gateway/OpenAI cache routing can be improved through a

@@ -559,9 +559,17 @@ describe("hostedRunnerIntercept", () => {
       inputItemRoleKinds: ["user"],
       inputItemTypeCounts: [1],
       inputItemTypeKinds: ["missing"],
+      inputLargestItemIndex: 0,
       inputLargestItemKinds: ["type:missing", "role:user"],
+      inputLargestItemReverseIndex: 0,
       inputNestedMetricCounts: [1, 0, 3],
       inputNestedMetricKinds: ["content", "output", "string"],
+      inputTailItemCount: 1,
+      inputTailItemFingerprintPresent: true,
+      inputTailItemIndexes: [0],
+      inputTailItemReverseIndexes: [0],
+      inputTailItemRoleKinds: ["user"],
+      inputTailItemTypeKinds: ["missing"],
       inputType: "array",
       jsonType: "object",
       jsonValid: true,
@@ -582,7 +590,19 @@ describe("hostedRunnerIntercept", () => {
         + testByteLength("input_text")
         + testByteLength("user"),
     ]);
-    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(45);
+    expect(entry?.redactedJson?.inputTailItemBytes).toEqual([
+      testJsonByteLength(requestBody.input[0]),
+    ]);
+    expect(entry?.redactedJson?.inputTailItemContentBytes).toEqual([
+      testJsonByteLength(requestBody.input[0].content),
+    ]);
+    expect(entry?.redactedJson?.inputTailItemOutputBytes).toEqual([0]);
+    expect(entry?.redactedJson?.inputTailItemStringBytes).toEqual([
+      testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
+        + testByteLength("input_text")
+        + testByteLength("user"),
+    ]);
+    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(60);
     expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
@@ -591,6 +611,9 @@ describe("hostedRunnerIntercept", () => {
     expect(entry?.redactedJson?.inputPrefixFingerprints).toEqual(
       expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
     );
+    expect(entry?.redactedJson?.inputTailItemFingerprints).toEqual([
+      expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u),
+    ]);
 
     const runtimeLogJson = JSON.stringify(runtimeLogBody);
     expect(runtimeLogJson).not.toContain(syntheticCacheNamespace);
@@ -709,7 +732,9 @@ describe("hostedRunnerIntercept", () => {
       inputItemTypeCounts: [1, 1, 2, 1],
       inputItemTypeKinds: ["function_call", "message", "missing", "other"],
       inputLargestItemBytes: testJsonByteLength(input[0]),
+      inputLargestItemIndex: 0,
       inputLargestItemKinds: ["type:message", "role:user"],
+      inputLargestItemReverseIndex: 4,
       inputNestedMetricCounts: [2, 1, 13],
       inputNestedMetricKinds: ["content", "output", "string"],
       inputNestedMetricBytes: [
@@ -731,7 +756,111 @@ describe("hostedRunnerIntercept", () => {
           "plain input",
         ].reduce((total, value) => total + testByteLength(value), 0),
       ],
+      inputTailItemBytes: input.map((item) => testJsonByteLength(item)),
+      inputTailItemContentBytes: [
+        testJsonByteLength(input[0].content),
+        0,
+        testJsonByteLength(input[2].content),
+        0,
+        0,
+      ],
+      inputTailItemCount: 5,
+      inputTailItemFingerprintPresent: false,
+      inputTailItemIndexes: [0, 1, 2, 3, 4],
+      inputTailItemOutputBytes: [
+        0,
+        testJsonByteLength(input[1].output),
+        0,
+        0,
+        0,
+      ],
+      inputTailItemReverseIndexes: [4, 3, 2, 1, 0],
+      inputTailItemRoleKinds: ["user", "assistant", "other", "missing", "missing"],
+      inputTailItemStringBytes: [
+        [
+          "message",
+          "user",
+          "input_text",
+          largestText,
+        ].reduce((total, value) => total + testByteLength(value), 0),
+        [
+          "function_call",
+          "assistant",
+          "tool result",
+        ].reduce((total, value) => total + testByteLength(value), 0),
+        [
+          "unexpected_call",
+          "banana",
+          "hidden",
+        ].reduce((total, value) => total + testByteLength(value), 0),
+        [
+          "  ",
+          "",
+        ].reduce((total, value) => total + testByteLength(value), 0),
+        testByteLength("plain input"),
+      ],
+      inputTailItemTypeKinds: ["message", "function_call", "other", "missing", "missing"],
     }));
+  });
+
+  it("bounds OpenAI input tail diagnostics to the last eight items", async () => {
+    const input = Array.from({ length: 10 }, (_, index) => ({
+      content: `private-tail-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      type: "message",
+    }));
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.5",
+      })),
+    });
+    const expectedTail = input.slice(2);
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      inputCount: 10,
+      inputTailItemCount: 8,
+      inputTailItemFingerprintPresent: false,
+      inputTailItemIndexes: [2, 3, 4, 5, 6, 7, 8, 9],
+      inputTailItemOutputBytes: [0, 0, 0, 0, 0, 0, 0, 0],
+      inputTailItemReverseIndexes: [7, 6, 5, 4, 3, 2, 1, 0],
+      inputTailItemRoleKinds: [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+      ],
+      inputTailItemTypeKinds: [
+        "message",
+        "message",
+        "message",
+        "message",
+        "message",
+        "message",
+        "message",
+        "message",
+      ],
+    }));
+    expect(diagnostic.inputTailItemBytes).toEqual(
+      expectedTail.map((item) => testJsonByteLength(item)),
+    );
+    expect(diagnostic.inputTailItemContentBytes).toEqual(
+      expectedTail.map((item) => testJsonByteLength(item.content)),
+    );
+    expect(diagnostic.inputTailItemStringBytes).toEqual(
+      expectedTail.map((item) =>
+        testByteLength(item.content) + testByteLength(item.role) + testByteLength(item.type)
+      ),
+    );
+    expect(JSON.stringify(diagnostic)).not.toContain("private-tail-0");
+    expect(JSON.stringify(diagnostic)).not.toContain("private-tail-9");
   });
 
   it("keeps maximal OpenAI input classification diagnostics runtime-log safe", async () => {
