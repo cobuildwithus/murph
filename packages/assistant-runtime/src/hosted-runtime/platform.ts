@@ -23,6 +23,10 @@ import type {
   HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedWorkspaceSnapshotV2Aad,
+  HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -223,6 +227,60 @@ export interface HostedRuntimeWorkspacePort {
   ): Promise<HostedWorkspaceCheckpointResponse>;
 }
 
+export interface HostedRuntimeWorkspaceSnapshotDataKey {
+  aad: HostedWorkspaceSnapshotV2Aad;
+  dataKeyBase64: string;
+  ivBase64: string;
+  rootKeyId: string;
+  scheme: HostedWorkspaceSnapshotV2Ref["encryption"]["scheme"];
+  wrappedDataKey: string;
+}
+
+export interface HostedRuntimeWorkspaceSnapshotUploadStart {
+  encryption: HostedRuntimeWorkspaceSnapshotDataKey;
+  expiresAt: string;
+  limits: {
+    maxSinglePartEncryptedBytes: number;
+    warnEncryptedBytes: number;
+  };
+  objectKey: string;
+  putUrl: string;
+  snapshotId: string;
+}
+
+export interface HostedRuntimeWorkspaceSnapshotCompleteResult {
+  checkpoint: HostedWorkspaceCheckpointResponse;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+}
+
+export interface HostedRuntimeWorkspaceSnapshotPort {
+  completeUploadedSnapshot(input: {
+    checkpointRequest: HostedWorkspaceCheckpointRequest;
+    ref: HostedWorkspaceSnapshotV2Ref;
+  }): Promise<HostedRuntimeWorkspaceSnapshotCompleteResult>;
+  directPutEncryptedObject(input: {
+    encryptedByteSize: number;
+    putUrl: string;
+    sourceFilePath: string;
+  }): Promise<void>;
+  restoreWorkspaceSnapshot(input: {
+    durableRoot: string;
+    ref: HostedWorkspaceSnapshotV2Ref;
+    scratchRoot?: string | null;
+  }): Promise<void>;
+  unwrapDataKey(input: {
+    aad: HostedWorkspaceSnapshotV2Aad;
+    rootKeyId: string;
+    wrappedDataKey: string;
+  }): Promise<string>;
+  startUpload(input: {
+    expectedWorkspaceVersion: string;
+    nextWakeAt?: string | null;
+    nextWakeReason?: string | null;
+    reason: "idle_shutdown";
+  }): Promise<HostedRuntimeWorkspaceSnapshotUploadStart>;
+}
+
 export interface HostedRuntimeLogPort {
   write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
 }
@@ -241,6 +299,7 @@ export interface HostedRuntimePlatform {
   runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
+  workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;
 }
 
 export type HostedRuntimeIssueRecordResponse = HostedRuntimeIssueExportResponse;

@@ -236,7 +236,7 @@ describe("runHostedExecutionChild", () => {
         artifactStore: expect.any(Object),
         effectsPort: expect.any(Object),
       }),
-      vaultRoot: path.join(launcherRoot, "vault"),
+      vaultRoot: path.join(launcherRoot, "durable", "vault"),
     });
 
     const payload = readChildResult(sendResult.mock.calls[0]?.[0]);

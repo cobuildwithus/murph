@@ -65,6 +65,8 @@ const requiredHostedCryptoWorkerVars = {
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
+  HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
 } as const;
 
 describe("deploy artifact validation", () => {
@@ -857,6 +859,8 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     ...requiredHostedCryptoWorkerVars,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+    HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
+    HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     OPENAI_API_KEY: "openai-key",
   };

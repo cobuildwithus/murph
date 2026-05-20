@@ -278,6 +278,24 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.LINQ_API_TOKEN).toBe("linq-local-test-token");
   });
 
+  it("fills local e2e R2 presign placeholders for the direct-upload test route", () => {
+    const merged = mergeCloudflareLocalEnv({
+      config: localConfig,
+      existing: {},
+      oidcIdentity,
+      overrides: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      },
+    });
+
+    expect(merged.HOSTED_R2_PRESIGN_ACCESS_KEY_ID).toBe("hosted-local-r2-access-key");
+    expect(merged.HOSTED_R2_PRESIGN_ACCOUNT_ID).toBe("hosted-local-r2-account");
+    expect(merged.HOSTED_R2_PRESIGN_BUCKET_NAME).toBe("hosted-local-r2-bundles");
+    expect(merged.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY).toBe("hosted-local-r2-secret-key");
+  });
+
   it("keeps local generated hosted crypto keys ahead of pulled Vercel values by default", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,

@@ -78,6 +78,10 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
+import {
+  parseHostedWorkspaceSnapshotUploadSession,
+  type HostedWorkspaceSnapshotUploadSession,
+} from "./workspace-snapshot-store.ts";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
@@ -379,6 +383,7 @@ export class HostedUserRunner {
     attemptId: string;
     generation: string;
     userId: string;
+    workspaceVersion?: string | null;
   }): Promise<boolean> {
     const validation = await this.stateStore.validateWriteFenceToken(input);
     if (!validation.owns) {
@@ -389,6 +394,7 @@ export class HostedUserRunner {
           generation: input.generation,
           record: validation.record,
           userId: input.userId,
+          workspaceVersion: input.workspaceVersion ?? null,
         }),
         level: "warn",
         message: "Hosted runner runtime write fence validation rejected.",
@@ -397,6 +403,48 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  async createHostedWorkspaceSnapshotUploadSession(
+    input: HostedWorkspaceSnapshotUploadSession,
+  ): Promise<HostedWorkspaceSnapshotUploadSession> {
+    await this.stateStore.bindUser(input.userId);
+    const session = parseHostedWorkspaceSnapshotUploadSession(input);
+    if (session.userId !== input.userId) {
+      throw new Error("Hosted workspace snapshot upload session user mismatch.");
+    }
+    await this.state.storage.put(workspaceSnapshotUploadSessionStorageKey(session.snapshotId), session);
+    return session;
+  }
+
+  async readHostedWorkspaceSnapshotUploadSession(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
+    await this.stateStore.bindUser(input.userId);
+    const value = await this.state.storage.get<unknown>(
+      workspaceSnapshotUploadSessionStorageKey(input.snapshotId),
+    );
+    if (value === undefined) {
+      return null;
+    }
+    const session = parseHostedWorkspaceSnapshotUploadSession(value);
+    if (session.userId !== input.userId || session.snapshotId !== input.snapshotId) {
+      throw new Error("Hosted workspace snapshot upload session is outside the bound user namespace.");
+    }
+    return session;
+  }
+
+  async deleteHostedWorkspaceSnapshotUploadSession(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<{ deleted: boolean }> {
+    await this.stateStore.bindUser(input.userId);
+    return {
+      deleted: await this.state.storage.delete(
+        workspaceSnapshotUploadSessionStorageKey(input.snapshotId),
+      ),
+    };
   }
 
   async beginRuntimeWriteFenceForSmoke(input: {
@@ -2747,6 +2795,7 @@ function buildRunnerWriteFenceValidationRejectedDetails(input: {
   generation: string;
   record: RunnerStateRecord;
   userId: string;
+  workspaceVersion: string | null;
 }): HostedExecutionStructuredLogDetails {
   const writeFence = input.record.writeFence;
   const writeFenceAttemptMatches = writeFence !== null
@@ -2754,6 +2803,11 @@ function buildRunnerWriteFenceValidationRejectedDetails(input: {
   const writeFenceGenerationMatches = writeFence !== null
     && String(writeFence.generation) === input.generation;
   const writeFenceUserMatches = input.record.userId === input.userId;
+  const writeFenceWorkspaceVersionMatches = input.workspaceVersion === null
+    || (
+      writeFence !== null
+      && writeFence.workspaceVersion === input.workspaceVersion
+    );
 
   return {
     activeWriteFencePresent: writeFence !== null,
@@ -2762,11 +2816,13 @@ function buildRunnerWriteFenceValidationRejectedDetails(input: {
     writeFenceAttemptMatches,
     writeFenceGenerationMatches,
     writeFenceUserMatches,
+    writeFenceWorkspaceVersionMatches,
     writeFenceValidationRejectReason: readRunnerWriteFenceValidationRejectReason({
       writeFenceAttemptMatches,
       writeFenceGenerationMatches,
       writeFencePresent: writeFence !== null,
       writeFenceUserMatches,
+      writeFenceWorkspaceVersionMatches,
     }),
   };
 }
@@ -2776,6 +2832,7 @@ function readRunnerWriteFenceValidationRejectReason(input: {
   writeFenceGenerationMatches: boolean;
   writeFencePresent: boolean;
   writeFenceUserMatches: boolean;
+  writeFenceWorkspaceVersionMatches: boolean;
 }): string {
   if (!input.writeFencePresent) {
     return "no_active_write_fence";
@@ -2788,6 +2845,9 @@ function readRunnerWriteFenceValidationRejectReason(input: {
   }
   if (!input.writeFenceUserMatches) {
     return "user_mismatch";
+  }
+  if (!input.writeFenceWorkspaceVersionMatches) {
+    return "workspace_version_mismatch";
   }
   return "unknown";
 }
@@ -2839,4 +2899,8 @@ function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecut
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
   };
+}
+
+function workspaceSnapshotUploadSessionStorageKey(snapshotId: string): string {
+  return `workspace-snapshot-upload-session:${snapshotId}`;
 }

@@ -2,7 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
   parseHostedUserRecipientPublicKeyJwk,
@@ -88,6 +90,13 @@ import {
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import {
+  createHostedR2PresignedPutUrl,
+  readHostedR2PresignEnvironment,
+} from "./r2-presigned-url.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+} from "./workspace-snapshot-store.ts";
+import {
   decodeRouteParam,
   readCachedRequestText,
   resolveHostedExecutionUserCryptoContext,
@@ -114,8 +123,12 @@ interface DeclarativeRoute<Context> {
 }
 
 const INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES = 4 * 1024;
+const DIRECT_R2_PRESIGNED_PUT_TEST_BODY_LIMIT_BYTES = 16 * 1024;
 const DEPLOY_CONTAINER_SMOKE_BODY_LIMIT_BYTES = 4 * 1024;
 const DEPLOY_OPENAI_INTERCEPT_SMOKE_WORKSPACE_VERSION = "0";
+const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
+const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
+  "deploy-smoke/direct-r2-presigned-put";
 
 const workerPublicRoutes: readonly DeclarativeRoute<{
   env: WorkerEnvironmentSource;
@@ -209,6 +222,19 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     match: matchTestUserRoute("/__test/users/", "/checkpoint-artifact-write-fence"),
     methods: ["POST"],
     name: "test-checkpoint-artifact-write-fence",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return isHostedWorkerTestEnvironment(context.env) ? null : notFound();
+    },
+    async handle(context, params) {
+      return handleTestDirectR2PresignedPutRoute(context, params.userId);
+    },
+    match: matchTestUserRoute("/__test/users/", "/direct-r2-presigned-put"),
+    methods: ["POST"],
+    name: "test-direct-r2-presigned-put",
     wrongMethodResponse: "not-found",
   },
   {
@@ -383,6 +409,24 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     userId: string;
   }): Promise<boolean> {
     return this.runner.validateRuntimeWriteFence(input);
+  }
+
+  async createHostedWorkspaceSnapshotUploadSession(
+    input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
+  ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {
+    return this.runner.createHostedWorkspaceSnapshotUploadSession(input);
+  }
+
+  async readHostedWorkspaceSnapshotUploadSession(
+    input: Parameters<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]>[0],
+  ): ReturnType<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]> {
+    return this.runner.readHostedWorkspaceSnapshotUploadSession(input);
+  }
+
+  async deleteHostedWorkspaceSnapshotUploadSession(
+    input: Parameters<HostedUserRunner["deleteHostedWorkspaceSnapshotUploadSession"]>[0],
+  ): ReturnType<HostedUserRunner["deleteHostedWorkspaceSnapshotUploadSession"]> {
+    return this.runner.deleteHostedWorkspaceSnapshotUploadSession(input);
   }
 
   async beginRuntimeWriteFenceForSmoke(input: {
@@ -647,11 +691,57 @@ async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const openAiIntercept = context.url.searchParams.get("openAiIntercept") === "1";
+  const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
-  const result = openAiIntercept
-    ? await runDeployContainerOpenAiInterceptSmokeWithFence(context, container)
-    : await container.smokeHealth({ openAiIntercept });
+  const directR2Smoke = directR2PresignedPut
+    ? await createDeployContainerDirectR2PresignedPutSmoke(context)
+    : null;
+  let result: Awaited<ReturnType<typeof container.smokeHealth>>;
+  let primaryError: unknown = null;
+
+  try {
+    result = openAiIntercept
+      ? await runDeployContainerOpenAiInterceptSmokeWithFence(
+          context,
+          container,
+          directR2Smoke?.containerInput,
+        )
+      : await container.smokeHealth({
+          ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
+          openAiIntercept,
+        });
+
+    if (directR2Smoke) {
+      await assertDeployContainerDirectR2PresignedPutSmokeObject(context, {
+        expectedByteLength: directR2Smoke.containerInput.byteLength,
+        objectKey: directR2Smoke.objectKey,
+        result: result.directR2PresignedPut ?? null,
+      });
+    }
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    if (directR2Smoke) {
+      await deleteDeployContainerDirectR2PresignedPutSmokeObject(context, directR2Smoke.objectKey)
+        .catch((cleanupError: unknown) => {
+          if (!primaryError) {
+            throw cleanupError;
+          }
+          emitHostedExecutionStructuredLog({
+            component: "cloudflare.worker",
+            details: {
+              errorCode: deriveHostedExecutionErrorCode(cleanupError),
+              errorName: readHostedExecutionSafeErrorName(cleanupError),
+            },
+            level: "warn",
+            message: "Deploy direct R2 presigned PUT smoke cleanup failed.",
+            phase: "failed",
+          });
+        });
+    }
+  }
 
   return json({
     ok: result.ok === true,
@@ -663,6 +753,10 @@ async function handleDeployContainerSmokeRoute(
 async function runDeployContainerOpenAiInterceptSmokeWithFence(
   context: WorkerRouteContext,
   container: ReturnType<WorkerEnvironmentSource["RUNNER_CONTAINER_SMOKE"]["getByName"]>,
+  directR2PresignedPut?: {
+    byteLength: number;
+    presignedPutUrl: string;
+  },
 ): Promise<Awaited<ReturnType<typeof container.smokeHealth>>> {
   const userId = await readDeployContainerOpenAiInterceptSmokeUserId(context);
   if (!userId) {
@@ -686,6 +780,7 @@ async function runDeployContainerOpenAiInterceptSmokeWithFence(
   }
   try {
     return await container.smokeHealth({
+      ...(directR2PresignedPut ? { directR2PresignedPut } : {}),
       openAiIntercept: true,
       openAiInterceptAuthority: {
         attemptId: lease.attemptId,
@@ -702,6 +797,83 @@ async function runDeployContainerOpenAiInterceptSmokeWithFence(
       userId,
     });
   }
+}
+
+async function createDeployContainerDirectR2PresignedPutSmoke(
+  context: WorkerRouteContext,
+): Promise<{
+  containerInput: {
+    byteLength: number;
+    presignedPutUrl: string;
+  };
+  objectKey: string;
+}> {
+  const objectKey = [
+    DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX,
+    `${crypto.randomUUID()}.bin`,
+  ].join("/");
+  const { url } = await createHostedR2PresignedPutUrl({
+    contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+    environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(context.env)),
+    key: objectKey,
+  });
+
+  return {
+    containerInput: {
+      byteLength: DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES,
+      presignedPutUrl: url,
+    },
+    objectKey,
+  };
+}
+
+async function assertDeployContainerDirectR2PresignedPutSmokeObject(
+  context: WorkerRouteContext,
+  input: {
+    expectedByteLength: number;
+    objectKey: string;
+    result: {
+      byteLength?: number | null;
+      ok?: boolean;
+      payloadSha256?: string | null;
+      status?: number | null;
+    } | null;
+  },
+): Promise<void> {
+  if (input.result?.ok !== true || input.result.status !== 200) {
+    throw new Error("Deploy direct R2 presigned PUT smoke did not complete successfully.");
+  }
+  if (input.result.byteLength !== input.expectedByteLength) {
+    throw new Error("Deploy direct R2 presigned PUT smoke reported an unexpected byte count.");
+  }
+  if (
+    typeof input.result.payloadSha256 !== "string"
+    || !/^[0-9a-f]{64}$/u.test(input.result.payloadSha256)
+  ) {
+    throw new Error("Deploy direct R2 presigned PUT smoke did not report a payload hash.");
+  }
+
+  const bucket = context.env.BUNDLES;
+  if (typeof bucket.head !== "function") {
+    throw new Error("Deploy direct R2 presigned PUT smoke requires R2 HEAD support.");
+  }
+  const object = await bucket.head(input.objectKey);
+  if (!object) {
+    throw new Error("Deploy direct R2 presigned PUT smoke object was not found in R2.");
+  }
+  if (object.size !== input.expectedByteLength) {
+    throw new Error("Deploy direct R2 presigned PUT smoke object had an unexpected byte count.");
+  }
+}
+
+async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
+  context: WorkerRouteContext,
+  objectKey: string,
+): Promise<void> {
+  if (typeof context.env.BUNDLES.delete !== "function") {
+    throw new Error("Deploy direct R2 presigned PUT smoke requires R2 delete support.");
+  }
+  await context.env.BUNDLES.delete(objectKey);
 }
 
 async function readDeployContainerOpenAiInterceptSmokeUserId(
@@ -1037,7 +1209,7 @@ async function handleTestCheckpointArtifactWriteFenceRoute(
   let body: Record<string, unknown>;
   try {
     body = await readOptionalJsonObject(context.request, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+      limitBytes: DIRECT_R2_PRESIGNED_PUT_TEST_BODY_LIMIT_BYTES,
     });
   } catch (error) {
     if (error instanceof RangeError) {
@@ -1161,6 +1333,67 @@ async function handleTestCheckpointArtifactWriteFenceRoute(
   }
 }
 
+async function handleTestDirectR2PresignedPutRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-direct-r2-presigned-put",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await readOptionalJsonObject(context.request, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return jsonError("Request body too large.", 413);
+    }
+    throw error;
+  }
+
+  const presignedPutUrl = normalizeNonEmptyString(body.presignedPutUrl);
+  if (!presignedPutUrl) {
+    return json({ error: "presignedPutUrl is required." }, 400);
+  }
+
+  const byteLength = parseTestPositiveIntegerValue(body.byteLength);
+  if (byteLength === "invalid") {
+    return json({ error: "Unsupported test direct R2 byte length." }, 400);
+  }
+  const tlsCaCertificatePem = normalizeNonEmptyString(body.tlsCaCertificatePem);
+
+  const container = context.env.RUNNER_CONTAINER_SMOKE
+    .getByName(resolveDeployContainerSmokeObjectName(context.env));
+  const result = await container.smokeHealth({
+    directR2PresignedPut: {
+      ...(byteLength === null ? {} : { byteLength }),
+      presignedPutUrl,
+      ...(tlsCaCertificatePem ? { tlsCaCertificatePem } : {}),
+    },
+  });
+
+  return json({
+    directR2PresignedPut: result.directR2PresignedPut ?? null,
+    ok: result.directR2PresignedPut?.ok === true,
+    runnerContainer: result,
+    service: "cloudflare-hosted-runner",
+  });
+}
+
 function createTestRuntimeWriteFenceHeaders(input: {
   attemptId: string;
   generation: string;
@@ -1184,6 +1417,17 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 function parseTestPositiveInteger(value: string | null): number | "invalid" | null {
   if (value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return "invalid";
+  }
+  return parsed;
+}
+
+function parseTestPositiveIntegerValue(value: unknown): number | "invalid" | null {
+  if (value === undefined || value === null) {
     return null;
   }
   const parsed = Number(value);

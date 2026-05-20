@@ -18,11 +18,18 @@ import {
   type HostedExecutionWorkingSnapshotRef,
 } from "../bundles.ts";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "../workspace-snapshot-v2.ts";
+import {
   requireObject,
   requireNumber,
   requireString,
   readNullableStringValue,
 } from "./assertions.ts";
+import {
+  parseHostedWorkspaceSnapshotV2Ref,
+} from "./workspace-snapshot-v2.ts";
 
 export function parseHostedExecutionBundlePayload(
   value: unknown,
@@ -68,6 +75,10 @@ export function parseHostedExecutionSnapshotRef(
     } satisfies HostedExecutionWorkingSnapshotRef;
   }
 
+  if (schema === HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
+    return parseHostedWorkspaceSnapshotV2Ref(record, label);
+  }
+
   return parseHostedExecutionBundleRef(value, label);
 }
 
@@ -87,6 +98,14 @@ export function isHostedExecutionWorkingSnapshotRef(
     && value.schema === HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA;
 }
 
+export function isHostedWorkspaceSnapshotV2Ref(
+  value: HostedExecutionSnapshotRefState,
+): value is HostedWorkspaceSnapshotV2Ref {
+  return value !== null
+    && "schema" in value
+    && value.schema === HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA;
+}
+
 export function readHostedExecutionSnapshotBaseRef(
   value: HostedExecutionSnapshotRefState,
 ): HostedExecutionBundleRefState {
@@ -96,6 +115,10 @@ export function readHostedExecutionSnapshotBaseRef(
 
   if (isHostedExecutionLayeredSnapshotRef(value) || isHostedExecutionWorkingSnapshotRef(value)) {
     return value.base;
+  }
+
+  if (isHostedWorkspaceSnapshotV2Ref(value)) {
+    return null;
   }
 
   return value;

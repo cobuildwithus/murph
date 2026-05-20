@@ -66,6 +66,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
+  workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
   whatsApp: "graph.facebook.com",
 } as const;
 
@@ -195,6 +196,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp]: handleHostedRunnerWhatsAppOutbound,
 };
 

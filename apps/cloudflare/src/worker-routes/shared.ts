@@ -14,6 +14,9 @@ import { readRequestBodyText } from "../json.ts";
 import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
 import type { HostedRunnerStuckInvocationTestResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import type {
+  HostedWorkspaceSnapshotUploadSession,
+} from "../workspace-snapshot-store.ts";
 import {
   requireHostedUserCryptoContextFromEnvironment,
 } from "../hosted-crypto/runtime-user-crypto-context.ts";
@@ -41,6 +44,17 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  createHostedWorkspaceSnapshotUploadSession?(
+    input: HostedWorkspaceSnapshotUploadSession,
+  ): Promise<HostedWorkspaceSnapshotUploadSession>;
+  deleteHostedWorkspaceSnapshotUploadSession?(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<{ deleted: boolean }>;
+  readHostedWorkspaceSnapshotUploadSession?(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runUntilIdleForTest?(input: {
     reason: HostedWorkspaceInvocationReason;

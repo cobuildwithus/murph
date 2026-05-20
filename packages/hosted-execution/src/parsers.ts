@@ -61,6 +61,7 @@ import {
   buildHostedExecutionWorkingSnapshotRef,
   isHostedExecutionLayeredSnapshotRef,
   isHostedExecutionWorkingSnapshotRef,
+  isHostedWorkspaceSnapshotV2Ref,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
@@ -81,6 +82,7 @@ export {
   buildHostedExecutionWorkingSnapshotRef,
   isHostedExecutionLayeredSnapshotRef,
   isHostedExecutionWorkingSnapshotRef,
+  isHostedWorkspaceSnapshotV2Ref,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
@@ -90,6 +92,9 @@ export {
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
+export {
+  parseHostedWorkspaceSnapshotV2Ref,
+} from "./parsers/workspace-snapshot-v2.ts";
 export {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,

@@ -158,6 +158,8 @@ export type {
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
+  HostedRuntimeWorkspaceSnapshotDataKey,
+  HostedRuntimeWorkspaceSnapshotPort,
 } from "./hosted-runtime/platform.ts";
 export {
   normalizeHostedAssistantRuntimeConfig,
@@ -1507,20 +1509,26 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
-  const checkpointRequest = await raceHostedRuntimeCancellation(
-    Promise.resolve(input.checkpointRequestBuilder.createRequest({
-      nextWakeAt: input.nextWakeAt,
-      nextWakeReason: input.nextWakeReason,
-      reason: "idle_shutdown",
-      redactedStatus: input.redactedStatus ?? null,
-    })),
-    input.runtimeAbortSignal,
-  );
+  const checkpointInput = {
+    nextWakeAt: input.nextWakeAt,
+    nextWakeReason: input.nextWakeReason,
+    reason: "idle_shutdown" as const,
+    redactedStatus: input.redactedStatus ?? null,
+  };
   input.assertRuntimeNotAborted();
-  const checkpoint = await raceHostedRuntimeCancellation(
-    input.workspacePort.checkpoint(checkpointRequest),
-    input.runtimeAbortSignal,
-  );
+  const checkpoint = input.checkpointRequestBuilder.checkpoint
+    ? await raceHostedRuntimeCancellation(
+      Promise.resolve(input.checkpointRequestBuilder.checkpoint(
+        checkpointInput,
+        input.workspacePort,
+      )),
+      input.runtimeAbortSignal,
+    )
+    : await raceHostedRuntimeCancellation(
+      Promise.resolve(input.checkpointRequestBuilder.createRequest(checkpointInput))
+        .then((checkpointRequest) => input.workspacePort!.checkpoint(checkpointRequest)),
+      input.runtimeAbortSignal,
+    );
   input.assertRuntimeNotAborted();
   assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);

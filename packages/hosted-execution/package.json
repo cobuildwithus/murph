@@ -77,6 +77,10 @@
     "./side-effects": {
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"
+    },
+    "./workspace-snapshot-v2": {
+      "types": "./dist/workspace-snapshot-v2.d.ts",
+      "default": "./dist/workspace-snapshot-v2.js"
     }
   },
   "files": [

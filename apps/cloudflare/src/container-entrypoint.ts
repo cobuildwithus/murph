@@ -1,8 +1,16 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { request as httpsRequest } from "node:https";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -42,9 +50,14 @@ const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
 const HOSTED_CONTAINER_ACTIVE_DIAGNOSTIC_INTERVAL_MS = 15_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH =
   "/internal/deploy-openai-intercept-smoke";
+const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
+  "/internal/direct-r2-presigned-put-smoke";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_TIMEOUT_MS = 120_000;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_MODEL = "gpt-5.4-mini";
+const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
+const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
+const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
 const HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_API_KEY_SENTINEL =
   "__cloudflare_injected__";
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
@@ -103,6 +116,14 @@ interface HostedContainerRuntimeOptions {
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi?: Partial<HostedContainerProcessApi>;
   processIsolation?: boolean;
+  runDirectR2PresignedPutSmoke?: (
+    options: {
+      byteLength: number;
+      presignedPutUrl: string;
+      signal: AbortSignal;
+      tlsCaCertificatePem?: string;
+    },
+  ) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runOpenAiInterceptSmoke?: (
     options: { authority: HostedContainerRuntimeAuthority; signal: AbortSignal },
   ) => Promise<HostedContainerOpenAiInterceptSmokeResult>;
@@ -115,6 +136,13 @@ interface HostedContainerRuntimeDependencies {
     () => Promise<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>;
   processApi: HostedContainerProcessApi;
   processIsolation: boolean;
+  runDirectR2PresignedPutSmoke:
+    (options: {
+      byteLength: number;
+      presignedPutUrl: string;
+      signal: AbortSignal;
+      tlsCaCertificatePem?: string;
+    }) => Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runOpenAiInterceptSmoke:
     (options: {
       authority: HostedContainerRuntimeAuthority;
@@ -127,6 +155,21 @@ interface HostedContainerOpenAiInterceptSmokeResult {
   model: string;
   stderrBytes: number;
   stdoutBytes: number;
+}
+
+interface HostedContainerDirectR2PresignedPutSmokeResult {
+  byteLength: number;
+  durationMs: number;
+  ok: boolean;
+  payloadSha256: string;
+  responseBodyBytes: number;
+  status: number;
+}
+
+interface HostedContainerDirectR2PresignedPutSmokeRequest {
+  byteLength: number;
+  presignedPutUrl: string;
+  tlsCaCertificatePem?: string;
 }
 
 interface HostedRunnerBundleManifestSummary {
@@ -233,10 +276,17 @@ export async function startHostedContainerEntrypoint(input: {
 
       const isOpenAiInterceptSmokeRequest =
         request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_OPENAI_INTERCEPT_SMOKE_PATH;
+      const isDirectR2PresignedPutSmokeRequest =
+        request.method === "POST"
+        && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
 
-      if (!isWorkspaceInvocationRequest && !isOpenAiInterceptSmokeRequest) {
+      if (
+        !isWorkspaceInvocationRequest
+        && !isOpenAiInterceptSmokeRequest
+        && !isDirectR2PresignedPutSmokeRequest
+      ) {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
@@ -268,6 +318,44 @@ export async function startHostedContainerEntrypoint(input: {
         writeJsonResponse(response, 200, {
           ok: true,
           openAiIntercept: result,
+        });
+        return;
+      }
+
+      if (isDirectR2PresignedPutSmokeRequest) {
+        if (activeHostedRunnerJobCount > 0) {
+          discardUnreadRequestBody(request);
+          writeJsonResponse(response, 409, {
+            error: "Hosted runner is busy.",
+          });
+          return;
+        }
+        activeHostedRunnerJobCount += 1;
+        claimedRunnerSlot = true;
+        let smokeRequest: HostedContainerDirectR2PresignedPutSmokeRequest;
+        try {
+          smokeRequest = parseHostedContainerDirectR2PresignedPutSmokeRequest(
+            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+          );
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint rejected the direct R2 presigned PUT smoke request body.",
+            phase: "failed",
+          });
+          const classified = classifyRequestDecodeError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+        const result = await runtime.runDirectR2PresignedPutSmoke({
+          ...smokeRequest,
+          signal: requestAbort.signal,
+        });
+        writeJsonResponse(response, 200, {
+          directR2PresignedPut: result,
+          ok: result.ok,
         });
         return;
       }
@@ -575,6 +663,54 @@ function readHostedContainerOpenAiInterceptSmokeAuthority(
   };
 }
 
+function parseHostedContainerDirectR2PresignedPutSmokeRequest(
+  value: unknown,
+): HostedContainerDirectR2PresignedPutSmokeRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Direct R2 presigned PUT smoke request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const presignedPutUrl = typeof record.presignedPutUrl === "string"
+    ? record.presignedPutUrl.trim()
+    : "";
+  if (!presignedPutUrl) {
+    throw new TypeError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
+  }
+
+  const parsedUrl = new URL(presignedPutUrl);
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    throw new TypeError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
+  }
+
+  const rawByteLength = Object.hasOwn(record, "byteLength")
+    ? record.byteLength
+    : HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES;
+  const byteLength = typeof rawByteLength === "number"
+    ? rawByteLength
+    : Number(rawByteLength);
+  if (
+    !Number.isSafeInteger(byteLength)
+    || byteLength <= 0
+    || byteLength > HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES
+  ) {
+    throw new RangeError("Direct R2 presigned PUT smoke byteLength is outside the supported range.");
+  }
+
+  const tlsCaCertificatePem = typeof record.tlsCaCertificatePem === "string"
+    ? record.tlsCaCertificatePem.trim()
+    : "";
+  if (tlsCaCertificatePem && tlsCaCertificatePem.length > 8 * 1024) {
+    throw new RangeError("Direct R2 presigned PUT smoke CA certificate is too large.");
+  }
+
+  return {
+    byteLength,
+    presignedPutUrl: parsedUrl.href,
+    ...(tlsCaCertificatePem ? { tlsCaCertificatePem } : {}),
+  };
+}
+
 function readSingleHeaderValue(
   request: IncomingMessage,
   name: string,
@@ -618,9 +754,134 @@ function resolveHostedContainerRuntimeDependencies(
       }
       : defaultHostedContainerProcessApi,
     processIsolation: runtime?.processIsolation ?? false,
+    runDirectR2PresignedPutSmoke:
+      runtime?.runDirectR2PresignedPutSmoke ?? runHostedContainerDirectR2PresignedPutSmoke,
     runOpenAiInterceptSmoke:
       runtime?.runOpenAiInterceptSmoke ?? runHostedContainerOpenAiInterceptSmoke,
   };
+}
+
+async function runHostedContainerDirectR2PresignedPutSmoke(input: {
+  byteLength: number;
+  presignedPutUrl: string;
+  signal: AbortSignal;
+  tlsCaCertificatePem?: string;
+}): Promise<HostedContainerDirectR2PresignedPutSmokeResult> {
+  const startedAt = Date.now();
+  const payload = createHostedContainerDeterministicPayloadStream(input.byteLength);
+  const response = await putHostedContainerDirectR2SmokePayload({
+    byteLength: input.byteLength,
+    payload: payload.stream,
+    presignedPutUrl: input.presignedPutUrl,
+    signal: input.signal,
+    tlsCaCertificatePem: input.tlsCaCertificatePem,
+  });
+  return {
+    byteLength: input.byteLength,
+    durationMs: Date.now() - startedAt,
+    ok: response.status >= 200 && response.status < 300,
+    payloadSha256: payload.readSha256(),
+    responseBodyBytes: response.bodyBytes,
+    status: response.status,
+  };
+}
+
+function createHostedContainerDeterministicPayloadStream(byteLength: number): {
+  readSha256: () => string;
+  stream: Readable;
+} {
+  const hash = createHash("sha256");
+  let offset = 0;
+  let digest: string | null = null;
+  const stream = new Readable({
+    read() {
+      if (offset >= byteLength) {
+        digest = hash.digest("hex");
+        this.push(null);
+        return;
+      }
+
+      const chunkLength = Math.min(
+        HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES,
+        byteLength - offset,
+      );
+      const chunk = Buffer.allocUnsafe(chunkLength);
+      for (let index = 0; index < chunkLength; index += 1) {
+        chunk[index] = (offset + index) & 0xff;
+      }
+      offset += chunkLength;
+      hash.update(chunk);
+      this.push(chunk);
+    },
+  });
+
+  return {
+    readSha256() {
+      if (digest === null) {
+        throw new Error("Direct R2 presigned PUT smoke payload digest was read before upload completed.");
+      }
+      return digest;
+    },
+    stream,
+  };
+}
+
+async function putHostedContainerDirectR2SmokePayload(input: {
+  byteLength: number;
+  payload: Readable;
+  presignedPutUrl: string;
+  signal: AbortSignal;
+  tlsCaCertificatePem?: string;
+}): Promise<{ bodyBytes: number; status: number }> {
+  const url = new URL(input.presignedPutUrl);
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error, result?: { bodyBytes: number; status: number }): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      input.signal.removeEventListener("abort", abort);
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(result ?? { bodyBytes: 0, status: 0 });
+    };
+    const abort = (): void => {
+      clientRequest.destroy(new Error("Direct R2 presigned PUT smoke aborted."));
+    };
+    const clientRequest = request(url, {
+      ...(input.tlsCaCertificatePem ? { ca: input.tlsCaCertificatePem } : {}),
+      headers: {
+        "content-length": String(input.byteLength),
+        "content-type": "application/octet-stream",
+        "if-none-match": "*",
+      },
+      method: "PUT",
+      signal: input.signal,
+    }, (response) => {
+      let bodyBytes = 0;
+      response.on("data", (chunk) => {
+        bodyBytes += Buffer.byteLength(chunk);
+      });
+      response.once("error", finish);
+      response.once("end", () => {
+        finish(undefined, {
+          bodyBytes,
+          status: response.statusCode ?? 0,
+        });
+      });
+      response.resume();
+    });
+
+    input.signal.addEventListener("abort", abort, { once: true });
+    clientRequest.once("error", finish);
+    input.payload.once("error", finish);
+    input.payload.pipe(clientRequest);
+  });
 }
 
 async function runHostedContainerOpenAiInterceptSmoke(input: {

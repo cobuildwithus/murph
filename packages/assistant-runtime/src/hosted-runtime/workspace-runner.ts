@@ -76,6 +76,7 @@ export interface HostedWorkspaceSnapshotCheckpointMetadata {
 
 export interface HostedWorkspaceSnapshotCheckpointResult {
   browserVaultReplicaRef?: HostedWorkspaceCheckpointRequest["browserVaultReplicaRef"];
+  checkpoint?: HostedWorkspaceCheckpointResponse;
   snapshotRef: HostedWorkspaceCheckpointRequest["snapshotRef"];
 }
 
@@ -108,6 +109,10 @@ export type HostedWorkspaceSnapshotCheckpointBuilder = (
 ) => Promise<HostedWorkspaceSnapshotCheckpointResult> | HostedWorkspaceSnapshotCheckpointResult;
 
 export interface HostedWorkspaceCheckpointRequestBuilder {
+  checkpoint?(
+    input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+    workspacePort: HostedRuntimeWorkspacePort,
+  ): Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse;
   createRequest(
     input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
@@ -262,26 +267,51 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
   return {
+    async checkpoint(requestInput, workspacePort) {
+      const snapshot = await input.createSnapshot(requestInput);
+      if (snapshot.checkpoint) {
+        return snapshot.checkpoint;
+      }
+      return await workspacePort.checkpoint(
+        buildHostedWorkspaceSnapshotCheckpointRequest({
+          metadata: input.metadata,
+          requestInput,
+          snapshot,
+        }),
+      );
+    },
     async createRequest(requestInput) {
       const snapshot = await input.createSnapshot(requestInput);
-      return {
-        attemptId: input.metadata.attemptId,
-        ...(Object.hasOwn(snapshot, "browserVaultReplicaRef")
-          ? { browserVaultReplicaRef: snapshot.browserVaultReplicaRef ?? null }
-          : {}),
-        expectedWorkspaceVersion: input.metadata.expectedWorkspaceVersion,
-        leaseGeneration: input.metadata.leaseGeneration,
-        nextWakeAt: Object.hasOwn(requestInput, "nextWakeAt")
-          ? requestInput.nextWakeAt ?? null
-          : input.metadata.nextWakeAt ?? null,
-        nextWakeReason: Object.hasOwn(requestInput, "nextWakeReason")
-          ? requestInput.nextWakeReason ?? null
-          : input.metadata.nextWakeReason ?? null,
-        reason: requestInput.reason,
-        redactedStatus: cloneHostedRuntimeRedactedJson(requestInput.redactedStatus ?? null),
-        snapshotRef: snapshot.snapshotRef,
-      };
+      return buildHostedWorkspaceSnapshotCheckpointRequest({
+        metadata: input.metadata,
+        requestInput,
+        snapshot,
+      });
     },
+  };
+}
+
+function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
+  metadata: HostedWorkspaceSnapshotCheckpointMetadata;
+  requestInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput;
+  snapshot: HostedWorkspaceSnapshotCheckpointResult;
+}): HostedWorkspaceCheckpointRequest {
+  return {
+    attemptId: input.metadata.attemptId,
+    ...(Object.hasOwn(input.snapshot, "browserVaultReplicaRef")
+      ? { browserVaultReplicaRef: input.snapshot.browserVaultReplicaRef ?? null }
+      : {}),
+    expectedWorkspaceVersion: input.metadata.expectedWorkspaceVersion,
+    leaseGeneration: input.metadata.leaseGeneration,
+    nextWakeAt: Object.hasOwn(input.requestInput, "nextWakeAt")
+      ? input.requestInput.nextWakeAt ?? null
+      : input.metadata.nextWakeAt ?? null,
+    nextWakeReason: Object.hasOwn(input.requestInput, "nextWakeReason")
+      ? input.requestInput.nextWakeReason ?? null
+      : input.metadata.nextWakeReason ?? null,
+    reason: input.requestInput.reason,
+    redactedStatus: cloneHostedRuntimeRedactedJson(input.requestInput.redactedStatus ?? null),
+    snapshotRef: input.snapshot.snapshotRef,
   };
 }
 

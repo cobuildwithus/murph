@@ -115,7 +115,7 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /aria-label="Slide 1: Title"/);
   assert.match(markup, /Murph turns group chats into health challenges\./);
   assert.match(markup, /Scroll or use arrow keys/);
-  assert.match(markup, /01 \/ 12/);
+  assert.match(markup, /01 \/ 13/);
 });
 
 test("BiomarkersPage metadata and route entrypoint filter generated biomarkers", () => {

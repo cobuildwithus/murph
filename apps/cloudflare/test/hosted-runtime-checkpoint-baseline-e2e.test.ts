@@ -1,24 +1,41 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedWorkspaceReadResponse } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceReadResponse,
+} from "@murphai/hosted-execution/runtime-control";
 import {
-  readHostedBundleTextFile,
-  sha256HostedBundleHex,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
+  buildHostedWorkspaceSnapshotV2Aad,
+  encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "../src/runtime-bridge-workspace.ts";
+import {
+  hostedWorkspaceSnapshotObjectKey,
+} from "../src/storage-paths.ts";
+import {
+  restoreEncryptedWorkspaceSnapshot,
+} from "../src/workspace-snapshot-local.ts";
 
 type HostedCheckpointSnapshotInput =
   Parameters<ReturnType<typeof createHostedWorkspaceRuntimeBridgeJobOptions>["createCheckpointSnapshot"]>[0];
 
 const cleanupPaths: string[] = [];
+const testDataKey = encodeHostedWorkspaceSnapshotV2DataKey(
+  Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+);
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -31,32 +48,25 @@ afterEach(async () => {
 });
 
 describe("hosted runtime checkpoint baseline", () => {
-  it("writes idle shutdown full/base checkpoints without browser-vault replicas", async () => {
+  it("writes idle shutdown checkpoints as direct-R2 encrypted snapshot objects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-baseline-"));
-    const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-base-"));
-    cleanupPaths.push(vaultRoot, baseVaultRoot);
-    await writeFile(path.join(baseVaultRoot, "note.md"), "base state\n", "utf8");
+    const restoreRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-checkpoint-restore-"));
+    cleanupPaths.push(vaultRoot, restoreRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "idle compacted state\n", "utf8");
-    const artifactBundles = new Map<string, Uint8Array>();
-    const baseSnapshot = await snapshotHostedExecutionContext({ vaultRoot: baseVaultRoot });
-    const baseSnapshotHash = sha256HostedBundleHex(baseSnapshot.bundle);
-    artifactBundles.set(baseSnapshotHash, baseSnapshot.bundle);
-    const putArtifact = vi.fn(async ({ bytes, sha256 }: { bytes: Uint8Array; sha256: string }) => {
-      artifactBundles.set(sha256, bytes);
+    const uploadedObjects = new Map<string, Uint8Array>();
+    const putArtifact = vi.fn(async () => {});
+    const writeBrowserVaultReplica = vi.fn(async () => {
+      throw new Error("Browser-vault replica writes are not part of idle checkpoint baseline.");
     });
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
-        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
         putArtifact,
         readWorkspace: async () => createWorkspaceReadResponse({
-          snapshotRef: {
-            hash: baseSnapshotHash,
-            key: `cloudflare-workspace-snapshots/${baseSnapshotHash}.bundle`,
-            size: baseSnapshot.bundle.byteLength,
-            updatedAt: "2026-05-01T00:00:00.000Z",
-          },
+          snapshotRef: null,
           version: "7",
         }),
+        uploadedObjects,
+        writeBrowserVaultReplica,
       }),
       readCurrentLease: () => createLease({ workspaceVersion: "7" }),
       request: createInvocationRequest({
@@ -68,18 +78,35 @@ describe("hosted runtime checkpoint baseline", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput());
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(snapshotRef.hash) ?? null,
-      expectedKind: "vault",
-      path: "note.md",
-      root: "vault",
-    })).toBe("idle compacted state\n");
-    expect(result).not.toHaveProperty("browserVaultReplicaRef");
-    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const encryptedBytes = uploadedObjects.get(snapshotRef.objectKey);
+
+    expect(snapshotRef).toEqual(expect.objectContaining({
+      objectKey: expect.stringMatching(
+        /^users\/hsn_[0-9a-f]{24}\/workspace-snapshots\/snapshot_[A-Za-z0-9._-]+\.snapshot\.enc$/u,
+      ),
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+      upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     }));
+    expect(encryptedBytes).toBeDefined();
+    expect(encryptedBytes?.byteLength).toBe(snapshotRef.archive.encryptedByteSize);
+    expect(result).not.toHaveProperty("browserVaultReplicaRef");
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
+
+    const encryptedScratchRoot = path.join(vaultRoot, ".runtime", "tmp");
+    await mkdir(encryptedScratchRoot, { recursive: true });
+    const encryptedFilePath = path.join(encryptedScratchRoot, "workspace.snapshot.enc");
+    await writeFile(encryptedFilePath, encryptedBytes!);
+    await restoreEncryptedWorkspaceSnapshot({
+      dataKey: testDataKey,
+      durableRoot: restoreRoot,
+      encryptedFilePath,
+      ref: snapshotRef,
+      scratchRoot: encryptedScratchRoot,
+    });
+    await expect(readFile(path.join(restoreRoot, "note.md"), "utf8"))
+      .resolves.toBe("idle compacted state\n");
   });
 });
 
@@ -136,14 +163,24 @@ function createCheckpointInput(): HostedCheckpointSnapshotInput {
 }
 
 function createPlatform(input: {
-  getArtifact?: (hash: string) => Promise<Uint8Array | null>;
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
   readWorkspace: () => Promise<HostedWorkspaceReadResponse>;
+  uploadedObjects: Map<string, Uint8Array>;
+  writeBrowserVaultReplica: () => Promise<never>;
 }) {
+  const uploadByPutUrl = new Map<string, {
+    objectKey: string;
+    snapshotId: string;
+  }>();
+  let uploadOrdinal = 0;
+
   return {
     artifactStore: {
-      get: input.getArtifact ?? (async () => null),
+      get: async () => null,
       put: input.putArtifact,
+    },
+    browserVaultReplicaPort: {
+      write: input.writeBrowserVaultReplica,
     },
     effectsPort: {
       readRawEmailMessage: async () => null,
@@ -155,28 +192,88 @@ function createPlatform(input: {
       },
       read: input.readWorkspace,
     },
+    workspaceSnapshotPort: {
+      completeUploadedSnapshot: async (request: {
+        checkpointRequest: HostedWorkspaceCheckpointRequest;
+        ref: HostedWorkspaceSnapshotV2Ref;
+      }) => ({
+        checkpoint: {
+          checkpointed: true,
+          workspace: createWorkspaceReadResponse({
+            snapshotRef: request.ref,
+            version: request.checkpointRequest.expectedWorkspaceVersion,
+          }).workspace!,
+        },
+        snapshotRef: request.ref,
+      }),
+      directPutEncryptedObject: async (request: {
+        putUrl: string;
+        sourceFilePath: string;
+      }) => {
+        const upload = uploadByPutUrl.get(request.putUrl);
+        if (!upload) {
+          throw new Error("Workspace snapshot test direct PUT URL was not started.");
+        }
+        input.uploadedObjects.set(upload.objectKey, await readFile(request.sourceFilePath));
+      },
+      restoreWorkspaceSnapshot: async () => {
+        throw new Error("Workspace snapshot restore is not used by baseline snapshot tests.");
+      },
+      startUpload: async (request: {
+        expectedWorkspaceVersion: string;
+        reason: "idle_shutdown";
+      }) => {
+        const snapshotId = `snapshot_baseline_${++uploadOrdinal}`;
+        const objectKey = await hostedWorkspaceSnapshotObjectKey({
+          snapshotId,
+          userId: "member_1",
+        });
+        const putUrl = `https://r2.example.invalid/${encodeURIComponent(objectKey)}`;
+        uploadByPutUrl.set(putUrl, {
+          objectKey,
+          snapshotId,
+        });
+
+        return {
+          encryption: {
+            aad: buildHostedWorkspaceSnapshotV2Aad({
+              objectKey,
+              snapshotId,
+              userId: "member_1",
+            }),
+            dataKeyBase64: testDataKey,
+            ivBase64: "AQIDBAUGBwgJCgsM",
+            rootKeyId: "root_key_test",
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+            wrappedDataKey: "wrapped_data_key_test",
+          },
+          expiresAt: "2026-05-01T00:10:00.000Z",
+          limits: {
+            maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+            warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+          },
+          objectKey,
+          putUrl,
+          snapshotId,
+        };
+      },
+      unwrapDataKey: async () => testDataKey,
+    },
   };
 }
 
-function requireBundleRef(value: unknown) {
+function requireWorkspaceSnapshotV2Ref(value: unknown): HostedWorkspaceSnapshotV2Ref {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Expected a hosted execution bundle ref.");
+    throw new TypeError("Expected a hosted workspace snapshot v2 ref.");
   }
-
-  const record = value as Record<string, unknown>;
+  const record = value as HostedWorkspaceSnapshotV2Ref;
   if (
-    typeof record.hash !== "string"
-    || typeof record.key !== "string"
-    || typeof record.size !== "number"
-    || typeof record.updatedAt !== "string"
+    record.schema !== HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA
+    || record.upload !== HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND
+    || typeof record.objectKey !== "string"
+    || typeof record.snapshotId !== "string"
   ) {
-    throw new TypeError("Hosted execution bundle ref is malformed.");
+    throw new TypeError("Hosted workspace snapshot v2 ref is malformed.");
   }
-
-  return {
-    hash: record.hash,
-    key: record.key,
-    size: record.size,
-    updatedAt: record.updatedAt,
-  };
+  return record;
 }

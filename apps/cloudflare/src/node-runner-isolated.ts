@@ -256,7 +256,7 @@ async function resolveHostedRunnerWarmLauncherRoot(
 }
 
 export function resolveHostedRunnerWarmWorkspaceVaultRoot(userId: string): string {
-  return path.join(resolveHostedRunnerWarmLauncherRootPath(userId), "vault");
+  return path.join(resolveHostedRunnerWarmLauncherRootPath(userId), "durable", "vault");
 }
 
 function resolveHostedRunnerWarmLauncherRootPath(userId: string): string {

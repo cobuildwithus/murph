@@ -44,6 +44,8 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_OPENAI_INTERCEPT_SMOKE_URL =
   "http://container/internal/deploy-openai-intercept-smoke";
+const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
+  "http://container/internal/direct-r2-presigned-put-smoke";
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
@@ -132,6 +134,14 @@ interface RunnerContainerLogContext {
 }
 
 interface HostedExecutionContainerSmokeHealthResult {
+  directR2PresignedPut?: {
+    byteLength: number | null;
+    durationMs: number | null;
+    ok: boolean;
+    payloadSha256: string | null;
+    responseBodyBytes: number | null;
+    status: number | null;
+  } | null;
   ok: boolean;
   openAiIntercept?: {
     client: string | null;
@@ -151,6 +161,11 @@ interface HostedExecutionContainerSmokeHealthResult {
 }
 
 interface HostedExecutionContainerSmokeHealthInput {
+  directR2PresignedPut?: {
+    byteLength?: number;
+    presignedPutUrl: string;
+    tlsCaCertificatePem?: string;
+  };
   openAiIntercept?: boolean;
   openAiInterceptAuthority?: RunnerRuntimeWriteFenceToken & { userId: string };
 }
@@ -406,8 +421,12 @@ export class RunnerContainer extends Container {
         const openAiIntercept = input.openAiIntercept === true
           ? await this.smokeOpenAiIntercept(readyTimeoutMs, input.openAiInterceptAuthority)
           : undefined;
+        const directR2PresignedPut = input.directR2PresignedPut
+          ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
+          : undefined;
 
         return {
+          ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
           ok: true,
           ...(openAiIntercept === undefined ? {} : { openAiIntercept }),
           runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
@@ -418,6 +437,59 @@ export class RunnerContainer extends Container {
         await this.stopWarmContainer({ failClosed: false });
       }
     });
+  }
+
+  private async smokeDirectR2PresignedPut(
+    readyTimeoutMs: number,
+    input: NonNullable<HostedExecutionContainerSmokeHealthInput["directR2PresignedPut"]>,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["directR2PresignedPut"]>> {
+    const response = await this.containerFetch(
+      RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL,
+      {
+        body: JSON.stringify({
+          ...(typeof input.byteLength === "number" ? { byteLength: input.byteLength } : {}),
+          presignedPutUrl: input.presignedPutUrl,
+          ...(typeof input.tlsCaCertificatePem === "string"
+            ? { tlsCaCertificatePem: input.tlsCaCertificatePem }
+            : {}),
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(Math.max(
+          readyTimeoutMs,
+          300_000,
+        )),
+      },
+    );
+    const payload = await response.json() as {
+      directR2PresignedPut?: {
+        byteLength?: unknown;
+        durationMs?: unknown;
+        ok?: unknown;
+        payloadSha256?: unknown;
+        responseBodyBytes?: unknown;
+        status?: unknown;
+      };
+      ok?: unknown;
+    };
+
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(`Hosted runner direct R2 presigned PUT smoke failed with HTTP ${response.status}.`);
+    }
+
+    const result = payload.directR2PresignedPut ?? {};
+    return {
+      byteLength: typeof result.byteLength === "number" ? result.byteLength : null,
+      durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
+      ok: result.ok === true,
+      payloadSha256: typeof result.payloadSha256 === "string" ? result.payloadSha256 : null,
+      responseBodyBytes: typeof result.responseBodyBytes === "number"
+        ? result.responseBodyBytes
+        : null,
+      status: typeof result.status === "number" ? result.status : null,
+    };
   }
 
   private async smokeOpenAiIntercept(

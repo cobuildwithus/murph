@@ -309,34 +309,40 @@ queued only after terminal handling evidence is durable under
 drained through the hosted provider-cleanup retry state after the next successful
 runtime-owned idle/deadline workspace checkpoint.
 
-The hosted workspace checkpoint ref may be a full/base workspace bundle, a
-working `{base, delta}` ref, or a legacy layered `{base, hot}` ref. Full/base
-bundles carry a portable workspace manifest generated from the same hosted
-snapshot inclusion/exclusion policy used to write the bundle. The bridge no
-longer writes foreground working commits. Mailbox import, active-turn
+The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
+legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a
+legacy layered `{base, hot}` ref. Live v2 snapshots are one encrypted compressed
+tar object uploaded directly from the container to R2 through a short-lived
+presigned `PUT` URL. The Worker handles only JSON start/complete metadata,
+stores a short-lived upload session without the URL or data key, verifies the
+object by `HEAD` on completion, and never receives the snapshot body. The bridge
+no longer writes foreground working commits. Mailbox import, active-turn
 acceptance, `canonical_runtime_commit`, assistant-runtime commits, provider
 cleanup, system-mailbox receipts, and pre-delivery outbox state must not enter
 workspace snapshot construction; the foreground caller tripwire fails those
 paths before the bridge. Bootstrap or live foreground paths must not fall back
-to broad foreground full snapshots, path-scoped working deltas, or legacy hot
-producers. `idle_shutdown` is the only new checkpoint snapshot producer.
+to broad foreground full snapshots, path-scoped working deltas, legacy hot
+producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
+`idle_shutdown` is the only new checkpoint snapshot producer.
 `idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps to
-a full/base snapshot from the effective restored state, runs through the
+a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
-during the broad snapshot walk so stale idle compaction can abort before bundle
-upload.
+during the broad snapshot walk so stale idle compaction can abort before direct
+R2 upload.
 
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
 cache/tmp, and rebuildable projections. Codex provider continuity is the exact
 active rollout JSONL referenced by live assistant session resume state, not the
-whole `.codex-hosted` tree. Restore applies the base bundle when present, then
+whole `.codex-hosted` tree. Restore downloads and verifies v2 snapshot objects
+by `objectKey`, decrypts the encrypted tar, and extracts into a fresh durable
+root. For legacy refs, restore applies the base bundle when present, then
 applies either the working delta or the legacy hot bundle according to the
 snapshot ref shape, and treats any local restore cache as a performance cache
 only. Legacy working `{base, delta}` and layered `{base, hot}` refs remain
-restorable during migration, but new bridge snapshots are idle-shutdown
-full/base bundles only.
+restorable during migration, but new bridge snapshots are idle-shutdown direct
+R2 v2 refs only.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
 or workspace pointer. Provider-native continuity remains a workspace snapshot
@@ -432,8 +438,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - provider delivery and receipt/reconciliation policy
 - runtime timers and next wake projection
 - checkpoint timing
-- checkpoint snapshot policy and metrics (`full`, external artifact PUT count,
-  and bundle PUT count)
+- checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, encrypted
+  byte size, warning threshold, and single-part guard)
 
 ### Cloudflare Owns
 
@@ -445,7 +451,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
   nudges; Cloudflare does not validate it as runner-start authority and missing,
   stale, mismatched, or invalid decisions never trigger a live web usage-gate
   callback before the hot reply path starts
-- encrypted bundle/artifact/env/journal object plumbing
+- direct-R2 snapshot upload-session plumbing plus legacy encrypted
+  bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority

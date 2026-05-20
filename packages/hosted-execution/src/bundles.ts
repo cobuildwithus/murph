@@ -1,4 +1,5 @@
 import type { HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
+import type { HostedWorkspaceSnapshotV2Ref } from "./workspace-snapshot-v2.ts";
 
 export type HostedExecutionBundlePayload = string | null;
 export type HostedExecutionBundleRefState = RuntimeHostedExecutionBundleRef | null;
@@ -23,6 +24,7 @@ export interface HostedExecutionWorkingSnapshotRef {
 export type HostedExecutionSnapshotRef =
   | RuntimeHostedExecutionBundleRef
   | HostedExecutionLayeredSnapshotRef
-  | HostedExecutionWorkingSnapshotRef;
+  | HostedExecutionWorkingSnapshotRef
+  | HostedWorkspaceSnapshotV2Ref;
 
 export type HostedExecutionSnapshotRefState = HostedExecutionSnapshotRef | null;

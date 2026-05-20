@@ -27,11 +27,11 @@ export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v4" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.public-calculator-view.v1" as const;
+  "murph.age.public-calculator-view.v3" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v5" as const;
+  "murph.age.research-calculator-view.v7" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
-  "murph.age.architecture-summary.v3" as const;
+  "murph.age.architecture-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
   "murph.age.public-lab-wearable-shadow-evidence-status.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION =
@@ -42,8 +42,12 @@ export const MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION =
   "murph.age.increment-evaluation-card.v1" as const;
 export const MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_SCHEMA_VERSION =
   "murph.age.ordinary-lab-wearable-evidence-template.v1" as const;
+export const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION =
+  "murph.age.wearable-lab-aggregate-receipt.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
   "murph.age.wearable-bridge-feature.v1" as const;
+export const MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION =
+  "murph.age.wearable-score-bearing-strategy.v1" as const;
 export const MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION = "murph.age.model-card-artifact.v1" as const;
 export const MURPH_AGE_WEARABLE_SHADOW_RESULT_EVIDENCE_TIERS = [
   "external-validation",
@@ -55,6 +59,14 @@ export const MURPH_AGE_INCREMENT_EVALUATION_LAYERS = [
   "biomarker-increment",
   "wearable-shadow-increment",
 ] as const satisfies readonly MurphAgeSourceRouteLayer[];
+export const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS = [
+  "m0-anchor-only",
+  "m1-anchor-plus-lab-body-bp",
+  "m2-coverage-device-ehr-density-control",
+  "m3-wearable-residual",
+  "m4-wearable-plus-coverage",
+  "m5-residualized-wearable-after-controls",
+] as const;
 
 export type MurphAgeSex = "female" | "male";
 export type MurphAgeStatus = "abstain" | "ready";
@@ -328,6 +340,54 @@ export interface MurphAgePublicLabWearableShadowEvidenceStatus {
   wearableScoreBearingAuthorized: false;
 }
 
+export type MurphAgeWearableScoreBearingFamilyCurrentUse =
+  | "context-only"
+  | "quality-gate-only"
+  | "shadow-residual-research";
+
+export type MurphAgeWearableScoreBearingFamilyPriority =
+  | "defer"
+  | "first"
+  | "second"
+  | "third";
+
+export type MurphAgeWearableScoreBearingPromotionSignal =
+  | "deployable-parameterization-authorized"
+  | "m5-beats-m1-proper-score"
+  | "m5-beats-m2-coverage-control"
+  | "m5-calibration-passes"
+  | "negative-controls-pass"
+  | "replicates-in-two-source-families"
+  | "reverse-causation-washout-passes";
+
+export interface MurphAgeWearableScoreBearingFamilyPolicy {
+  currentUse: MurphAgeWearableScoreBearingFamilyCurrentUse;
+  family: MurphAgeWearableBridgeFeatureFamily;
+  minimumValidDays28d: number | null;
+  minimumValidNights28d: number | null;
+  productAuthorized: false;
+  productMultiplier: 0;
+  qualityMetricKeys: string[];
+  requiresDeviceOrMethodQualification: boolean;
+  researchMultiplier: 0 | 1;
+  scoreBearingPromotionPriority: MurphAgeWearableScoreBearingFamilyPriority;
+  scoreContributionAuthorized: false;
+  signalMetricKeys: string[];
+}
+
+export interface MurphAgeWearableScoreBearingStrategy {
+  aggregateReceiptOnlyAuthorizesScienceReview: true;
+  deployableParameterizationRequiredForProductScoring: true;
+  familyPolicies: MurphAgeWearableScoreBearingFamilyPolicy[];
+  modelForm: "penalized-additive-residual-bounded-and-shrunk";
+  primaryDecisionComparisons: Array<"m5-vs-m1-lab-body" | "m5-vs-m2-coverage-control">;
+  productStatus: "context-only";
+  productWearableMultiplier: 0;
+  requiredPromotionSignals: MurphAgeWearableScoreBearingPromotionSignal[];
+  researchResidualMode: "locked-evaluator-only";
+  schemaVersion: typeof MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION;
+}
+
 export interface MurphAgeArchitectureSummary {
   layerOrder: MurphAgeArchitectureLayerId[];
   layers: MurphAgeArchitectureLayerSummary[];
@@ -339,6 +399,7 @@ export interface MurphAgeArchitectureSummary {
   riskToAgeDisplayAuthorized: false;
   schemaVersion: typeof MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION;
   sourceRouteIdsByPriority: MurphAgeSourceRouteId[];
+  wearableScoreBearingStrategy: MurphAgeWearableScoreBearingStrategy;
 }
 
 const MURPH_AGE_PRODUCT_PROMOTION_EVIDENCE_TIERS = new Set<MurphAgeValidationEvidenceTier>([
@@ -696,13 +757,21 @@ export interface MurphAgePublicDomainContributionView {
 }
 
 export interface MurphAgePublicWearableCalculatorView {
+  candidateFeatureCount: number;
   contextOnlyMetricKeys: string[];
+  deferredFeatureKeys: string[];
+  features: MurphAgePublicWearableBridgeFeatureReadiness[];
+  firstPriorityIncompleteFeatureKeys: string[];
+  firstPriorityReadyFeatureKeys: string[];
   missingFeatureKeys: string[];
   partialFeatureKeys: string[];
   quality: MurphAgePublicWearableContextSummary["quality"];
   readyFeatureKeys: string[];
   scoreBearing: false;
   scoreContributionAuthorized: false;
+  scorePolicy: MurphAgeWearableScoreBearingStrategy;
+  secondPriorityIncompleteFeatureKeys: string[];
+  secondPriorityReadyFeatureKeys: string[];
 }
 
 export interface MurphAgePublicCalculatorView {
@@ -1299,6 +1368,120 @@ export interface MurphAgeOrdinaryLabWearableAggregateEvidenceSummary {
   status: MurphAgeOrdinaryLabWearableAggregateEvidenceStatus;
 }
 
+export type MurphAgeWearableLabAggregateReceiptModelId =
+  typeof MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS[number];
+
+export type MurphAgeWearableLabAggregateReceiptEndpointFamily =
+  | "all-cause-mortality"
+  | "cardiometabolic-event"
+  | "cvd-event"
+  | "ehr-event-burden"
+  | "hospitalization-or-acute-event";
+
+export type MurphAgeWearableLabAggregateReceiptIndexDateRule =
+  | "baseline-exam-before-risk-window"
+  | "feature-window-end-before-risk-window";
+
+export type MurphAgeWearableLabAggregateReceiptOutcomeAscertainment =
+  | "adjudicated-event"
+  | "death-registry"
+  | "ehr-event"
+  | "registry-linked-event";
+
+export type MurphAgeWearableLabAggregateReceiptCalibrationStatus =
+  | "fail"
+  | "not-reported"
+  | "pass"
+  | "warn";
+
+export interface MurphAgeWearableLabAggregateReceiptEndpoint {
+  endpointFamily: MurphAgeWearableLabAggregateReceiptEndpointFamily;
+  endpointFrozenBeforeScoring: true;
+  horizonYears: number | null;
+  indexDateRule: MurphAgeWearableLabAggregateReceiptIndexDateRule;
+  outcomeAscertainment: MurphAgeWearableLabAggregateReceiptOutcomeAscertainment;
+  outcomeLinked: true;
+  washoutDays: number;
+}
+
+export interface MurphAgeWearableLabAggregateReceiptDenominator {
+  evaluatedRowCount: number;
+  eventCount: number;
+  minimumCellCount: number;
+  personYears?: number;
+  suppressedCellCount: number;
+}
+
+export interface MurphAgeWearableLabAggregateReceiptModelResult {
+  calibrationStatus: MurphAgeWearableLabAggregateReceiptCalibrationStatus;
+  metrics: MurphAgeIncrementEvaluationAggregateMetricSummary;
+  modelId: MurphAgeWearableLabAggregateReceiptModelId;
+}
+
+export interface MurphAgeWearableLabAggregateReceiptNegativeControls {
+  coverageOnlyBeatenByResidualWearable: boolean | null;
+  deviceOrEhrDensityDominates: boolean | null;
+  earlyEventSensitivityPassed: boolean | null;
+  reverseCausationWashoutPassed: boolean | null;
+}
+
+export interface MurphAgeWearableLabAggregateReceipt {
+  artifactBoundary: MurphAgeIncrementEvaluationOutputBoundary;
+  denominator: MurphAgeWearableLabAggregateReceiptDenominator;
+  endpoint: MurphAgeWearableLabAggregateReceiptEndpoint;
+  evaluatorFrozenBeforeExecution: true;
+  evidenceTier: MurphAgeIncrementEvaluationEvidenceTier;
+  models: MurphAgeWearableLabAggregateReceiptModelResult[];
+  negativeControls: MurphAgeWearableLabAggregateReceiptNegativeControls;
+  productAuthorized: false;
+  receiptId: string;
+  sameDenominator: true;
+  schemaVersion: typeof MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION;
+  scoreBearing: false;
+  scoreContributionAuthorized: false;
+  sourceRouteId: MurphAgeSourceRouteId;
+}
+
+export interface MurphAgeWearableLabAggregateReceiptMetricDeltas {
+  aucDelta: number | null;
+  brierDelta: number | null;
+  cIndexDelta: number | null;
+  logLossDelta: number | null;
+}
+
+export type MurphAgeWearableLabAggregateReceiptConclusion =
+  | "blocked"
+  | "reviewgpt-science-delta"
+  | "valid-no-delta";
+
+export type MurphAgeWearableLabAggregateReceiptBlocker =
+  | "calibration_not_acceptable"
+  | "event_support_under_100"
+  | "m5_does_not_beat_coverage_control"
+  | "m5_does_not_improve_over_lab_body"
+  | "negative_controls_not_passed"
+  | "receipt_invalid";
+
+export interface MurphAgeWearableLabAggregateReceiptEvaluationSummary {
+  blockers: MurphAgeWearableLabAggregateReceiptBlocker[];
+  conclusion: MurphAgeWearableLabAggregateReceiptConclusion;
+  denominator: {
+    evaluatedRowCount: number | null;
+    eventCount: number | null;
+    minimumCellCount: number | null;
+  };
+  m1ToM5Deltas: MurphAgeWearableLabAggregateReceiptMetricDeltas | null;
+  m2ToM5Deltas: MurphAgeWearableLabAggregateReceiptMetricDeltas | null;
+  modelIdsPresent: MurphAgeWearableLabAggregateReceiptModelId[];
+  productAuthorized: false;
+  reviewGptRequired: boolean;
+  schemaVersion: typeof MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION;
+  scoreBearingPromotionAuthorized: false;
+  sourceRouteId: MurphAgeSourceRouteId | null;
+  validation: MurphAgeModelValidationResult;
+  wearableScoreBearingAuthorized: false;
+}
+
 type MurphAgeWearableShadowIncrementPolicyDefinition = Omit<
   MurphAgeWearableShadowIncrementPolicy,
   "allowedMetricKeys"
@@ -1788,6 +1971,97 @@ const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS = [
 const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS =
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS.map(completeWearableBridgeFeatureSpec);
 
+const MURPH_AGE_WEARABLE_SCORE_BEARING_FAMILY_POLICIES = [
+  {
+    currentUse: "quality-gate-only",
+    family: "quality",
+    minimumValidDays28d: 14,
+    minimumValidNights28d: 14,
+    productAuthorized: false,
+    productMultiplier: 0,
+    qualityMetricKeys: [],
+    requiresDeviceOrMethodQualification: false,
+    researchMultiplier: 0,
+    scoreBearingPromotionPriority: "first",
+    scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "wearable-coverage-index",
+      "wearable-valid-day-count-28d",
+      "wearable-valid-night-count-28d",
+    ],
+  },
+  {
+    currentUse: "shadow-residual-research",
+    family: "activity",
+    minimumValidDays28d: 14,
+    minimumValidNights28d: null,
+    productAuthorized: false,
+    productMultiplier: 0,
+    qualityMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+    requiresDeviceOrMethodQualification: false,
+    researchMultiplier: 1,
+    scoreBearingPromotionPriority: "first",
+    scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "steps",
+      "activity-minutes",
+      "mvpa-minutes",
+      "sedentary-minutes",
+    ],
+  },
+  {
+    currentUse: "shadow-residual-research",
+    family: "sleep",
+    minimumValidDays28d: null,
+    minimumValidNights28d: 14,
+    productAuthorized: false,
+    productMultiplier: 0,
+    qualityMetricKeys: [...MURPH_AGE_WEARABLE_NIGHT_QUALITY_METRIC_KEYS],
+    requiresDeviceOrMethodQualification: true,
+    researchMultiplier: 1,
+    scoreBearingPromotionPriority: "second",
+    scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "total-sleep-minutes",
+      "sleep-duration-variability-minutes",
+      "sleep-regularity-score",
+      "sleep-midpoint-variability-minutes",
+    ],
+  },
+  {
+    currentUse: "shadow-residual-research",
+    family: "resting-heart-rate",
+    minimumValidDays28d: 10,
+    minimumValidNights28d: null,
+    productAuthorized: false,
+    productMultiplier: 0,
+    qualityMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+    requiresDeviceOrMethodQualification: true,
+    researchMultiplier: 1,
+    scoreBearingPromotionPriority: "third",
+    scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "resting-heart-rate",
+    ],
+  },
+  {
+    currentUse: "context-only",
+    family: "hrv",
+    minimumValidDays28d: null,
+    minimumValidNights28d: null,
+    productAuthorized: false,
+    productMultiplier: 0,
+    qualityMetricKeys: [...MURPH_AGE_WEARABLE_DAY_QUALITY_METRIC_KEYS],
+    requiresDeviceOrMethodQualification: true,
+    researchMultiplier: 0,
+    scoreBearingPromotionPriority: "defer",
+    scoreContributionAuthorized: false,
+    signalMetricKeys: [
+      "hrv-rmssd",
+    ],
+  },
+] satisfies readonly MurphAgeWearableScoreBearingFamilyPolicy[];
+
 const MURPH_AGE_MODEL_CARD_POLICIES: readonly MurphAgeModelCardPolicy[] = [
   {
     acceptedBundleIds: ["function-context"],
@@ -2142,6 +2416,81 @@ const MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS = new Set([
   "splitMembershipExportAllowed",
 ]);
 
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ROOT_KEYS = new Set([
+  "artifactBoundary",
+  "denominator",
+  "endpoint",
+  "evaluatorFrozenBeforeExecution",
+  "evidenceTier",
+  "models",
+  "negativeControls",
+  "productAuthorized",
+  "receiptId",
+  "sameDenominator",
+  "schemaVersion",
+  "scoreBearing",
+  "scoreContributionAuthorized",
+  "sourceRouteId",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ENDPOINT_KEYS = new Set([
+  "endpointFamily",
+  "endpointFrozenBeforeScoring",
+  "horizonYears",
+  "indexDateRule",
+  "outcomeAscertainment",
+  "outcomeLinked",
+  "washoutDays",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_DENOMINATOR_KEYS = new Set([
+  "evaluatedRowCount",
+  "eventCount",
+  "minimumCellCount",
+  "personYears",
+  "suppressedCellCount",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_KEYS = new Set([
+  "calibrationStatus",
+  "metrics",
+  "modelId",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_NEGATIVE_CONTROL_KEYS = new Set([
+  "coverageOnlyBeatenByResidualWearable",
+  "deviceOrEhrDensityDominates",
+  "earlyEventSensitivityPassed",
+  "reverseCausationWashoutPassed",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ENDPOINT_FAMILIES = new Set<string>([
+  "all-cause-mortality",
+  "cardiometabolic-event",
+  "cvd-event",
+  "ehr-event-burden",
+  "hospitalization-or-acute-event",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_INDEX_DATE_RULES = new Set<string>([
+  "baseline-exam-before-risk-window",
+  "feature-window-end-before-risk-window",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_OUTCOME_ASCERTAINMENTS = new Set<string>([
+  "adjudicated-event",
+  "death-registry",
+  "ehr-event",
+  "registry-linked-event",
+]);
+
+const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_CALIBRATION_STATUSES = new Set<string>([
+  "fail",
+  "not-reported",
+  "pass",
+  "warn",
+]);
+
 const MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS = new Set(
   MURPH_AGE_WEARABLE_CONTEXT_FEATURES.flatMap((feature) => feature.metricKeys),
 );
@@ -2245,15 +2594,15 @@ const MURPH_AGE_ARCHITECTURE_LAYER_ORDER = [
 const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_PACKETS: readonly MurphAgePublicLabWearableShadowEvidencePacket[] = [
   {
     aggregateMetricDeltas: {
-      auc: 0.00541653,
-      brier: -0.00046046,
-      calibrationSlope: 1.06082719,
-      eOverO: 1.01882003,
-      logLoss: -0.00112145,
+      auc: -0.00311477,
+      brier: 0.00005335,
+      calibrationSlope: 1.05308537,
+      eOverO: 0.99957721,
+      logLoss: 0.00039351,
     },
-    conclusion: "wrist_activity_signal_ready_for_r1034_review",
+    conclusion: "wrist_activity_signal_shadow_hold_for_calibration_or_external_validation",
     evidenceRole: "same-family-public-shadow-diagnostic",
-    negativeControlsBeaten: true,
+    negativeControlsBeaten: false,
     packetId: "r1065-nhanes-wrist-activity-shadow-loop",
     productDisplayAuthorized: false,
     sourceRouteId: "nhanes-activity-shadow-lmf",
@@ -2328,6 +2677,34 @@ export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridge
   return MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map(cloneMurphAgeWearableBridgeFeatureSpec);
 }
 
+export function summarizeMurphAgeWearableScoreBearingStrategy(): MurphAgeWearableScoreBearingStrategy {
+  return {
+    aggregateReceiptOnlyAuthorizesScienceReview: true,
+    deployableParameterizationRequiredForProductScoring: true,
+    familyPolicies: MURPH_AGE_WEARABLE_SCORE_BEARING_FAMILY_POLICIES.map(
+      cloneMurphAgeWearableScoreBearingFamilyPolicy,
+    ),
+    modelForm: "penalized-additive-residual-bounded-and-shrunk",
+    primaryDecisionComparisons: [
+      "m5-vs-m1-lab-body",
+      "m5-vs-m2-coverage-control",
+    ],
+    productStatus: "context-only",
+    productWearableMultiplier: 0,
+    requiredPromotionSignals: [
+      "m5-beats-m1-proper-score",
+      "m5-beats-m2-coverage-control",
+      "m5-calibration-passes",
+      "negative-controls-pass",
+      "reverse-causation-washout-passes",
+      "replicates-in-two-source-families",
+      "deployable-parameterization-authorized",
+    ],
+    researchResidualMode: "locked-evaluator-only",
+    schemaVersion: MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
+  };
+}
+
 export function listMurphAgeInputBundleMetricKeys(): string[] {
   return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
 }
@@ -2373,6 +2750,8 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
   );
   const publicLabWearableShadowEvidenceStatus = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
   const sourceRouteIdsByPriority = listMurphAgePrioritySourceRoutes().map((route) => route.routeId);
+  const wearableScoreBearingStrategy: MurphAgeWearableScoreBearingStrategy =
+    summarizeMurphAgeWearableScoreBearingStrategy();
   const layers: MurphAgeArchitectureLayerSummary[] = [
     architectureLayerFromPolicies({
       blockedUntil: "Keep frozen until external or Murph-native validation supports product promotion and age display.",
@@ -2484,6 +2863,7 @@ export function summarizeMurphAgeArchitecture(): MurphAgeArchitectureSummary {
     riskToAgeDisplayAuthorized: false,
     schemaVersion: MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION,
     sourceRouteIdsByPriority,
+    wearableScoreBearingStrategy,
   };
 }
 
@@ -2493,6 +2873,16 @@ function cloneMurphAgePublicLabWearableShadowEvidencePacket(
   return {
     ...packet,
     aggregateMetricDeltas: { ...packet.aggregateMetricDeltas },
+  };
+}
+
+function cloneMurphAgeWearableScoreBearingFamilyPolicy(
+  policy: MurphAgeWearableScoreBearingFamilyPolicy,
+): MurphAgeWearableScoreBearingFamilyPolicy {
+  return {
+    ...policy,
+    qualityMetricKeys: [...policy.qualityMetricKeys],
+    signalMetricKeys: [...policy.signalMetricKeys],
   };
 }
 
@@ -2822,6 +3212,244 @@ export function summarizeMurphAgeOrdinaryLabWearableAggregateEvidence(
     readyCardCount: assessments.filter((assessment) => assessment.status === "ready").length,
     readySourceRouteIds,
     status: readySourceRouteIds.length > 0 ? "ready" : "blocked",
+  };
+}
+
+export function validateMurphAgeWearableLabAggregateReceipt(
+  candidate: unknown,
+): MurphAgeModelValidationResult {
+  const subject = "Wearable/lab aggregate receipt";
+  const warnings: MurphAgeWarning[] = [];
+  if (!isPlainRecord(candidate)) {
+    return {
+      status: "invalid",
+      warnings: [{
+        code: "INVALID_INPUT",
+        message: `${subject} must be an object.`,
+      }],
+    };
+  }
+
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ROOT_KEYS,
+    label: "root",
+    object: candidate,
+    subject,
+    warnings,
+  });
+
+  const schemaVersion = readStringField({ key: "schemaVersion", label: "schema version", object: candidate, subject, warnings });
+  const receiptId = readStringField({ key: "receiptId", label: "receipt id", object: candidate, subject, warnings });
+  const sourceRouteId = readStringField({ key: "sourceRouteId", label: "source route id", object: candidate, subject, warnings });
+  const evidenceTier = readStringField({ key: "evidenceTier", object: candidate, label: "evidence tier", subject, warnings });
+  const sameDenominator = readBooleanField({ key: "sameDenominator", label: "same denominator", object: candidate, subject, warnings });
+  const evaluatorFrozen = readBooleanField({
+    key: "evaluatorFrozenBeforeExecution",
+    label: "evaluator frozen before execution",
+    object: candidate,
+    subject,
+    warnings,
+  });
+  const productAuthorized = readBooleanField({ key: "productAuthorized", label: "product authorized", object: candidate, subject, warnings });
+  const scoreBearing = readBooleanField({ key: "scoreBearing", label: "score bearing", object: candidate, subject, warnings });
+  const scoreContributionAuthorized = readBooleanField({
+    key: "scoreContributionAuthorized",
+    label: "score contribution authorized",
+    object: candidate,
+    subject,
+    warnings,
+  });
+  const artifactBoundary = readPlainRecordField({ key: "artifactBoundary", label: "artifact boundary", object: candidate, subject, warnings });
+  const denominator = readPlainRecordField({ key: "denominator", label: "denominator", object: candidate, subject, warnings });
+  const endpoint = readPlainRecordField({ key: "endpoint", label: "endpoint", object: candidate, subject, warnings });
+  const negativeControls = readPlainRecordField({
+    key: "negativeControls",
+    label: "negative controls",
+    object: candidate,
+    subject,
+    warnings,
+  });
+
+  if (schemaVersion !== MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION) {
+    warnings.push({
+      code: "INVALID_INPUT",
+      message: `${subject} schema version is not supported.`,
+    });
+  }
+  if (!receiptId || !isNonEmptySimpleKey(receiptId)) {
+    warnings.push({
+      code: "INVALID_INPUT",
+      message: `${subject} receipt id must be a non-empty simple key.`,
+    });
+  }
+  if (!sourceRouteId || !isNonEmptySimpleKey(sourceRouteId)) {
+    warnings.push({
+      code: "INVALID_INPUT",
+      message: `${subject} source route id must be a non-empty simple key.`,
+    });
+  } else {
+    const sourceRoute = resolveMurphAgeSourceRoute(sourceRouteId);
+    if (!sourceRoute) {
+      warnings.push({
+        code: "INVALID_INPUT",
+        message: `${subject} source route id must reference a registered Murph Age source route.`,
+      });
+    } else {
+      if (!sourceRoute.layers.includes("wearable-shadow-increment")) {
+        warnings.push({
+          code: "MODEL_CARD_POLICY_VIOLATION",
+          message: `${subject} source route must support a wearable shadow increment.`,
+        });
+      }
+      if (sourceRoute.productAuthorized !== false || !isLockedSourceRouteArtifactBoundary(sourceRoute.artifactBoundary)) {
+        warnings.push({
+          code: "MODEL_CARD_POLICY_VIOLATION",
+          message: `${subject} source route must stay metadata-only and product-blocked.`,
+        });
+      }
+    }
+  }
+  if (!evidenceTier || !isWearableShadowResultEvidenceTier(evidenceTier)) {
+    warnings.push({
+      code: "INVALID_INPUT",
+      message: `${subject} evidence tier is not supported.`,
+    });
+  }
+  if (
+    sameDenominator !== true
+    || evaluatorFrozen !== true
+    || productAuthorized !== false
+    || scoreBearing !== false
+    || scoreContributionAuthorized !== false
+  ) {
+    warnings.push({
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${subject} must stay frozen, same-denominator, research-only, non-score-bearing, and product-blocked.`,
+    });
+  }
+  if (!artifactBoundary || !isLockedIncrementEvaluationOutputBoundary(artifactBoundary)) {
+    warnings.push({
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${subject} artifact boundary must block row, identifier, prediction, coefficient, model parameter, path, source text, split membership, and product display egress.`,
+    });
+  }
+  if (artifactBoundary) {
+    appendUnknownObjectKeyWarnings({
+      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS,
+      label: "artifact boundary",
+      object: artifactBoundary,
+      subject,
+      warnings,
+    });
+  }
+  if (denominator) {
+    appendUnknownObjectKeyWarnings({
+      allowedKeys: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_DENOMINATOR_KEYS,
+      label: "denominator",
+      object: denominator,
+      subject,
+      warnings,
+    });
+    appendRequiredPositiveIntegerWarnings({
+      keys: ["evaluatedRowCount", "eventCount", "minimumCellCount"],
+      object: denominator,
+      subject,
+      warnings,
+    });
+    appendRequiredNonnegativeIntegerWarnings({
+      keys: ["suppressedCellCount"],
+      object: denominator,
+      subject,
+      warnings,
+    });
+    appendOptionalFiniteNonnegativeNumberWarning({ key: "personYears", object: denominator, subject, warnings });
+  }
+  if (endpoint) {
+    validateWearableLabAggregateReceiptEndpoint({ endpoint, subject, warnings });
+  }
+  if (negativeControls) {
+    validateWearableLabAggregateReceiptNegativeControls({ negativeControls, subject, warnings });
+  }
+  validateWearableLabAggregateReceiptModels({ candidate, subject, warnings });
+
+  return {
+    status: warnings.length === 0 ? "valid" : "invalid",
+    warnings,
+  };
+}
+
+export function summarizeMurphAgeWearableLabAggregateReceipt(
+  candidate: unknown,
+): MurphAgeWearableLabAggregateReceiptEvaluationSummary {
+  const validation = validateMurphAgeWearableLabAggregateReceipt(candidate);
+  const record = isPlainRecord(candidate) ? candidate : null;
+  const sourceRouteId = record ? readRegisteredWearableLabAggregateReceiptSourceRouteId(record) : null;
+  const denominatorRecord = record && isPlainRecord(record.denominator) ? record.denominator : null;
+  const denominator = {
+    evaluatedRowCount: readFiniteNumberOrNull(denominatorRecord?.evaluatedRowCount),
+    eventCount: readFiniteNumberOrNull(denominatorRecord?.eventCount),
+    minimumCellCount: readFiniteNumberOrNull(denominatorRecord?.minimumCellCount),
+  };
+  const modelMap = validation.status === "valid" && record
+    ? readWearableLabAggregateReceiptModelMap(record.models)
+    : new Map<MurphAgeWearableLabAggregateReceiptModelId, MurphAgeWearableLabAggregateReceiptModelResult>();
+  const modelIdsPresent = MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS.filter((modelId) =>
+    modelMap.has(modelId)
+  );
+  if (validation.status !== "valid") {
+    return {
+      blockers: ["receipt_invalid"],
+      conclusion: "blocked",
+      denominator,
+      m1ToM5Deltas: null,
+      m2ToM5Deltas: null,
+      modelIdsPresent,
+      productAuthorized: false,
+      reviewGptRequired: false,
+      schemaVersion: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+      scoreBearingPromotionAuthorized: false,
+      sourceRouteId,
+      validation,
+      wearableScoreBearingAuthorized: false,
+    };
+  }
+
+  const m1 = modelMap.get("m1-anchor-plus-lab-body-bp");
+  const m2 = modelMap.get("m2-coverage-device-ehr-density-control");
+  const m5 = modelMap.get("m5-residualized-wearable-after-controls");
+  const m1ToM5Deltas = m1 && m5 ? calculateWearableLabAggregateReceiptMetricDeltas(m5.metrics, m1.metrics) : null;
+  const m2ToM5Deltas = m2 && m5 ? calculateWearableLabAggregateReceiptMetricDeltas(m5.metrics, m2.metrics) : null;
+  const negativeControls = record && isPlainRecord(record.negativeControls) ? record.negativeControls : null;
+  const scienceBlockers: MurphAgeWearableLabAggregateReceiptBlocker[] = [];
+
+  if (denominator.eventCount === null || denominator.eventCount < 100) scienceBlockers.push("event_support_under_100");
+  if (!m1ToM5Deltas || !hasReceiptProperScoreImprovement(m1ToM5Deltas) || !hasReceiptDiscriminationNonWorse(m1ToM5Deltas)) {
+    scienceBlockers.push("m5_does_not_improve_over_lab_body");
+  }
+  if (!m2ToM5Deltas || !hasReceiptProperScoreImprovement(m2ToM5Deltas) || !hasReceiptDiscriminationNonWorse(m2ToM5Deltas)) {
+    scienceBlockers.push("m5_does_not_beat_coverage_control");
+  }
+  if (!negativeControls || !wearableLabAggregateReceiptNegativeControlsPassed(negativeControls)) {
+    scienceBlockers.push("negative_controls_not_passed");
+  }
+  if (!m5 || m5.calibrationStatus !== "pass") {
+    scienceBlockers.push("calibration_not_acceptable");
+  }
+
+  return {
+    blockers: scienceBlockers,
+    conclusion: scienceBlockers.length === 0 ? "reviewgpt-science-delta" : "valid-no-delta",
+    denominator,
+    m1ToM5Deltas,
+    m2ToM5Deltas,
+    modelIdsPresent,
+    productAuthorized: false,
+    reviewGptRequired: scienceBlockers.length === 0,
+    schemaVersion: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
+    scoreBearingPromotionAuthorized: false,
+    sourceRouteId,
+    validation,
+    wearableScoreBearingAuthorized: false,
   };
 }
 
@@ -4273,15 +4901,7 @@ export function buildMurphAgePublicCalculatorView(
     selectedScoreBearingMetricKeys: canExposeScoreIdentity ? [...summary.selectedScoreBearingMetricKeys] : [],
     status: report.status,
     warnings: report.warnings.map((warning) => ({ ...warning })),
-    wearable: {
-      contextOnlyMetricKeys: contextOnlyWearableMetricKeys,
-      missingFeatureKeys: [...summary.wearableBridge.missingFeatureKeys],
-      partialFeatureKeys: [...summary.wearableBridge.partialFeatureKeys],
-      quality: summary.wearableContext.quality,
-      readyFeatureKeys: [...summary.wearableBridge.readyFeatureKeys],
-      scoreBearing: false,
-      scoreContributionAuthorized: false,
-    },
+    wearable: buildMurphAgePublicWearableCalculatorView(summary, contextOnlyWearableMetricKeys),
   };
 }
 
@@ -4353,15 +4973,54 @@ export function buildMurphAgeResearchCalculatorView(
     selectedScoreBearingMetricKeys,
     status: report.status,
     warnings: report.warnings.map((warning) => ({ ...warning })),
-    wearable: {
-      contextOnlyMetricKeys: contextOnlyWearableMetricKeys,
-      missingFeatureKeys: [...summary.wearableBridge.missingFeatureKeys],
-      partialFeatureKeys: [...summary.wearableBridge.partialFeatureKeys],
-      quality: summary.wearableContext.quality,
-      readyFeatureKeys: [...summary.wearableBridge.readyFeatureKeys],
-      scoreBearing: false,
-      scoreContributionAuthorized: false,
-    },
+    wearable: buildMurphAgePublicWearableCalculatorView(summary, contextOnlyWearableMetricKeys),
+  };
+}
+
+function buildMurphAgePublicWearableCalculatorView(
+  summary: MurphAgePublicDisplaySummary,
+  contextOnlyWearableMetricKeys: readonly string[],
+): MurphAgePublicWearableCalculatorView {
+  return {
+    candidateFeatureCount: summary.wearableBridge.candidateFeatureCount,
+    contextOnlyMetricKeys: [...contextOnlyWearableMetricKeys],
+    deferredFeatureKeys: [...summary.wearableBridge.deferredFeatureKeys],
+    features: summary.wearableBridge.features.map(cloneMurphAgePublicWearableBridgeFeatureReadiness),
+    firstPriorityIncompleteFeatureKeys: [...summary.wearableBridge.firstPriorityIncompleteFeatureKeys],
+    firstPriorityReadyFeatureKeys: [...summary.wearableBridge.firstPriorityReadyFeatureKeys],
+    missingFeatureKeys: [...summary.wearableBridge.missingFeatureKeys],
+    partialFeatureKeys: [...summary.wearableBridge.partialFeatureKeys],
+    quality: summary.wearableContext.quality,
+    readyFeatureKeys: [...summary.wearableBridge.readyFeatureKeys],
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    scorePolicy: summarizeMurphAgeWearableScoreBearingStrategy(),
+    secondPriorityIncompleteFeatureKeys: [...summary.wearableBridge.secondPriorityIncompleteFeatureKeys],
+    secondPriorityReadyFeatureKeys: [...summary.wearableBridge.secondPriorityReadyFeatureKeys],
+  };
+}
+
+function cloneMurphAgePublicWearableBridgeFeatureReadiness(
+  feature: MurphAgePublicWearableBridgeFeatureReadiness,
+): MurphAgePublicWearableBridgeFeatureReadiness {
+  return {
+    family: feature.family,
+    featureKey: feature.featureKey,
+    methodQualifier: feature.methodQualifier,
+    metricKeys: [...feature.metricKeys],
+    missingMetricKeys: [...feature.missingMetricKeys],
+    missingQualityMetricKeys: [...feature.missingQualityMetricKeys],
+    productAuthorized: false,
+    qualityReady: feature.qualityReady,
+    readyMetricKeys: [...feature.readyMetricKeys],
+    requiredQualityMetricKeys: [...feature.requiredQualityMetricKeys],
+    riskEffect: "not-estimated",
+    role: feature.role,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    status: feature.status,
+    uncertaintyAction: feature.uncertaintyAction,
+    unlockPriority: feature.unlockPriority,
   };
 }
 
@@ -4460,9 +5119,9 @@ function buildMurphAgeResearchModelStatusView(input: {
         evidenceId: "midus-lab-lift-local-run",
         productAuthorizationChanged: false,
         scoringMathChanged: false,
-        signal: "slight-lift",
+        signal: "weak",
         sourceRouteId: "midus-biomarker-mortality",
-        summary: "MIDUS local aggregate runs show a small research-only lift from compact lab/body inputs over age/sex.",
+        summary: "MIDUS-family local aggregate runs do not confirm glycemia specificity because negative controls compete in at least one direction.",
         supportedMetricKeys: ["glucose", "egfr", "bmi"],
       },
       {
@@ -4470,9 +5129,9 @@ function buildMurphAgeResearchModelStatusView(input: {
         evidenceId: "creles-glycemia-transport-local-run",
         productAuthorizationChanged: false,
         scoringMathChanged: false,
-        signal: "glycemia-only-better",
+        signal: "weak",
         sourceRouteId: "creles-transport-stress",
-        summary: "CRELES transport stress favors tiny glycemia-style candidates; broad lab/lipid/body transport remains weak.",
+        summary: "CRELES/MIDUS minimal glycemia transport is not confirmed because negative controls also beat age/sex under recalibrated transport.",
         supportedMetricKeys: ["glucose"],
       },
       {
@@ -5366,6 +6025,279 @@ function appendUnknownObjectKeyWarnings(input: {
   }
 }
 
+function appendRequiredPositiveIntegerWarnings(input: {
+  keys: readonly string[];
+  object: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  for (const key of input.keys) {
+    if (isPositiveIntegerValue(input.object[key])) continue;
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} ${key} must be a positive integer.`,
+    });
+  }
+}
+
+function appendRequiredNonnegativeIntegerWarnings(input: {
+  keys: readonly string[];
+  object: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  for (const key of input.keys) {
+    if (isNonnegativeIntegerValue(input.object[key])) continue;
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} ${key} must be a nonnegative integer.`,
+    });
+  }
+}
+
+function appendOptionalNonnegativeIntegerWarning(input: {
+  key: string;
+  object: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  const value = input.object[input.key];
+  if (value === undefined || isNonnegativeIntegerValue(value)) return;
+  input.warnings.push({
+    code: "INVALID_INPUT",
+    message: `${input.subject} ${input.key} must be a nonnegative integer.`,
+  });
+}
+
+function appendOptionalFiniteNonnegativeNumberWarning(input: {
+  key: string;
+  object: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  const value = input.object[input.key];
+  if (value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0)) return;
+  input.warnings.push({
+    code: "INVALID_INPUT",
+    message: `${input.subject} ${input.key} must be a finite nonnegative number.`,
+  });
+}
+
+function validateWearableLabAggregateReceiptEndpoint(input: {
+  endpoint: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ENDPOINT_KEYS,
+    label: "endpoint",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  const endpointFamily = readStringField({
+    key: "endpointFamily",
+    label: "endpoint family",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  const indexDateRule = readStringField({
+    key: "indexDateRule",
+    label: "index date rule",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  const outcomeAscertainment = readStringField({
+    key: "outcomeAscertainment",
+    label: "outcome ascertainment",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  const endpointFrozen = readBooleanField({
+    key: "endpointFrozenBeforeScoring",
+    label: "endpoint frozen before scoring",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  const outcomeLinked = readBooleanField({
+    key: "outcomeLinked",
+    label: "outcome linked",
+    object: input.endpoint,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  if (!endpointFamily || !MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_ENDPOINT_FAMILIES.has(endpointFamily)) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} endpoint family is not supported.`,
+    });
+  }
+  if (!indexDateRule || !MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_INDEX_DATE_RULES.has(indexDateRule)) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} index date rule is not supported.`,
+    });
+  }
+  if (
+    !outcomeAscertainment
+    || !MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_OUTCOME_ASCERTAINMENTS.has(outcomeAscertainment)
+  ) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} outcome ascertainment is not supported.`,
+    });
+  }
+  if (endpointFrozen !== true || outcomeLinked !== true) {
+    input.warnings.push({
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${input.subject} endpoint must be frozen and outcome-linked before scoring.`,
+    });
+  }
+  const horizonYears = input.endpoint.horizonYears;
+  if (horizonYears !== null && !(typeof horizonYears === "number" && Number.isFinite(horizonYears) && horizonYears > 0)) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} horizonYears must be a positive finite number or null.`,
+    });
+  }
+  if (!isNonnegativeIntegerValue(input.endpoint.washoutDays)) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} washoutDays must be a nonnegative integer.`,
+    });
+  }
+}
+
+function readRegisteredWearableLabAggregateReceiptSourceRouteId(
+  record: Readonly<Record<string, unknown>>,
+): MurphAgeSourceRouteId | null {
+  if (typeof record.sourceRouteId !== "string") return null;
+  return resolveMurphAgeSourceRoute(record.sourceRouteId)?.routeId ?? null;
+}
+
+function validateWearableLabAggregateReceiptNegativeControls(input: {
+  negativeControls: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_NEGATIVE_CONTROL_KEYS,
+    label: "negative controls",
+    object: input.negativeControls,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  for (const key of MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_NEGATIVE_CONTROL_KEYS) {
+    const value = input.negativeControls[key];
+    if (typeof value === "boolean" || value === null) continue;
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} negative control ${key} must be boolean or null.`,
+    });
+  }
+}
+
+function validateWearableLabAggregateReceiptModels(input: {
+  candidate: Readonly<Record<string, unknown>>;
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  const models = input.candidate.models;
+  if (!Array.isArray(models)) {
+    input.warnings.push({
+      code: "INVALID_INPUT",
+      message: `${input.subject} models must be an array.`,
+    });
+    return;
+  }
+  const seenModelIds = new Set<MurphAgeWearableLabAggregateReceiptModelId>();
+  for (const model of models) {
+    if (!isPlainRecord(model)) {
+      input.warnings.push({
+        code: "INVALID_INPUT",
+        message: `${input.subject} model entries must be objects.`,
+      });
+      continue;
+    }
+    appendUnknownObjectKeyWarnings({
+      allowedKeys: MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_KEYS,
+      label: "model",
+      object: model,
+      subject: input.subject,
+      warnings: input.warnings,
+    });
+    const modelIdValue = readStringField({
+      key: "modelId",
+      label: "model id",
+      object: model,
+      subject: input.subject,
+      warnings: input.warnings,
+    });
+    const modelId = parseWearableLabAggregateReceiptModelId(modelIdValue);
+    if (!modelId) {
+      input.warnings.push({
+        code: "INVALID_INPUT",
+        message: `${input.subject} model id is not supported.`,
+      });
+    } else if (seenModelIds.has(modelId)) {
+      input.warnings.push({
+        code: "MODEL_CARD_POLICY_VIOLATION",
+        message: `${input.subject} model id ${modelId} is duplicated.`,
+      });
+    } else {
+      seenModelIds.add(modelId);
+    }
+    const calibrationStatus = readStringField({
+      key: "calibrationStatus",
+      label: "calibration status",
+      object: model,
+      subject: input.subject,
+      warnings: input.warnings,
+    });
+    if (
+      !calibrationStatus
+      || !MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_CALIBRATION_STATUSES.has(calibrationStatus)
+    ) {
+      input.warnings.push({
+        code: "INVALID_INPUT",
+        message: `${input.subject} calibration status is not supported.`,
+      });
+    }
+    const metrics = readPlainRecordField({
+      key: "metrics",
+      label: "metrics",
+      object: model,
+      subject: input.subject,
+      warnings: input.warnings,
+    });
+    if (metrics) {
+      appendUnknownObjectKeyWarnings({
+        allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS,
+        label: "model metrics",
+        object: metrics,
+        subject: input.subject,
+        warnings: input.warnings,
+      });
+      appendIncrementEvaluationAggregateMetricValueWarnings({
+        metrics,
+        subject: input.subject,
+        warnings: input.warnings,
+      });
+    }
+  }
+  for (const requiredModelId of MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS) {
+    if (seenModelIds.has(requiredModelId)) continue;
+    input.warnings.push({
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: `${input.subject} is missing required model ${requiredModelId}.`,
+    });
+  }
+}
+
 function appendAggregateMetricDeltaValueWarnings(input: {
   deltas: Readonly<Record<string, unknown>>;
   warnings: MurphAgeWarning[];
@@ -5531,6 +6463,134 @@ function appendOrdinaryLabWearableAggregateEvidenceBlocker(input: {
 
 function isPositiveIntegerValue(value: unknown): boolean {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0;
+}
+
+function isNonnegativeIntegerValue(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+function parseWearableLabAggregateReceiptModelId(
+  value: unknown,
+): MurphAgeWearableLabAggregateReceiptModelId | null {
+  switch (value) {
+    case "m0-anchor-only":
+    case "m1-anchor-plus-lab-body-bp":
+    case "m2-coverage-device-ehr-density-control":
+    case "m3-wearable-residual":
+    case "m4-wearable-plus-coverage":
+    case "m5-residualized-wearable-after-controls":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parseWearableLabAggregateReceiptCalibrationStatus(
+  value: unknown,
+): MurphAgeWearableLabAggregateReceiptCalibrationStatus | null {
+  switch (value) {
+    case "fail":
+    case "not-reported":
+    case "pass":
+    case "warn":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readWearableLabAggregateReceiptModelMap(
+  value: unknown,
+): Map<MurphAgeWearableLabAggregateReceiptModelId, MurphAgeWearableLabAggregateReceiptModelResult> {
+  const modelMap = new Map<MurphAgeWearableLabAggregateReceiptModelId, MurphAgeWearableLabAggregateReceiptModelResult>();
+  if (!Array.isArray(value)) return modelMap;
+  for (const item of value) {
+    if (!isPlainRecord(item) || !isPlainRecord(item.metrics)) continue;
+    const modelId = parseWearableLabAggregateReceiptModelId(item.modelId);
+    const calibrationStatus = parseWearableLabAggregateReceiptCalibrationStatus(item.calibrationStatus);
+    if (!modelId || !calibrationStatus) continue;
+    modelMap.set(modelId, {
+      calibrationStatus,
+      metrics: readIncrementEvaluationAggregateMetricSummary(item.metrics),
+      modelId,
+    });
+  }
+  return modelMap;
+}
+
+function readIncrementEvaluationAggregateMetricSummary(
+  metrics: Readonly<Record<string, unknown>>,
+): MurphAgeIncrementEvaluationAggregateMetricSummary {
+  const summary: MurphAgeIncrementEvaluationAggregateMetricSummary = {};
+  const auc = readFiniteNumberOrNull(metrics.auc);
+  if (auc !== null || metrics.auc === null) summary.auc = auc;
+  const cIndex = readFiniteNumberOrNull(metrics.cIndex);
+  if (cIndex !== null || metrics.cIndex === null) summary.cIndex = cIndex;
+  if (typeof metrics.brier === "number" && Number.isFinite(metrics.brier)) summary.brier = metrics.brier;
+  if (typeof metrics.calibrationIntercept === "number" && Number.isFinite(metrics.calibrationIntercept)) {
+    summary.calibrationIntercept = metrics.calibrationIntercept;
+  }
+  if (typeof metrics.calibrationSlope === "number" && Number.isFinite(metrics.calibrationSlope)) {
+    summary.calibrationSlope = metrics.calibrationSlope;
+  }
+  if (typeof metrics.events === "number" && Number.isFinite(metrics.events)) summary.events = metrics.events;
+  if (typeof metrics.logLoss === "number" && Number.isFinite(metrics.logLoss)) summary.logLoss = metrics.logLoss;
+  if (typeof metrics.meanPrediction === "number" && Number.isFinite(metrics.meanPrediction)) {
+    summary.meanPrediction = metrics.meanPrediction;
+  }
+  if (typeof metrics.n === "number" && Number.isFinite(metrics.n)) summary.n = metrics.n;
+  if (typeof metrics.observedRate === "number" && Number.isFinite(metrics.observedRate)) {
+    summary.observedRate = metrics.observedRate;
+  }
+  return summary;
+}
+
+function readFiniteNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function calculateWearableLabAggregateReceiptMetricDeltas(
+  candidate: MurphAgeIncrementEvaluationAggregateMetricSummary,
+  comparator: MurphAgeIncrementEvaluationAggregateMetricSummary,
+): MurphAgeWearableLabAggregateReceiptMetricDeltas {
+  return {
+    aucDelta: subtractFiniteMetrics(candidate.auc, comparator.auc),
+    brierDelta: subtractFiniteMetrics(candidate.brier, comparator.brier),
+    cIndexDelta: subtractFiniteMetrics(candidate.cIndex, comparator.cIndex),
+    logLossDelta: subtractFiniteMetrics(candidate.logLoss, comparator.logLoss),
+  };
+}
+
+function subtractFiniteMetrics(candidate: number | null | undefined, comparator: number | null | undefined): number | null {
+  return typeof candidate === "number" && Number.isFinite(candidate)
+      && typeof comparator === "number" && Number.isFinite(comparator)
+    ? candidate - comparator
+    : null;
+}
+
+function hasReceiptProperScoreImprovement(
+  deltas: MurphAgeWearableLabAggregateReceiptMetricDeltas,
+): boolean {
+  return (deltas.brierDelta !== null && deltas.brierDelta < 0)
+    || (deltas.logLossDelta !== null && deltas.logLossDelta < 0);
+}
+
+function hasReceiptDiscriminationNonWorse(
+  deltas: MurphAgeWearableLabAggregateReceiptMetricDeltas,
+): boolean {
+  const discriminationDeltas = [deltas.aucDelta, deltas.cIndexDelta].filter((value): value is number =>
+    typeof value === "number" && Number.isFinite(value)
+  );
+  return discriminationDeltas.length === 0 || discriminationDeltas.every((value) => value >= -0.001);
+}
+
+function wearableLabAggregateReceiptNegativeControlsPassed(
+  negativeControls: Readonly<Record<string, unknown>>,
+): boolean {
+  return negativeControls.coverageOnlyBeatenByResidualWearable === true
+    && negativeControls.deviceOrEhrDensityDominates === false
+    && negativeControls.earlyEventSensitivityPassed === true
+    && negativeControls.reverseCausationWashoutPassed === true;
 }
 
 function isMurphAgeIncrementEvaluationLayer(value: string): value is MurphAgeIncrementEvaluationLayer {

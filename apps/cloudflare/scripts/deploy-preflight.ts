@@ -194,6 +194,17 @@ export function listHostedDeployEnvironmentInvariantErrors(
     return errors;
   }
 
+  const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
+  const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
+  if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
+    errors.push("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.");
+  }
+  const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
+  const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
+  if (cloudflareAccountId && presignAccountId && presignAccountId !== cloudflareAccountId) {
+    errors.push("HOSTED_R2_PRESIGN_ACCOUNT_ID must match CLOUDFLARE_ACCOUNT_ID.");
+  }
+
   const hostedAssistantModel = normalizeOptionalString(source.HOSTED_ASSISTANT_MODEL);
   const hostedAssistantProvider = normalizeOptionalString(source.HOSTED_ASSISTANT_PROVIDER);
   const hostedAssistantReasoningEffort = normalizeOptionalString(

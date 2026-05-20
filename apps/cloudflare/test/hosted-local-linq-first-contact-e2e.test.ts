@@ -1,12 +1,30 @@
 import { createHmac } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  seedHostedWorkspaceCheckpointForTest,
+} from "#hosted-web-testing";
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedBrowserVaultReplicaRef,
+  type HostedExecutionSnapshotRef,
+} from "@murphai/hosted-execution/contracts";
+import {
+  sha256HostedBundleHex,
+  snapshotHostedExecutionContext,
+} from "@murphai/runtime-state/node";
+import {
+  createIntegratedVaultServices,
+} from "@murphai/vault-usecases/vault-services";
 
 import {
   buildHostedAssistantNotificationDecisionResponse,
@@ -33,9 +51,11 @@ const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const duplicateWelcomeUserId = `member_local_linq_duplicate_welcome_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
+const checkpointReplayUserId = `member_local_linq_checkpoint_replay_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
+const checkpointReplayReplyText = "Yes - I can help with that.";
 const productionLikeAssistantModel = "gpt-5.5";
 const localRunnerIdleTtlMs = "300000";
 
@@ -44,9 +64,27 @@ const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const itOutsideFastDeployGate = fastDeployGate ? it.skip : it;
+const itCheckpointReplayRepro =
+  process.env.MURPH_HOSTED_LOCAL_LINQ_REPLAY_REPRO === "1"
+    ? itOutsideFastDeployGate
+    : it.skip;
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
+const cleanupPaths: string[] = [];
+
+afterAll(async () => {
+  await scenario?.stop();
+  scenario = null;
+  await linqStub?.stop();
+  linqStub = null;
+  await Promise.all(cleanupPaths.splice(0).map((target) =>
+    rm(target, {
+      force: true,
+      recursive: true,
+    })
+  ));
+}, 120_000);
 
 it("derives stable numeric suffixes from the full Linq user id", () => {
   expect(buildStableNumericSuffix("member_local_linq_first_contact_20260408", 7)).not.toBe(
@@ -56,15 +94,8 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 
 describe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
-    await startLinqScenario();
+    await ensureLinqScenario();
   }, 300_000);
-
-  afterAll(async () => {
-    await scenario?.stop();
-    scenario = null;
-    await linqStub?.stop();
-    linqStub = null;
-  }, 120_000);
 
   it("sends the first-contact Linq welcome through the live local worker", async () => {
     await requireScenario().seedActiveHostedLinqMember({
@@ -587,6 +618,115 @@ describe("hosted local Linq first-contact e2e", () => {
     },
     300_000,
   );
+
+});
+
+describe("hosted local Linq checkpoint replay e2e", () => {
+  beforeAll(async () => {
+    await ensureLinqScenario();
+  }, 300_000);
+
+  itCheckpointReplayRepro(
+    "reproduces duplicate visible Linq sends when replay groups change after a lost receipt checkpoint",
+    async () => {
+      const materializedChatId = `chat_local_linq_checkpoint_replay_${Date.now()}`;
+      const memberPhone = buildLinqRecipientPhoneNumber(checkpointReplayUserId);
+      const homePhone = buildLinqHomePhoneNumber(checkpointReplayUserId);
+      const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+
+      await requireScenario().seedActiveHostedLinqMember({
+        homePhone,
+        memberId: checkpointReplayUserId,
+        memberPhone,
+      });
+      await requireScenario().bindActiveHostedLinqHomeChat({
+        chatId: materializedChatId,
+        memberId: checkpointReplayUserId,
+        recipientPhone: memberPhone,
+      });
+      await seedEmptyHostedWorkspaceCheckpointForTest(
+        checkpointReplayUserId,
+        "checkpoint-replay-before-first-send",
+      );
+
+      const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
+      requireScenario().queueAssistantResponses([checkpointReplayReplyText]);
+      const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        checkpointReplayUserId,
+        materializedChatId,
+        {
+          eventId: `evt_checkpoint_replay_first_${checkpointReplayUserId}`,
+          messageId: `msg_checkpoint_replay_first_${checkpointReplayUserId}`,
+          text: "Can you help me with this?",
+        },
+      ));
+      expect(firstWebhookResponse.status).toBe(202);
+      await expect(firstWebhookResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      await requireScenario().waitForLatestPendingWake(checkpointReplayUserId);
+      const firstSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: baselineSendCount,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId: checkpointReplayUserId,
+      });
+      expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(
+        checkpointReplayReplyText,
+      );
+      const firstIdempotencyKey = readObservedLinqIdempotencyKey(firstSend);
+      expect(firstIdempotencyKey).toMatch(/^sha256:/u);
+
+      await seedEmptyHostedWorkspaceCheckpointForTest(
+        checkpointReplayUserId,
+        "checkpoint-replay-after-lost-receipt",
+      );
+
+      const postRewindBaselineSendCount = requireLinqStub().countObservedSends(replyPath);
+      requireScenario().queueAssistantResponses([
+        checkpointReplayReplyText,
+        checkpointReplayReplyText,
+      ]);
+      const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        checkpointReplayUserId,
+        materializedChatId,
+        {
+          eventId: `evt_checkpoint_replay_second_${checkpointReplayUserId}`,
+          messageId: `msg_checkpoint_replay_second_${checkpointReplayUserId}`,
+          text: "Also, can you repeat that?",
+        },
+      ));
+      expect(secondWebhookResponse.status).toBe(202);
+      await expect(secondWebhookResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      await requireScenario().waitForLatestPendingWake(checkpointReplayUserId);
+      const replaySend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: postRewindBaselineSendCount,
+        expectedPath: replyPath,
+        scenario: requireScenario(),
+        userId: checkpointReplayUserId,
+      });
+      expect(requireLinqStub().readObservedMessageText(replaySend)).toBe(
+        checkpointReplayReplyText,
+      );
+      const replayIdempotencyKey = readObservedLinqIdempotencyKey(replaySend);
+      expect(replayIdempotencyKey).toMatch(/^sha256:/u);
+      expect(replayIdempotencyKey).not.toBe(firstIdempotencyKey);
+
+      const replaySends = requireLinqStub().observedRequests
+        .filter((request) => request.url === replyPath)
+        .filter((request) =>
+          requireLinqStub().readObservedMessageText(request) === checkpointReplayReplyText
+        );
+      expect(replaySends.length).toBeGreaterThanOrEqual(2);
+    },
+    360_000,
+  );
 });
 
 function countAssistantProviderResponsesApiRequests(): number {
@@ -733,6 +873,113 @@ function isMatchingObservedLinqRequest(
   return request.method === input.expectedMethod && request.url === input.expectedPath;
 }
 
+function readObservedLinqIdempotencyKey(request: ObservedLinqRequest): string | null {
+  const parsed: unknown = JSON.parse(request.body);
+  const message = readObjectProperty(parsed, "message");
+  const idempotencyKey = readObjectProperty(message, "idempotency_key");
+  return typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0
+    ? idempotencyKey
+    : null;
+}
+
+function readObjectProperty(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return Object.prototype.hasOwnProperty.call(value, key)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+async function seedEmptyHostedWorkspaceCheckpointForTest(
+  memberId: string,
+  label: string,
+): Promise<void> {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-linq-replay-vault-"));
+  cleanupPaths.push(root);
+  const operatorHomeRoot = path.join(root, "operator-home");
+  const vaultRoot = path.join(root, "vault");
+  await mkdir(operatorHomeRoot, { recursive: true });
+
+  await createIntegratedVaultServices().core.init({
+    requestId: `seed-${label}`,
+    timezone: "UTC",
+    vault: vaultRoot,
+  });
+
+  const snapshot = await snapshotHostedExecutionContext({
+    operatorHomeRoot,
+    vaultRoot,
+  });
+  const hash = sha256HostedBundleHex(snapshot.bundle);
+  const checkpoint = await seedHostedWorkspaceCheckpointForTest({
+    browserVaultReplicaRef: createBrowserVaultReplicaRef(memberId, hash, label),
+    environment: requireScenario().runtimeEnv,
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatusJson: {
+      seeded: true,
+    },
+    snapshotRef: createSnapshotBundleRef(hash, snapshot.bundle.byteLength),
+    userId: memberId,
+  });
+  expect(checkpoint.status).toBe("updated");
+
+  await uploadHostedSnapshotArtifact({
+    bytes: snapshot.bundle,
+    hash,
+    userId: memberId,
+  });
+}
+
+async function uploadHostedSnapshotArtifact(input: {
+  bytes: Uint8Array;
+  hash: string;
+  userId: string;
+}): Promise<void> {
+  await requireScenario().harness.request(
+    `/__test/artifacts?userId=${encodeURIComponent(input.userId)}&sha256=${input.hash}`,
+    {
+      body: new Blob([new Uint8Array(input.bytes)]),
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+      },
+      method: "PUT",
+    },
+  );
+}
+
+function createSnapshotBundleRef(
+  hash: string,
+  size: number,
+): HostedExecutionSnapshotRef {
+  return {
+    hash,
+    key: `cloudflare-workspace-snapshots/${hash}.bundle`,
+    size,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function createBrowserVaultReplicaRef(
+  memberId: string,
+  sourceBundleHash: string,
+  label: string,
+): HostedBrowserVaultReplicaRef {
+  return {
+    byteLength: 256,
+    dataVersion: `${label}-${sourceBundleHash.slice(0, 16)}`,
+    generatedAt: new Date().toISOString(),
+    keyId: "browser-vault-replica:linq-checkpoint-replay",
+    objectKey: `browser-vault/${memberId}/${label}.json`,
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:linq-checkpoint-replay",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash,
+  };
+}
+
 async function startLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
 ): Promise<void> {
@@ -748,6 +995,7 @@ async function startLinqScenario(
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,
     },
@@ -761,12 +1009,23 @@ async function startLinqScenario(
   });
 }
 
+async function ensureLinqScenario(): Promise<void> {
+  if (scenario) {
+    return;
+  }
+
+  await startLinqScenario({
+    HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
+  });
+}
+
 function buildLinqFirstContactLocalInboundAllowlist(): string {
   return [
     directReplyUserId,
     duplicateWelcomeUserId,
     fastReplyUserId,
     postAssistantReplyUserId,
+    checkpointReplayUserId,
   ].map(buildLinqRecipientPhoneNumber).join(",");
 }
 

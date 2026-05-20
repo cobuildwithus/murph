@@ -237,6 +237,119 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("can run deploy-signed direct R2 presigned PUT smoke against the bundles bucket", async () => {
+    const uploadedObjects = new Map<string, { customMetadata: Record<string, string>; size: number }>();
+    const deletedKeys: string[] = [];
+    const smokeHealth = vi.fn(async (input: {
+      directR2PresignedPut?: {
+        byteLength: number;
+        presignedPutUrl: string;
+      };
+      openAiIntercept?: boolean;
+    }) => {
+      const directR2PresignedPut = input.directR2PresignedPut;
+      if (!directR2PresignedPut) {
+        throw new Error("Expected direct R2 presigned PUT smoke input.");
+      }
+      const presignedUrl = new URL(directR2PresignedPut.presignedPutUrl);
+      const objectKey = decodeURIComponent(
+        presignedUrl.pathname.replace(/^\/smoke-bucket\//u, ""),
+      );
+      uploadedObjects.set(objectKey, {
+        customMetadata: { payloadSha256: "a".repeat(64) },
+        size: directR2PresignedPut.byteLength,
+      });
+
+      return {
+        directR2PresignedPut: {
+          byteLength: directR2PresignedPut.byteLength,
+          durationMs: 10,
+          ok: true,
+          payloadSha256: "a".repeat(64),
+          responseBodyBytes: 0,
+          status: 200,
+        },
+        ok: true,
+        runnerBundle: null,
+        service: "cloudflare-hosted-runner-node",
+        status: 200,
+      };
+    });
+    const bucket = {
+      async delete(key: string) {
+        deletedKeys.push(key);
+        uploadedObjects.delete(key);
+      },
+      async get() {
+        return null;
+      },
+      async head(key: string) {
+        const object = uploadedObjects.get(key);
+        return object ? { key, ...object } : null;
+      },
+      async put() {},
+    };
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      BUNDLES: bucket,
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "smoke-bucket",
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    });
+    const url = new URL(
+      "https://runner.example.test/internal/deploy/container-smoke?directR2PresignedPut=1",
+    );
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(smokeHealth).toHaveBeenCalledWith({
+      directR2PresignedPut: {
+        byteLength: 160 * 1024 * 1024,
+        presignedPutUrl: expect.stringContaining(
+          "https://r2-account.r2.cloudflarestorage.com/smoke-bucket/deploy-smoke/direct-r2-presigned-put/",
+        ),
+      },
+      openAiIntercept: false,
+    });
+    expect(deletedKeys).toHaveLength(1);
+    expect(deletedKeys[0]).toMatch(/^deploy-smoke\/direct-r2-presigned-put\/.+\.bin$/u);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      runnerContainer: {
+        directR2PresignedPut: {
+          byteLength: 160 * 1024 * 1024,
+          ok: true,
+          payloadSha256: "a".repeat(64),
+          status: 200,
+        },
+      },
+      service: "cloudflare-hosted-runner",
+    });
+  });
+
   it("passes the OpenAI intercept option to the managed container smoke route", async () => {
     const userRunner = createUserRunnerStub();
     const smokeHealth = vi.fn(async () => ({
@@ -683,6 +796,31 @@ describe("cloudflare worker routes", () => {
     await expect(checkpointArtifactResponse.json()).resolves.toEqual({
       error: "Hosted execution bound user does not match the test runner user.",
     });
+
+    const directR2Response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
+        {
+          body: JSON.stringify({
+            byteLength: 4096,
+            presignedPutUrl:
+              "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(directR2Response.status).toBe(401);
+    await expect(directR2Response.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
   });
 
   it("stores and reads hosted-local test artifacts for correctly bound callers", async () => {
@@ -724,6 +862,76 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
+  });
+
+  it("runs hosted-local direct R2 presigned PUT smoke for correctly bound callers", async () => {
+    const presignedPutUrl =
+      "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test";
+    const smokeHealth = vi.fn(async () => ({
+      directR2PresignedPut: {
+        byteLength: 4096,
+        durationMs: 5,
+        ok: true,
+        payloadSha256: "c".repeat(64),
+        responseBodyBytes: 2,
+        status: 200,
+      },
+      ok: true,
+      runnerBundle: null,
+      service: "cloudflare-hosted-runner-node",
+      status: 200,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER_SMOKE: {
+        getByName() {
+          return {
+            async destroyInstance() {},
+            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
+              throw new Error("Runner container should not be invoked by direct R2 smoke route tests.");
+            },
+            smokeHealth,
+          };
+        },
+      },
+    });
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/direct-r2-presigned-put",
+        {
+          body: JSON.stringify({
+            byteLength: 4096,
+            presignedPutUrl,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(smokeHealth).toHaveBeenCalledWith({
+      directR2PresignedPut: {
+        byteLength: 4096,
+        presignedPutUrl,
+      },
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      directR2PresignedPut: {
+        byteLength: 4096,
+        ok: true,
+        status: 200,
+      },
+      ok: true,
+      service: "cloudflare-hosted-runner",
+    });
   });
 
   it("reads hosted-local test bundle refs for correctly bound callers", async () => {

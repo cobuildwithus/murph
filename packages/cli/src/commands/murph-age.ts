@@ -14,7 +14,9 @@ import {
 } from '@murphai/query'
 import {
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
+  buildMurphAgePublicCalculatorView,
   buildMurphAgeResearchCalculatorView,
+  calculateMurphAgePublicReportFromSubmittedInputs,
   isMurphAgePublicFeatureKey,
   isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
@@ -24,7 +26,9 @@ import {
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
+  MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -412,6 +416,43 @@ const murphAgePublicWearableBridgeSummarySchema = z.object({
   secondPriorityIncompleteFeatureKeys: z.array(z.string().min(1)),
   secondPriorityReadyFeatureKeys: z.array(z.string().min(1)),
 })
+const murphAgeWearableScoreBearingFamilyPolicySchema = z.object({
+  currentUse: z.enum(['context-only', 'quality-gate-only', 'shadow-residual-research']),
+  family: z.enum(['activity', 'hrv', 'quality', 'resting-heart-rate', 'sleep']),
+  minimumValidDays28d: z.number().int().nonnegative().nullable(),
+  minimumValidNights28d: z.number().int().nonnegative().nullable(),
+  productAuthorized: z.literal(false),
+  productMultiplier: z.literal(0),
+  qualityMetricKeys: z.array(z.string().min(1)),
+  requiresDeviceOrMethodQualification: z.boolean(),
+  researchMultiplier: z.union([z.literal(0), z.literal(1)]),
+  scoreBearingPromotionPriority: z.enum(['defer', 'first', 'second', 'third']),
+  scoreContributionAuthorized: z.literal(false),
+  signalMetricKeys: z.array(z.string().min(1)),
+})
+const murphAgeWearableScoreBearingStrategySchema = z.object({
+  aggregateReceiptOnlyAuthorizesScienceReview: z.literal(true),
+  deployableParameterizationRequiredForProductScoring: z.literal(true),
+  familyPolicies: z.array(murphAgeWearableScoreBearingFamilyPolicySchema),
+  modelForm: z.literal('penalized-additive-residual-bounded-and-shrunk'),
+  primaryDecisionComparisons: z.array(z.enum([
+    'm5-vs-m1-lab-body',
+    'm5-vs-m2-coverage-control',
+  ])),
+  productStatus: z.literal('context-only'),
+  productWearableMultiplier: z.literal(0),
+  requiredPromotionSignals: z.array(z.enum([
+    'deployable-parameterization-authorized',
+    'm5-beats-m1-proper-score',
+    'm5-beats-m2-coverage-control',
+    'm5-calibration-passes',
+    'negative-controls-pass',
+    'replicates-in-two-source-families',
+    'reverse-causation-washout-passes',
+  ])),
+  researchResidualMode: z.literal('locked-evaluator-only'),
+  schemaVersion: z.literal(MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION),
+})
 
 const murphAgeWearableShadowFamilySchema = z.enum([
   'activity',
@@ -551,13 +592,53 @@ const murphAgePublicDomainContributionViewSchema = z.object({
   moduleId: z.string().min(1),
 })
 const murphAgePublicWearableCalculatorViewSchema = z.object({
+  candidateFeatureCount: z.number().int().nonnegative(),
   contextOnlyMetricKeys: z.array(z.string().min(1)),
+  deferredFeatureKeys: z.array(z.string().min(1)),
+  features: z.array(murphAgePublicWearableBridgeFeatureReadinessSchema),
+  firstPriorityIncompleteFeatureKeys: z.array(z.string().min(1)),
+  firstPriorityReadyFeatureKeys: z.array(z.string().min(1)),
   missingFeatureKeys: z.array(z.string().min(1)),
   partialFeatureKeys: z.array(z.string().min(1)),
   quality: murphAgeWearableContextQualitySchema,
   readyFeatureKeys: z.array(z.string().min(1)),
   scoreBearing: z.literal(false),
   scoreContributionAuthorized: z.literal(false),
+  scorePolicy: murphAgeWearableScoreBearingStrategySchema,
+  secondPriorityIncompleteFeatureKeys: z.array(z.string().min(1)),
+  secondPriorityReadyFeatureKeys: z.array(z.string().min(1)),
+})
+const murphAgePublicCalculatorViewDisplayCategorySchema = z.enum([
+  'abstain',
+  'context-only',
+  'product-age-ready',
+  'product-risk-only',
+  'research-preview',
+])
+export const murphAgePublicCalculatorViewResultSchema = z.object({
+  ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
+  blockedFeatureKeys: z.array(z.string().min(1)),
+  displayBlockedReason: murphAgeDisplayBlockedReasonSchema.nullable(),
+  displayCategory: murphAgePublicCalculatorViewDisplayCategorySchema,
+  displayStatus: murphAgeDisplayStatusSchema,
+  domainContributions: z.array(murphAgePublicDomainContributionViewSchema),
+  featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
+  missingFeatureKeys: z.array(z.string().min(1)),
+  mode: murphAgeModeSchema,
+  product: z.object({
+    ageDisplayReady: z.boolean(),
+    promotionBlockers: z.array(murphAgeProductPromotionBlockerSchema),
+    riskDisplayReady: z.boolean(),
+    validationGate: murphAgePublicValidationGateSummarySchema.nullable(),
+  }),
+  risk: murphAgePublicRiskViewSchema,
+  schemaVersion: z.literal(MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION),
+  selectedCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  selectedScoreBearingFeatureKeys: z.array(z.string().min(1)),
+  selectedScoreBearingMetricKeys: z.array(z.string().min(1)),
+  status: murphAgeInputBundleStatusSchema,
+  warnings: z.array(murphAgePublicWarningSchema),
+  wearable: murphAgePublicWearableCalculatorViewSchema,
 })
 const murphAgeResearchLocalRunEvidenceItemSchema = z.object({
   bundleId: z.enum([
@@ -662,6 +743,10 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   warnings: z.array(murphAgePublicWarningSchema),
   wearable: murphAgePublicWearableCalculatorViewSchema,
 })
+export const murphAgeCalculatorViewResultSchema = z.union([
+  murphAgePublicCalculatorViewResultSchema,
+  murphAgeResearchCalculatorViewResultSchema,
+])
 
 const murphAgeIncrementEvaluationLayerSchema = z.enum([
   'biomarker-increment',
@@ -907,6 +992,47 @@ export function registerMurphAgeCommands(
     },
   })
 
+  age.command('calculate', {
+    description:
+      'Return a stable Murph Age calculator view from submitted labs, body metrics, blood pressure, and wearable summaries.',
+    args: emptyArgsSchema,
+    options: z.object({
+      input: inputFileOptionSchema.describe('Submitted Murph Age payload in @file.json form or - for stdin.'),
+      mode: murphAgeModeSchema
+        .default('product')
+        .describe('Use product for normal safe display, or explicit research for local research-only age/risk output.'),
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
+    }),
+    examples: [
+      {
+        description:
+          'Return the product-safe calculator view from submitted data. Current research-only cards will abstain until authorized.',
+        options: {
+          input: '@murph-age-preview.json',
+        },
+      },
+      {
+        description:
+          'Return the internal research calculator view with the current local research age/risk breakdown.',
+        options: {
+          input: '@murph-age-preview.json',
+          mode: 'research',
+          modelCardArtifactRoot: './.runtime/operations/murph-age/model-cards',
+        },
+      },
+    ],
+    hint:
+      'This is the site/backend-shaped calculator contract. Product mode is safe-by-default; research mode is explicit and not a product or medical claim.',
+    output: murphAgeCalculatorViewResultSchema,
+    async run({ options }) {
+      const report = await loadMurphAgeSubmittedCalculatorReport(options)
+      if (options.mode === 'research') {
+        return buildMurphAgeResearchCalculatorView(report)
+      }
+      return buildMurphAgePublicCalculatorView(report)
+    },
+  })
+
   age.command('inputs', {
     description:
       'Return metadata-only Murph Age input readiness for labs, body metrics, blood pressure, and wearable context in the selected vault.',
@@ -1124,6 +1250,45 @@ async function loadMurphAgeSubmittedPreviewReport(
     ...payload,
     modelCardArtifactRoot: options.modelCardArtifactRoot ?? payload.modelCardArtifactRoot,
   })
+}
+
+async function loadMurphAgeSubmittedCalculatorReport(
+  options: MurphAgeSubmittedPreviewOptions & { mode: z.infer<typeof murphAgeModeSchema> },
+) {
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+    await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
+  )
+  const {
+    modelCardArtifactRoot: payloadModelCardArtifactRoot,
+    ...calculatorPayload
+  } = payload
+  const modelCardArtifactRoot = options.mode === 'research'
+    ? options.modelCardArtifactRoot ?? payloadModelCardArtifactRoot
+    : options.modelCardArtifactRoot
+  if (options.mode === 'research') {
+    return getMurphAgeResearchPreviewForSubmittedInputs({
+      ...calculatorPayload,
+      modelCardArtifactRoot,
+    })
+  }
+
+  const loaded = options.modelCardArtifactRoot === undefined
+    ? { models: {}, warnings: [] }
+    : await loadMurphAgeLocalModelCardArtifacts({
+        modelCardArtifactRoot,
+      })
+  const report = calculateMurphAgePublicReportFromSubmittedInputs({
+    ...calculatorPayload,
+    mode: 'product',
+    models: loaded.models,
+  })
+  return {
+    ...report,
+    warnings: [
+      ...loaded.warnings.map((warning) => ({ ...warning })),
+      ...report.warnings,
+    ],
+  }
 }
 
 async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promise<unknown[]> {

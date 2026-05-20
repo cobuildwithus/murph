@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -37,11 +37,23 @@ import {
 } from "@murphai/hosted-execution";
 import {
   recordHostedMaterializedArtifactPaths,
+  type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
   createHostedMailboxEncryptionEnvironmentFromIngressRoot,
@@ -49,8 +61,14 @@ import {
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "../src/runtime-bridge-workspace.ts";
+import {
+  hostedWorkspaceSnapshotObjectKey,
+} from "../src/storage-paths.ts";
 
 const cleanupPaths: string[] = [];
+const workspaceSnapshotEncryptionScheme:
+  typeof HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME =
+    HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -135,12 +153,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     expect(snapshotRef).toEqual(expect.objectContaining({
-      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      archive: expect.objectContaining({
+        encryptedObjectSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }),
+      schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
     }));
-    expect(putArtifact).toHaveBeenCalled();
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("writes idle shutdown full compactions without the browser-vault replica port", async () => {
@@ -156,6 +177,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
       artifactBundles.set(sha256, bytes);
     });
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
@@ -165,6 +187,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotRef: baseSnapshotRef,
           version: "7",
         }),
+        workspaceSnapshotUploads,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -184,25 +207,18 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(result.snapshotRef).not.toHaveProperty("schema");
-    expect(result.snapshotRef).not.toHaveProperty("delta");
-    expect(result.snapshotRef).not.toHaveProperty("hot");
+    expect(snapshotRef.objectKey).toMatch(/^users\/hsn_[0-9a-f]{24}\/workspace-snapshots\/snapshot_[A-Za-z0-9._-]+\.snapshot\.enc$/u);
     expect(result).not.toHaveProperty("browserVaultReplicaRef");
-    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(workspaceSnapshotUploads.get(snapshotRef.objectKey)).toEqual(expect.objectContaining({
+      encryptedByteSize: snapshotRef.archive.encryptedByteSize,
+      encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
     }));
-    expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(snapshotRef.hash) ?? null,
-      expectedKind: "vault",
-      path: "note.md",
-      root: "vault",
-    })).toBe("workspace changed\n");
   });
 
-  it("persists full snapshot artifacts with bounded concurrency", async () => {
+  it("uploads idle shutdown snapshots as a single encrypted workspace object", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -217,15 +233,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       await writeFile(path.join(rawRoot, `capture-${index}.bin`), `artifact-${index}\n`, "utf8");
     }
 
-    let activePuts = 0;
-    let maxActivePuts = 0;
     const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
-      activePuts += 1;
-      maxActivePuts = Math.max(maxActivePuts, activePuts);
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
       artifactBundles.set(sha256, bytes);
-      activePuts -= 1;
     });
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
@@ -234,6 +245,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotRef: baseSnapshotRef,
           version: "7",
         }),
+        workspaceSnapshotUploads,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -253,18 +265,61 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
-    expect(snapshotRef.hash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(result.snapshotRef).not.toHaveProperty("schema");
-    expect(result.snapshotRef).not.toHaveProperty("delta");
-    expect(result.snapshotRef).not.toHaveProperty("hot");
-    expect(putArtifact).toHaveBeenCalledTimes(41);
-    expect(maxActivePuts).toBeGreaterThan(1);
-    expect(maxActivePuts).toBeLessThanOrEqual(32);
+    expect(snapshotRef.archive.fileCount).toBeGreaterThanOrEqual(41);
+    expect(workspaceSnapshotUploads.size).toBe(1);
+    expect(workspaceSnapshotUploads.get(snapshotRef.objectKey)).toEqual(expect.objectContaining({
+      encryptedByteSize: snapshotRef.archive.encryptedByteSize,
+      encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
+    }));
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
-  it("re-uploads live raw artifacts when the base manifest ref is stale", async () => {
+  it("fails before direct PUT at the single-part size guard", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    await writeFile(path.join(vaultRoot, "oversized.txt"), "size guard payload\n");
+    const putArtifact = vi.fn(async () => {});
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotLimits: {
+          maxSinglePartEncryptedBytes: 16,
+          warnEncryptedBytes: 1,
+        },
+        workspaceSnapshotUploads,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow(/size limit/u);
+
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(putArtifact).not.toHaveBeenCalled();
+  });
+
+  it("keeps live raw files inside the encrypted v2 snapshot when legacy artifact refs are stale", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(baseVaultRoot, vaultRoot);
@@ -297,6 +352,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const writeLog = vi.fn(async (request) => ({
       loggedCount: request.entries.length,
     }));
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
@@ -305,6 +361,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotRef: baseSnapshotRef,
           version: "7",
         }),
+        workspaceSnapshotUploads,
         writeLog,
       }),
       readCurrentLease: () => ({
@@ -325,40 +382,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
-    expect(Buffer.from(artifactBundles.get(rawHash) ?? [])).toEqual(rawBytes);
-    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: rawHash,
-    }));
-    expect(listHostedBundleArtifacts({
-      bytes: bundle,
-      expectedKind: "vault",
-    })).toContainEqual({
-      path: rawPath,
-      ref: {
-        byteSize: rawBytes.byteLength,
-        sha256: rawHash,
-      },
-      root: "vault",
-    });
+    expect(artifactBundles.get(rawHash)).toBeUndefined();
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(workspaceSnapshotUploads.has(snapshotRef.objectKey)).toBe(true);
     const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
     expect(entries).toContainEqual(expect.objectContaining({
-      eventCode: "checkpoint.bundle_write_started",
+      eventCode: "checkpoint.snapshot_finished",
       redactedJson: expect.objectContaining({
-        pendingArtifactPutCount: 1,
-      }),
-    }));
-    expect(entries).toContainEqual(expect.objectContaining({
-      eventCode: "checkpoint.bundle_write_finished",
-      redactedJson: expect.objectContaining({
-        externalArtifactPutCount: 1,
+        snapshotMode: "workspace_snapshot_v2",
+        workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
     }));
   });
 
-  it("fails full compaction when an unmaterialized preserved artifact ref is stale", async () => {
+  it("logs metadata-only diagnostics when legacy preserved artifact refs are unavailable", async () => {
     const baseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-base-workspace-"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(baseVaultRoot, vaultRoot);
@@ -416,31 +455,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted bundle artifact integrity validation failed.");
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     expect(putArtifact).not.toHaveBeenCalled();
     const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
     expect(entries).toContainEqual(expect.objectContaining({
       attemptId: "attempt_1",
       component: "workspace",
-      eventCode: "checkpoint.snapshot_failed",
+      eventCode: "checkpoint.snapshot_finished",
       leaseGeneration: "4",
-      level: "error",
+      level: "info",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
-        bundleArchiveOperation: "runner-output",
-        bundleArchiveValidationCause: "artifact_integrity",
-        bundleArchiveValidationDetail:
-          "Hosted bundle artifact integrity validation failed.",
-        bundlePutBytes: 0,
         checkpointPolicy: "full",
-        errorCode: "bundle_archive_validation_error",
-        errorCodeDetail: "bundle_archive_validation_error",
-        pendingArtifactPutCount: 0,
-        safeErrorDetail: "Hosted bundle artifact integrity validation failed.",
-        safeErrorMessage: "Hosted bundle archive validation failed.",
-        snapshotMode: "full",
+        snapshotMode: "workspace_snapshot_v2",
+        workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
       workspaceVersion: "7",
     }));
@@ -504,12 +534,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
-    }));
+    expect(snapshotRef.objectKey).toContain("/workspace-snapshots/");
+    expect(putArtifact).not.toHaveBeenCalled();
     expect(writeBrowserVaultReplica).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty("browserVaultReplicaRef");
     expect(writeLog).toHaveBeenCalled();
@@ -581,38 +609,19 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted Codex continuity snapshot is missing required rollout state.");
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     expect(putArtifact).not.toHaveBeenCalled();
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          attemptId: "attempt_1",
-          component: "workspace",
-          eventCode: "workspace.codex_home_snapshot_failed",
-          leaseGeneration: "4",
-          level: "error",
-          phase: "checkpoint",
-          redactedJson: expect.objectContaining({
-            checkpointReason: "idle_shutdown",
-            codexResumeArchivedUnsupportedCount: 0,
-            codexResumeFlushFailed: false,
-            codexResumeInvalidPathCount: 1,
-            codexResumeMissingRolloutCount: 0,
-            codexResumeRolloutBytes: 0,
-            codexResumeRolloutFileBytes: [],
-            codexResumeRolloutRelHashes: [],
-            codexResumeThreadCount: 1,
-            continuityReason: "codex_home_missing",
-            errorName: "HostedWorkspaceSnapshotContinuityIncompleteError",
-            safeErrorMessage: "Hosted Codex continuity snapshot is missing required rollout state.",
-            snapshotMode: "full",
-          }),
-          workspaceVersion: "8",
+    expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: expect.objectContaining({
+          snapshotMode: "workspace_snapshot_v2",
         }),
-      ],
-    });
+      }),
+    );
   });
 
   it("fails idle shutdown compaction when current committed snapshot state is unavailable", async () => {
@@ -708,41 +717,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted bundle archive contains invalid artifact metadata.");
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     expect(putArtifact).not.toHaveBeenCalled();
     const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
     expect(entries).toContainEqual(expect.objectContaining({
       attemptId: "attempt_1",
       component: "workspace",
-      eventCode: "checkpoint.snapshot_failed",
+      eventCode: "checkpoint.snapshot_finished",
       leaseGeneration: "4",
-      level: "error",
+      level: "info",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
-        bundleArchiveOperation: "runner-output",
-        bundleArchiveValidationCause: "invalid_artifact_metadata",
-        bundleArchiveValidationDetail:
-          "Hosted bundle archive contains invalid artifact metadata.",
-        bundleRefKeyPresent: false,
-        bundleRefPresent: false,
-        bundlePutBytes: 0,
         checkpointPolicy: "full",
-        errorCode: "bundle_archive_validation_error",
-        errorCodeDetail: "bundle_archive_validation_error",
-        errorDetailPresent: true,
-        errorName: "HostedBundleArchiveValidationError",
-        pendingArtifactPutCount: 0,
-        safeErrorDetail: "Hosted bundle archive contains invalid artifact metadata.",
-        safeErrorMessage: "Hosted bundle archive validation failed.",
-        snapshotMode: "full",
-        workspaceSnapshotArchiveArtifactCount: 1,
-        workspaceSnapshotArchiveFileCount: 2,
-        workspaceSnapshotArchiveInlineFileCount: 1,
-        workspaceSnapshotArchivePreservedArtifactCandidateCount: 1,
-        workspaceSnapshotArchivePreservedArtifactIncludedCount: 1,
-        workspaceSnapshotSizeDiagnosticsPresent: true,
+        snapshotMode: "workspace_snapshot_v2",
+        workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
       workspaceVersion: "8",
     }));
@@ -783,7 +773,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
-      .rejects.toThrow("Hosted runtime bridge checkpoint lease validation failed before_bundle_write.");
+      .rejects.toThrow("Hosted runtime bridge checkpoint lease validation failed before_direct_r2_put.");
 
     expect(leaseReadCount).toBe(2);
     expect(putArtifact).not.toHaveBeenCalled();
@@ -833,20 +823,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(result.snapshotRef).not.toHaveProperty("schema");
-    expect(result.snapshotRef).not.toHaveProperty("delta");
-    expect(result.snapshotRef).not.toHaveProperty("hot");
-    expect(readHostedBundleTextFile({
-      bytes: artifactBundles.get(snapshotRef.hash) ?? null,
-      expectedKind: "vault",
-      path: "note.md",
-      root: "vault",
-    })).toBe("latest working state\n");
-    expect(putArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      sha256: snapshotRef.hash,
-    }));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("compacts legacy layered refs with hot preserved inline files into a direct full snapshot", async () => {
@@ -906,31 +885,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(result.snapshotRef).not.toHaveProperty("schema");
-    expect(result.snapshotRef).not.toHaveProperty("delta");
-    expect(result.snapshotRef).not.toHaveProperty("hot");
-    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
-    expect(readHostedBundleTextFile({
-      bytes: bundle,
-      expectedKind: "vault",
-      path: preservedPath,
-      root: "vault",
-    })).toBeNull();
-    expect(listHostedBundleArtifacts({
-      bytes: bundle,
-      expectedKind: "vault",
-    })).toContainEqual({
-      path: preservedPath,
-      ref: {
-        byteSize: preservedBytes.byteLength,
-        sha256: sha256HostedBundleHex(preservedBytes),
-      },
-      root: "vault",
-    });
-    expect(Buffer.from(artifactBundles.get(sha256HostedBundleHex(preservedBytes)) ?? []))
-      .toEqual(preservedBytes);
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("drops preserved raw inline files after targeted materialization", async () => {
@@ -994,29 +951,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
-    const snapshotRef = requireBundleRef(result.snapshotRef);
-    expect(snapshotRef.key).toMatch(/^cloudflare-workspace-snapshots\/[a-f0-9]{64}\.bundle$/u);
-    expect(result.snapshotRef).not.toHaveProperty("schema");
-    expect(result.snapshotRef).not.toHaveProperty("delta");
-    expect(result.snapshotRef).not.toHaveProperty("hot");
-    const bundle = artifactBundles.get(snapshotRef.hash) ?? null;
-    expect(readHostedBundleTextFile({
-      bytes: bundle,
-      expectedKind: "vault",
-      path: preservedPath,
-      root: "vault",
-    })).toBeNull();
-    expect(listHostedBundleArtifacts({
-      bytes: bundle,
-      expectedKind: "vault",
-    })).not.toContainEqual({
-      path: preservedPath,
-      ref: {
-        byteSize: preservedBytes.byteLength,
-        sha256: sha256HostedBundleHex(preservedBytes),
-      },
-      root: "vault",
-    });
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+    expect(putArtifact).not.toHaveBeenCalled();
   });
 
   it("logs hashed Codex home snapshot diagnostics when checkpointing", async () => {
@@ -1110,33 +1047,25 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
-    expect(writeLog).toHaveBeenCalledWith({
-      entries: [
-        expect.objectContaining({
-          attemptId: "attempt_1",
-          component: "workspace",
-          eventCode: "workspace.codex_home_snapshot",
-          leaseGeneration: "4",
-          level: "info",
-          phase: "checkpoint",
-          redactedJson: {
-            codexResumeArchivedUnsupportedCount: 0,
-            codexResumeFlushFailed: false,
-            codexResumeInvalidPathCount: 0,
-            codexResumeMissingRolloutCount: 0,
-            codexResumeRolloutBytes: "{\"rollout\":\"kept\"}\n".length,
-            codexResumeRolloutFileBytes: ["{\"rollout\":\"kept\"}\n".length],
-            codexResumeRolloutRelHashes: [
-              expect.stringMatching(/^h1_[a-f0-9]{24}$/u),
-            ],
-            codexResumeThreadCount: 1,
-          },
-          workspaceVersion: "7",
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        attemptId: "attempt_1",
+        component: "workspace",
+        eventCode: "checkpoint.snapshot_finished",
+        leaseGeneration: "4",
+        level: "info",
+        phase: "checkpoint",
+        redactedJson: expect.objectContaining({
+          checkpointReason: "idle_shutdown",
+          snapshotMode: "workspace_snapshot_v2",
+          workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
         }),
-      ],
-    });
+        workspaceVersion: "7",
+      }),
+    );
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain(threadId);
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("SHOULD_NOT_APPEAR");
   });
@@ -1198,58 +1127,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
 
     const entries = writeLog.mock.calls.flatMap(([request]) => request.entries);
-    const progressLog = entries.find((entry) =>
-      typeof entry === "object"
-      && entry !== null
-      && "eventCode" in entry
-      && entry.eventCode === "checkpoint.snapshot_size_progress");
     const snapshotLog = entries.find((entry) =>
       typeof entry === "object"
       && entry !== null
       && "eventCode" in entry
       && entry.eventCode === "checkpoint.snapshot_finished");
-    expect(progressLog).toEqual(expect.objectContaining({
-      eventCode: "checkpoint.snapshot_size_progress",
-      redactedJson: expect.objectContaining({
-        checkpointReason: "idle_shutdown",
-        checkpointPolicy: "full",
-        workspaceSnapshotExternalArtifactBytes: rawArtifactBytes,
-        workspaceSnapshotExternalArtifactCount: 1,
-        workspaceSnapshotFingerprintStatus: "enabled",
-        workspaceSnapshotLargestFiles: expect.arrayContaining([
-          expect.stringMatching(
-            /^class=raw,root=vault,bytes=307200,external=1,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
-          ),
-        ]),
-      }),
-    }));
     expect(snapshotLog).toEqual(expect.objectContaining({
       eventCode: "checkpoint.snapshot_finished",
       redactedJson: expect.objectContaining({
         checkpointReason: "idle_shutdown",
         checkpointPolicy: "full",
-        externalArtifactPutBytes: rawArtifactBytes,
-        externalArtifactPutCount: 1,
-        workspaceSnapshotClassSummary: expect.arrayContaining([
-          `class=raw,files=1,inlineBytes=0,externalBytes=${rawArtifactBytes},externalCount=1`,
-          expect.stringMatching(
-            /^class=runtime-assistant,files=1,inlineBytes=\d+,externalBytes=0,externalCount=0$/u,
-          ),
-        ]),
-        workspaceSnapshotExternalArtifactBytes: rawArtifactBytes,
-        workspaceSnapshotExternalArtifactCount: 1,
-        workspaceSnapshotFingerprintStatus: "enabled",
-        workspaceSnapshotIncludedFileCount: 3,
-        workspaceSnapshotLargestFiles: expect.arrayContaining([
-          expect.stringMatching(
-            /^class=raw,root=vault,bytes=307200,external=1,ext=\.bin,depth=3,relHash=h1_[a-f0-9]{24}$/u,
-          ),
-        ]),
-        workspaceSnapshotMaxFileBytes: rawArtifactBytes,
-        workspaceSnapshotMaxFileClass: "raw",
+        snapshotMode: "workspace_snapshot_v2",
+        workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
     }));
     expect(JSON.stringify(writeLog.mock.calls)).not.toContain("large-video");
@@ -1824,11 +1717,22 @@ function createPlatform(input: {
   omitBrowserVaultReplicaPort?: boolean;
   putArtifact: (payload: { bytes: Uint8Array; sha256: string }) => Promise<void>;
   readWorkspace?: () => Promise<HostedWorkspaceReadResponse>;
+  workspaceSnapshotLimits?: Partial<{
+    maxSinglePartEncryptedBytes: number;
+    warnEncryptedBytes: number;
+  }>;
+  workspaceSnapshotUploads?: Map<string, WorkspaceSnapshotUpload>;
   writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
     entries: readonly unknown[];
   }) => Promise<{ loggedCount: number }>;
 }) {
+  const workspaceSnapshotUploads = input.workspaceSnapshotUploads ?? new Map<string, WorkspaceSnapshotUpload>();
+  const workspaceSnapshotUploadByPutUrl = new Map<string, {
+    objectKey: string;
+    snapshotId: string;
+  }>();
+  let workspaceSnapshotStartOrdinal = 0;
   return {
     artifactStore: {
       get: input.getArtifact ?? (async () => null),
@@ -1854,6 +1758,93 @@ function createPlatform(input: {
           },
         }
       : {}),
+    workspaceSnapshotPort: {
+      completeUploadedSnapshot: async (request: {
+        checkpointRequest: Parameters<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["completeUploadedSnapshot"]>[0]["checkpointRequest"];
+        ref: HostedWorkspaceSnapshotV2Ref;
+      }) => ({
+        checkpoint: {
+          checkpointed: true,
+          workspace: createWorkspaceReadResponse({
+            snapshotRef: request.ref,
+            version: request.checkpointRequest.expectedWorkspaceVersion,
+          }).workspace!,
+        },
+        snapshotRef: request.ref,
+      }),
+      directPutEncryptedObject: async (request: {
+        encryptedByteSize: number;
+        putUrl: string;
+        sourceFilePath: string;
+      }) => {
+        const upload = workspaceSnapshotUploadByPutUrl.get(request.putUrl);
+        if (!upload) {
+          throw new Error("Workspace snapshot test direct PUT URL was not started.");
+        }
+        const bytes = await readFile(request.sourceFilePath);
+        workspaceSnapshotUploads.set(upload.objectKey, {
+          bytes,
+          encryptedByteSize: request.encryptedByteSize,
+          encryptedObjectSha256: sha256HostedBundleHex(bytes),
+          objectKey: upload.objectKey,
+          snapshotId: upload.snapshotId,
+        });
+      },
+      restoreWorkspaceSnapshot: async () => {
+        throw new Error("Workspace snapshot restore is not used by bridge snapshot tests.");
+      },
+      startUpload: async (request: {
+        expectedWorkspaceVersion: string;
+        nextWakeAt?: string | null;
+        nextWakeReason?: string | null;
+        reason: "idle_shutdown";
+      }) => {
+        const snapshotId = `snapshot_test_${++workspaceSnapshotStartOrdinal}`;
+        const objectKey = await hostedWorkspaceSnapshotObjectKey({
+          snapshotId,
+          userId: "member_1",
+        });
+        const putUrl = `https://r2.example.invalid/${encodeURIComponent(objectKey)}`;
+        workspaceSnapshotUploadByPutUrl.set(putUrl, {
+          objectKey,
+          snapshotId,
+        });
+        void request.nextWakeAt;
+        void request.nextWakeReason;
+        return {
+          encryption: {
+            aad: buildHostedWorkspaceSnapshotV2Aad({
+              objectKey,
+              snapshotId,
+              userId: "member_1",
+            }),
+            dataKeyBase64: encodeHostedWorkspaceSnapshotV2DataKey(
+              Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+            ),
+            ivBase64: "AQIDBAUGBwgJCgsM",
+            rootKeyId: "root_key_test",
+            scheme: workspaceSnapshotEncryptionScheme,
+            wrappedDataKey: "wrapped_data_key_test",
+          },
+          expiresAt: "2026-05-01T00:10:00.000Z",
+          limits: {
+            maxSinglePartEncryptedBytes:
+              input.workspaceSnapshotLimits?.maxSinglePartEncryptedBytes
+              ?? HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+            warnEncryptedBytes:
+              input.workspaceSnapshotLimits?.warnEncryptedBytes
+              ?? HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+          },
+          objectKey,
+          putUrl,
+          snapshotId,
+        };
+      },
+      unwrapDataKey: async () =>
+        encodeHostedWorkspaceSnapshotV2DataKey(
+          Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+        ),
+    },
     ...(input.readWorkspace
       ? {
           workspacePort: {
@@ -1865,6 +1856,14 @@ function createPlatform(input: {
         }
       : {}),
   };
+}
+
+interface WorkspaceSnapshotUpload {
+  bytes: Uint8Array;
+  encryptedByteSize: number;
+  encryptedObjectSha256: string;
+  objectKey: string;
+  snapshotId: string;
 }
 
 function createBundleRef(hashCharacter: string) {
@@ -2043,6 +2042,19 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash,
   } as const;
+}
+
+function requireWorkspaceSnapshotV2Ref(value: unknown): HostedWorkspaceSnapshotV2Ref {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || (value as Record<string, unknown>).schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
+  ) {
+    throw new TypeError("Expected a hosted workspace snapshot v2 ref.");
+  }
+
+  return value as HostedWorkspaceSnapshotV2Ref;
 }
 
 function requireBundleRef(value: unknown) {

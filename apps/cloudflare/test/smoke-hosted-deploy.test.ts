@@ -18,6 +18,7 @@ import {
 import { TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON } from "./hosted-execution-fixtures.js";
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const TEST_OIDC_TOKEN = "vercel-oidc-token";
 
 describe("resolveSmokeWorkerBaseUrl", () => {
   it("prefers the explicit smoke worker base URL over the other envs", () => {
@@ -185,7 +186,7 @@ describe("runSmokeHostedDeploy", () => {
         body: undefined,
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
-          authorization: "Bearer vercel-oidc-token",
+          authorization: `Bearer ${TEST_OIDC_TOKEN}`,
           [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
         },
         method: "GET",
@@ -412,6 +413,74 @@ describe("runSmokeHostedDeploy", () => {
     );
   });
 
+  it("can request the deployed runner direct R2 presigned PUT smoke", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-direct-r2-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const fetchCalls: string[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      fetchCalls.push(String(url));
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/internal/deploy/container-smoke?directR2PresignedPut=1")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            directR2PresignedPut: {
+              byteLength: 160 * 1024 * 1024,
+              ok: true,
+              payloadSha256: "b".repeat(64),
+              status: 200,
+            },
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(fetchCalls).toContain(
+      "https://worker.example.test/internal/deploy/container-smoke?directR2PresignedPut=1",
+    );
+  });
+
   it("requires the managed-container smoke when the OpenAI intercept smoke is enabled", async () => {
     await expect(runSmokeHostedDeploy({
       fetchImpl: async () => {
@@ -424,6 +493,21 @@ describe("runSmokeHostedDeploy", () => {
       },
     })).rejects.toThrow(
       "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  });
+
+  it("requires the managed-container smoke when the direct R2 smoke is enabled", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async () => {
+        throw new Error("Direct R2 smoke precondition should fail before deploy smoke requests.");
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: "true",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
     );
   });
 
@@ -682,7 +766,7 @@ describe("runSmokeHostedDeploy", () => {
     const statusCall = fetchCalls.find((entry) => entry.url.endsWith("/internal/users/member_123/status"));
     expect(statusCall).toBeDefined();
     const headers = new Headers(statusCall?.headers);
-    expect(readBearerAuthorizationToken(headers.get("authorization"))).toBe("vercel-oidc-token");
+    expect(readBearerAuthorizationToken(headers.get("authorization"))).toBe(TEST_OIDC_TOKEN);
   });
 
   it("fails before issuing requests when a candidate version id is configured without a worker name", async () => {

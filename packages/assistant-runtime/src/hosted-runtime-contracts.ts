@@ -38,6 +38,9 @@ export type {
   HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
+  HostedRuntimeWorkspaceSnapshotDataKey,
+  HostedRuntimeWorkspaceSnapshotUploadStart,
+  HostedRuntimeWorkspaceSnapshotPort,
 } from "./hosted-runtime/platform.ts";
 export {
   parseHostedAssistantRuntimeConfig,
