@@ -100,6 +100,9 @@
       "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
+      "@murphai/runtime-state/loopback-control-plane": [
+        "packages/runtime-state/src/loopback-control-plane.ts"
+      ],
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
