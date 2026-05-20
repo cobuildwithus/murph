@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   type HostedExecutionMemberChannels,
@@ -8,6 +8,7 @@ import {
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "./errors";
+import { hasHostedMemberActiveAccess } from "./entitlement";
 import {
   readHostedMemberEmailAuthorization,
   readHostedMemberSnapshot,
@@ -19,6 +20,8 @@ import {
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 import { lockHostedMemberRow } from "./shared";
+
+type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
 
 export function resolveHostedMemberChannelsForSnapshot(input: {
   emailLinked: boolean;
@@ -62,9 +65,27 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
     });
   }
 
-  const memberChannels = resolveHostedMemberChannelsForSnapshot({
+  return appendHostedMemberChannelsUpdatedForSnapshotTx({
     emailLinked: input.emailLinked,
     member,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+    sourceType: input.sourceType,
+  });
+}
+
+async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
+  emailLinked: boolean;
+  member: HostedMemberSnapshot;
+  memberId: string;
+  occurredAt: string;
+  prisma: Prisma.TransactionClient;
+  sourceType: string;
+}): Promise<HostedExecutionWake> {
+  const memberChannels = resolveHostedMemberChannelsForSnapshot({
+    emailLinked: input.emailLinked,
+    member: input.member,
   });
   const wake = buildHostedExecutionMemberChannelsUpdatedWake({
     eventId: buildHostedMemberChannelsUpdatedEventId({
@@ -85,9 +106,51 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   return wake;
 }
 
+export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input: {
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
+  memberId: string;
+  occurredAt: string;
+  prisma: Prisma.TransactionClient;
+  sourceType: string;
+}): Promise<HostedExecutionWake | null> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+
+  const member = await readHostedMemberSnapshot({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      message: "Finish signup from your latest Murph link before continuing.",
+      httpStatus: 403,
+    });
+  }
+
+  if (!hasHostedMemberActiveAccess(member.core)) {
+    return null;
+  }
+
+  const emailLinked = await resolveHostedMemberEmailLinked({
+    linkedAccounts: input.linkedAccounts,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  return appendHostedMemberChannelsUpdatedForSnapshotTx({
+    emailLinked,
+    member,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+    sourceType: input.sourceType,
+  });
+}
+
 export async function resolveHostedMemberEmailLinked(input: {
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
+  prisma?: HostedMemberEmailLinkedClient;
 }): Promise<boolean> {
   if (extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? []) !== null) {
     return true;
@@ -95,7 +158,7 @@ export async function resolveHostedMemberEmailLinked(input: {
 
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
-    prisma: getPrisma(),
+    prisma: input.prisma ?? getPrisma(),
   });
 
   return Boolean(emailAuthorization?.verifiedEmail);

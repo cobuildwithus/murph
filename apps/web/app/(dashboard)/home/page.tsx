@@ -51,11 +51,14 @@ export default async function HomePage({
     }),
   ]);
   const usageLimitNotice =
-    usageGate && !usageGate.allowed && usageGate.reason === "ai_usage_limit_exceeded"
-    && usageGate.userNotice
+    usageGate && !usageGate.allowed && usageGate.userNotice
       ? usageGate.userNotice
       : null;
-  const usageLimitResetAt = usageLimitNotice && usageGate && !usageGate.allowed
+  const usageLimitResetAt =
+    usageLimitNotice
+    && usageGate
+    && !usageGate.allowed
+    && usageGate.reason === "ai_usage_limit_exceeded"
     ? usageGate.retryAfter
     : null;
 

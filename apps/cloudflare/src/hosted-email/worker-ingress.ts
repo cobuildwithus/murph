@@ -1,4 +1,8 @@
-import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import {
+  emitHostedExecutionStructuredLog,
+  HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
+  type HostedExecutionEmailAttachmentSummary,
+} from "@murphai/hosted-execution";
 import { readHostedEmailCapabilities } from "@murphai/hosted-execution/hosted-email";
 import {
   parseRawEmailMessage,
@@ -6,7 +10,6 @@ import {
   type ParsedEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
 import type { HostedEmailAuthenticatedSenderVerdict } from "@murphai/runtime-state";
-import type { HostedExecutionEmailAttachmentSummary } from "@murphai/hosted-execution";
 import {
   buildParsedEmailThreadTarget,
   resolveParsedEmailThreadKey,
@@ -299,7 +302,6 @@ const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
 const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
 const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
-const HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS = 320;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
 

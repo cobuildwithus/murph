@@ -1,16 +1,12 @@
 import { getPrisma } from "@/src/lib/prisma";
 import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import {
-  assertHostedMemberNotSuspended,
-  hasHostedMemberActiveAccess,
-} from "@/src/lib/hosted-onboarding/entitlement";
+import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberTelegramRoutingBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import {
-  enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberEmailLinked,
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
@@ -57,14 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const prisma = getPrisma();
-  const shouldDispatchChannelsUpdate = hasHostedMemberActiveAccess(auth.member);
   const now = new Date();
-  const emailLinked = shouldDispatchChannelsUpdate
-    ? await resolveHostedMemberEmailLinked({
-      linkedAccounts: auth.linkedAccounts,
-      memberId: auth.member.id,
-    })
-    : false;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: auth.member.id,
@@ -72,12 +61,8 @@ export const POST = withJsonError(async (request: Request) => {
       telegramUserId: telegramAccount.telegramUserId,
     });
 
-    if (!shouldDispatchChannelsUpdate) {
-      return null;
-    }
-
-    return enqueueHostedMemberChannelsUpdatedTx({
-      emailLinked,
+    return enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+      linkedAccounts: auth.linkedAccounts,
       memberId: auth.member.id,
       occurredAt: now.toISOString(),
       prisma: tx,

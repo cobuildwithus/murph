@@ -87,6 +87,22 @@ describe("device sync messaging return route", () => {
     expect(html).toContain("Oura is connected");
   });
 
+  it("does not auto-open a connected-success message when device connection returns an error", async () => {
+    process.env.TELEGRAM_BOT_USERNAME = "@murph_bot";
+
+    const response = GET(new Request(
+      "https://join.example.test/api/device-sync/messaging-return?target=telegram&deviceSyncStatus=error&deviceSyncProvider=oura",
+    ));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Oura connection did not finish");
+    expect(html).not.toContain("http-equiv=\"refresh\"");
+    expect(html).not.toContain("I+just+connected+my+Oura");
+    expect(html).not.toContain(">Text Murph</a>");
+    expect(html).toContain('href="/home"');
+  });
+
   it("falls back to the Murph Telegram bot when a configured bot username is unavailable", async () => {
     delete process.env.TELEGRAM_BOT_USERNAME;
 

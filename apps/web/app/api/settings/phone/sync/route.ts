@@ -4,13 +4,11 @@ import { readHostedPhoneHint } from "@/src/lib/hosted-onboarding/contact-privacy
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import {
   assertHostedMemberNotSuspended,
-  hasHostedMemberActiveAccess,
 } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberEmailLinked,
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { reconcileHostedPrivyIdentityOnMemberTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
@@ -32,14 +30,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const prisma = getPrisma();
-  const shouldDispatchChannelsUpdate = hasHostedMemberActiveAccess(auth.member);
   const now = new Date();
-  const emailLinked = shouldDispatchChannelsUpdate
-    ? await resolveHostedMemberEmailLinked({
-      linkedAccounts: auth.linkedAccounts,
-      memberId: auth.member.id,
-    })
-    : false;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
     await reconcileHostedPrivyIdentityOnMemberTx({
       identity: auth.identity,
@@ -48,12 +39,8 @@ export const POST = withJsonError(async (request: Request) => {
       prisma: tx,
     });
 
-    if (!shouldDispatchChannelsUpdate) {
-      return null;
-    }
-
-    return enqueueHostedMemberChannelsUpdatedTx({
-      emailLinked,
+    return enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+      linkedAccounts: auth.linkedAccounts,
       memberId: auth.member.id,
       occurredAt: now.toISOString(),
       prisma: tx,

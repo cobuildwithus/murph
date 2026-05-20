@@ -63,6 +63,16 @@ describe("hosted email ingress contract", () => {
     });
   });
 
+  it("accepts the hosted email self address bound produced by the Cloudflare ingress worker", () => {
+    expect(parseHostedEmailIngressWakeAppendRequest({
+      eventId: "evt_email",
+      identityId: null,
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      rawMessageKey: "raw_123",
+      selfAddress: "x".repeat(320),
+    }).selfAddress).toBe("x".repeat(320));
+  });
+
   it("rejects email prompt projection fields outside ingress bounds", () => {
     const base = {
       eventId: "evt_email",
@@ -97,8 +107,8 @@ describe("hosted email ingress contract", () => {
     })).toThrow(/messageId must be at most 512 characters/u);
     expect(() => parseHostedEmailIngressWakeAppendRequest({
       ...base,
-      selfAddress: "x".repeat(161),
-    })).toThrow(/selfAddress must be at most 160 characters/u);
+      selfAddress: "x".repeat(321),
+    })).toThrow(/selfAddress must be at most 320 characters/u);
     expect(() => parseHostedEmailIngressWakeAppendRequest({
       ...base,
       threadKey: "x".repeat(513),
