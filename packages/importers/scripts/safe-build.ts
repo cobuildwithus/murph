@@ -42,14 +42,24 @@ export type SafeBuildOptions = {
   runBuildCommand?: (context: BuildCommandContext) => BuildCommandResult;
 };
 
-function listFiles(root: string): string[] {
+function formatRelativePath(rootPath: string, candidatePath: string): string {
+  const relativePath = path.relative(rootPath, candidatePath);
+  if (!containsRelativePath(relativePath)) {
+    return "<outside-package>";
+  }
+  return relativePath.split(path.sep).join(path.posix.sep);
+}
+
+function listFiles(root: string, packageRoot = root): string[] {
   if (!existsSync(root)) {
     return [];
   }
 
   const rootStat = lstatSync(root);
   if (rootStat.isSymbolicLink()) {
-    throw new Error(`Refusing to publish symlinked TypeScript output root: ${root}`);
+    throw new Error(
+      `Refusing to publish symlinked TypeScript output root: ${formatRelativePath(packageRoot, root)}`,
+    );
   }
   if (!rootStat.isDirectory()) {
     return [];
@@ -60,10 +70,12 @@ function listFiles(root: string): string[] {
     const fullPath = path.join(root, entry);
     const stat = lstatSync(fullPath);
     if (stat.isSymbolicLink()) {
-      throw new Error(`Refusing to publish symlink from TypeScript output: ${fullPath}`);
+      throw new Error(
+        `Refusing to publish symlink from TypeScript output: ${formatRelativePath(packageRoot, fullPath)}`,
+      );
     }
     if (stat.isDirectory()) {
-      files.push(...listFiles(fullPath));
+      files.push(...listFiles(fullPath, packageRoot));
       continue;
     }
     if (stat.isFile()) {
@@ -79,7 +91,9 @@ function containsRelativePath(relativePath: string): boolean {
 
 function assertPathInside(rootPath: string, candidatePath: string): void {
   if (!containsRelativePath(path.relative(rootPath, candidatePath))) {
-    throw new Error(`Refusing to write outside package build output: ${candidatePath}`);
+    throw new Error(
+      `Refusing to write outside package build output: ${formatRelativePath(rootPath, candidatePath)}`,
+    );
   }
 }
 
@@ -136,8 +150,8 @@ function restoreInterruptedPublish(packageRoot: string, distPath: string): void 
 }
 
 export function syncBuiltDist(tempDistPath: string, distPath: string): void {
-  const tempFiles = listFiles(tempDistPath);
   const packageRoot = path.dirname(distPath);
+  const tempFiles = listFiles(tempDistPath, packageRoot);
   const publishTempRoot = mkdtempSync(path.join(packageRoot, publishTempPrefix));
 
   try {

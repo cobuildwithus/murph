@@ -358,6 +358,10 @@ async function createHostedWorkspaceV2Snapshot(
       plan: input.legacyMaterialization,
       vaultRoot: input.vaultRoot,
     });
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
+    });
     const encrypted = await createEncryptedWorkspaceSnapshotFile({
       aad: snapshotSession.encryption.aad,
       dataKey: snapshotSession.encryption.dataKeyBase64,

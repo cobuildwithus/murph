@@ -3460,6 +3460,60 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects workspace snapshot completion when R2 HEAD checksum mismatches", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_checksum_mismatch";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: { sha256: hexToBytes("b".repeat(64)) },
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot object metadata does not match its ref.",
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects workspace snapshot completion when checkpoint reason is not idle_shutdown", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_non_idle";

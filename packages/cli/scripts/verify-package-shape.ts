@@ -174,7 +174,7 @@ assert(
     packageJson.scripts?.['verify:prepared-runtime'] ===
       'pnpm --dir ../.. build:test-runtime:prepared' &&
     packageJson.scripts?.build ===
-      'node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force' &&
+      'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.build.json' &&
     packageJson.scripts?.['verify:package-shape'] ===
       'pnpm build && node --import=tsx ./scripts/verify-package-shape.ts' &&
     packageJson.scripts?.['test:built-runtime'] ===

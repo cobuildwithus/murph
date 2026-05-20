@@ -1,4 +1,4 @@
-import { type EventSource } from "@murphai/contracts";
+import type { EventSource } from "@murphai/contracts";
 import { z } from "zod";
 
 import { assertCanonicalWritePort } from "./core-port.ts";

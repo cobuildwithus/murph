@@ -88,6 +88,7 @@ describe("hosted workspace restore Codex continuity", () => {
       assert.deepEqual(artifactGetCalls, []);
       assert.equal(restoreCalls.length, 1);
       assert.equal(restoreCalls[0]?.ref, snapshotRef);
+      assert.equal(restoreCalls[0]?.scratchRoot, path.join(workspaceRoot, "restored-vault-scratch"));
       assert.equal(
         await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
         "restored from v2\n",

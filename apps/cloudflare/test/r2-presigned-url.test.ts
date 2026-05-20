@@ -54,6 +54,38 @@ describe("R2 presigned URL helpers", () => {
     expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
   });
 
+  it("binds signed checksum header values into the PUT signature", async () => {
+    const baseInput = {
+      contentType: "application/octet-stream",
+      environment: {
+        accessKeyId: "AKIDEXAMPLE",
+        bucketName: "snapshot-bucket",
+        endpoint: "https://example-account.r2.cloudflarestorage.com",
+        secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      },
+      expiresSeconds: 600,
+      key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
+      metadata: {
+        encryptedsha256: "a".repeat(64),
+        schema: "murph.hosted-workspace-snapshot.v2",
+        snapshotid: "snapshot-1",
+      },
+      now: new Date("2026-05-20T12:34:56.000Z"),
+    } as const;
+    const left = await createHostedR2PresignedPutUrl({
+      ...baseInput,
+      checksumSha256Base64: Buffer.from("a".repeat(64), "hex").toString("base64"),
+    });
+    const right = await createHostedR2PresignedPutUrl({
+      ...baseInput,
+      checksumSha256Base64: Buffer.from("b".repeat(64), "hex").toString("base64"),
+    });
+
+    expect(new URL(left.url).searchParams.get("X-Amz-Signature")).not.toBe(
+      new URL(right.url).searchParams.get("X-Amz-Signature"),
+    );
+  });
+
   it("creates presigned GET URLs with only the host header signed", async () => {
     const result = await createHostedR2PresignedGetUrl({
       environment: {
