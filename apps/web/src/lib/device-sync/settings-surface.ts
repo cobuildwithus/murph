@@ -589,14 +589,6 @@ export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
   upstreamSources: readonly Pick<HostedDeviceSyncSettingsUpstreamSource, "sourceProviderSlug">[];
 }): HostedDeviceSyncSettingsConnectTarget | null {
   const provider = normalizeProviderKey(input.connection.provider);
-  const directTarget = input.targets.find((target) =>
-    normalizeProviderKey(target.provider) === provider
-    && normalizeProviderKey(target.connectTarget) === provider
-  );
-
-  if (directTarget) {
-    return directTarget;
-  }
 
   for (const upstreamSource of input.upstreamSources) {
     const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
@@ -608,6 +600,15 @@ export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
     if (target) {
       return target;
     }
+  }
+
+  const directTarget = input.targets.find((target) =>
+    normalizeProviderKey(target.provider) === provider
+    && normalizeProviderKey(target.connectTarget) === provider
+  );
+
+  if (directTarget) {
+    return directTarget;
   }
 
   return null;

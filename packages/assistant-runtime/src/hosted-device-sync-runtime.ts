@@ -118,6 +118,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         "Hosted control plane marked the device-sync connection as disconnected.",
       );
     }
+    if (stored.status === "reauthorization_required" && existing?.status !== "reauthorization_required") {
+      store.markPendingJobsDeadForAccount(
+        stored.id,
+        now,
+        "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
+        "Hosted control plane marked the device-sync connection as requiring reconnection.",
+      );
+    }
 
     state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
@@ -987,6 +995,7 @@ function buildHostedAccountHydrationInput(input: {
       existing: input.existing,
       hostedLocalState,
       hostedStateAdvanced,
+      status: connection.status,
     }),
     ...(hostedTokenBundle && !hostedTokenStateStale && !hostedTokenStateReplayed
       ? {
@@ -1166,6 +1175,7 @@ function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  status: StoredDeviceSyncAccount["status"];
 }): {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -1355,7 +1365,12 @@ function resolveHydratedNextReconcileAt(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  status: StoredDeviceSyncAccount["status"];
 }): string | null {
+  if (input.status === "disconnected" || input.status === "reauthorization_required") {
+    return null;
+  }
+
   const localNextReconcileAt = input.existing?.nextReconcileAt ?? null;
   const hostedNextReconcileAt = input.hostedLocalState.nextReconcileAt ?? null;
 

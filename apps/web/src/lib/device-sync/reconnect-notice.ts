@@ -1,7 +1,7 @@
 import "server-only";
 
 import {
-  listConfiguredDeviceSyncConnectTargets,
+  listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
 } from "@murphai/device-syncd/connect-config";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
@@ -129,7 +129,7 @@ export async function appendHostedDeviceSyncReconnectNoticeTx(input: {
     connectSourceId: target.connectSourceId,
     connectTarget: target.connectTarget,
     memberId: input.userId,
-    now: new Date(input.appliedAt),
+    now: new Date(),
     provider: target.provider,
     request: input.request,
     sourceProviderSlug: target.sourceProviderSlug ?? null,
@@ -138,7 +138,7 @@ export async function appendHostedDeviceSyncReconnectNoticeTx(input: {
   });
   const message = buildHostedDeviceSyncReconnectNoticeMessage({
     providerLabel: resolveHostedDeviceSyncReconnectNoticeProviderLabel(input.connection),
-    url: intent.deviceConnectUrl,
+    url: intent.connectUrl,
   });
   const wake = buildHostedExecutionAssistantNotificationRequestedWake({
     eventId,
@@ -167,6 +167,7 @@ export async function appendHostedDeviceSyncReconnectNoticeTx(input: {
     eventCode: "device-sync.reconnect_notice_created",
     failureCode: input.failureCode,
     outcome: append.inserted ? "inserted" : "duplicate",
+    target,
     tx: input.tx,
     userId: input.userId,
   });
@@ -195,7 +196,7 @@ export async function startHostedDeviceSyncReconnectNoticeWorkflowBestEffort(
 }
 
 function resolveHostedDeviceSyncReconnectTarget(connection: PublicDeviceSyncAccount) {
-  const targets = listConfiguredDeviceSyncConnectTargets(
+  const targets = listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
   );
 
@@ -251,6 +252,12 @@ async function recordHostedDeviceSyncReconnectNoticeLogTx(input: {
   eventCode: string;
   failureCode: string | null;
   outcome: string;
+  target?: {
+    connectSourceId: string;
+    connectTarget: string;
+    provider: string;
+    sourceProviderSlug?: string | null;
+  } | null;
   tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<void> {
@@ -264,6 +271,14 @@ async function recordHostedDeviceSyncReconnectNoticeLogTx(input: {
       phase: "invoke",
       redacted: {
         ...(input.channel ? { channel: input.channel } : {}),
+        ...(input.target
+          ? {
+              connectSourceId: input.target.connectSourceId,
+              connectTarget: input.target.connectTarget,
+              sourceProviderSlug: input.target.sourceProviderSlug ?? null,
+              targetProvider: input.target.provider,
+            }
+          : {}),
         failureCode: input.failureCode,
         outcome: input.outcome,
         provider: input.connection.provider,

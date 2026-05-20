@@ -2315,6 +2315,13 @@ describe("hosted device-sync runtime", () => {
           nextReconcileAt: "2026-04-06T10:00:00.000Z",
         },
       });
+      getStore(service).enqueueJob({
+        accountId: connected.account.id,
+        availableAt: "2026-04-06T09:09:00.000Z",
+        kind: "pending-before-reauth",
+        payload: {},
+        provider: "demo",
+      });
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
@@ -2330,7 +2337,68 @@ describe("hosted device-sync runtime", () => {
       const stored = getStore(service).getAccountById(connected.account.id);
       assert.equal(stored?.status, "reauthorization_required");
       assert.equal(stored?.nextReconcileAt, null);
-      assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
+      assert.deepEqual(readJobsForAccount(service, connected.account.id).map((job) => ({
+        code: job.lastErrorCode,
+        status: job.status,
+      })), [{
+        code: "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
+        status: "dead",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("snapshot hydration dead-letters pending jobs for reauthorization-required accounts", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "reauthorize",
+        provider: "demo",
+        state: begin.state,
+      });
+      getStore(service).enqueueJob({
+        accountId: connected.account.id,
+        availableAt: "2026-04-06T09:09:00.000Z",
+        kind: "pending-before-hydration-reauth",
+        payload: {},
+        provider: "demo",
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+          connectionId: "hosted_conn_reauth_snapshot",
+          externalAccountId: connected.account.externalAccountId,
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
+          },
+          status: "reauthorization_required",
+        })),
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const stored = getStore(service).getAccountById(connected.account.id);
+      assert.equal(stored?.status, "reauthorization_required");
+      assert.equal(stored?.nextReconcileAt, null);
+      assert.deepEqual(readJobsForAccount(service, connected.account.id).map((job) => ({
+        code: job.lastErrorCode,
+        status: job.status,
+      })), [{
+        code: "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
+        status: "dead",
+      }]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -2778,7 +2846,7 @@ describe("hosted device-sync runtime", () => {
         local: true,
       });
       assert.deepEqual(stored.scopes, ["offline", "read:data", "manual"]);
-      assert.equal(stored.nextReconcileAt, "2026-04-06T11:00:00.000Z");
+      assert.equal(stored.nextReconcileAt, null);
       assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 5);
       const storedCredential = requireStoredOAuthCredential(stored);
@@ -2954,7 +3022,7 @@ describe("hosted device-sync runtime", () => {
         local: true,
       });
       assert.deepEqual(stored.scopes, ["offline", "read:data", "manual"]);
-      assert.equal(stored.nextReconcileAt, "2026-04-06T11:00:00.000Z");
+      assert.equal(stored.nextReconcileAt, null);
       assert.equal(stored.hostedObservedUpdatedAt, "2026-04-06T09:10:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 5);
       assert.equal(stored.lastErrorCode, "REPLAY_IGNORED");
@@ -3124,7 +3192,13 @@ describe("hosted device-sync runtime", () => {
 
       assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
         occurredAt: "2026-04-06T09:13:00.000Z",
-        updates: [],
+        updates: [{
+          connectionId: "hosted_conn_same_wake_replay",
+          localState: {
+            nextReconcileAt: null,
+          },
+          observedUpdatedAt: "2026-04-06T09:10:00.000Z",
+        }],
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

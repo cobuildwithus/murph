@@ -162,6 +162,17 @@ function buildStoredAccount(
 }
 
 function createAuthorityHarness(input: {
+  connectionSources?: Array<{
+    connectionId: string;
+    displayName: string | null;
+    firstSeenAt: string;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    lastSeenAt: string | null;
+    resourceAvailabilitySummary: Record<string, unknown>;
+    sourceProviderSlug: string;
+    status: "connected" | "disconnected" | "error" | "unavailable";
+  }>;
   record?: ReturnType<typeof buildHostedRecord>;
   storedAccount?: ReturnType<typeof buildStoredAccount> | null;
 } = {}) {
@@ -245,7 +256,7 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
-    listConnectionSources: vi.fn(async () => []),
+    listConnectionSources: vi.fn(async () => input.connectionSources ?? []),
     persistStoredConnectionTokenBundle,
     prisma: {
       deviceConnection: {
@@ -627,6 +638,77 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(mocks.startHostedDeviceSyncReconnectNoticeWorkflowBestEffort).toHaveBeenCalledWith(
       "hmi_reconnect_123",
     );
+  });
+
+  it("passes stored connection sources to reconnect notice creation for Junction-backed recovery", async () => {
+    createAuthorityHarness({
+      connectionSources: [{
+        connectionId: "conn_junction",
+        displayName: null,
+        firstSeenAt: "2026-05-01T00:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-05-19T22:00:00.000Z",
+        resourceAvailabilitySummary: { sleep: 1 },
+        sourceProviderSlug: "garmin",
+        status: "error",
+      }],
+      record: buildHostedRecord({
+        id: "conn_junction",
+        provider: "junction",
+        updatedAt: "2026-05-19T22:00:44.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          occurredAt: "2026-05-19T22:03:28.000Z",
+          updates: [
+            {
+              connection: {
+                status: "reauthorization_required",
+              },
+              connectionId: "conn_junction",
+              failureDiagnostic: {
+                accountStatus: "reauthorization_required",
+                code: "JUNCTION_TOKEN_REQUEST_FAILED",
+                details: {},
+                retryable: false,
+              },
+              localState: {
+                lastErrorCode: "JUNCTION_TOKEN_REQUEST_FAILED",
+                lastErrorMessage: "Junction token request failed.",
+                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+                nextReconcileAt: null,
+              },
+              observedTokenVersion: null,
+              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(mocks.appendHostedDeviceSyncReconnectNoticeTx).toHaveBeenCalledWith(expect.objectContaining({
+      connection: expect.objectContaining({
+        id: "conn_junction",
+        provider: "junction",
+        sources: [expect.objectContaining({
+          resourceCount: 1,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        })],
+        status: "reauthorization_required",
+      }),
+      failureCode: "JUNCTION_TOKEN_REQUEST_FAILED",
+    }));
   });
 
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {

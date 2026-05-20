@@ -2584,6 +2584,47 @@ test("device sync store migrates existing OAuth state tables to preserve owner b
   }
 });
 
+test("device sync store clears next reconcile when sync failure preserves an existing terminal status", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-terminal-failure");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-terminal-failure",
+      displayName: "Demo",
+      scopes: ["offline"],
+      status: "reauthorization_required",
+      tokens: {
+        accessToken: "terminal-access",
+        accessTokenEncrypted: "enc:terminal-access",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    store.markSyncFailed(
+      account.id,
+      "2026-04-07T01:00:00.000Z",
+      "SYNC_FAILED",
+      "Sync failed.",
+      null,
+    );
+
+    const failed = store.getAccountById(account.id);
+    assert.equal(failed?.status, "reauthorization_required");
+    assert.equal(failed?.lastErrorCode, "SYNC_FAILED");
+    assert.equal(failed?.lastErrorMessage, "Sync failed.");
+    assert.equal(failed?.nextReconcileAt, null);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store hydrates new hosted accounts, guards token updates, and respects running-job ownership", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-insert");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

@@ -267,6 +267,48 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("uses the Junction reconnect target when direct and Junction targets share a visible source", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_junction_whoop",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-04-03T08:00:00.000Z",
+        resourceCount: 1,
+        sourceProviderSlug: "whoop",
+        status: "unavailable",
+      }],
+      connectTargets: [
+        {
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          provider: "whoop",
+          sourceProviderSlug: null,
+        },
+        {
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          provider: "junction",
+          sourceProviderSlug: "whoop",
+        },
+      ],
+      connections: [buildConnection({
+        id: "dspc_junction_whoop",
+        provider: "junction",
+        status: "reauthorization_required",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      provider: "junction",
+      state: "reauthorization_required",
+    });
+  });
+
   it("keeps pending external-link setup separate from the active lifecycle state", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({

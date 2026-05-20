@@ -507,6 +507,12 @@ class DeviceSyncServiceController {
         null,
         false,
       );
+      this.store.markPendingJobsDeadForAccount(
+        storedAccount.id,
+        now,
+        "ACCOUNT_REAUTHORIZATION_REQUIRED",
+        "Device sync account requires reconnection before queued jobs can run.",
+      );
       return job;
     }
 

@@ -289,8 +289,11 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.sources.upsertConnectionSource(input);
   }
 
-  async listConnectionSources(connectionId: string): Promise<HostedDeviceConnectionSource[]> {
-    return this.sources.listConnectionSources(connectionId);
+  async listConnectionSources(
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    return this.sources.listConnectionSources(connectionId, tx);
   }
 
   async consumeBrowserAssertionNonce(input: {

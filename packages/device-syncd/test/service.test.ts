@@ -1081,9 +1081,18 @@ test("device sync service worker handles missing providers, disconnected jobs, a
     payload: {},
     availableAt: "2026-03-17T10:00:02.000Z",
   });
+  const reauthFollowupJob = store.enqueueJob({
+    accountId: reauthAccount.id,
+    provider: "demo",
+    kind: "sync-followup",
+    payload: {},
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
   await service.runWorkerOnce();
   assert.equal(store.getJobById(reauthJob.id)?.status, "dead");
   assert.equal(store.getJobById(reauthJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
+  assert.equal(store.getJobById(reauthFollowupJob.id)?.status, "dead");
+  assert.equal(store.getJobById(reauthFollowupJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
 
   close();
 });
