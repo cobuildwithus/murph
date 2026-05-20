@@ -1039,7 +1039,7 @@ function normalizeExecutionError(error: unknown): {
     return {
       code: error.code,
       details: buildDeviceSyncErrorFailureDiagnostics(error),
-      message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
+      message: summarizeDeviceSyncErrorMessage(error),
       retryable: error.retryable,
       accountStatus: error.accountStatus,
     };
@@ -1062,6 +1062,16 @@ function normalizeExecutionError(error: unknown): {
   };
 }
 
+function summarizeDeviceSyncErrorMessage(error: DeviceSyncError): string {
+  const baseMessage = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
+  const providerReason = readSafeDiagnosticText(error.details?.oauthErrorDescription);
+  if (!providerReason) {
+    return baseMessage;
+  }
+
+  return sanitizeHostedRuntimeErrorText(`${baseMessage} Provider reason: ${providerReason}`) ?? baseMessage;
+}
+
 function buildDeviceSyncErrorFailureDiagnostics(
   error: DeviceSyncError,
 ): DeviceSyncJobFailureDiagnostic["details"] {
@@ -1071,6 +1081,23 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
     providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
     providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),
+    providerOAuthRequestClientCredentialPresent: readSafeDiagnosticBoolean(
+      error.details?.oauthRequestClientCredentialPresent,
+    ),
+    providerOAuthRequestClientIdPresent: readSafeDiagnosticBoolean(error.details?.oauthRequestClientIdPresent),
+    providerOAuthRequestEncodingKind: readSafeDiagnosticToken(error.details?.oauthRequestEncodingKind),
+    providerOAuthRequestOfflineScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestOfflineScopePresent),
+    providerOAuthRequestParameterCount: readSafeDiagnosticNumber(error.details?.oauthRequestParameterCount),
+    providerOAuthRequestRefreshCredentialPresent: readSafeDiagnosticBoolean(
+      error.details?.oauthRequestRefreshCredentialPresent,
+    ),
+    providerOAuthRequestScopeCount: readSafeDiagnosticNumber(error.details?.oauthRequestScopeCount),
+    providerOAuthRequestScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestScopePresent),
+    providerOAuthResponseErrorDescriptionFieldPresent: readSafeDiagnosticBoolean(
+      error.details?.oauthResponseErrorDescriptionFieldPresent,
+    ),
+    providerOAuthResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.oauthResponseErrorFieldPresent),
+    providerOAuthResponseShapeKind: readSafeDiagnosticToken(error.details?.oauthResponseShapeKind),
   });
 }
 
@@ -1101,6 +1128,37 @@ function compactFailureDiagnostics(
   setFailureDiagnosticDetail(output, "providerOAuthErrorCode", input.providerOAuthErrorCode);
   setFailureDiagnosticDetail(output, "providerOAuthErrorDescription", input.providerOAuthErrorDescription);
   setFailureDiagnosticDetail(output, "providerOAuthGrantType", input.providerOAuthGrantType);
+  setFailureDiagnosticDetail(
+    output,
+    "providerOAuthRequestClientCredentialPresent",
+    input.providerOAuthRequestClientCredentialPresent,
+  );
+  setFailureDiagnosticDetail(output, "providerOAuthRequestClientIdPresent", input.providerOAuthRequestClientIdPresent);
+  setFailureDiagnosticDetail(output, "providerOAuthRequestEncodingKind", input.providerOAuthRequestEncodingKind);
+  setFailureDiagnosticDetail(
+    output,
+    "providerOAuthRequestOfflineScopePresent",
+    input.providerOAuthRequestOfflineScopePresent,
+  );
+  setFailureDiagnosticDetail(output, "providerOAuthRequestParameterCount", input.providerOAuthRequestParameterCount);
+  setFailureDiagnosticDetail(
+    output,
+    "providerOAuthRequestRefreshCredentialPresent",
+    input.providerOAuthRequestRefreshCredentialPresent,
+  );
+  setFailureDiagnosticDetail(output, "providerOAuthRequestScopeCount", input.providerOAuthRequestScopeCount);
+  setFailureDiagnosticDetail(output, "providerOAuthRequestScopePresent", input.providerOAuthRequestScopePresent);
+  setFailureDiagnosticDetail(
+    output,
+    "providerOAuthResponseErrorDescriptionFieldPresent",
+    input.providerOAuthResponseErrorDescriptionFieldPresent,
+  );
+  setFailureDiagnosticDetail(
+    output,
+    "providerOAuthResponseErrorFieldPresent",
+    input.providerOAuthResponseErrorFieldPresent,
+  );
+  setFailureDiagnosticDetail(output, "providerOAuthResponseShapeKind", input.providerOAuthResponseShapeKind);
 
   return output;
 }
@@ -1124,6 +1182,14 @@ function readSafeDiagnosticToken(value: unknown): string | null {
 
   const token = value.trim();
   return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
+}
+
+function readSafeDiagnosticBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readSafeDiagnosticNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function readSafeDiagnosticText(value: unknown): string | null {

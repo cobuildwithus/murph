@@ -61,6 +61,17 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   providerOAuthErrorCode?: string;
   providerOAuthErrorDescription?: string;
   providerOAuthGrantType?: string;
+  providerOAuthRequestClientCredentialPresent?: boolean;
+  providerOAuthRequestClientIdPresent?: boolean;
+  providerOAuthRequestEncodingKind?: string;
+  providerOAuthRequestOfflineScopePresent?: boolean;
+  providerOAuthRequestParameterCount?: number;
+  providerOAuthRequestRefreshCredentialPresent?: boolean;
+  providerOAuthRequestScopeCount?: number;
+  providerOAuthRequestScopePresent?: boolean;
+  providerOAuthResponseErrorDescriptionFieldPresent?: boolean;
+  providerOAuthResponseErrorFieldPresent?: boolean;
+  providerOAuthResponseShapeKind?: string;
 }
 
 export interface DeviceSyncJobFailureDiagnostic {

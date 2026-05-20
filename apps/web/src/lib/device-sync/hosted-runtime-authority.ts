@@ -688,8 +688,73 @@ function buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(
     details.providerOAuthErrorDescription,
   );
   appendHostedRuntimeDiagnosticCode(redacted, "providerOAuthGrantType", details.providerOAuthGrantType);
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestClientCredentialPresent",
+    details.providerOAuthRequestClientCredentialPresent,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestClientIdPresent",
+    details.providerOAuthRequestClientIdPresent,
+  );
+  appendHostedRuntimeDiagnosticCode(
+    redacted,
+    "providerOAuthRequestEncodingKind",
+    details.providerOAuthRequestEncodingKind,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestOfflineScopePresent",
+    details.providerOAuthRequestOfflineScopePresent,
+  );
+  appendHostedRuntimeDiagnosticNumber(
+    redacted,
+    "providerOAuthRequestParameterCount",
+    details.providerOAuthRequestParameterCount,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestRefreshCredentialPresent",
+    details.providerOAuthRequestRefreshCredentialPresent,
+  );
+  appendHostedRuntimeDiagnosticNumber(
+    redacted,
+    "providerOAuthRequestScopeCount",
+    details.providerOAuthRequestScopeCount,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestScopePresent",
+    details.providerOAuthRequestScopePresent,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthResponseErrorDescriptionFieldPresent",
+    details.providerOAuthResponseErrorDescriptionFieldPresent,
+  );
+  appendHostedRuntimeDiagnosticBoolean(
+    redacted,
+    "providerOAuthResponseErrorFieldPresent",
+    details.providerOAuthResponseErrorFieldPresent,
+  );
+  appendHostedRuntimeDiagnosticCode(
+    redacted,
+    "providerOAuthResponseShapeKind",
+    details.providerOAuthResponseShapeKind,
+  );
 
   return redacted;
+}
+
+function appendHostedRuntimeDiagnosticBoolean(
+  redacted: HostedRuntimeRedactedJson,
+  key: string,
+  value: boolean | undefined,
+): void {
+  if (value !== undefined) {
+    redacted[key] = value;
+  }
 }
 
 function appendHostedRuntimeDiagnosticNumber(

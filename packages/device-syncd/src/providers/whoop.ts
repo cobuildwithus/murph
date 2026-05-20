@@ -357,47 +357,104 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-function readOAuthErrorCode(body: string): string | null {
-  return readOAuthStringField(body, "error")?.toLowerCase() ?? null;
+interface WhoopOAuthErrorBodyDiagnostics {
+  errorCode: string | null;
+  errorDescription: string | null;
+  errorDescriptionFieldPresent: boolean;
+  errorFieldPresent: boolean;
+  responseShapeKind: string;
 }
 
-function readOAuthErrorDescription(body: string): string | null {
-  return readOAuthStringField(body, "error_description");
-}
+function inspectOAuthErrorBody(body: string): WhoopOAuthErrorBodyDiagnostics {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return {
+      errorCode: null,
+      errorDescription: null,
+      errorDescriptionFieldPresent: false,
+      errorFieldPresent: false,
+      responseShapeKind: "empty",
+    };
+  }
 
-function readOAuthStringField(body: string, key: "error" | "error_description"): string | null {
   try {
-    const parsed: unknown = JSON.parse(body);
+    const parsed: unknown = JSON.parse(trimmed);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
+      return {
+        errorCode: null,
+        errorDescription: null,
+        errorDescriptionFieldPresent: false,
+        errorFieldPresent: false,
+        responseShapeKind: classifyOAuthJsonShape(parsed),
+      };
     }
 
-    const value = (parsed as Record<string, unknown>)[key];
-    if (typeof value !== "string") {
-      return null;
-    }
+    const record = parsed as Record<string, unknown>;
+    const errorValue = record.error;
+    const errorDescriptionValue = record.error_description;
 
-    return value.trim() || null;
+    return {
+      errorCode: typeof errorValue === "string" ? errorValue.trim().toLowerCase() || null : null,
+      errorDescription: typeof errorDescriptionValue === "string" ? errorDescriptionValue.trim() || null : null,
+      errorDescriptionFieldPresent: Object.prototype.hasOwnProperty.call(record, "error_description"),
+      errorFieldPresent: Object.prototype.hasOwnProperty.call(record, "error"),
+      responseShapeKind: "json_object",
+    };
   } catch {
-    return null;
+    return {
+      errorCode: null,
+      errorDescription: null,
+      errorDescriptionFieldPresent: false,
+      errorFieldPresent: false,
+      responseShapeKind: "non_json",
+    };
   }
 }
 
+function classifyOAuthJsonShape(value: unknown): string {
+  if (value === null) {
+    return "json_null";
+  }
+
+  if (Array.isArray(value)) {
+    return "json_array";
+  }
+
+  return `json_${typeof value}`;
+}
+
 function resolveWhoopTokenRequestAccountStatus(input: {
-  body: string;
   grantType?: string;
+  oauthErrorCode?: string | null;
   response: Response;
 }): "reauthorization_required" | null {
   if (input.grantType !== "refresh_token") {
     return null;
   }
 
-  const oauthErrorCode = readOAuthErrorCode(input.body);
-  if ((input.response.status === 400 || input.response.status === 401) && oauthErrorCode === "invalid_grant") {
+  if ((input.response.status === 400 || input.response.status === 401) && input.oauthErrorCode === "invalid_grant") {
     return "reauthorization_required";
   }
 
   return null;
+}
+
+function buildWhoopTokenRequestDiagnostics(
+  parameters: Record<string, string>,
+): Record<string, boolean | number | string | null | undefined> {
+  const scopes = splitScopes(parameters.scope);
+
+  return {
+    oauthGrantType: parameters.grant_type,
+    oauthRequestClientCredentialPresent: Boolean(parameters.client_secret?.trim()),
+    oauthRequestClientIdPresent: Boolean(parameters.client_id?.trim()),
+    oauthRequestEncodingKind: "form_urlencoded",
+    oauthRequestOfflineScopePresent: scopes.includes("offline"),
+    oauthRequestParameterCount: Object.keys(parameters).length,
+    oauthRequestRefreshCredentialPresent: Boolean(parameters.refresh_token?.trim()),
+    oauthRequestScopeCount: scopes.length,
+    oauthRequestScopePresent: Boolean(parameters.scope?.trim()),
+  };
 }
 
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
@@ -432,20 +489,22 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       timeoutMs,
       parameters,
       buildError: (response, body) => {
-        const oauthErrorCode = readOAuthErrorCode(body);
-        const oauthErrorDescription = readOAuthErrorDescription(body);
+        const oauthErrorBody = inspectOAuthErrorBody(body);
 
         return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: resolveWhoopTokenRequestAccountStatus({
-            body,
             grantType: parameters.grant_type,
+            oauthErrorCode: oauthErrorBody.errorCode,
             response,
           }),
           diagnostics: {
-            ...(oauthErrorCode ? { oauthErrorCode } : {}),
-            ...(oauthErrorDescription ? { oauthErrorDescription } : {}),
-            oauthGrantType: parameters.grant_type,
+            ...buildWhoopTokenRequestDiagnostics(parameters),
+            ...(oauthErrorBody.errorCode ? { oauthErrorCode: oauthErrorBody.errorCode } : {}),
+            ...(oauthErrorBody.errorDescription ? { oauthErrorDescription: oauthErrorBody.errorDescription } : {}),
+            oauthResponseErrorDescriptionFieldPresent: oauthErrorBody.errorDescriptionFieldPresent,
+            oauthResponseErrorFieldPresent: oauthErrorBody.errorFieldPresent,
+            oauthResponseShapeKind: oauthErrorBody.responseShapeKind,
           },
         });
       },

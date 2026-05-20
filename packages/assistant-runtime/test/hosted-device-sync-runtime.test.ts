@@ -943,6 +943,17 @@ describe("hosted device-sync runtime", () => {
                   oauthErrorCode: "invalid_grant",
                   oauthErrorDescription: "Refresh token expired. Reconnect provider.",
                   oauthGrantType: "refresh_token",
+                  oauthRequestClientCredentialPresent: true,
+                  oauthRequestClientIdPresent: true,
+                  oauthRequestEncodingKind: "form_urlencoded",
+                  oauthRequestOfflineScopePresent: true,
+                  oauthRequestParameterCount: 5,
+                  oauthRequestRefreshCredentialPresent: true,
+                  oauthRequestScopeCount: 1,
+                  oauthRequestScopePresent: true,
+                  oauthResponseErrorDescriptionFieldPresent: true,
+                  oauthResponseErrorFieldPresent: true,
+                  oauthResponseShapeKind: "json_object",
                 },
                 httpStatus: 400,
                 message: "Provider token request failed.",
@@ -1033,9 +1044,24 @@ describe("hosted device-sync runtime", () => {
           providerOAuthErrorCode: "invalid_grant",
           providerOAuthErrorDescription: "Refresh token expired. Reconnect provider.",
           providerOAuthGrantType: "refresh_token",
+          providerOAuthRequestClientCredentialPresent: true,
+          providerOAuthRequestClientIdPresent: true,
+          providerOAuthRequestEncodingKind: "form_urlencoded",
+          providerOAuthRequestOfflineScopePresent: true,
+          providerOAuthRequestParameterCount: 5,
+          providerOAuthRequestRefreshCredentialPresent: true,
+          providerOAuthRequestScopeCount: 1,
+          providerOAuthRequestScopePresent: true,
+          providerOAuthResponseErrorDescriptionFieldPresent: true,
+          providerOAuthResponseErrorFieldPresent: true,
+          providerOAuthResponseShapeKind: "json_object",
         },
         retryable: false,
       });
+      assert.equal(
+        request.updates[0]?.localState?.lastErrorMessage,
+        "Provider token request failed. Provider reason: Refresh token expired. Reconnect provider.",
+      );
       assert.equal(request.updates[0]?.localState?.lastSyncErrorAt, failed.lastSyncErrorAt);
       assert.equal(request.updates[0]?.observedUpdatedAt, "2026-04-06T09:15:00.000Z");
     } finally {

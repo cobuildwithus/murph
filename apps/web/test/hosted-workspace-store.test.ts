@@ -1234,6 +1234,17 @@ describe("hosted runtime log store", () => {
       providerOAuthErrorCode: "invalid_grant",
       providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
       providerOAuthGrantType: "refresh_token",
+      providerOAuthRequestClientCredentialPresent: true,
+      providerOAuthRequestClientIdPresent: true,
+      providerOAuthRequestEncodingKind: "form_urlencoded",
+      providerOAuthRequestOfflineScopePresent: true,
+      providerOAuthRequestParameterCount: 5,
+      providerOAuthRequestRefreshCredentialPresent: true,
+      providerOAuthRequestScopeCount: 1,
+      providerOAuthRequestScopePresent: true,
+      providerOAuthResponseErrorDescriptionFieldPresent: true,
+      providerOAuthResponseErrorFieldPresent: true,
+      providerOAuthResponseShapeKind: "json_object",
     };
 
     const result = await recordHostedRuntimeLogTx({
