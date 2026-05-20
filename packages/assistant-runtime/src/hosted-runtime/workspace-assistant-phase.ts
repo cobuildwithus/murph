@@ -312,7 +312,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const preferredInputIds = hasFreshConversationInput
       ? foregroundReplayInputIds
       : input.initialMailboxImport.importResult.assistantInputIds ?? [];
-    const assistantMetrics = await runHostedAssistantRuntimeTimerLane({
+    let assistantMetrics = await runHostedAssistantRuntimeTimerLane({
       executionContext,
       foregroundReplayInputIds,
       foregroundReplayPromptInputIds,
@@ -330,6 +330,21 @@ export async function runHostedWorkspaceAssistantPhase(
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
+    if (shouldRunDeferredLegacyDeviceSyncRecovery({ assistantMetrics, input })) {
+      const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
+        deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        platformEnv: input.runtime.platformEnv,
+        runtimeLogPlatform: input.runtime.platform,
+        resolvedConfig: input.runtime.resolvedConfig,
+        timeoutMs: input.runtime.commitTimeoutMs,
+        vaultRoot: input.restored.vaultRoot,
+        wake,
+      });
+      assistantMetrics = mergeDeferredLegacyDeviceSyncMetrics({
+        assistantMetrics,
+        deviceSyncMetrics,
+      });
+    }
     const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake({
       assistantMetrics,
       input,
@@ -1525,6 +1540,15 @@ function shouldSkipDeviceSyncForAssistantPhase(
   return true;
 }
 
+function isDueHostedDeviceSyncRecoveryAlarm(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return (
+    isDueHostedDeviceSyncReconcileAlarm(input)
+    || isDueHostedLegacyDeviceSyncRecoveryAlarm(input)
+  );
+}
+
 function isDueHostedDeviceSyncReconcileAlarm(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
@@ -1534,10 +1558,10 @@ function isDueHostedDeviceSyncReconcileAlarm(
   );
 }
 
-function isDueHostedLegacyDeviceSyncReconcileAlarm(
+function isDueHostedLegacyDeviceSyncRecoveryAlarm(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  if (!isDueHostedWorkspaceWake(input) || !hasHostedDeviceSyncRuntimeConfigured(input)) {
+  if (!isDueHostedWorkspaceAlarm(input) || !hasHostedDeviceSyncRuntimeConfigured(input)) {
     return false;
   }
 
@@ -1609,13 +1633,6 @@ function resolveSkippedDeviceSyncWake(input: {
     };
   }
 
-  if (shouldRecoverLegacyDeviceSyncReconcileWake(input)) {
-    return {
-      at: new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString(),
-      reason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-    };
-  }
-
   if (shouldRescheduleSkippedDeviceSyncWake(input.input)) {
     return {
       at: new Date(nowMs + HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS).toISOString(),
@@ -1626,11 +1643,11 @@ function resolveSkippedDeviceSyncWake(input: {
   return null;
 }
 
-function shouldRecoverLegacyDeviceSyncReconcileWake(input: {
-  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+function shouldRunDeferredLegacyDeviceSyncRecovery(input: {
+  assistantMetrics: HostedAssistantMetrics;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): boolean {
-  if (!isDueHostedLegacyDeviceSyncReconcileAlarm(input.input)) {
+  if (!isDueHostedLegacyDeviceSyncRecoveryAlarm(input.input)) {
     return false;
   }
 
@@ -1640,11 +1657,47 @@ function shouldRecoverLegacyDeviceSyncReconcileWake(input: {
   });
   return (
     assistantNextWakeAt === null
+    && input.assistantMetrics.activeTurnInputIngested !== true
     && input.assistantMetrics.assistantAutomationProgressed !== true
+    && (input.assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0) === 0
     && input.assistantMetrics.deviceSyncProcessed === 0
     && input.assistantMetrics.parserProcessed === 0
     && (input.assistantMetrics.postCheckpointRecord ?? null) === null
   );
+}
+
+function mergeDeferredLegacyDeviceSyncMetrics(input: {
+  assistantMetrics: HostedAssistantMetrics;
+  deviceSyncMetrics: HostedDeviceSyncWakeMetrics;
+}): HostedAssistantMetrics {
+  const assistantMetrics = { ...input.assistantMetrics };
+  delete assistantMetrics.nextWakeReason;
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      input.assistantMetrics.nextWakeAt,
+      input.assistantMetrics.nextWakeReason ?? null,
+    ),
+    createHostedRuntimeWakeCandidate(
+      input.deviceSyncMetrics.nextWakeAt,
+      input.deviceSyncMetrics.nextWakeReason ?? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(
+      input.deviceSyncMetrics.postCheckpointRecord?.nextWakeAt ?? null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
+
+  return {
+    ...assistantMetrics,
+    deviceSyncElapsedMs: input.deviceSyncMetrics.deviceSyncElapsedMs
+      ?? input.assistantMetrics.deviceSyncElapsedMs
+      ?? null,
+    deviceSyncProcessed: input.deviceSyncMetrics.deviceSyncProcessed,
+    deviceSyncSkipped: input.deviceSyncMetrics.deviceSyncSkipped,
+    nextWakeAt: nextWake.at,
+    ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
+    postCheckpointRecord: input.deviceSyncMetrics.postCheckpointRecord ?? null,
+  };
 }
 
 function shouldRescheduleSkippedDeviceSyncWake(
@@ -2090,6 +2143,10 @@ function hostedAssistantWakeStateProgressed(input: {
     return false;
   }
 
+  if (isDueHostedDeviceSyncRecoveryAlarm(input.input)) {
+    return true;
+  }
+
   return (
     input.nextWakeAt !== null
     || hasFreshHostedConversationInput(input.input)
@@ -2423,7 +2480,7 @@ function shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input: {
   }
 
   const existingWakeReason = input.input.workspace?.nextWakeReason ?? null;
-  if (existingWakeReason !== "assistant") {
+  if (existingWakeReason !== "assistant" && existingWakeReason !== null) {
     return false;
   }
 
