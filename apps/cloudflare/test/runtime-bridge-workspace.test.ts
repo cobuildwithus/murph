@@ -284,6 +284,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "oversized.txt"), "size guard payload\n");
     const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
     const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
     const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
@@ -299,6 +302,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         },
         workspaceSnapshotAborts,
         workspaceSnapshotUploads,
+        writeLog,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -327,6 +331,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       }),
     ]);
     expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          safeErrorDetail: "Hosted workspace snapshot exceeds the configured size limit.",
+          snapshotMode: "workspace_snapshot_v2",
+        }),
+      }),
+    );
   });
 
   it("keeps live raw files inside the encrypted v2 snapshot when legacy artifact refs are stale", async () => {

@@ -630,6 +630,9 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
     redactedJson.errorDetailPresent = typeof diagnostics.errorDetail === "string";
     redactedJson.errorCausePresent = typeof diagnostics.errorCause === "string";
   }
+  if (safeDiagnosticDetail) {
+    redactedJson.safeErrorDetail = safeDiagnosticDetail;
+  }
 
   const bundleValidation = readHostedBundleArchiveValidationErrorDetails(error);
   if (bundleValidation) {
