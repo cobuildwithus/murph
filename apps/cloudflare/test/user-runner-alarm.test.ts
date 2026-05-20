@@ -995,7 +995,7 @@ describe("HostedUserRunner wake scheduling", () => {
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
   });
 
-  it("uses the same container processing reconciliation from alarms", async () => {
+  it("does not spin mailbox backlog rechecks after an alarm confirms the active runtime", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -1004,7 +1004,7 @@ describe("HostedUserRunner wake scheduling", () => {
         kind: "accepted" as const,
       }),
     );
-    const { invoke, runner, sql } = createRunnerHarness({
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       mailboxLag: [createMailboxLag({
         importedSeq: "700",
@@ -1014,6 +1014,8 @@ describe("HostedUserRunner wake scheduling", () => {
       workspace: createWorkspaceState({ version: "21" }),
     });
     await runner.bindUser("member_123");
+    const activeExpiresAt = "2026-04-27T00:01:00.000Z";
+    const dueBacklogRecheckAt = FIXED_NOW;
     sql.exec(
       `UPDATE runner_meta
        SET active_attempt_id = ?,
@@ -1021,14 +1023,16 @@ describe("HostedUserRunner wake scheduling", () => {
            active_kind = ?,
            active_started_at = ?,
            active_expires_at = ?,
-           active_workspace_version = ?
+           active_workspace_version = ?,
+           wake_at = ?
        WHERE singleton = 1`,
       "attempt_alarm",
       9,
       "runtime",
       FIXED_NOW,
-      "2026-04-27T00:01:00.000Z",
+      activeExpiresAt,
       "21",
+      dueBacklogRecheckAt,
     );
 
     await runner.alarm();
@@ -1046,8 +1050,9 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: "attempt_alarm",
       active_generation: 9,
-      wake_at: "2026-04-27T00:00:01.000Z",
+      wake_at: null,
     });
+    expect(alarms.at(-1)).toBe(activeExpiresAt);
   });
 
   it("keeps alarm-started runtime work attached until the local drive settles", async () => {
