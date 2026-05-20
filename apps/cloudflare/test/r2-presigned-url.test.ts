@@ -3,6 +3,8 @@ import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_R2_CHECKSUM_MODE_ENABLED,
+  HOSTED_R2_CHECKSUM_MODE_HEADER,
   createHostedR2PresignedDeleteUrl,
   createHostedR2PresignedGetUrl,
   createHostedR2PresignedHeadUrl,
@@ -109,6 +111,27 @@ describe("R2 presigned URL helpers", () => {
     expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
   });
 
+  it("can bind S3 checksum mode into presigned HEAD URLs", async () => {
+    const result = await createHostedR2PresignedHeadUrl({
+      checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      environment: {
+        accessKeyId: "AKIDEXAMPLE",
+        bucketName: "snapshot-bucket",
+        endpoint: "https://example-account.r2.cloudflarestorage.com",
+        secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      },
+      expiresSeconds: 600,
+      key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
+      now: new Date("2026-05-20T12:34:56.000Z"),
+    });
+    const url = new URL(result.url);
+
+    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe(
+      `host;${HOSTED_R2_CHECKSUM_MODE_HEADER}`,
+    );
+    expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
+  });
+
   it("derives the default account-scoped R2 endpoint from deploy environment", () => {
     expect(readHostedR2PresignEnvironment({
       HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "access-key",
@@ -156,6 +179,12 @@ describe("R2 presigned URL helpers", () => {
       key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
       now: new Date("2026-05-20T12:34:56.000Z"),
     });
+    const checksumHead = await createHostedR2PresignedHeadUrl({
+      checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      environment,
+      key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
+      now: new Date("2026-05-20T12:34:56.000Z"),
+    });
     verifyLocalS3SigV4QueryUrl({
       accessKeyId: "access-key",
       amzDate: "20260520T123456Z",
@@ -171,6 +200,18 @@ describe("R2 presigned URL helpers", () => {
       accessKeyId: "access-key",
       amzDate: "20260520T123456Z",
       bucketName: "bucket",
+      checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      endpoint: "http://host.docker.internal:9000",
+      expiresSeconds: 600,
+      key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
+      method: "HEAD",
+      secretAccessKey: "secret-key",
+      url: checksumHead.url,
+    });
+    verifyLocalS3SigV4QueryUrl({
+      accessKeyId: "access-key",
+      amzDate: "20260520T123456Z",
+      bucketName: "bucket",
       endpoint: "http://host.docker.internal:9000",
       expiresSeconds: 600,
       key: "users/ns/workspace-snapshots/snapshot-1.snapshot.enc",
@@ -179,6 +220,8 @@ describe("R2 presigned URL helpers", () => {
       url: deleted.url,
     });
     expect(new URL(deleted.url).searchParams.get("X-Amz-Signature"))
+      .not.toBe(new URL(head.url).searchParams.get("X-Amz-Signature"));
+    expect(new URL(checksumHead.url).searchParams.get("X-Amz-Signature"))
       .not.toBe(new URL(head.url).searchParams.get("X-Amz-Signature"));
   });
 
@@ -398,6 +441,7 @@ function verifyLocalS3SigV4QueryUrl(input: {
   accessKeyId: string;
   amzDate: string;
   bucketName: string;
+  checksumMode?: typeof HOSTED_R2_CHECKSUM_MODE_ENABLED;
   endpoint: string;
   expiresSeconds: number;
   key: string;
@@ -410,21 +454,32 @@ function verifyLocalS3SigV4QueryUrl(input: {
   const canonicalUri = `/${encodeSigV4PathSegment(input.bucketName)}/${encodeSigV4ObjectKey(input.key)}`;
   const credentialScope = `${input.amzDate.slice(0, 8)}/auto/s3/aws4_request`;
   const credential = `${input.accessKeyId}/${credentialScope}`;
+  const signedHeaders = [
+    "host",
+    ...(input.checksumMode === undefined ? [] : [HOSTED_R2_CHECKSUM_MODE_HEADER]),
+  ].join(";");
   const expectedQuery = new URLSearchParams({
     "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
     "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
     "X-Amz-Credential": credential,
     "X-Amz-Date": input.amzDate,
     "X-Amz-Expires": String(input.expiresSeconds),
-    "X-Amz-SignedHeaders": "host",
+    "X-Amz-SignedHeaders": signedHeaders,
   });
   const canonicalQuery = canonicalizeSigV4SearchParams(expectedQuery);
+  const canonicalHeaders = [
+    `host:${url.host}`,
+    ...(input.checksumMode === undefined
+      ? []
+      : [`${HOSTED_R2_CHECKSUM_MODE_HEADER}:${input.checksumMode}`]),
+    "",
+  ].join("\n");
   const canonicalRequest = [
     input.method,
     canonicalUri,
     canonicalQuery,
-    [`host:${url.host}`, ""].join("\n"),
-    "host",
+    canonicalHeaders,
+    signedHeaders,
     "UNSIGNED-PAYLOAD",
   ].join("\n");
   const stringToSign = [
@@ -446,7 +501,7 @@ function verifyLocalS3SigV4QueryUrl(input: {
   expect(url.searchParams.get("X-Amz-Credential")).toBe(credential);
   expect(url.searchParams.get("X-Amz-Date")).toBe(input.amzDate);
   expect(url.searchParams.get("X-Amz-Expires")).toBe(String(input.expiresSeconds));
-  expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+  expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe(signedHeaders);
   expect(canonicalizeSigV4SearchParamsWithoutSignature(url.searchParams)).toBe(canonicalQuery);
   expect(url.searchParams.get("X-Amz-Signature")).toBe(signature);
 }

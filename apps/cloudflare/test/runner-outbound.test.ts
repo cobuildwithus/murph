@@ -78,6 +78,10 @@ import {
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
 import {
+  HOSTED_R2_CHECKSUM_MODE_ENABLED,
+  HOSTED_R2_CHECKSUM_MODE_HEADER,
+} from "../src/r2-presigned-url.ts";
+import {
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import {
@@ -3317,6 +3321,7 @@ describe("handleRunnerOutboundRequest", () => {
           accessKeyId: "r2_access_fixture_test",
           amzDate: "20260520T123456Z",
           bucketName: "bundles-test",
+          checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
           endpoint: "http://127.0.0.1:39000",
           expiresSeconds: 60,
           key: objectKey,
@@ -3378,6 +3383,7 @@ describe("handleRunnerOutboundRequest", () => {
       accessKeyId: "r2_access_fixture_test",
       amzDate: "20260520T123456Z",
       bucketName: "bundles-test",
+      checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
       endpoint: "http://127.0.0.1:39000",
       expiresSeconds: 60,
       key: objectKey,
@@ -3386,6 +3392,9 @@ describe("handleRunnerOutboundRequest", () => {
       url: headUrl,
     });
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      headers: {
+        [HOSTED_R2_CHECKSUM_MODE_HEADER]: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      },
       method: "HEAD",
     }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
@@ -3434,6 +3443,18 @@ describe("handleRunnerOutboundRequest", () => {
       const url = new URL(request instanceof Request ? request.url : String(request));
       const method = init?.method ?? (request instanceof Request ? request.method : "GET");
       if (url.origin === "http://127.0.0.1:39000" && method === "HEAD") {
+        verifyLocalS3SigV4QueryUrl({
+          accessKeyId: "r2_access_fixture_test",
+          amzDate: "20260520T123456Z",
+          bucketName: "bundles-test",
+          checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+          endpoint: "http://127.0.0.1:39000",
+          expiresSeconds: 60,
+          key: objectKey,
+          method: "HEAD",
+          secretAccessKey: "r2_signing_fixture_test",
+          url,
+        });
         return new Response(null, {
           headers: {
             "content-length": String(bytes.byteLength),
@@ -3478,6 +3499,12 @@ describe("handleRunnerOutboundRequest", () => {
     });
     expect(bindingHead).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      headers: {
+        [HOSTED_R2_CHECKSUM_MODE_HEADER]: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      },
+      method: "HEAD",
+    }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
@@ -3578,6 +3605,7 @@ describe("handleRunnerOutboundRequest", () => {
           accessKeyId: "r2_access_fixture_test",
           amzDate: "20260520T123456Z",
           bucketName: "bundles-test",
+          checksumMode: HOSTED_R2_CHECKSUM_MODE_ENABLED,
           endpoint: "http://127.0.0.1:39000",
           expiresSeconds: 60,
           key: objectKey,
@@ -3628,6 +3656,12 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace snapshot object size is unavailable.",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      headers: {
+        [HOSTED_R2_CHECKSUM_MODE_HEADER]: HOSTED_R2_CHECKSUM_MODE_ENABLED,
+      },
+      method: "HEAD",
+    }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
@@ -5561,6 +5595,7 @@ function verifyLocalS3SigV4QueryUrl(input: {
   accessKeyId: string;
   amzDate: string;
   bucketName: string;
+  checksumMode?: typeof HOSTED_R2_CHECKSUM_MODE_ENABLED;
   endpoint: string;
   expiresSeconds: number;
   key: string;
@@ -5572,21 +5607,32 @@ function verifyLocalS3SigV4QueryUrl(input: {
   const canonicalUri = `/${encodeSigV4PathSegment(input.bucketName)}/${encodeSigV4ObjectKey(input.key)}`;
   const credentialScope = `${input.amzDate.slice(0, 8)}/auto/s3/aws4_request`;
   const credential = `${input.accessKeyId}/${credentialScope}`;
+  const signedHeaders = [
+    "host",
+    ...(input.checksumMode === undefined ? [] : [HOSTED_R2_CHECKSUM_MODE_HEADER]),
+  ].join(";");
   const expectedQuery = new URLSearchParams({
     "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
     "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
     "X-Amz-Credential": credential,
     "X-Amz-Date": input.amzDate,
     "X-Amz-Expires": String(input.expiresSeconds),
-    "X-Amz-SignedHeaders": "host",
+    "X-Amz-SignedHeaders": signedHeaders,
   });
   const canonicalQuery = canonicalizeSigV4SearchParams(expectedQuery);
+  const canonicalHeaders = [
+    `host:${input.url.host}`,
+    ...(input.checksumMode === undefined
+      ? []
+      : [`${HOSTED_R2_CHECKSUM_MODE_HEADER}:${input.checksumMode}`]),
+    "",
+  ].join("\n");
   const canonicalRequest = [
     input.method,
     canonicalUri,
     canonicalQuery,
-    [`host:${input.url.host}`, ""].join("\n"),
-    "host",
+    canonicalHeaders,
+    signedHeaders,
     "UNSIGNED-PAYLOAD",
   ].join("\n");
   const stringToSign = [
@@ -5608,7 +5654,7 @@ function verifyLocalS3SigV4QueryUrl(input: {
   expect(input.url.searchParams.get("X-Amz-Credential")).toBe(credential);
   expect(input.url.searchParams.get("X-Amz-Date")).toBe(input.amzDate);
   expect(input.url.searchParams.get("X-Amz-Expires")).toBe(String(input.expiresSeconds));
-  expect(input.url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+  expect(input.url.searchParams.get("X-Amz-SignedHeaders")).toBe(signedHeaders);
   expect(canonicalizeSigV4SearchParamsWithoutSignature(input.url.searchParams)).toBe(canonicalQuery);
   expect(input.url.searchParams.get("X-Amz-Signature")).toBe(signature);
 }
