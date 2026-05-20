@@ -293,10 +293,6 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.sources.listConnectionSources(connectionId);
   }
 
-  async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {
-    return this.signals.listSignalsForUser(userId, options);
-  }
-
   async consumeBrowserAssertionNonce(input: {
     nonceHash: string;
     userId: string;

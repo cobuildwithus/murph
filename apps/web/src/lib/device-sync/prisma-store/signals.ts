@@ -35,28 +35,6 @@ export class PrismaHostedSignalStore {
 
     return mapHostedSignalRecord(record);
   }
-
-  async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {
-    const limit = Math.min(500, Math.max(1, options.limit ?? 100));
-    const records = await this.prisma.deviceSyncSignal.findMany({
-      where: {
-        userId,
-        ...(typeof options.afterId === "number"
-          ? {
-              id: {
-                gt: options.afterId,
-              },
-            }
-          : {}),
-      },
-      orderBy: {
-        id: "asc",
-      },
-      take: limit,
-    });
-
-    return records.map((record) => mapHostedSignalRecord(record));
-  }
 }
 
 function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {

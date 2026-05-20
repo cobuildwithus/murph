@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
   handleWebhook: vi.fn(),
-  listSignals: vi.fn(),
   pairAgent: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
@@ -29,13 +28,11 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
 type PairRouteModule = typeof import("../app/api/device-sync/agents/pair/route");
 type RefreshRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
-type SignalsRouteModule = typeof import("../app/api/device-sync/agent/signals/route");
 type WebhookRouteModule = typeof import("../app/api/device-sync/webhooks/[provider]/route");
 
 let exportRoute: ExportRouteModule;
 let pairRoute: PairRouteModule;
 let refreshRoute: RefreshRouteModule;
-let signalsRoute: SignalsRouteModule;
 let webhookRoute: WebhookRouteModule;
 
 describe("hosted device-sync agent and webhook routes", () => {
@@ -43,7 +40,6 @@ describe("hosted device-sync agent and webhook routes", () => {
     exportRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
     pairRoute = await import("../app/api/device-sync/agents/pair/route");
     refreshRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
-    signalsRoute = await import("../app/api/device-sync/agent/signals/route");
     webhookRoute = await import("../app/api/device-sync/webhooks/[provider]/route");
   });
 
@@ -53,7 +49,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
       exportTokenBundle: mocks.exportTokenBundle,
       handleWebhook: mocks.handleWebhook,
-      listSignals: mocks.listSignals,
       pairAgent: mocks.pairAgent,
       readWebhookRawBody: mocks.readWebhookRawBody,
       registry: mocks.webhookRegistry,
@@ -70,22 +65,6 @@ describe("hosted device-sync agent and webhook routes", () => {
     mocks.requireAgentSession.mockResolvedValue({
       id: "dsa_current",
       userId: "user-123",
-    });
-    mocks.listSignals.mockResolvedValue({
-      nextCursor: 9,
-      signals: [
-        {
-          id: 8,
-          kind: "webhook_hint",
-          occurredAt: "2026-03-26T11:59:00.000Z",
-          traceId: "trace_123",
-          eventType: "sleep.updated",
-          resourceCategory: "daily_sleep",
-          reason: null,
-          nextReconcileAt: null,
-          revokeWarning: null,
-        },
-      ],
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
     mocks.pairAgent.mockResolvedValue({
@@ -254,35 +233,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       },
     });
     expect(mocks.refreshTokenBundle).not.toHaveBeenCalled();
-  });
-
-  it("passes the authenticated agent user and returns sparse webhook hints from signals", async () => {
-    const response = await signalsRoute.GET(
-      createBearerRequest("https://example.test/api/device-sync/agent/signals?after=7&limit=2", "active-session-token"),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.listSignals).toHaveBeenCalledTimes(1);
-    expect(mocks.listSignals.mock.calls[0]?.[0]).toBe("user-123");
-    expect(mocks.listSignals.mock.calls[0]?.[1]).toBeInstanceOf(URL);
-    expect(mocks.listSignals.mock.calls[0]?.[1]?.searchParams.get("after")).toBe("7");
-    expect(mocks.listSignals.mock.calls[0]?.[1]?.searchParams.get("limit")).toBe("2");
-    await expect(response.json()).resolves.toEqual({
-      nextCursor: 9,
-      signals: [
-        {
-          id: 8,
-          kind: "webhook_hint",
-          occurredAt: "2026-03-26T11:59:00.000Z",
-          traceId: "trace_123",
-          eventType: "sleep.updated",
-          resourceCategory: "daily_sleep",
-          reason: null,
-          nextReconcileAt: null,
-          revokeWarning: null,
-        },
-      ],
-    });
   });
 
   it("returns Oura webhook verification challenges as JSON", async () => {

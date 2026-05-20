@@ -133,10 +133,6 @@ export class HostedDeviceSyncControlPlane {
     return this.agentSessions.requireAgentSession();
   }
 
-  async listSignals(agentUserId: string, url: URL) {
-    return this.agentSessions.listSignals(agentUserId, url);
-  }
-
   async exportTokenBundle(
     session: HostedAgentSessionRecord,
     connectionId: string,

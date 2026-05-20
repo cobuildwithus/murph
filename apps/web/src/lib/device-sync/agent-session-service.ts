@@ -31,7 +31,7 @@ import {
   persistProviderTokenRefreshErrorStatus,
   refreshProviderTokens,
 } from "./agent-session-token-refresh";
-import { parseInteger, toIsoTimestamp } from "./shared";
+import { toIsoTimestamp } from "./shared";
 
 export type { HostedTokenExport } from "./agent-session-token-bundle";
 
@@ -101,20 +101,6 @@ export class HostedDeviceSyncAgentSessionService {
     token: string;
   }> {
     return this.agentSessions.createAgentSession(user, label);
-  }
-
-  async listSignals(agentUserId: string, url: URL) {
-    const afterId = parseInteger(url.searchParams.get("after"));
-    const limit = parseInteger(url.searchParams.get("limit")) ?? 100;
-    const signals = await this.store.listSignalsForUser(agentUserId, {
-      afterId: afterId ?? undefined,
-      limit,
-    });
-
-    return {
-      signals,
-      nextCursor: signals.length > 0 ? signals[signals.length - 1].id : afterId,
-    };
   }
 
   async exportTokenBundle(

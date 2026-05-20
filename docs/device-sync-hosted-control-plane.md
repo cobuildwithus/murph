@@ -191,11 +191,9 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 ### Hosted local-agent routes
 
-- `GET /api/device-sync/agent/signals?after=<cursor>`
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
 - `POST /api/device-sync/agent/session/revoke`
-- `POST /api/device-sync/agent/signals/ack`
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
 
 These are authenticated by local-agent credentials, not browser cookies.

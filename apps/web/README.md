@@ -522,7 +522,6 @@ Public provider-facing routes:
 
 Local-agent routes:
 
-- `GET /api/device-sync/agent/signals`
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
