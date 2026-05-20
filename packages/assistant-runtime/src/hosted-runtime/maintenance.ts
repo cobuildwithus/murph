@@ -1105,6 +1105,64 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
   };
 }
 
+type DeviceSyncFailureDiagnosticDetails = DeviceSyncJobFailureDiagnostic["details"];
+type DeviceSyncFailureDiagnosticStringField = {
+  [Key in keyof DeviceSyncFailureDiagnosticDetails]: DeviceSyncFailureDiagnosticDetails[Key] extends string | undefined
+    ? Key
+    : never;
+}[keyof DeviceSyncFailureDiagnosticDetails];
+type DeviceSyncFailureDiagnosticNumberField = {
+  [Key in keyof DeviceSyncFailureDiagnosticDetails]: DeviceSyncFailureDiagnosticDetails[Key] extends number | undefined
+    ? Key
+    : never;
+}[keyof DeviceSyncFailureDiagnosticDetails];
+type DeviceSyncFailureDiagnosticBooleanField = {
+  [Key in keyof DeviceSyncFailureDiagnosticDetails]: DeviceSyncFailureDiagnosticDetails[Key] extends boolean | undefined
+    ? Key
+    : never;
+}[keyof DeviceSyncFailureDiagnosticDetails];
+
+const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
+  "failureCauseCode",
+  "failureCauseName",
+  "failureErrorName",
+  "providerOAuthErrorCode",
+  "providerOAuthGrantType",
+  "providerOAuthRequestBodyBuilderKind",
+  "providerOAuthRequestClientAuthPlacement",
+  "providerOAuthRequestContentType",
+  "providerOAuthRequestEncodingKind",
+  "providerOAuthRequestMethod",
+  "providerOAuthRequestParameterNames",
+  "providerOAuthRequestScopeValue",
+  "providerOAuthRequestTokenEndpointKind",
+  "providerOAuthResponseShapeKind",
+] as const satisfies readonly DeviceSyncFailureDiagnosticStringField[];
+
+const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
+  "failureErrorCause",
+  "providerHttpStatusText",
+  "providerOAuthErrorDescription",
+] as const satisfies readonly DeviceSyncFailureDiagnosticStringField[];
+
+const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
+  "providerHttpStatus",
+  "providerOAuthRequestDuplicateParameterCount",
+  "providerOAuthRequestParameterCount",
+  "providerOAuthRequestScopeCount",
+] as const satisfies readonly DeviceSyncFailureDiagnosticNumberField[];
+
+const DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
+  "providerOAuthRequestClientCredentialPresent",
+  "providerOAuthRequestClientIdPresent",
+  "providerOAuthRequestHasDuplicateParameters",
+  "providerOAuthRequestOfflineScopePresent",
+  "providerOAuthRequestRefreshCredentialPresent",
+  "providerOAuthRequestScopePresent",
+  "providerOAuthResponseErrorDescriptionFieldPresent",
+  "providerOAuthResponseErrorFieldPresent",
+] as const satisfies readonly DeviceSyncFailureDiagnosticBooleanField[];
+
 function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
   diagnostic: DeviceSyncJobFailureDiagnostic | null,
 ): Record<string, boolean | number | string | null> {
@@ -1120,74 +1178,21 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
     redacted.providerAccountStatus = toHostedRuntimeLogCode(diagnostic.accountStatus);
   }
 
-  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureCauseCode", diagnostic.details.failureCauseCode);
-  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureCauseName", diagnostic.details.failureCauseName);
-  appendHostedDeviceSyncFailureDiagnosticReason(redacted, "failureErrorCause", diagnostic.details.failureErrorCause);
-  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "failureErrorName", diagnostic.details.failureErrorName);
-  appendHostedDeviceSyncFailureDiagnosticNumber(redacted, "providerHttpStatus", diagnostic.details.providerHttpStatus);
-  appendHostedDeviceSyncFailureDiagnosticReason(redacted, "providerHttpStatusText", diagnostic.details.providerHttpStatusText);
-  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "providerOAuthErrorCode", diagnostic.details.providerOAuthErrorCode);
-  appendHostedDeviceSyncFailureDiagnosticReason(
-    redacted,
-    "providerOAuthErrorDescription",
-    diagnostic.details.providerOAuthErrorDescription,
-  );
-  appendHostedDeviceSyncFailureDiagnosticCode(redacted, "providerOAuthGrantType", diagnostic.details.providerOAuthGrantType);
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestClientCredentialPresent",
-    diagnostic.details.providerOAuthRequestClientCredentialPresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestClientIdPresent",
-    diagnostic.details.providerOAuthRequestClientIdPresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticCode(
-    redacted,
-    "providerOAuthRequestEncodingKind",
-    diagnostic.details.providerOAuthRequestEncodingKind,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestOfflineScopePresent",
-    diagnostic.details.providerOAuthRequestOfflineScopePresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticNumber(
-    redacted,
-    "providerOAuthRequestParameterCount",
-    diagnostic.details.providerOAuthRequestParameterCount,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestRefreshCredentialPresent",
-    diagnostic.details.providerOAuthRequestRefreshCredentialPresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticNumber(
-    redacted,
-    "providerOAuthRequestScopeCount",
-    diagnostic.details.providerOAuthRequestScopeCount,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestScopePresent",
-    diagnostic.details.providerOAuthRequestScopePresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthResponseErrorDescriptionFieldPresent",
-    diagnostic.details.providerOAuthResponseErrorDescriptionFieldPresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticBoolean(
-    redacted,
-    "providerOAuthResponseErrorFieldPresent",
-    diagnostic.details.providerOAuthResponseErrorFieldPresent,
-  );
-  appendHostedDeviceSyncFailureDiagnosticCode(
-    redacted,
-    "providerOAuthResponseShapeKind",
-    diagnostic.details.providerOAuthResponseShapeKind,
-  );
+  for (const field of DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS) {
+    appendHostedDeviceSyncFailureDiagnosticCode(redacted, field, diagnostic.details[field]);
+  }
+
+  for (const field of DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS) {
+    appendHostedDeviceSyncFailureDiagnosticReason(redacted, field, diagnostic.details[field]);
+  }
+
+  for (const field of DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS) {
+    appendHostedDeviceSyncFailureDiagnosticNumber(redacted, field, diagnostic.details[field]);
+  }
+
+  for (const field of DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS) {
+    appendHostedDeviceSyncFailureDiagnosticBoolean(redacted, field, diagnostic.details[field]);
+  }
 
   return redacted;
 }

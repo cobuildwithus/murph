@@ -1081,18 +1081,31 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
     providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
     providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),
+    providerOAuthRequestBodyBuilderKind: readSafeDiagnosticToken(error.details?.oauthRequestBodyBuilderKind),
+    providerOAuthRequestClientAuthPlacement: readSafeDiagnosticToken(error.details?.oauthRequestClientAuthPlacement),
     providerOAuthRequestClientCredentialPresent: readSafeDiagnosticBoolean(
       error.details?.oauthRequestClientCredentialPresent,
     ),
     providerOAuthRequestClientIdPresent: readSafeDiagnosticBoolean(error.details?.oauthRequestClientIdPresent),
+    providerOAuthRequestContentType: readSafeDiagnosticToken(error.details?.oauthRequestContentType),
+    providerOAuthRequestDuplicateParameterCount: readSafeDiagnosticNumber(
+      error.details?.oauthRequestDuplicateParameterCount,
+    ),
     providerOAuthRequestEncodingKind: readSafeDiagnosticToken(error.details?.oauthRequestEncodingKind),
+    providerOAuthRequestHasDuplicateParameters: readSafeDiagnosticBoolean(
+      error.details?.oauthRequestHasDuplicateParameters,
+    ),
+    providerOAuthRequestMethod: readSafeDiagnosticToken(error.details?.oauthRequestMethod),
     providerOAuthRequestOfflineScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestOfflineScopePresent),
     providerOAuthRequestParameterCount: readSafeDiagnosticNumber(error.details?.oauthRequestParameterCount),
+    providerOAuthRequestParameterNames: readSafeDiagnosticToken(error.details?.oauthRequestParameterNames),
     providerOAuthRequestRefreshCredentialPresent: readSafeDiagnosticBoolean(
       error.details?.oauthRequestRefreshCredentialPresent,
     ),
     providerOAuthRequestScopeCount: readSafeDiagnosticNumber(error.details?.oauthRequestScopeCount),
     providerOAuthRequestScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestScopePresent),
+    providerOAuthRequestScopeValue: readSafeDiagnosticToken(error.details?.oauthRequestScopeValue),
+    providerOAuthRequestTokenEndpointKind: readSafeDiagnosticToken(error.details?.oauthRequestTokenEndpointKind),
     providerOAuthResponseErrorDescriptionFieldPresent: readSafeDiagnosticBoolean(
       error.details?.oauthResponseErrorDescriptionFieldPresent,
     ),
@@ -1119,46 +1132,9 @@ function compactFailureDiagnostics(
 ): DeviceSyncJobFailureDiagnostic["details"] {
   const output: DeviceSyncJobFailureDiagnostic["details"] = {};
 
-  setFailureDiagnosticDetail(output, "failureCauseCode", input.failureCauseCode);
-  setFailureDiagnosticDetail(output, "failureCauseName", input.failureCauseName);
-  setFailureDiagnosticDetail(output, "failureErrorCause", input.failureErrorCause);
-  setFailureDiagnosticDetail(output, "failureErrorName", input.failureErrorName);
-  setFailureDiagnosticDetail(output, "providerHttpStatus", input.providerHttpStatus);
-  setFailureDiagnosticDetail(output, "providerHttpStatusText", input.providerHttpStatusText);
-  setFailureDiagnosticDetail(output, "providerOAuthErrorCode", input.providerOAuthErrorCode);
-  setFailureDiagnosticDetail(output, "providerOAuthErrorDescription", input.providerOAuthErrorDescription);
-  setFailureDiagnosticDetail(output, "providerOAuthGrantType", input.providerOAuthGrantType);
-  setFailureDiagnosticDetail(
-    output,
-    "providerOAuthRequestClientCredentialPresent",
-    input.providerOAuthRequestClientCredentialPresent,
-  );
-  setFailureDiagnosticDetail(output, "providerOAuthRequestClientIdPresent", input.providerOAuthRequestClientIdPresent);
-  setFailureDiagnosticDetail(output, "providerOAuthRequestEncodingKind", input.providerOAuthRequestEncodingKind);
-  setFailureDiagnosticDetail(
-    output,
-    "providerOAuthRequestOfflineScopePresent",
-    input.providerOAuthRequestOfflineScopePresent,
-  );
-  setFailureDiagnosticDetail(output, "providerOAuthRequestParameterCount", input.providerOAuthRequestParameterCount);
-  setFailureDiagnosticDetail(
-    output,
-    "providerOAuthRequestRefreshCredentialPresent",
-    input.providerOAuthRequestRefreshCredentialPresent,
-  );
-  setFailureDiagnosticDetail(output, "providerOAuthRequestScopeCount", input.providerOAuthRequestScopeCount);
-  setFailureDiagnosticDetail(output, "providerOAuthRequestScopePresent", input.providerOAuthRequestScopePresent);
-  setFailureDiagnosticDetail(
-    output,
-    "providerOAuthResponseErrorDescriptionFieldPresent",
-    input.providerOAuthResponseErrorDescriptionFieldPresent,
-  );
-  setFailureDiagnosticDetail(
-    output,
-    "providerOAuthResponseErrorFieldPresent",
-    input.providerOAuthResponseErrorFieldPresent,
-  );
-  setFailureDiagnosticDetail(output, "providerOAuthResponseShapeKind", input.providerOAuthResponseShapeKind);
+  for (const key of Object.keys(input) as Array<keyof DeviceSyncJobFailureDiagnostic["details"]>) {
+    setFailureDiagnosticDetail(output, key, input[key]);
+  }
 
   return output;
 }
