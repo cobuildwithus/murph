@@ -46,7 +46,7 @@ async function importBuiltPackage(): Promise<BuiltPackageProbe> {
     const packageManifest = await readPackageManifest();
     const packageName = packageManifest.name ?? "@murphai/openclaw-plugin";
 
-    await execFileAsync("npm", ["run", "build", "--silent"], { cwd: packageDir });
+    await execFileAsync(process.execPath, ["--run", "build"], { cwd: packageDir });
     const builtModule = await import(
       pathToFileURL(path.join(packageDir, packageManifest.main ?? "dist/index.js")).href
     ) as BuiltPackageModule;
