@@ -30,6 +30,8 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v9" as const;
+export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
+  "murph.age.submitted-calculator-view-bundle.v1" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -623,6 +625,27 @@ export interface MurphAgeSubmittedCalculatorInput extends Omit<MurphAgeCalculato
   submittedMetrics: readonly MurphAgeSubmittedMetricInput[];
 }
 
+export type MurphAgeSubmittedCalculatorMetricRole =
+  | "bp-body-research"
+  | "function-context"
+  | "lab-research"
+  | "proxy-anchor-research"
+  | "wearable-context";
+
+export interface MurphAgeSubmittedCalculatorMetricInputSpec {
+  allowedSourceKinds: MurphAgeSubmittedMetricSourceKind[];
+  aliases: string[];
+  calculatorRoles: MurphAgeSubmittedCalculatorMetricRole[];
+  canonicalUnit: string | null;
+  category: string;
+  displayName: string;
+  featureKeys: string[];
+  metricKey: string;
+  productScoreBearingAuthorized: boolean;
+  researchScoreBearingCardIds: MurphAgeScoreBearingCardId[];
+  wearableScoreBearingAuthorized: false;
+}
+
 export interface MurphAgeInputBundleAssessmentInput {
   asOf?: string;
   points: readonly MetricPoint[];
@@ -1145,6 +1168,26 @@ export interface MurphAgeResearchCalculatorView {
   warnings: MurphAgePublicWarning[];
   wearable: MurphAgePublicWearableCalculatorView;
   wearableResidualLayer: MurphAgePublicWearableResidualLayerView | null;
+}
+
+export interface MurphAgeCalculatorReportAndView {
+  report: MurphAgePublicCalculatorReport;
+  view: MurphAgePublicCalculatorView;
+}
+
+export interface MurphAgeResearchCalculatorReportAndView {
+  report: MurphAgePublicCalculatorReport;
+  view: MurphAgeResearchCalculatorView;
+}
+
+export interface MurphAgeSubmittedCalculatorViewBundle {
+  product: MurphAgeCalculatorReportAndView;
+  researchPreview: MurphAgeResearchCalculatorReportAndView | null;
+  schemaVersion: typeof MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION;
+}
+
+export interface MurphAgeSubmittedCalculatorViewBundleOptions {
+  includeResearchPreview?: boolean;
 }
 
 export type MurphAgeDisplayStatus =
@@ -2178,6 +2221,15 @@ const MURPH_AGE_R399_PROXY_FEATURES = [
     requiredFor: "r399-proxy-anchor",
   },
 ] satisfies readonly MurphAgeInputFeatureRequirement[];
+
+const MURPH_AGE_INPUT_FEATURE_REQUIREMENTS: readonly MurphAgeInputFeatureRequirement[] = [
+  ...MURPH_AGE_LAB9_FEATURES,
+  ...MURPH_AGE_BP_BODY_FEATURES,
+  ...MURPH_AGE_LAB5_FEATURES,
+  ...MURPH_AGE_R399_PROXY_FEATURES,
+  ...MURPH_AGE_WEARABLE_CONTEXT_FEATURES,
+  ...MURPH_AGE_FUNCTION_CONTEXT_FEATURES,
+];
 
 const MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES = {
   activity: [
@@ -3714,6 +3766,28 @@ function validateMurphAgeWearableResidualParameterPackForContract(input: {
 
 export function listMurphAgeInputBundleMetricKeys(): string[] {
   return [...MURPH_AGE_INPUT_BUNDLE_METRIC_KEYS];
+}
+
+export function listMurphAgeSubmittedCalculatorMetricInputSpecs():
+  MurphAgeSubmittedCalculatorMetricInputSpec[] {
+  const specs: MurphAgeSubmittedCalculatorMetricInputSpec[] = [];
+  for (const metricKey of listMurphAgeInputBundleMetricKeys()) {
+    const definition = resolveMetricDefinition(metricKey);
+    specs.push({
+      allowedSourceKinds: listSubmittedCalculatorAllowedSourceKinds(metricKey),
+      aliases: [...(definition?.aliases ?? [])],
+      calculatorRoles: listSubmittedCalculatorMetricRoles(metricKey),
+      canonicalUnit: definition?.canonicalUnit ?? null,
+      category: definition?.category ?? "custom",
+      displayName: definition?.displayName ?? metricKey,
+      featureKeys: listSubmittedCalculatorFeatureKeys(metricKey),
+      metricKey,
+      productScoreBearingAuthorized: isSubmittedCalculatorProductScoreBearingAuthorized(metricKey),
+      researchScoreBearingCardIds: listSubmittedCalculatorResearchScoreBearingCardIds(metricKey),
+      wearableScoreBearingAuthorized: false,
+    });
+  }
+  return specs.sort((left, right) => left.metricKey.localeCompare(right.metricKey));
 }
 
 export function summarizeMurphAgePublicLabWearableShadowEvidenceStatus():
@@ -6106,6 +6180,41 @@ export function calculateMurphAgePublicReportFromSubmittedInputs(
   return toPublicMurphAgeCalculatorReport(calculateMurphAgeFromSubmittedInputs(input));
 }
 
+export function buildMurphAgeSubmittedCalculatorViewBundle(
+  input: MurphAgeSubmittedCalculatorInput,
+  options: MurphAgeSubmittedCalculatorViewBundleOptions = {},
+): MurphAgeSubmittedCalculatorViewBundle {
+  const productReport = calculateMurphAgePublicReportFromSubmittedInputs({
+    ...input,
+    mode: "product",
+  });
+  const product = {
+    report: productReport,
+    view: buildMurphAgePublicCalculatorView(productReport),
+  };
+  const researchPreview = options.includeResearchPreview === true
+    ? buildMurphAgeResearchPreviewFromSubmittedInputs(input)
+    : null;
+  return {
+    product,
+    researchPreview,
+    schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
+  };
+}
+
+function buildMurphAgeResearchPreviewFromSubmittedInputs(
+  input: MurphAgeSubmittedCalculatorInput,
+): MurphAgeResearchCalculatorReportAndView {
+  const report = calculateMurphAgePublicReportFromSubmittedInputs({
+    ...input,
+    mode: "research",
+  });
+  return {
+    report,
+    view: buildMurphAgeResearchCalculatorView(report),
+  };
+}
+
 function buildMurphAgeSubmittedMetricPoints(input: {
   asOf: string;
   submittedMetrics: readonly MurphAgeSubmittedMetricInput[];
@@ -6289,6 +6398,57 @@ function inferSubmittedMetricSourceKind(metricKey: string): MurphAgeSubmittedMet
     return "measurement";
   }
   return "test-result";
+}
+
+function listSubmittedCalculatorAllowedSourceKinds(metricKey: string): MurphAgeSubmittedMetricSourceKind[] {
+  if (MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS.has(metricKey)) {
+    return ["activity-summary", "sleep-summary", "wearable-summary"];
+  }
+  if (MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS.has(metricKey) || MURPH_AGE_BP_BODY_METRIC_KEYS.has(metricKey)) {
+    return ["measurement"];
+  }
+  if (MURPH_AGE_R399_PROXY_METRIC_KEYS.has(metricKey)) {
+    return [...MURPH_AGE_R399_PROXY_SOURCE_KINDS] as MurphAgeSubmittedMetricSourceKind[];
+  }
+  return ["measurement", "test-result"];
+}
+
+function listSubmittedCalculatorMetricRoles(metricKey: string): MurphAgeSubmittedCalculatorMetricRole[] {
+  const roles: MurphAgeSubmittedCalculatorMetricRole[] = [];
+  if (MURPH_AGE_SCORE_BEARING_LAB_METRIC_KEYS.has(metricKey)) roles.push("lab-research");
+  if (MURPH_AGE_BP_BODY_METRIC_KEYS.has(metricKey)) roles.push("bp-body-research");
+  if (MURPH_AGE_R399_PROXY_METRIC_KEYS.has(metricKey)) roles.push("proxy-anchor-research");
+  if (MURPH_AGE_WEARABLE_CONTEXT_METRIC_KEYS.has(metricKey)) roles.push("wearable-context");
+  if (MURPH_AGE_FUNCTION_CONTEXT_METRIC_KEYS.has(metricKey)) roles.push("function-context");
+  return roles;
+}
+
+function listSubmittedCalculatorResearchScoreBearingCardIds(metricKey: string): MurphAgeScoreBearingCardId[] {
+  const cardIds: MurphAgeScoreBearingCardId[] = [];
+  for (const policy of MURPH_AGE_MODEL_CARD_POLICIES) {
+    if (
+      policy.cardId !== "function_context_no_risk"
+      && policy.cardId !== "wearable_context_no_risk"
+      && policy.scoreBearing
+      && policy.scoreBearingMetricKeys.includes(metricKey)
+    ) {
+      cardIds.push(policy.cardId);
+    }
+  }
+  return cardIds;
+}
+
+function isSubmittedCalculatorProductScoreBearingAuthorized(metricKey: string): boolean {
+  return MURPH_AGE_MODEL_CARD_POLICIES.some((policy) =>
+    policy.scoreBearingMetricKeys.includes(metricKey)
+    && isMurphAgeModelCardProductAuthorized(policy)
+  );
+}
+
+function listSubmittedCalculatorFeatureKeys(metricKey: string): string[] {
+  return uniqueStrings(MURPH_AGE_INPUT_FEATURE_REQUIREMENTS
+    .filter((requirement) => requirement.metricKeys.includes(metricKey))
+    .map((requirement) => requirement.featureKey));
 }
 
 function inferSubmittedMetricGrain(metricKey: string): MetricPoint["grain"] {
