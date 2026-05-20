@@ -32,6 +32,9 @@ import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "./codex-shell-env-policy.ts";
+import {
+  buildHostedRunnerExecutablePath,
+} from "./environment.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
@@ -104,6 +107,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
+  runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
   const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {

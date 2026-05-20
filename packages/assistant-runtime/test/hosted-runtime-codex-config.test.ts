@@ -32,6 +32,10 @@ import {
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
+import {
+  buildHostedRunnerExecutablePath,
+  HOSTED_RUNNER_EXECUTABLE_PATH,
+} from "../src/hosted-runtime/environment.ts";
 
 import {
   buildHostedCodexConfigToml,
@@ -93,6 +97,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT, "medium");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_APPROVAL_POLICY, "never");
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_SANDBOX, "danger-full-access");
+  assert.equal(result.runtimeEnv.PATH, HOSTED_RUNNER_EXECUTABLE_PATH);
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.doesNotMatch(config, /^model = /mu);
@@ -135,6 +140,27 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(configMode, 0o600);
   const codexHomeMode = (await stat(result.codexHome)).mode & 0o777;
   assert.equal(codexHomeMode, 0o700);
+});
+
+test("hosted Codex runtime env exposes bundled CLI bins on PATH", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const reducedSystemPath = "/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games";
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+      PATH: reducedSystemPath,
+    },
+  });
+
+  assert.equal(result.runtimeEnv.PATH, buildHostedRunnerExecutablePath(reducedSystemPath));
+  assert.equal(result.runtimeEnv.PATH.startsWith("/app/node_modules/.bin:"), true);
+  assert.equal(
+    result.runtimeEnv.PATH.split(":").filter((entry) => entry === "/app/node_modules/.bin")
+      .length,
+    1,
+  );
 });
 
 test("hosted Cloudflare Codex config injects the hosted auto-compaction limit", async () => {
@@ -278,6 +304,10 @@ test("hosted Codex runtime config installs a local E2E app-server stub when conf
   assert.equal(
     result.runtimeEnv.PATH?.startsWith(`${shimBinDir}${path.delimiter}`),
     true,
+  );
+  assert.equal(
+    result.runtimeEnv.PATH,
+    [shimBinDir, buildHostedRunnerExecutablePath(undefined)].join(path.delimiter),
   );
   const shimSource = await readFile(shimPath, "utf8");
   assert.match(shimSource, /^#!\/usr\/bin\/env node/u);
