@@ -890,6 +890,97 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground stale assistant wake does not keep dirty runtime ahead of idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const staleWakeAt = "2026-04-26T23:59:59.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const startedAt = performance.now();
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_foreground_stale_assistant_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/foreground-stale-wake.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            deviceSyncPort,
+            events,
+            logRequests,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_foreground_stale_wake_001",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleWakeAt,
+                nextWakeReason: "assistant",
+                version: "4",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+      const elapsedMs = performance.now() - startedAt;
+      const assistantPass = logRequests
+        .flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "assistant.pass_finished");
+
+      assert.ok(elapsedMs < 5_000);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_foreground_stale_wake_001",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(assistantPass?.redactedJson?.deviceSyncSkipped, true);
+      assert.equal(assistantPass?.redactedJson?.nextWakeAtPresent, false);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime wakes reset the idle checkpoint window before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];

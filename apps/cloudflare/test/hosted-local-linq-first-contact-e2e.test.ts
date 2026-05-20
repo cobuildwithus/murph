@@ -787,8 +787,19 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       const observedMessageIdsBeforeReply =
         requireLinqStub().listObservedMessageIds(materializedChatId).length;
       const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyPath);
+      await seedStaleWorkspaceWakeFromCurrentCheckpoint(typingLoopUserId);
+      const statusAfterPreReplyStaleWakeSeed = await readHostedRunnerStatusWithLogLimit(
+        typingLoopUserId,
+        20,
+      );
+      const preReplySeededWakeMs = Date.parse(
+        statusAfterPreReplyStaleWakeSeed.workspace?.nextWakeAt ?? "",
+      );
+      expect(Number.isFinite(preReplySeededWakeMs)).toBe(true);
+      expect(preReplySeededWakeMs).toBeLessThanOrEqual(Date.now());
       requireScenario().queueAssistantResponses([typingLoopReplyText]);
 
+      const replyStartedAtMs = Date.now();
       const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
         typingLoopUserId,
         materializedChatId,
@@ -831,6 +842,15 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         userId: typingLoopUserId,
       });
       await requireScenario().waitForHostedCompletion(typingLoopUserId);
+
+      const statusAfterReplyIdle = await readHostedRunnerStatusWithLogLimit(
+        typingLoopUserId,
+        200,
+      );
+      expect(statusAfterReplyIdle.workspace?.nextWakeAt ?? null).toBeNull();
+      expect(
+        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterReplyIdle, replyStartedAtMs),
+      ).toBeLessThanOrEqual(1);
 
       const requestCountAfterCleanup = requireLinqStub().observedRequests.length;
       const outboundCountAfterCleanup = requireLinqStub().countObservedSends(expectedReplyPath);

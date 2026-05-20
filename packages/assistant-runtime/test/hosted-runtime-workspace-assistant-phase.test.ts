@@ -588,6 +588,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect("nextWakeReason" in result).toBe(false);
   });
 
+  it("does not re-arm a stale assistant wake as a skipped device-sync retry during a foreground nudge", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      reason: "nudge",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantRuntimeTimerLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDeviceSync: true,
+      }),
+    );
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        hostedAssistantProgressed: false,
+      }),
+    });
+    expect("checkpointReason" in result).toBe(false);
+    expect("nextWakeAt" in result).toBe(false);
+    expect("nextWakeReason" in result).toBe(false);
+  });
+
   it("preserves a real device-sync follow-up from a due legacy assistant-labeled alarm", async () => {
     const nextWakeAt = "2026-04-27T00:05:00.000Z";
     mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValueOnce({
