@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v1" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v3" as const;
+  "murph.age.research-calculator-view.v4" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -731,6 +731,31 @@ export interface MurphAgePublicCalculatorView {
   wearable: MurphAgePublicWearableCalculatorView;
 }
 
+export type MurphAgeResearchLocalRunEvidenceSignal =
+  | "context-only"
+  | "glycemia-only-better"
+  | "partial"
+  | "slight-lift"
+  | "supported"
+  | "weak";
+
+export interface MurphAgeResearchLocalRunEvidenceItem {
+  bundleId?: MurphAgeInputBundleId;
+  cohortLabel: "CRELES" | "HAALSI" | "MIDUS" | "NSHAP" | "wearables";
+  evidenceId:
+    | "creles-glycemia-transport-local-run"
+    | "haalsi-glucose-transport-local-run"
+    | "midus-lab-lift-local-run"
+    | "nshap-hba1c-transport-local-run"
+    | "wearables-context-only-local-run";
+  productAuthorizationChanged: false;
+  scoringMathChanged: false;
+  signal: MurphAgeResearchLocalRunEvidenceSignal;
+  sourceRouteId?: MurphAgeSourceRouteId;
+  summary: string;
+  supportedMetricKeys: string[];
+}
+
 export interface MurphAgeResearchModelStatusView {
   blockers: Array<
     | "biomarker-transport-not-confirmed"
@@ -749,6 +774,8 @@ export interface MurphAgeResearchModelStatusView {
     nextAction: "validate-transport-before-product-use";
     transportStatus: "internal-promising-transport-not-confirmed";
   };
+  latestLocalRunEvidence: MurphAgeResearchLocalRunEvidenceItem[];
+  latestLocalRunEvidenceStatus: "mixed-research-only-no-product-promotion";
   productUseAuthorized: false;
   scoreBearingFeatureKeys: string[];
   scoreBearingMetricKeys: string[];
@@ -4336,6 +4363,59 @@ function buildMurphAgeResearchModelStatusView(input: {
       nextAction: "validate-transport-before-product-use",
       transportStatus: "internal-promising-transport-not-confirmed",
     },
+    latestLocalRunEvidence: [
+      {
+        cohortLabel: "MIDUS",
+        evidenceId: "midus-lab-lift-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "slight-lift",
+        sourceRouteId: "midus-biomarker-mortality",
+        summary: "MIDUS local aggregate runs show a small research-only lift from compact lab/body inputs over age/sex.",
+        supportedMetricKeys: ["glucose", "egfr", "bmi"],
+      },
+      {
+        cohortLabel: "CRELES",
+        evidenceId: "creles-glycemia-transport-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "glycemia-only-better",
+        sourceRouteId: "creles-transport-stress",
+        summary: "CRELES transport stress favors tiny glycemia-style candidates; broad lab/lipid/body transport remains weak.",
+        supportedMetricKeys: ["glucose"],
+      },
+      {
+        cohortLabel: "HAALSI",
+        evidenceId: "haalsi-glucose-transport-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "supported",
+        sourceRouteId: "haalsi-transport-stress",
+        summary: "HAALSI aggregate diagnostics support glucose signal with clean negative controls, still research-only.",
+        supportedMetricKeys: ["glucose"],
+      },
+      {
+        cohortLabel: "NSHAP",
+        evidenceId: "nshap-hba1c-transport-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "partial",
+        sourceRouteId: "nshap-integrated-aging",
+        summary: "NSHAP HbA1c replication is directionally useful but partial because controls compete in one wave.",
+        supportedMetricKeys: ["hba1c"],
+      },
+      {
+        bundleId: "wearable-context",
+        cohortLabel: "wearables",
+        evidenceId: "wearables-context-only-local-run",
+        productAuthorizationChanged: false,
+        scoringMathChanged: false,
+        signal: "context-only",
+        summary: "Wearable and wearable-adjacent evidence remains context-only until true lab/wearable/outcome validation lands.",
+        supportedMetricKeys: [],
+      },
+    ],
+    latestLocalRunEvidenceStatus: "mixed-research-only-no-product-promotion",
     productUseAuthorized: false,
     scoreBearingFeatureKeys: [...input.selectedScoreBearingFeatureKeys],
     scoreBearingMetricKeys: [...input.selectedScoreBearingMetricKeys],

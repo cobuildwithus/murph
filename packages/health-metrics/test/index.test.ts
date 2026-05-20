@@ -4910,6 +4910,54 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.model.labBody.currentUse, "score-bearing-research-when-selected");
   assert.equal(submittedLab5ResearchView.model.labBody.nextAction, "validate-transport-before-product-use");
   assert.equal(submittedLab5ResearchView.model.labBody.transportStatus, "internal-promising-transport-not-confirmed");
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidenceStatus,
+    "mixed-research-only-no-product-promotion",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.map((item) => item.evidenceId).join("|"),
+    "midus-lab-lift-local-run|creles-glycemia-transport-local-run|haalsi-glucose-transport-local-run|nshap-hba1c-transport-local-run|wearables-context-only-local-run",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "midus-lab-lift-local-run")?.signal,
+    "slight-lift",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "midus-lab-lift-local-run")?.supportedMetricKeys.join("|"),
+    "glucose|egfr|bmi",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "creles-glycemia-transport-local-run")?.signal,
+    "glycemia-only-better",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "creles-glycemia-transport-local-run")?.supportedMetricKeys.join("|"),
+    "glucose",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "nshap-hba1c-transport-local-run")?.signal,
+    "partial",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "nshap-hba1c-transport-local-run")?.supportedMetricKeys.join("|"),
+    "hba1c",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.every((item) => item.scoringMathChanged === false),
+    true,
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.every((item) => item.productAuthorizationChanged === false),
+    true,
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "haalsi-glucose-transport-local-run")?.supportedMetricKeys.join("|"),
+    "glucose",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.latestLocalRunEvidence.find((item) => item.evidenceId === "wearables-context-only-local-run")?.signal,
+    "context-only",
+  );
   assert.equal(submittedLab5ResearchView.model.scoreBearingFeatureKeys.join("|"), "glucose|egfr|bmi");
   assert.equal(
     submittedLab5ResearchView.model.scoreBearingMetricKeys.join("|"),
