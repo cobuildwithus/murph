@@ -7607,6 +7607,26 @@ export function assessMurphAgeSecondaryContextBundles(input: MurphAgeInputBundle
     .map(toContextBundleAssessment);
 }
 
+export function summarizeMurphAgePublicWearableBridgeFromInputBundle(
+  input: MurphAgeInputBundleAssessmentInput,
+): MurphAgePublicWearableBridgeSummary {
+  const bundleAssessment = assessMurphAgeInputBundle(input);
+  const contextAssessments = assessMurphAgeSecondaryContextBundles({
+    ...input,
+    primaryBundleId: bundleAssessment.bundleId,
+  });
+  const primaryContextFeatureStatuses = bundleAssessment.status === "context-only"
+    && bundleAssessment.bundleId === "wearable-context"
+    ? toContextBundleAssessment(bundleAssessment).featureStatuses
+    : [];
+  const wearableFeatures = [...primaryContextFeatureStatuses, ...contextAssessments.flatMap((assessment) =>
+    assessment.bundleId === "wearable-context" ? assessment.featureStatuses : []
+  )]
+    .filter((feature) => feature.status === "ready");
+
+  return toPublicWearableBridgeSummary(summarizeWearableBridge(wearableFeatures));
+}
+
 function assessMurphAgeR399ProxyAnchor(
   input: MurphAgeInputBundleAssessmentInput,
 ): MurphAgeInputBundleAssessment {

@@ -87,6 +87,7 @@ import {
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
   summarizeMurphAgePublicLabWearableShadowEvidenceStatus,
+  summarizeMurphAgePublicWearableBridgeFromInputBundle,
   summarizeMurphAgeWearableParameterPackContract,
   summarizeMurphAgeWearableResidualLayerContract,
   summarizeMurphAgeWearableScoreBearingStrategy,
@@ -6234,6 +6235,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnly.contextAssessments.length, 0);
   assert.equal(wearableOnly.wearableShadowIncrementAssessments.length, 0);
   const wearableOnlySummary = summarizeMurphAgeCalculatorOutput(wearableOnly);
+  assert.deepEqual(
+    summarizeMurphAgePublicWearableBridgeFromInputBundle({ asOf, points: wearableContextPoints }),
+    summarizeMurphAgeCalculatorPublicOutput(wearableOnly).wearableBridge,
+  );
   assert.equal(wearableOnlySummary.displayStatus, "context-only");
   assert.equal(wearableOnlySummary.displayBlockedReason, "context-only");
   assert.deepEqual(wearableOnlySummary.outcomeContext, {
