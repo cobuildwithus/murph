@@ -68,6 +68,9 @@ import {
   createEncryptedWorkspaceSnapshotFile,
 } from "./workspace-snapshot-local.ts";
 import {
+  pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks,
+} from "./workspace-snapshot-cleanup.ts";
+import {
   clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
   materializeLegacyWorkspaceRefsForV2Snapshot,
   prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
@@ -338,6 +341,7 @@ async function createHostedWorkspaceV2Snapshot(
   let encryptedTemporaryDirectoryPath: string | null = null;
   let snapshotSession: Awaited<ReturnType<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["startSnapshotSession"]>> | null = null;
   let checkpointAttempted = false;
+  let prunedRuntimeSymlinkCount = 0;
   try {
     leaseCheckCount += 1;
     assertHostedWorkspaceBridgeCheckpointLease({
@@ -346,15 +350,34 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_snapshot",
       userId: input.userId,
     });
+    const durableRoot = resolveWorkspaceDurableRoot(input.vaultRoot);
+    const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(input.vaultRoot);
     snapshotSession = await input.platform.workspaceSnapshotPort.startSnapshotSession({
       expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
       nextWakeAt: input.request.nextWakeAt,
       nextWakeReason: input.request.nextWakeReason,
       reason: "idle_shutdown",
     });
+    ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
+      durableRoot,
+      operatorHomeRoot,
+    }));
+    if (prunedRuntimeSymlinkCount > 0) {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          prunedRuntimeSymlinkCount,
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        },
+        level: "warn",
+        message: "Hosted workspace snapshot pruned runtime-owned symlinks.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
     await materializeLegacyWorkspaceRefsForV2Snapshot({
       artifactStore: input.platform.artifactStore,
-      operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+      operatorHomeRoot,
       plan: input.legacyMaterialization,
       vaultRoot: input.vaultRoot,
     });
@@ -365,7 +388,7 @@ async function createHostedWorkspaceV2Snapshot(
     const encrypted = await createEncryptedWorkspaceSnapshotFile({
       aad: snapshotSession.encryption.aad,
       dataKey: snapshotSession.encryption.dataKeyBase64,
-      durableRoot: resolveWorkspaceDurableRoot(input.vaultRoot),
+      durableRoot,
       ivBase64: snapshotSession.encryption.ivBase64,
       maxEncryptedBytes: Math.min(
         snapshotSession.limits.maxSinglePartEncryptedBytes,
@@ -488,6 +511,12 @@ async function createHostedWorkspaceV2Snapshot(
       details: {
         encryptedByteSize,
         leaseCheckCount,
+        ...(prunedRuntimeSymlinkCount > 0
+          ? {
+              prunedRuntimeSymlinkCount,
+              runtimeSymlinkPruneScope: "operator-home",
+            }
+          : {}),
         snapshotElapsedMs: Date.now() - startedAt,
         snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
       },
@@ -525,6 +554,7 @@ async function createHostedWorkspaceV2Snapshot(
     encryptedByteSize,
     leaseCheckCount,
     platform: input.platform,
+    prunedRuntimeSymlinkCount,
     request: input.request,
     snapshotElapsedMs: Date.now() - startedAt,
     snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
@@ -661,6 +691,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   encryptedByteSize: number;
   leaseCheckCount: number;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  prunedRuntimeSymlinkCount: number;
   request: HostedWorkspaceIdleCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
@@ -673,6 +704,12 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
     leaseCheckCount: input.leaseCheckCount,
+    ...(input.prunedRuntimeSymlinkCount > 0
+      ? {
+          prunedRuntimeSymlinkCount: input.prunedRuntimeSymlinkCount,
+          runtimeSymlinkPruneScope: "operator-home",
+        }
+      : {}),
     snapshotElapsedMs: input.snapshotElapsedMs,
     workspaceSnapshotEncryptedBytes: input.encryptedByteSize,
     snapshotMode: input.snapshotMode,

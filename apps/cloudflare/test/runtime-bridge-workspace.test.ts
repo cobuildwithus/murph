@@ -1,6 +1,6 @@
 import { createDecipheriv } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -276,6 +276,428 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       encryptedByteSize: snapshotRef.archive.encryptedByteSize,
       encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
     }));
+    expect(putArtifact).not.toHaveBeenCalled();
+  });
+
+  it("prunes runtime-owned operator-home symlinks before archiving v2 snapshots", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    await mkdir(vaultRoot, { recursive: true });
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "cache", "runtime-cache.txt"),
+      "runtime cache\n",
+      "utf8",
+    );
+    await writeFile(path.join(workspaceRoot, "outside-runtime-cache.txt"), "outside target\n", "utf8");
+    const runtimeSymlinkPath =
+      path.join(operatorHomeRoot, ".codex-hosted", "cache", "runtime-cache-link");
+    await symlink(path.join(workspaceRoot, "outside-runtime-cache.txt"), runtimeSymlinkPath);
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotDirectPuts = vi.fn();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
+
+    expect(uploaded).toBeDefined();
+    const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
+    expect(entries).toContain("vault/note.md");
+    expect(entries).toContain("home/.codex-hosted/cache/runtime-cache.txt");
+    expect(entries).not.toContain("home/.codex-hosted/cache/runtime-cache-link");
+    await expect(lstat(runtimeSymlinkPath)).rejects.toThrow();
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: expect.objectContaining({
+          prunedRuntimeSymlinkCount: 1,
+          runtimeSymlinkPruneScope: "operator-home",
+          snapshotMode: "workspace_snapshot_v2",
+          workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
+        }),
+      }),
+    );
+  });
+
+  it("rejects user-vault symlinks instead of silently dropping workspace state", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    await mkdir(vaultRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await symlink("note.md", path.join(vaultRoot, "note-link.md"));
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotDirectPuts = vi.fn();
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted workspace snapshot durable root contains symlinks.");
+
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotDirectPuts).not.toHaveBeenCalled();
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          safeErrorDetail: "Hosted workspace snapshot durable root contains symlinks.",
+          snapshotMode: "workspace_snapshot_v2",
+        }),
+      }),
+    );
+  });
+
+  it("does not prune non-Codex operator-home symlinks", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    await mkdir(vaultRoot, { recursive: true });
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const operatorHomeSymlinkPath = path.join(operatorHomeRoot, "runtime-cache-link");
+    await symlink("missing-runtime-cache", operatorHomeSymlinkPath);
+    const putArtifact = vi.fn(async () => {});
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotDirectPuts = vi.fn();
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted workspace snapshot durable root contains symlinks.");
+
+    expect((await lstat(operatorHomeSymlinkPath)).isSymbolicLink()).toBe(true);
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotDirectPuts).not.toHaveBeenCalled();
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+  });
+
+  it("includes pruned runtime symlink counts when a later vault symlink fails snapshotting", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "cache"), { recursive: true });
+    await mkdir(vaultRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    const runtimeSymlinkPath =
+      path.join(operatorHomeRoot, ".codex-hosted", "cache", "runtime-cache-link");
+    await symlink("missing-runtime-cache", runtimeSymlinkPath);
+    await symlink("note.md", path.join(vaultRoot, "note-link.md"));
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotDirectPuts = vi.fn();
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted workspace snapshot durable root contains symlinks.");
+
+    await expect(lstat(runtimeSymlinkPath)).rejects.toThrow();
+    expect(workspaceSnapshotUploads.size).toBe(0);
+    expect(workspaceSnapshotDirectPuts).not.toHaveBeenCalled();
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          prunedRuntimeSymlinkCount: 1,
+          runtimeSymlinkPruneScope: "operator-home",
+          safeErrorDetail: "Hosted workspace snapshot durable root contains symlinks.",
+          snapshotMode: "workspace_snapshot_v2",
+        }),
+      }),
+    );
+  });
+
+  it("rejects an operator-home root symlink before legacy materialization can write through it", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const externalHomeRoot = path.join(workspaceRoot, "external-home");
+    await mkdir(vaultRoot, { recursive: true });
+    await mkdir(externalHomeRoot, { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await symlink(externalHomeRoot, path.join(durableRoot, "home"));
+    const putArtifact = vi.fn(async () => {});
+    const workspaceSnapshotAborts: Array<{ objectKey: string; snapshotId: string }> = [];
+    const workspaceSnapshotDirectPuts = vi.fn();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        onWorkspaceSnapshotDirectPut: workspaceSnapshotDirectPuts,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: null,
+          version: "7",
+        }),
+        workspaceSnapshotAborts,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown")))
+      .rejects.toThrow("Hosted workspace snapshot operator home root is a symlink.");
+
+    expect(workspaceSnapshotDirectPuts).not.toHaveBeenCalled();
+    expect(workspaceSnapshotAborts).toEqual([
+      expect.objectContaining({
+        snapshotId: expect.stringMatching(/^snapshot_test_/u),
+      }),
+    ]);
+    expect(putArtifact).not.toHaveBeenCalled();
+  });
+
+  it("prunes operator-home symlinks before legacy materialization writes preserved files", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(workspaceRoot);
+    const durableRoot = path.join(workspaceRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    const preservedPath = ".codex-hosted/sessions/preserved.jsonl";
+    const preservedBytes = Buffer.from("{\"preserved\":true}\n");
+    const preservedHash = sha256HostedBundleHex(preservedBytes);
+    const preservedTargetPath = path.join(operatorHomeRoot, ...preservedPath.split("/"));
+    await mkdir(vaultRoot, { recursive: true });
+    await mkdir(path.dirname(preservedTargetPath), { recursive: true });
+    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
+    await writeFile(path.join(workspaceRoot, "old-runtime-target.jsonl"), "{\"old\":true}\n");
+    await symlink(path.join(workspaceRoot, "old-runtime-target.jsonl"), preservedTargetPath);
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: [{
+        path: preservedPath,
+        root: "operator-home",
+        sha256: preservedHash,
+        size: preservedBytes.byteLength,
+      }],
+      vaultRoot,
+    });
+    const artifactBundles = new Map<string, Uint8Array>([
+      [preservedHash, preservedBytes],
+    ]);
+    const baseSnapshotRef = createStoredManifestOnlySnapshotRef({
+      artifactBundles,
+      files: [{
+        artifact: {
+          byteSize: preservedBytes.byteLength,
+          sha256: preservedHash,
+        },
+        path: preservedPath,
+        root: "operator-home",
+        sha256: preservedHash,
+        size: preservedBytes.byteLength,
+      }],
+    });
+    const putArtifact = vi.fn(async () => {});
+    const writeLog = vi.fn(async (request) => ({
+      loggedCount: request.entries.length,
+    }));
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({
+        getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
+        putArtifact,
+        readWorkspace: async () => createWorkspaceReadResponse({
+          snapshotRef: baseSnapshotRef,
+          version: "7",
+        }),
+        workspaceSnapshotUploads,
+        writeLog,
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        userId: "member_1",
+        workspaceVersion: "7",
+      }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_1",
+        workspaceVersion: "7",
+      },
+      runtime: {},
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
+
+    expect(uploaded).toBeDefined();
+    expect(await readFile(preservedTargetPath, "utf8")).toBe(preservedBytes.toString("utf8"));
+    expect((await lstat(preservedTargetPath)).isSymbolicLink()).toBe(false);
+    expect(listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef))
+      .toContain("home/.codex-hosted/sessions/preserved.jsonl");
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: expect.objectContaining({
+          prunedRuntimeSymlinkCount: 1,
+          runtimeSymlinkPruneScope: "operator-home",
+          snapshotMode: "workspace_snapshot_v2",
+        }),
+      }),
+    );
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
@@ -1749,6 +2171,13 @@ function createPlatform(input: {
     warnEncryptedBytes: number;
   }>;
   workspaceSnapshotAborts?: Array<{ objectKey: string; snapshotId: string }>;
+  onWorkspaceSnapshotDirectPut?: (request: {
+    encryptedByteSize: number;
+    encryptedObjectSha256: string;
+    objectKey: string;
+    sourceFilePath: string;
+    snapshotId: string;
+  }) => void;
   workspaceSnapshotUploads?: Map<string, WorkspaceSnapshotUpload>;
   writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
@@ -1803,6 +2232,7 @@ function createPlatform(input: {
         sourceFilePath: string;
         snapshotId: string;
       }) => {
+        input.onWorkspaceSnapshotDirectPut?.(request);
         const bytes = await readFile(request.sourceFilePath);
         workspaceSnapshotUploads.set(request.objectKey, {
           bytes,
