@@ -1133,8 +1133,73 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
     diagnostic.details.providerOAuthErrorDescription,
   );
   appendHostedDeviceSyncFailureDiagnosticCode(redacted, "providerOAuthGrantType", diagnostic.details.providerOAuthGrantType);
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestClientCredentialPresent",
+    diagnostic.details.providerOAuthRequestClientCredentialPresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestClientIdPresent",
+    diagnostic.details.providerOAuthRequestClientIdPresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticCode(
+    redacted,
+    "providerOAuthRequestEncodingKind",
+    diagnostic.details.providerOAuthRequestEncodingKind,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestOfflineScopePresent",
+    diagnostic.details.providerOAuthRequestOfflineScopePresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticNumber(
+    redacted,
+    "providerOAuthRequestParameterCount",
+    diagnostic.details.providerOAuthRequestParameterCount,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestRefreshCredentialPresent",
+    diagnostic.details.providerOAuthRequestRefreshCredentialPresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticNumber(
+    redacted,
+    "providerOAuthRequestScopeCount",
+    diagnostic.details.providerOAuthRequestScopeCount,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthRequestScopePresent",
+    diagnostic.details.providerOAuthRequestScopePresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthResponseErrorDescriptionFieldPresent",
+    diagnostic.details.providerOAuthResponseErrorDescriptionFieldPresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticBoolean(
+    redacted,
+    "providerOAuthResponseErrorFieldPresent",
+    diagnostic.details.providerOAuthResponseErrorFieldPresent,
+  );
+  appendHostedDeviceSyncFailureDiagnosticCode(
+    redacted,
+    "providerOAuthResponseShapeKind",
+    diagnostic.details.providerOAuthResponseShapeKind,
+  );
 
   return redacted;
+}
+
+function appendHostedDeviceSyncFailureDiagnosticBoolean(
+  redacted: Record<string, boolean | number | string | null>,
+  key: string,
+  value: boolean | undefined,
+): void {
+  if (value !== undefined) {
+    redacted[key] = value;
+  }
 }
 
 function appendHostedDeviceSyncFailureDiagnosticNumber(

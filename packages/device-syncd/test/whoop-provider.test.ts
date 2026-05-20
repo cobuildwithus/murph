@@ -100,6 +100,28 @@ function createStoredAccount(scopes: string[], overrides: StoredDeviceSyncAccoun
   };
 }
 
+function expectedWhoopRefreshRequestDiagnostics() {
+  return {
+    oauthGrantType: "refresh_token",
+    oauthRequestClientCredentialPresent: true,
+    oauthRequestClientIdPresent: true,
+    oauthRequestEncodingKind: "form_urlencoded",
+    oauthRequestOfflineScopePresent: true,
+    oauthRequestParameterCount: 5,
+    oauthRequestRefreshCredentialPresent: true,
+    oauthRequestScopeCount: 1,
+    oauthRequestScopePresent: true,
+  };
+}
+
+function expectedWhoopJsonOAuthErrorResponseDiagnostics() {
+  return {
+    oauthResponseErrorDescriptionFieldPresent: true,
+    oauthResponseErrorFieldPresent: true,
+    oauthResponseShapeKind: "json_object",
+  };
+}
+
 function requireOAuthTokens(connection: ProviderConnectionResult): ProviderAuthTokens {
   const tokens = connection.credential?.kind === "oauth_tokens"
     ? connection.credential.tokens
@@ -359,7 +381,8 @@ test("WHOOP provider marks invalid refresh-token grants as reauthorization requi
         accountStatus: "reauthorization_required",
         oauthErrorCode: "invalid_grant",
         oauthErrorDescription: "The refresh token is invalid.",
-        oauthGrantType: "refresh_token",
+        ...expectedWhoopRefreshRequestDiagnostics(),
+        ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
       return true;
     },
@@ -405,7 +428,8 @@ test("WHOOP provider does not mark other refresh-token OAuth errors as reauthori
         accountStatus: null,
         oauthErrorCode: "invalid_request",
         oauthErrorDescription: "The token request is malformed.",
-        oauthGrantType: "refresh_token",
+        ...expectedWhoopRefreshRequestDiagnostics(),
+        ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
       return true;
     },
@@ -448,7 +472,8 @@ test("WHOOP provider does not mark client credential token failures as reauthori
         accountStatus: null,
         oauthErrorCode: "invalid_client",
         oauthErrorDescription: "The OAuth client credentials are invalid.",
-        oauthGrantType: "refresh_token",
+        ...expectedWhoopRefreshRequestDiagnostics(),
+        ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
       return true;
     },
@@ -486,7 +511,10 @@ test("WHOOP provider does not mark opaque token endpoint authorization failures 
         status: 401,
         retryable: false,
         accountStatus: null,
-        oauthGrantType: "refresh_token",
+        ...expectedWhoopRefreshRequestDiagnostics(),
+        oauthResponseErrorDescriptionFieldPresent: false,
+        oauthResponseErrorFieldPresent: false,
+        oauthResponseShapeKind: "empty",
       });
       return true;
     },

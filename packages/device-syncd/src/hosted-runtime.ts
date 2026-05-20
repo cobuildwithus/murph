@@ -204,6 +204,17 @@ export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
   providerOAuthErrorCode?: string;
   providerOAuthErrorDescription?: string;
   providerOAuthGrantType?: string;
+  providerOAuthRequestClientCredentialPresent?: boolean;
+  providerOAuthRequestClientIdPresent?: boolean;
+  providerOAuthRequestEncodingKind?: string;
+  providerOAuthRequestOfflineScopePresent?: boolean;
+  providerOAuthRequestParameterCount?: number;
+  providerOAuthRequestRefreshCredentialPresent?: boolean;
+  providerOAuthRequestScopeCount?: number;
+  providerOAuthRequestScopePresent?: boolean;
+  providerOAuthResponseErrorDescriptionFieldPresent?: boolean;
+  providerOAuthResponseErrorFieldPresent?: boolean;
+  providerOAuthResponseShapeKind?: string;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeFailureDiagnostic {
@@ -1234,6 +1245,17 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     "providerOAuthErrorCode",
     "providerOAuthErrorDescription",
     "providerOAuthGrantType",
+    "providerOAuthRequestClientCredentialPresent",
+    "providerOAuthRequestClientIdPresent",
+    "providerOAuthRequestEncodingKind",
+    "providerOAuthRequestOfflineScopePresent",
+    "providerOAuthRequestParameterCount",
+    "providerOAuthRequestRefreshCredentialPresent",
+    "providerOAuthRequestScopeCount",
+    "providerOAuthRequestScopePresent",
+    "providerOAuthResponseErrorDescriptionFieldPresent",
+    "providerOAuthResponseErrorFieldPresent",
+    "providerOAuthResponseShapeKind",
   ]);
   const details: HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails = {};
 
@@ -1243,6 +1265,8 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     "failureErrorName",
     "providerOAuthErrorCode",
     "providerOAuthGrantType",
+    "providerOAuthRequestEncodingKind",
+    "providerOAuthResponseShapeKind",
   ] as const) {
     if (record[field] !== undefined) {
       const value = sanitizeHostedRuntimeErrorCode(
@@ -1271,6 +1295,29 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
 
   if (record.providerHttpStatus !== undefined) {
     details.providerHttpStatus = requireNumber(record.providerHttpStatus, `${label}.providerHttpStatus`);
+  }
+
+  for (const field of [
+    "providerOAuthRequestParameterCount",
+    "providerOAuthRequestScopeCount",
+  ] as const) {
+    if (record[field] !== undefined && record[field] !== null) {
+      details[field] = requireNumber(record[field], `${label}.${field}`);
+    }
+  }
+
+  for (const field of [
+    "providerOAuthRequestClientCredentialPresent",
+    "providerOAuthRequestClientIdPresent",
+    "providerOAuthRequestOfflineScopePresent",
+    "providerOAuthRequestRefreshCredentialPresent",
+    "providerOAuthRequestScopePresent",
+    "providerOAuthResponseErrorDescriptionFieldPresent",
+    "providerOAuthResponseErrorFieldPresent",
+  ] as const) {
+    if (record[field] !== undefined && record[field] !== null) {
+      details[field] = requireBoolean(record[field], `${label}.${field}`);
+    }
   }
 
   return details;
