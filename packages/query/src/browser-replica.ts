@@ -36,6 +36,7 @@ export { createBrowserVaultQueryClient } from "./browser-replica/query.ts";
 export {
   selectBrowserVaultHistory,
   selectBrowserVaultOverview,
+  selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";
 export {
@@ -109,5 +110,6 @@ export type {
 } from "./browser-replica/experiments.ts";
 export {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
+  isCompletedOverviewExperimentStatus,
   isActiveOverviewExperimentStatus,
 } from "./overview.ts";

@@ -50,6 +50,7 @@ function OverviewPageContent() {
   );
   const overview = useMemo(() => client ? selectBrowserVaultOverview(client) : null, [client]);
   const metrics = overview?.metrics ?? [];
+  const experimentSummary = overview?.experimentSummary;
   const allExperiments = overview?.trackedExperiments ?? [];
   const experiments = allExperiments.slice(0, 8);
   const recentJournals = overview?.recentJournals ?? [];
@@ -63,8 +64,6 @@ function OverviewPageContent() {
       .slice(0, 8),
     [client, overview, timeZone],
   );
-  const activeExperiments = allExperiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status));
-  const completedExperiments = allExperiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status));
   const canRenderContent = status === "empty" || client !== null;
   const isEmpty =
     metrics.every((metric) => metric.value === 0) &&
@@ -151,14 +150,15 @@ function OverviewPageContent() {
                     Active now
                   </div>
                   <div className="mt-2 font-serif text-3xl font-semibold text-foreground">
-                    {activeExperiments.length}
+                    {experimentSummary?.activeCount ?? 0}
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {activeExperiments.length > 0 ? activeExperiments.slice(0, 4).map((entry) => (
-                      <Badge key={entry.id} variant="outline">
-                        {entry.title}
-                      </Badge>
-                    )) : (
+                    {experimentSummary && experimentSummary.activePreview.length > 0
+                      ? experimentSummary.activePreview.map((entry) => (
+                        <Badge key={entry.id} variant="outline">
+                          {entry.title}
+                        </Badge>
+                      )) : (
                       <span className="text-sm text-muted-foreground">No active experiments right now.</span>
                     )}
                   </div>
@@ -168,11 +168,11 @@ function OverviewPageContent() {
                     Recently finished
                   </div>
                   <div className="mt-2 font-serif text-3xl font-semibold text-foreground">
-                    {completedExperiments.length}
+                    {experimentSummary?.completedCount ?? 0}
                   </div>
                   <div className="mt-3 text-sm text-muted-foreground">
-                    {completedExperiments[0]
-                      ? `${completedExperiments[0].title} started ${formatIsoDate(completedExperiments[0].startedOn)}.`
+                    {experimentSummary?.latestCompleted
+                      ? `${experimentSummary.latestCompleted.title} started ${formatIsoDate(experimentSummary.latestCompleted.startedOn)}.`
                       : "No completed experiments yet."}
                   </div>
                 </div>

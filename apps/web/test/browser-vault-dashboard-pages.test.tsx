@@ -103,8 +103,8 @@ test("OverviewPage renders the dashboard overview", () => {
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
-  const activeExperiments = Array.from({ length: 6 }, (_, index) => {
-    const day = String(20 - index).padStart(2, "0");
+  const activeExperiments = Array.from({ length: 25 }, (_, index) => {
+    const day = String(30 - index).padStart(2, "0");
     return createEntity("experiment", `active_extra_${index}`, {
       body: `Active experiment ${index}.\n`,
       date: `2026-04-${day}`,
@@ -125,6 +125,14 @@ test("OverviewPage counts all tracked experiments while listing the most recent 
         status: "completed",
         title: "Finished hydration",
       }),
+      createEntity("experiment", "paused_old", {
+        body: "Paused experiment.\n",
+        date: "2026-03-31",
+        experimentSlug: "paused-baseline",
+        occurredAt: "2026-03-31T08:00:00.000Z",
+        status: "paused",
+        title: "Paused baseline",
+      }),
     ],
   });
   mocks.useBrowserVault.mockReturnValue({
@@ -138,13 +146,14 @@ test("OverviewPage counts all tracked experiments while listing the most recent 
 
   const markup = renderToStaticMarkup(createElement(OverviewPage));
 
-  assert.match(markup, /Active now[\s\S]*>8<\/div>/);
+  assert.match(markup, /Active now[\s\S]*>27<\/div>/);
   assert.match(markup, /Recently finished[\s\S]*>1<\/div>/);
   assert.match(markup, /Finished hydration started/);
   const recentExperimentsMarkup =
     markup.match(/Recent experiments[\s\S]*?Weekly sample deltas/)?.[0] ?? "";
   assert.match(recentExperimentsMarkup, /Active extra 0/);
   assert.doesNotMatch(recentExperimentsMarkup, /Finished hydration/);
+  assert.doesNotMatch(recentExperimentsMarkup, /Paused baseline/);
 });
 
 test("HistoryPage renders recent timeline entries", () => {

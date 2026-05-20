@@ -4,8 +4,14 @@ import {
   type ExperimentFrontmatter,
 } from "@murphai/contracts";
 
-import { isActiveOverviewExperimentStatus } from "../overview-status.ts";
-import type { OverviewExperiment } from "../overview.ts";
+import {
+  isActiveOverviewExperimentStatus,
+  isCompletedOverviewExperimentStatus,
+} from "../overview-status.ts";
+import type {
+  OverviewExperiment,
+  OverviewExperimentSummary,
+} from "../overview.ts";
 import {
   TRACKED_EXPERIMENT_LIMIT,
   type BrowserVaultEntity,
@@ -13,17 +19,37 @@ import {
 } from "./shared.ts";
 
 export function selectBrowserVaultTrackedExperiments(client: BrowserVaultQueryClient): OverviewExperiment[] {
+  return listPrioritizedBrowserVaultExperimentEntities(client)
+    .slice(0, TRACKED_EXPERIMENT_LIMIT)
+    .map(toOverviewExperiment);
+}
+
+export function selectBrowserVaultExperimentSummary(client: BrowserVaultQueryClient): OverviewExperimentSummary {
+  const experiments = listPrioritizedBrowserVaultExperimentEntities(client);
+  const activeExperiments = experiments
+    .filter((entry) => isActiveOverviewExperimentStatus(entry.status))
+    .map(toOverviewExperiment);
+  const completedExperiments = experiments
+    .filter((entry) => isCompletedOverviewExperimentStatus(entry.status))
+    .map(toOverviewExperiment);
+
+  return {
+    activeCount: activeExperiments.length,
+    activePreview: activeExperiments.slice(0, 4),
+    completedCount: completedExperiments.length,
+    latestCompleted: completedExperiments[0] ?? null,
+  };
+}
+
+function listPrioritizedBrowserVaultExperimentEntities(client: BrowserVaultQueryClient): BrowserVaultEntity[] {
   const sortedExperiments = client.replica.entities
     .filter((entry) => entry.family === "experiment")
     .sort((left, right) => compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date));
-  const prioritizedExperiments = [
+
+  return [
     ...sortedExperiments.filter((entry) => isActiveOverviewExperimentStatus(entry.status)),
     ...sortedExperiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status)),
   ];
-
-  return prioritizedExperiments
-    .slice(0, TRACKED_EXPERIMENT_LIMIT)
-    .map(toOverviewExperiment);
 }
 
 type QueryOverviewExperimentFrontmatter = ExperimentFrontmatter;

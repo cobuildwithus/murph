@@ -26,6 +26,7 @@ export {
   createBrowserVaultReplica,
   hashBrowserVaultReplicaData,
   isActiveOverviewExperimentStatus,
+  isCompletedOverviewExperimentStatus,
   parseBrowserVaultReplica,
   BROWSER_VAULT_METRIC_ROW_SCHEMA,
   BROWSER_VAULT_METRIC_SELECTION_SCHEMA,
@@ -36,6 +37,7 @@ export {
   selectBrowserVaultHistory,
   selectBrowserVaultMurphAgeReadiness,
   selectBrowserVaultOverview,
+  selectBrowserVaultExperimentSummary,
   selectBrowserVaultBiomarkerPanel,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica.ts";
@@ -114,6 +116,7 @@ export {
 } from "./overview.ts";
 export type {
   OverviewExperiment,
+  OverviewExperimentSummary,
   OverviewJournalEntry,
   OverviewMetric,
   OverviewWeeklySampleSummary,

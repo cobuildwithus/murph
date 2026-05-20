@@ -7,10 +7,14 @@ import {
   type BrowserVaultQueryClient,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
-import { selectBrowserVaultTrackedExperiments } from "./tracked-experiments.ts";
+import {
+  selectBrowserVaultExperimentSummary,
+  selectBrowserVaultTrackedExperiments,
+} from "./tracked-experiments.ts";
 
 export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): BrowserVaultOverviewView {
   return {
+    experimentSummary: selectBrowserVaultExperimentSummary(client),
     metrics: buildBrowserOverviewMetrics(client),
     recentJournals: summarizeRecentBrowserOverviewJournals(client, RECENT_JOURNAL_LIMIT),
     trackedExperiments: selectBrowserVaultTrackedExperiments(client),
