@@ -69,6 +69,7 @@ const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 const WHOOP_MAX_COLLECTION_PAGES = 100;
 const WHOOP_MAX_COLLECTION_RECORDS = 25_000;
+const WHOOP_OAUTH_TOKEN_ENDPOINT_KIND = "whoop_oauth_token";
 
 type WhoopScope =
   | "offline"
@@ -442,19 +443,39 @@ function resolveWhoopTokenRequestAccountStatus(input: {
 function buildWhoopTokenRequestDiagnostics(
   parameters: Record<string, string>,
 ): Record<string, boolean | number | string | null | undefined> {
+  const parameterNames = Object.keys(parameters).sort();
   const scopes = splitScopes(parameters.scope);
 
   return {
     oauthGrantType: parameters.grant_type,
+    oauthRequestBodyBuilderKind: "url_search_params_record",
+    oauthRequestClientAuthPlacement: "body_parameters",
     oauthRequestClientCredentialPresent: Boolean(parameters.client_secret?.trim()),
     oauthRequestClientIdPresent: Boolean(parameters.client_id?.trim()),
+    oauthRequestContentType: "application_x_www_form_urlencoded",
+    // The request is built from a record before URLSearchParams, so duplicate form keys cannot be emitted here.
+    oauthRequestDuplicateParameterCount: 0,
     oauthRequestEncodingKind: "form_urlencoded",
+    oauthRequestHasDuplicateParameters: false,
+    oauthRequestMethod: "POST",
     oauthRequestOfflineScopePresent: scopes.includes("offline"),
-    oauthRequestParameterCount: Object.keys(parameters).length,
+    oauthRequestParameterCount: parameterNames.length,
+    oauthRequestParameterNames: formatOAuthDiagnosticTokenList(parameterNames),
     oauthRequestRefreshCredentialPresent: Boolean(parameters.refresh_token?.trim()),
     oauthRequestScopeCount: scopes.length,
     oauthRequestScopePresent: Boolean(parameters.scope?.trim()),
+    oauthRequestScopeValue: formatOAuthDiagnosticTokenList(scopes),
+    oauthRequestTokenEndpointKind: WHOOP_OAUTH_TOKEN_ENDPOINT_KIND,
   };
+}
+
+function formatOAuthDiagnosticTokenList(values: readonly string[]): string | null {
+  const formatted = values
+    .map((value) => normalizeString(value))
+    .filter((value): value is string => Boolean(value))
+    .join(".");
+
+  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(formatted) ? formatted : null;
 }
 
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {

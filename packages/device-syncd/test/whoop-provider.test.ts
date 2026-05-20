@@ -103,14 +103,46 @@ function createStoredAccount(scopes: string[], overrides: StoredDeviceSyncAccoun
 function expectedWhoopRefreshRequestDiagnostics() {
   return {
     oauthGrantType: "refresh_token",
+    oauthRequestBodyBuilderKind: "url_search_params_record",
+    oauthRequestClientAuthPlacement: "body_parameters",
     oauthRequestClientCredentialPresent: true,
     oauthRequestClientIdPresent: true,
+    oauthRequestContentType: "application_x_www_form_urlencoded",
+    oauthRequestDuplicateParameterCount: 0,
     oauthRequestEncodingKind: "form_urlencoded",
+    oauthRequestHasDuplicateParameters: false,
+    oauthRequestMethod: "POST",
     oauthRequestOfflineScopePresent: true,
     oauthRequestParameterCount: 5,
+    oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
     oauthRequestRefreshCredentialPresent: true,
     oauthRequestScopeCount: 1,
     oauthRequestScopePresent: true,
+    oauthRequestScopeValue: "offline",
+    oauthRequestTokenEndpointKind: "whoop_oauth_token",
+  };
+}
+
+function expectedWhoopAuthorizationCodeRequestDiagnostics() {
+  return {
+    oauthGrantType: "authorization_code",
+    oauthRequestBodyBuilderKind: "url_search_params_record",
+    oauthRequestClientAuthPlacement: "body_parameters",
+    oauthRequestClientCredentialPresent: true,
+    oauthRequestClientIdPresent: true,
+    oauthRequestContentType: "application_x_www_form_urlencoded",
+    oauthRequestDuplicateParameterCount: 0,
+    oauthRequestEncodingKind: "form_urlencoded",
+    oauthRequestHasDuplicateParameters: false,
+    oauthRequestMethod: "POST",
+    oauthRequestOfflineScopePresent: false,
+    oauthRequestParameterCount: 5,
+    oauthRequestParameterNames: "client_id.client_secret.code.grant_type.redirect_uri",
+    oauthRequestRefreshCredentialPresent: false,
+    oauthRequestScopeCount: 0,
+    oauthRequestScopePresent: false,
+    oauthRequestScopeValue: null,
+    oauthRequestTokenEndpointKind: "whoop_oauth_token",
   };
 }
 
@@ -390,6 +422,62 @@ test("WHOOP provider marks invalid refresh-token grants as reauthorization requi
   assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("refresh_token"), "persisted-refresh-token");
   assert.equal(new URLSearchParams(requestBody ?? "").get("scope"), "offline");
+});
+
+test("WHOOP provider includes safe request-shape diagnostics for auth-code token failures", async () => {
+  let requestBody: string | null = null;
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        requestBody = readRequestBody(init);
+        return createJsonResponse({
+          error: "invalid_request",
+          error_description: "Authorization code expired. Restart WHOOP connection.",
+        }, 400);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.oauthAdapter.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+          state: "state-auth-code-diagnostics",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-fixture",
+      ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 400);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, null);
+      assert.deepEqual(error.details, {
+        status: 400,
+        retryable: false,
+        accountStatus: null,
+        oauthErrorCode: "invalid_request",
+        oauthErrorDescription: "Authorization code expired. Restart WHOOP connection.",
+        ...expectedWhoopAuthorizationCodeRequestDiagnostics(),
+        ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
+      });
+      assert.equal(JSON.stringify(error.details).includes("auth-code-fixture"), false);
+      assert.equal(JSON.stringify(error.details).includes("whoop-client-secret"), false);
+      return true;
+    },
+  );
+  assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "authorization_code");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("code"), "auth-code-fixture");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("redirect_uri"), "https://sync.example.test/device-sync/oauth/whoop/callback");
 });
 
 test("WHOOP provider does not mark other refresh-token OAuth errors as reauthorization required", async () => {

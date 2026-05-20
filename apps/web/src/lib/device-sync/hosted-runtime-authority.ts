@@ -670,79 +670,82 @@ function buildHostedRuntimeFailureDiagnosticRedactedJson(
   };
 }
 
+type HostedRuntimeFailureDiagnosticDetails =
+  NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"]>["details"];
+type HostedRuntimeFailureDiagnosticStringField = {
+  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
+    string | undefined ? Key : never;
+}[keyof HostedRuntimeFailureDiagnosticDetails];
+type HostedRuntimeFailureDiagnosticNumberField = {
+  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
+    number | undefined ? Key : never;
+}[keyof HostedRuntimeFailureDiagnosticDetails];
+type HostedRuntimeFailureDiagnosticBooleanField = {
+  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
+    boolean | undefined ? Key : never;
+}[keyof HostedRuntimeFailureDiagnosticDetails];
+
+const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
+  "failureCauseCode",
+  "failureCauseName",
+  "failureErrorName",
+  "providerOAuthErrorCode",
+  "providerOAuthGrantType",
+  "providerOAuthRequestBodyBuilderKind",
+  "providerOAuthRequestClientAuthPlacement",
+  "providerOAuthRequestContentType",
+  "providerOAuthRequestEncodingKind",
+  "providerOAuthRequestMethod",
+  "providerOAuthRequestParameterNames",
+  "providerOAuthRequestScopeValue",
+  "providerOAuthRequestTokenEndpointKind",
+  "providerOAuthResponseShapeKind",
+] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
+
+const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
+  "failureErrorCause",
+  "providerHttpStatusText",
+  "providerOAuthErrorDescription",
+] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
+
+const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
+  "providerHttpStatus",
+  "providerOAuthRequestDuplicateParameterCount",
+  "providerOAuthRequestParameterCount",
+  "providerOAuthRequestScopeCount",
+] as const satisfies readonly HostedRuntimeFailureDiagnosticNumberField[];
+
+const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
+  "providerOAuthRequestClientCredentialPresent",
+  "providerOAuthRequestClientIdPresent",
+  "providerOAuthRequestHasDuplicateParameters",
+  "providerOAuthRequestOfflineScopePresent",
+  "providerOAuthRequestRefreshCredentialPresent",
+  "providerOAuthRequestScopePresent",
+  "providerOAuthResponseErrorDescriptionFieldPresent",
+  "providerOAuthResponseErrorFieldPresent",
+] as const satisfies readonly HostedRuntimeFailureDiagnosticBooleanField[];
+
 function buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(
-  details: NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"]>["details"],
+  details: HostedRuntimeFailureDiagnosticDetails,
 ): HostedRuntimeRedactedJson {
   const redacted: HostedRuntimeRedactedJson = {};
 
-  appendHostedRuntimeDiagnosticCode(redacted, "failureCauseCode", details.failureCauseCode);
-  appendHostedRuntimeDiagnosticCode(redacted, "failureCauseName", details.failureCauseName);
-  appendHostedRuntimeDiagnosticReason(redacted, "failureErrorCause", details.failureErrorCause);
-  appendHostedRuntimeDiagnosticCode(redacted, "failureErrorName", details.failureErrorName);
-  appendHostedRuntimeDiagnosticNumber(redacted, "providerHttpStatus", details.providerHttpStatus);
-  appendHostedRuntimeDiagnosticReason(redacted, "providerHttpStatusText", details.providerHttpStatusText);
-  appendHostedRuntimeDiagnosticCode(redacted, "providerOAuthErrorCode", details.providerOAuthErrorCode);
-  appendHostedRuntimeDiagnosticReason(
-    redacted,
-    "providerOAuthErrorDescription",
-    details.providerOAuthErrorDescription,
-  );
-  appendHostedRuntimeDiagnosticCode(redacted, "providerOAuthGrantType", details.providerOAuthGrantType);
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestClientCredentialPresent",
-    details.providerOAuthRequestClientCredentialPresent,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestClientIdPresent",
-    details.providerOAuthRequestClientIdPresent,
-  );
-  appendHostedRuntimeDiagnosticCode(
-    redacted,
-    "providerOAuthRequestEncodingKind",
-    details.providerOAuthRequestEncodingKind,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestOfflineScopePresent",
-    details.providerOAuthRequestOfflineScopePresent,
-  );
-  appendHostedRuntimeDiagnosticNumber(
-    redacted,
-    "providerOAuthRequestParameterCount",
-    details.providerOAuthRequestParameterCount,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestRefreshCredentialPresent",
-    details.providerOAuthRequestRefreshCredentialPresent,
-  );
-  appendHostedRuntimeDiagnosticNumber(
-    redacted,
-    "providerOAuthRequestScopeCount",
-    details.providerOAuthRequestScopeCount,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthRequestScopePresent",
-    details.providerOAuthRequestScopePresent,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthResponseErrorDescriptionFieldPresent",
-    details.providerOAuthResponseErrorDescriptionFieldPresent,
-  );
-  appendHostedRuntimeDiagnosticBoolean(
-    redacted,
-    "providerOAuthResponseErrorFieldPresent",
-    details.providerOAuthResponseErrorFieldPresent,
-  );
-  appendHostedRuntimeDiagnosticCode(
-    redacted,
-    "providerOAuthResponseShapeKind",
-    details.providerOAuthResponseShapeKind,
-  );
+  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS) {
+    appendHostedRuntimeDiagnosticCode(redacted, field, details[field]);
+  }
+
+  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS) {
+    appendHostedRuntimeDiagnosticReason(redacted, field, details[field]);
+  }
+
+  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS) {
+    appendHostedRuntimeDiagnosticNumber(redacted, field, details[field]);
+  }
+
+  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS) {
+    appendHostedRuntimeDiagnosticBoolean(redacted, field, details[field]);
+  }
 
   return redacted;
 }
