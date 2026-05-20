@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   LandingAuthActions: vi.fn(
     (props: {
@@ -53,6 +54,18 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/github-stars", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/src/lib/github-stars")>(
+      "@/src/lib/github-stars",
+    );
+
+  return {
+    ...actual,
+    getMurphGithubStarCount: mocks.getMurphGithubStarCount,
+  };
+});
+
 vi.mock(
   "@/src/components/hosted-onboarding/phone-country-code-provider",
   () => ({
@@ -81,12 +94,14 @@ test("HomePage renders the canonical landing page at the root route", async () =
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
+  mocks.getMurphGithubStarCount.mockResolvedValue(null);
 
   const { default: HomePage } = await import("../app/page");
 
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
@@ -164,6 +179,7 @@ test("SecurityPage keeps the shared sticky nav on one auth button", async () => 
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
   });
+  mocks.getMurphGithubStarCount.mockResolvedValue(null);
 
   const { default: SecurityPage } = await import("../app/security/page");
 
@@ -216,6 +232,7 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
   });
+  mocks.getMurphGithubStarCount.mockResolvedValue(null);
 
   const { default: HomePage } = await import("../app/page");
 

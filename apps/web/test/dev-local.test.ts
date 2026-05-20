@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,7 @@ import {
   buildHostedWebDevArgv,
   clearConflictingNextDevLock,
   loadHostedWebDevLocalEnv,
+  removeHostedWebDevServerLockIfOwned,
   resolveHostedWebDevCacheLimitBytes,
   resolveHostedWebDevOwnerPid,
   resolveHostedWebDevRuntimePaths,
@@ -146,6 +147,67 @@ test("hosted web dev lock paths stay isolated between interactive and smoke arti
     isolatedSmokePaths.lockPath,
     "/repo/apps/web/.next-smoke-e2e-run/.dev-server.lock",
   );
+});
+
+test("hosted web dev package wrappers leave lock cleanup to the owner-aware dev helper", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as {
+    scripts?: Record<string, string>;
+  };
+
+  for (const scriptName of ["dev:local-env", "dev:prepared-local-env"]) {
+    const script = packageJson.scripts?.[scriptName] ?? "";
+
+    assert.match(script, /apps\/web\/scripts\/dev-local\.ts/u);
+    assert.doesNotMatch(script, /rm\s+-rf\s+\.next-dev\/\.dev-server\.lock/u);
+  }
+});
+
+test("hosted web dev lock release does not remove another owner metadata lock", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-web-dev-owner-lock-"));
+  const runtimePaths = resolveHostedWebDevRuntimePaths(tempDir);
+
+  try {
+    await mkdir(runtimePaths.lockPath, { recursive: true });
+    await writeFile(
+      runtimePaths.lockMetadataPath,
+      `${JSON.stringify({
+        command: "next-server",
+        pid: process.pid + 1,
+        port: 3000,
+        startedAt: "2026-03-25T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    await removeHostedWebDevServerLockIfOwned(runtimePaths);
+    assert.equal(
+      await readFile(runtimePaths.lockMetadataPath, "utf8"),
+      `${JSON.stringify({
+        command: "next-server",
+        pid: process.pid + 1,
+        port: 3000,
+        startedAt: "2026-03-25T00:00:00.000Z",
+      })}\n`,
+    );
+
+    await writeFile(
+      runtimePaths.lockMetadataPath,
+      `${JSON.stringify({
+        command: "tsx dev-local.ts",
+        pid: process.pid,
+        port: 3000,
+        startedAt: "2026-03-25T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    await removeHostedWebDevServerLockIfOwned(runtimePaths);
+    await assert.rejects(readFile(runtimePaths.lockMetadataPath, "utf8"), /ENOENT/u);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("hosted web dev removes a stale Next dev lock when its pid is no longer running", async () => {

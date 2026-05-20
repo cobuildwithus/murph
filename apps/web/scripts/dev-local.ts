@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -196,7 +196,7 @@ async function acquireHostedWebDevServerLock(
   }
 
   const releaseExitHandler = () => {
-    rmSync(runtimePaths.lockPath, { force: true, recursive: true });
+    removeHostedWebDevServerLockIfOwnedSync(runtimePaths);
   };
 
   try {
@@ -206,7 +206,7 @@ async function acquireHostedWebDevServerLock(
       "utf8",
     );
   } catch (error) {
-    releaseExitHandler();
+    rmSync(runtimePaths.lockPath, { force: true, recursive: true });
     throw error;
   }
 
@@ -220,11 +220,36 @@ async function acquireHostedWebDevServerLock(
 
     released = true;
     try {
-      await rm(runtimePaths.lockPath, { force: true, recursive: true });
+      await removeHostedWebDevServerLockIfOwned(runtimePaths);
     } finally {
       process.off("exit", releaseExitHandler);
     }
   };
+}
+
+export async function removeHostedWebDevServerLockIfOwned(
+  runtimePaths: Pick<HostedWebDevRuntimePaths, "lockMetadataPath" | "lockPath">,
+): Promise<void> {
+  const metadata = await readHostedWebDevServerLockMetadata(runtimePaths.lockMetadataPath);
+  if (metadata?.pid === process.pid) {
+    await rm(runtimePaths.lockPath, { force: true, recursive: true });
+  }
+}
+
+function removeHostedWebDevServerLockIfOwnedSync(
+  runtimePaths: Pick<HostedWebDevRuntimePaths, "lockMetadataPath" | "lockPath">,
+): void {
+  let metadata: HostedWebDevServerLockMetadata | null;
+
+  try {
+    metadata = readHostedWebDevServerLockMetadataSync(runtimePaths.lockMetadataPath);
+  } catch {
+    return;
+  }
+
+  if (metadata?.pid === process.pid) {
+    rmSync(runtimePaths.lockPath, { force: true, recursive: true });
+  }
 }
 
 function createHostedWebDevServerLockMetadata(
@@ -330,27 +355,8 @@ async function inspectHostedWebDevServerLock(
   | { state: "active"; metadata: HostedWebDevServerLockMetadata }
   | { state: "stale" }
 > {
-  let rawMetadata: string;
-
-  try {
-    rawMetadata = await readFile(lockMetadataPath, "utf8");
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return { state: "stale" };
-    }
-
-    throw error;
-  }
-
-  let metadata: unknown;
-
-  try {
-    metadata = JSON.parse(rawMetadata);
-  } catch {
-    return { state: "stale" };
-  }
-
-  if (!isHostedWebDevServerLockMetadata(metadata)) {
+  const metadata = await readHostedWebDevServerLockMetadata(lockMetadataPath);
+  if (metadata === null) {
     return { state: "stale" };
   }
 
@@ -362,6 +368,48 @@ async function inspectHostedWebDevServerLock(
     state: "active",
     metadata,
   };
+}
+
+async function readHostedWebDevServerLockMetadata(
+  lockMetadataPath: string,
+): Promise<HostedWebDevServerLockMetadata | null> {
+  try {
+    return parseHostedWebDevServerLockMetadata(await readFile(lockMetadataPath, "utf8"));
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function readHostedWebDevServerLockMetadataSync(
+  lockMetadataPath: string,
+): HostedWebDevServerLockMetadata | null {
+  try {
+    return parseHostedWebDevServerLockMetadata(readFileSync(lockMetadataPath, "utf8"));
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function parseHostedWebDevServerLockMetadata(
+  rawMetadata: string,
+): HostedWebDevServerLockMetadata | null {
+  let metadata: unknown;
+
+  try {
+    metadata = JSON.parse(rawMetadata);
+  } catch {
+    return null;
+  }
+
+  return isHostedWebDevServerLockMetadata(metadata) ? metadata : null;
 }
 
 async function pruneOversizedHostedWebDevArtifacts(

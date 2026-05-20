@@ -1,9 +1,6 @@
 import process from "node:process";
 
-import {
-  startHostedLocalDevStack,
-  type HostedLocalDevStack,
-} from "../../../scripts/dev-hosted-local/stack.ts";
+import type { HostedLocalDevStack } from "../../../scripts/dev-hosted-local/stack.ts";
 import {
   applyHostedLocalProfile,
   type HostedLocalProfile,
@@ -55,6 +52,9 @@ export interface HostedLocalHarness {
 export async function startHostedLocalHarness(
   input: StartHostedLocalHarnessInput = {},
 ): Promise<HostedLocalHarness> {
+  const { startHostedLocalDevStack } = await import(
+    "../../../scripts/dev-hosted-local/stack.ts"
+  );
   const profiled = applyHostedLocalProfile({
     env: input.env ?? process.env,
     profileName: input.profileName,

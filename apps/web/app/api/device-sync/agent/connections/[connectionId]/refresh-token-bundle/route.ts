@@ -1,3 +1,5 @@
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import {
   jsonOk,
@@ -18,7 +20,7 @@ export const POST = withJsonError(async (
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const session = await controlPlane.requireAgentSession();
   const body = await readOptionalJsonObject(request);
-  const expectedTokenVersion = typeof body.expectedTokenVersion === "number" ? body.expectedTokenVersion : null;
+  const expectedTokenVersion = readExpectedTokenVersion(body);
   const force = body.force === true;
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
   const refresh = await controlPlane.refreshTokenBundle(session, connectionId, {
@@ -32,3 +34,26 @@ export const POST = withJsonError(async (
     tokenVersionChanged: refresh.tokenVersionChanged,
   });
 });
+
+function readExpectedTokenVersion(body: Record<string, unknown>): number | null {
+  if (!Object.hasOwn(body, "expectedTokenVersion") || body.expectedTokenVersion === null) {
+    return null;
+  }
+
+  const { expectedTokenVersion } = body;
+
+  if (
+    typeof expectedTokenVersion !== "number"
+    || !Number.isSafeInteger(expectedTokenVersion)
+    || expectedTokenVersion <= 0
+  ) {
+    throw deviceSyncError({
+      code: "INVALID_EXPECTED_TOKEN_VERSION",
+      message: "expectedTokenVersion must be a positive safe integer when provided.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return expectedTokenVersion;
+}

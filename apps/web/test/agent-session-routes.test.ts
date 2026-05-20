@@ -2,7 +2,17 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
-import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
+import { createBearerRequest, createRouteContext } from "./route-test-helpers";
+
+function createJsonPostBearerRequest(url: string, bearerToken: string, body: unknown) {
+  return createBearerRequest(url, bearerToken, {
+    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+}
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -149,16 +159,12 @@ describe("hosted device-sync agent token routes", () => {
     );
 
     const response = await refreshRoute.POST(
-      createJsonPostRequest(
+      createJsonPostBearerRequest(
         "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        "hbds_agent_expired",
         {
           expectedTokenVersion: 2,
           force: true,
-        },
-        {
-          headers: {
-            authorization: "Bearer hbds_agent_expired",
-          },
         },
       ),
       createRouteContext({ connectionId: "dsc_123" }),
@@ -204,16 +210,12 @@ describe("hosted device-sync agent token routes", () => {
 
   it("passes the authenticated session and refresh options into refresh-token-bundle", async () => {
     const response = await refreshRoute.POST(
-      createJsonPostRequest(
+      createJsonPostBearerRequest(
         "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        "hbds_agent_active",
         {
           expectedTokenVersion: 2,
           force: true,
-        },
-        {
-          headers: {
-            authorization: "Bearer hbds_agent_active",
-          },
         },
       ),
       createRouteContext({ connectionId: "dsc_123" }),
@@ -235,6 +237,60 @@ describe("hosted device-sync agent token routes", () => {
     });
     expect(body).not.toHaveProperty("agentSession");
     expect(JSON.stringify(body)).not.toContain("hbds_agent_active");
+  });
+
+  it("omits the refresh-token-bundle version fence when expectedTokenVersion is absent or null", async () => {
+    for (const body of [
+      { force: true },
+      { expectedTokenVersion: null, force: false },
+    ]) {
+      mocks.refreshTokenBundle.mockClear();
+
+      const response = await refreshRoute.POST(
+        createJsonPostBearerRequest(
+          "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+          "hbds_agent_active",
+          body,
+        ),
+        createRouteContext({ connectionId: "dsc_123" }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.refreshTokenBundle).toHaveBeenCalledWith(session, "dsc_123", {
+        expectedTokenVersion: null,
+        force: body.force === true,
+      });
+    }
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["string", "2"],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1],
+  ])("rejects a present non-positive-safe-integer expectedTokenVersion: %s", async (_label, expectedTokenVersion) => {
+    const response = await refreshRoute.POST(
+      createJsonPostBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+        "hbds_agent_active",
+        {
+          expectedTokenVersion,
+          force: true,
+        },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_EXPECTED_TOKEN_VERSION",
+        message: "expectedTokenVersion must be a positive safe integer when provided.",
+        retryable: false,
+      },
+    });
+    expect(mocks.refreshTokenBundle).not.toHaveBeenCalled();
   });
 
   it("passes the authenticated session into revoke so the handler can invalidate it", async () => {

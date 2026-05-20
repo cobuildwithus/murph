@@ -91,6 +91,10 @@ test("SubprocessorsPage uses affirmative model and search provider wording", () 
 
   assert.match(
     markup,
+    /Hosted member, routing, billing reference, mailbox, workspace checkpoint, consent, and operational records\./u,
+  );
+  assert.match(
+    markup,
     /Encrypted stored workspace data, transient execution content needed to run requested hosted workflows, execution metadata, runtime logs, and operational artifacts/u,
   );
   assert.match(markup, /Configured AI model providers/);

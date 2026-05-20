@@ -54,9 +54,6 @@
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
-      "@murphai/runtime-state/*": [
-        "packages/runtime-state/src/*"
-      ],
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
       ],

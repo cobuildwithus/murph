@@ -3,9 +3,8 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { repoRoot } from "../../../scripts/dev-hosted-local/constants.ts";
-import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
 import type { HostedLocalProfile } from "./profiles.ts";
+import { hostedLocalHarnessRepoRoot } from "./repo.ts";
 
 export type HostedLocalHarnessStateStatus =
   | "created"
@@ -72,6 +71,10 @@ const hostedLocalArtifactRoot = path.join(".artifacts", "hosted-local");
 export async function createHostedLocalHarnessState(
   input: CreateHostedLocalStateInput,
 ): Promise<HostedLocalHarnessState> {
+  const { resolveHostedLocalDevConfig } = await import(
+    "../../../scripts/dev-hosted-local/config.ts"
+  );
+  const config = tryResolveHostedLocalDevConfig(resolveHostedLocalDevConfig, input.env);
   const createdAt = new Date().toISOString();
   const runId = buildHostedLocalRunId(input.profile.name, input.runIdSuffix);
   const artifactDir = path.join(hostedLocalArtifactRoot, runId);
@@ -81,7 +84,7 @@ export async function createHostedLocalHarnessState(
     artifactDir,
     command: redactHostedLocalCommand(input.command),
     createdAt,
-    cwd: formatHostedLocalStatePath(input.cwd ?? repoRoot),
+    cwd: formatHostedLocalStatePath(input.cwd ?? hostedLocalHarnessRepoRoot),
     env: redactHostedLocalEnvironment(input.env),
     mode: input.profile.mode,
     profile: input.profile.name,
@@ -91,8 +94,8 @@ export async function createHostedLocalHarnessState(
     status: input.status ?? "created",
     updatedAt: createdAt,
     version: 1,
-    workerBaseUrl: resolveWorkerBaseUrl(input.env),
-    webBaseUrl: resolveWebBaseUrl(input.env),
+    workerBaseUrl: config ? formatWorkerBaseUrl(config) : null,
+    webBaseUrl: config ? formatWebBaseUrl(config) : null,
   };
   await writeHostedLocalHarnessState(state);
   return state;
@@ -233,12 +236,12 @@ function isSensitiveHostedLocalCommandValue(value: string): boolean {
 }
 
 function resolveHostedLocalRepoPath(value: string): string {
-  return path.isAbsolute(value) ? value : path.join(repoRoot, value);
+  return path.isAbsolute(value) ? value : path.join(hostedLocalHarnessRepoRoot, value);
 }
 
 function formatHostedLocalStatePath(value: string): string {
   const resolved = path.resolve(value);
-  const relative = path.relative(repoRoot, resolved);
+  const relative = path.relative(hostedLocalHarnessRepoRoot, resolved);
   if (!relative) {
     return ".";
   }
@@ -250,29 +253,38 @@ function formatHostedLocalStatePath(value: string): string {
 
 function redactHostedLocalStateValue(value: string): string {
   return value
-    .split(repoRoot).join("<REPO_ROOT>")
+    .split(hostedLocalHarnessRepoRoot).join("<REPO_ROOT>")
     .split(os.homedir()).join("<HOME_DIR>");
 }
 
-function resolveWorkerBaseUrl(env: NodeJS.ProcessEnv): string | null {
+function tryResolveHostedLocalDevConfig(
+  resolveHostedLocalDevConfig: typeof import("../../../scripts/dev-hosted-local/config.ts").resolveHostedLocalDevConfig,
+  env: NodeJS.ProcessEnv,
+): import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig | null {
   try {
-    const config = resolveHostedLocalDevConfig(env);
-    const host = config.workerHost === "0.0.0.0" ? "127.0.0.1" : config.workerHost;
-    return `${config.workerProtocol}://${host}:${config.workerPort}`;
+    return resolveHostedLocalDevConfig(env);
   } catch {
     return null;
   }
 }
 
-function resolveWebBaseUrl(env: NodeJS.ProcessEnv): string | null {
-  try {
-    const config = resolveHostedLocalDevConfig(env);
-    if (config.skipWeb) {
-      return null;
-    }
-    const host = config.webHost === "0.0.0.0" ? "127.0.0.1" : config.webHost;
-    return `http://${host}:${config.webPort}`;
-  } catch {
+function formatWorkerBaseUrl(
+  config: import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig,
+): string {
+  const host = formatHostedLocalListenHost(config.workerHost);
+  return `${config.workerProtocol}://${host}:${config.workerPort}`;
+}
+
+function formatWebBaseUrl(
+  config: import("../../../scripts/dev-hosted-local/types.ts").HostedLocalDevConfig,
+): string | null {
+  if (config.skipWeb) {
     return null;
   }
+  const host = formatHostedLocalListenHost(config.webHost);
+  return `http://${host}:${config.webPort}`;
+}
+
+function formatHostedLocalListenHost(host: string): string {
+  return host === "0.0.0.0" ? "127.0.0.1" : host;
 }
