@@ -167,7 +167,7 @@ test("SecurityPage keeps the shared sticky nav on one auth button", async () => 
 
   const { default: SecurityPage } = await import("../app/security/page");
 
-  renderToStaticMarkup(await SecurityPage());
+  const markup = renderToStaticMarkup(await SecurityPage());
 
   expect(mocks.LandingAuthActions).toHaveBeenCalled();
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
@@ -180,6 +180,11 @@ test("SecurityPage keeps the shared sticky nav on one auth button", async () => 
     },
     undefined
   );
+  assert.match(
+    markup,
+    /curl -fsSL https:\/\/www\.withmurph\.ai\/install\.sh \| bash/
+  );
+  assert.doesNotMatch(markup, /curl -sSL withmurph\.ai\/install\.sh \| bash/);
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {

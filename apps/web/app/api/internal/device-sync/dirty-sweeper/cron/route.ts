@@ -1,4 +1,7 @@
-import { runHostedDeviceSyncDirtySweeper } from "@/src/lib/device-sync/dirty-sweeper";
+import {
+  runHostedDeviceSyncDirtySweeper,
+  type HostedDeviceSyncDirtySweeperResult,
+} from "@/src/lib/device-sync/dirty-sweeper";
 import {
   runHostedDeviceSyncDueReconcileSweeper,
   type HostedDeviceSyncDueReconcileSweeperResult,
@@ -14,17 +17,24 @@ export const GET = withJsonError(async (request: Request) => {
     runHostedDeviceSyncDueReconcileSweeper(),
   ]);
 
+  const dirtyWakeAppendFailed =
+    dirtySweep.status === "fulfilled" && hasDirtyWakeAppendFailures(dirtySweep.value);
   const dueReconcileWakeAppendFailed =
     dueReconcileSweep.status === "fulfilled" && hasDueReconcileWakeAppendFailures(dueReconcileSweep.value);
 
   if (
     dirtySweep.status === "rejected" ||
+    dirtyWakeAppendFailed ||
     dueReconcileSweep.status === "rejected" ||
     dueReconcileWakeAppendFailed
   ) {
     console.warn("Hosted device-sync sweeper cron failed.", {
       dirtySweeperErrorName: describeErrorName(dirtySweep),
       dirtySweeperFailed: dirtySweep.status === "rejected",
+      dirtyWakeAppendFailed,
+      dirtyWakeNotAppended: dirtySweep.status === "fulfilled"
+        ? dirtySweep.value.wakeNotAppended
+        : null,
       dueReconcileWakeAppendFailed,
       dueReconcileWakeNotAppended: dueReconcileSweep.status === "fulfilled"
         ? dueReconcileSweep.value.wakeNotAppended
@@ -35,6 +45,9 @@ export const GET = withJsonError(async (request: Request) => {
 
     if (dirtySweep.status === "rejected") {
       throw dirtySweep.reason;
+    }
+    if (dirtyWakeAppendFailed) {
+      throw new Error("Hosted device-sync dirty sweeper failed to append one or more wakes.");
     }
     if (dueReconcileSweep.status === "rejected") {
       throw dueReconcileSweep.reason;
@@ -59,6 +72,12 @@ function describeErrorName<T>(
   }
 
   return result.reason instanceof Error ? result.reason.name : "unknown";
+}
+
+function hasDirtyWakeAppendFailures(
+  result: HostedDeviceSyncDirtySweeperResult,
+): boolean {
+  return result.wakeNotAppended > 0;
 }
 
 function hasDueReconcileWakeAppendFailures(
