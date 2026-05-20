@@ -2270,6 +2270,59 @@ test("calculates Murph Age from calibrated demographic, wearable, and lab featur
   assert.equal(result.moduleAttributions.find((module) => module.moduleId === "biomarkers")?.contributionYears, 1.7);
 });
 
+test("keeps Murph Age feature attributions informative when displayed risk-age is clamped", () => {
+  const result = calculateMurphAge({
+    asOf: "2026-05-10T00:00:00.000Z",
+    chronologicalAgeYears: 30,
+    model: {
+      endpoint: "10-year all-cause mortality",
+      features: [
+        { coefficient: 0.01, key: "age", kind: "chronological-age", label: "Age" },
+        {
+          coefficient: 0.2,
+          expectedUnit: "mg/dL",
+          key: "apob",
+          kind: "metric",
+          label: "ApoB",
+          metricKey: "apob",
+          moduleId: "biomarkers",
+          transform: { kind: "z-score", mean: 90, standardDeviation: 20 },
+        },
+      ],
+      horizonYears: 10,
+      intercept: -6.5,
+      modelId: "fixture-low-risk-attribution-model",
+      referencePopulation: "fixture adult reference curve",
+      referenceRiskCurve: fixtureReferenceRiskCurve(),
+    },
+    points: [
+      metricPoint({
+        biomarkerKey: "biomarker:apob",
+        effectiveDate: "2026-05-01",
+        id: "metric-point:apob:2026-05-01:lab:0",
+        metricKey: "apob",
+        observedAt: "2026-05-01T08:00:00.000Z",
+        recordId: "lab_apob",
+        sourceKind: "test-result",
+        unit: "mg/dL",
+        value: 110,
+      }),
+    ],
+    sex: "male",
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.biologicalAgeYears, 20);
+  assert.equal(result.warnings.some((warning) => warning.code === "OUT_OF_REFERENCE_RANGE"), true);
+  const apoBAttribution = result.featureAttributions.find((feature) => feature.featureKey === "apob");
+  assert.ok(apoBAttribution);
+  assert.ok(apoBAttribution.contributionYears !== null && apoBAttribution.contributionYears > 1);
+  assert.equal(
+    result.moduleAttributions.find((module) => module.moduleId === "biomarkers")?.contributionYears,
+    apoBAttribution.contributionYears,
+  );
+});
+
 test("assesses Murph Age research input bundles for Lab9, Lab5 fallback, and wearable context", () => {
   const asOf = "2026-05-10T00:00:00.000Z";
   const lab9 = assessMurphAgeInputBundle({

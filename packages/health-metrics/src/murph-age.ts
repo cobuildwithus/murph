@@ -7801,6 +7801,50 @@ export function mapRiskToReferenceAge(
   return { ageYears: last.ageYears, warnings };
 }
 
+function mapRiskToReferenceAgeForAttribution(
+  riskProbability: number,
+  referenceRiskCurve: readonly MurphAgeReferenceRiskPoint[],
+): number {
+  const clamped = mapRiskToReferenceAge(riskProbability, referenceRiskCurve);
+  if (clamped.warnings.length === 0) return clamped.ageYears;
+
+  const curve = validateReferenceRiskCurve(referenceRiskCurve);
+  const first = curve[0];
+  const second = curve[1];
+  const nextToLast = curve[curve.length - 2];
+  const last = curve[curve.length - 1];
+  if (!first || !second || !nextToLast || !last) return clamped.ageYears;
+
+  if (riskProbability < first.riskProbability) {
+    return extrapolateReferenceAgeByLogit(riskProbability, first, second);
+  }
+  if (riskProbability > last.riskProbability) {
+    return extrapolateReferenceAgeByLogit(riskProbability, nextToLast, last);
+  }
+  return clamped.ageYears;
+}
+
+function extrapolateReferenceAgeByLogit(
+  riskProbability: number,
+  left: MurphAgeReferenceRiskPoint,
+  right: MurphAgeReferenceRiskPoint,
+): number {
+  const riskLogit = logitFromProbability(clampProbabilityForAttribution(riskProbability));
+  const leftLogit = logitFromProbability(clampProbabilityForAttribution(left.riskProbability));
+  const rightLogit = logitFromProbability(clampProbabilityForAttribution(right.riskProbability));
+  if (riskLogit === null || leftLogit === null || rightLogit === null || rightLogit === leftLogit) {
+    const riskSpan = right.riskProbability - left.riskProbability;
+    if (riskSpan === 0) return left.ageYears;
+    return left.ageYears + ((riskProbability - left.riskProbability) / riskSpan) * (right.ageYears - left.ageYears);
+  }
+  return left.ageYears + ((riskLogit - leftLogit) / (rightLogit - leftLogit)) * (right.ageYears - left.ageYears);
+}
+
+function clampProbabilityForAttribution(riskProbability: number): number {
+  const epsilon = 1e-9;
+  return Math.min(1 - epsilon, Math.max(epsilon, riskProbability));
+}
+
 function assessInputFeatureRequirements(
   input: MurphAgeInputBundleAssessmentInput,
   requirements: readonly MurphAgeInputFeatureRequirement[],
@@ -10046,15 +10090,19 @@ function withContributionYears(input: {
   features: readonly EvaluatedFeature[];
   model: MurphAgeRiskModel;
 }): MurphAgeFeatureAttribution[] {
+  const attributionAgeYears = mapRiskToReferenceAgeForAttribution(
+    logistic(input.calibratedLogit),
+    input.model.referenceRiskCurve,
+  );
   return input.features.map((feature) => {
     if (!isScoreContributingEvaluatedFeature(feature)) {
       return feature.attribution;
     }
     const omittedLogit = input.calibratedLogit - calibratedContribution(feature.contributionLogit, input.model.calibration);
-    const omittedAge = mapRiskToReferenceAge(logistic(omittedLogit), input.model.referenceRiskCurve).ageYears;
+    const omittedAge = mapRiskToReferenceAgeForAttribution(logistic(omittedLogit), input.model.referenceRiskCurve);
     return {
       ...feature.attribution,
-      contributionYears: roundYears(input.ageYears - omittedAge),
+      contributionYears: roundYears(attributionAgeYears - omittedAge),
     };
   });
 }
@@ -10075,12 +10123,16 @@ function buildModuleAttributions(input: {
     modules.set(moduleId, current);
   }
 
+  const attributionAgeYears = mapRiskToReferenceAgeForAttribution(
+    logistic(input.calibratedLogit),
+    input.model.referenceRiskCurve,
+  );
   return [...modules.entries()].map(([moduleId, module]) => {
     const omittedLogit = input.calibratedLogit - calibratedContribution(module.contributionLogit, input.model.calibration);
-    const omittedAge = mapRiskToReferenceAge(logistic(omittedLogit), input.model.referenceRiskCurve).ageYears;
+    const omittedAge = mapRiskToReferenceAgeForAttribution(logistic(omittedLogit), input.model.referenceRiskCurve);
     return {
       contributionLogit: roundContribution(module.contributionLogit),
-      contributionYears: roundYears(input.ageYears - omittedAge),
+      contributionYears: roundYears(attributionAgeYears - omittedAge),
       featureKeys: module.featureKeys,
       moduleId,
     };
