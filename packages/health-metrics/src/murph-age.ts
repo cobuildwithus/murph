@@ -32,6 +32,8 @@ export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v9" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
   "murph.age.submitted-calculator-view-bundle.v1" as const;
+export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
+  "murph.age.submitted-calculator-input-bundle-spec.v1" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v4" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -644,6 +646,45 @@ export interface MurphAgeSubmittedCalculatorMetricInputSpec {
   productScoreBearingAuthorized: boolean;
   researchScoreBearingCardIds: MurphAgeScoreBearingCardId[];
   wearableScoreBearingAuthorized: false;
+}
+
+export type MurphAgeSubmittedCalculatorInputBundleSpecId =
+  | "function-context"
+  | "lab5-bp-bmi"
+  | "lab9-bp-body"
+  | "r399-nhis-proxy-anchor"
+  | "wearable-context";
+
+export type MurphAgeSubmittedCalculatorInputBundleReadinessRule =
+  | "all-required-features"
+  | "all-lab5-features-plus-bmi-or-blood-pressure"
+  | "one-or-more-context-features"
+  | "one-or-more-proxy-features";
+
+export interface MurphAgeSubmittedCalculatorInputBundleCompletionRule {
+  alternativeFeatureKeyGroups: string[][];
+  minReadyFeatureCount: number | null;
+  requiredFeatureKeys: string[];
+  rule: MurphAgeSubmittedCalculatorInputBundleReadinessRule;
+}
+
+export interface MurphAgeSubmittedCalculatorInputBundleFeatureSpec {
+  displayName: string;
+  featureKey: string;
+  metricKeys: string[];
+  requiredForCompletion: boolean;
+}
+
+export interface MurphAgeSubmittedCalculatorInputBundleSpec {
+  bundleId: MurphAgeSubmittedCalculatorInputBundleSpecId;
+  cardId: MurphAgeModelCardId;
+  completion: MurphAgeSubmittedCalculatorInputBundleCompletionRule;
+  displayName: string;
+  featureSpecs: MurphAgeSubmittedCalculatorInputBundleFeatureSpec[];
+  productScoreBearingAuthorized: boolean;
+  researchAgeEstimateEligible: boolean;
+  schemaVersion: typeof MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION;
+  scoreBearing: boolean;
 }
 
 export interface MurphAgeInputBundleAssessmentInput {
@@ -3788,6 +3829,141 @@ export function listMurphAgeSubmittedCalculatorMetricInputSpecs():
     });
   }
   return specs.sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+}
+
+export function listMurphAgeSubmittedCalculatorInputBundleSpecs():
+  MurphAgeSubmittedCalculatorInputBundleSpec[] {
+  const lab9RequiredFeatureKeys = [
+    ...MURPH_AGE_LAB9_FEATURES.map((feature) => feature.featureKey),
+    ...MURPH_AGE_BP_BODY_FEATURES
+      .filter((feature) => feature.requiredFor === "lab9-mainline")
+      .map((feature) => feature.featureKey),
+  ];
+  const lab5RequiredFeatureKeys = MURPH_AGE_LAB5_FEATURES.map((feature) => feature.featureKey);
+  return [
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "lab9-bp-body",
+      cardId: "lab9_bp_body_10y_acm_research",
+      completion: {
+        alternativeFeatureKeyGroups: [],
+        minReadyFeatureCount: null,
+        requiredFeatureKeys: lab9RequiredFeatureKeys,
+        rule: "all-required-features",
+      },
+      displayName: "Lab9 BP/body research bundle",
+      featureRequirements: [...MURPH_AGE_LAB9_FEATURES, ...MURPH_AGE_BP_BODY_FEATURES],
+      requiredFeatureKeys: lab9RequiredFeatureKeys,
+      researchAgeEstimateEligible: true,
+      scoreBearing: true,
+    }),
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "lab5-bp-bmi",
+      cardId: "lab5_bp_bmi_transport_research",
+      completion: {
+        alternativeFeatureKeyGroups: [
+          ["bmi"],
+          ["systolic-blood-pressure", "diastolic-blood-pressure"],
+        ],
+        minReadyFeatureCount: null,
+        requiredFeatureKeys: lab5RequiredFeatureKeys,
+        rule: "all-lab5-features-plus-bmi-or-blood-pressure",
+      },
+      displayName: "Lab5 BP/BMI fallback research bundle",
+      featureRequirements: [
+        ...MURPH_AGE_LAB5_FEATURES,
+        ...MURPH_AGE_BP_BODY_FEATURES.filter((feature) =>
+          ["bmi", "diastolic-blood-pressure", "systolic-blood-pressure"].includes(feature.featureKey)
+        ),
+      ],
+      requiredFeatureKeys: lab5RequiredFeatureKeys,
+      researchAgeEstimateEligible: true,
+      scoreBearing: true,
+    }),
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "r399-nhis-proxy-anchor",
+      cardId: "r399_nhis_proxy_10y_acm_research",
+      completion: {
+        alternativeFeatureKeyGroups: [],
+        minReadyFeatureCount: 1,
+        requiredFeatureKeys: [],
+        rule: "one-or-more-proxy-features",
+      },
+      displayName: "R399 survey/proxy anchor research bundle",
+      featureRequirements: MURPH_AGE_R399_PROXY_FEATURES,
+      requiredFeatureKeys: [],
+      researchAgeEstimateEligible: true,
+      scoreBearing: true,
+    }),
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "wearable-context",
+      cardId: "wearable_context_no_risk",
+      completion: {
+        alternativeFeatureKeyGroups: [],
+        minReadyFeatureCount: 1,
+        requiredFeatureKeys: [],
+        rule: "one-or-more-context-features",
+      },
+      displayName: "Wearable activity/sleep context bundle",
+      featureRequirements: MURPH_AGE_WEARABLE_CONTEXT_FEATURES,
+      requiredFeatureKeys: [],
+      researchAgeEstimateEligible: false,
+      scoreBearing: false,
+    }),
+    buildSubmittedCalculatorInputBundleSpec({
+      bundleId: "function-context",
+      cardId: "function_context_no_risk",
+      completion: {
+        alternativeFeatureKeyGroups: [],
+        minReadyFeatureCount: 1,
+        requiredFeatureKeys: [],
+        rule: "one-or-more-context-features",
+      },
+      displayName: "Function/frailty context bundle",
+      featureRequirements: MURPH_AGE_FUNCTION_CONTEXT_FEATURES,
+      requiredFeatureKeys: [],
+      researchAgeEstimateEligible: false,
+      scoreBearing: false,
+    }),
+  ];
+}
+
+function buildSubmittedCalculatorInputBundleSpec(input: {
+  bundleId: MurphAgeSubmittedCalculatorInputBundleSpecId;
+  cardId: MurphAgeModelCardId;
+  completion: MurphAgeSubmittedCalculatorInputBundleCompletionRule;
+  displayName: string;
+  featureRequirements: readonly MurphAgeInputFeatureRequirement[];
+  requiredFeatureKeys: readonly string[];
+  researchAgeEstimateEligible: boolean;
+  scoreBearing: boolean;
+}): MurphAgeSubmittedCalculatorInputBundleSpec {
+  const requiredFeatureKeys = new Set(input.requiredFeatureKeys);
+  return {
+    bundleId: input.bundleId,
+    cardId: input.cardId,
+    completion: {
+      alternativeFeatureKeyGroups: input.completion.alternativeFeatureKeyGroups.map((group) => [...group]),
+      minReadyFeatureCount: input.completion.minReadyFeatureCount,
+      requiredFeatureKeys: [...input.completion.requiredFeatureKeys],
+      rule: input.completion.rule,
+    },
+    displayName: input.displayName,
+    featureSpecs: input.featureRequirements.map((feature) => ({
+      displayName: feature.label,
+      featureKey: feature.featureKey,
+      metricKeys: [...feature.metricKeys],
+      requiredForCompletion: requiredFeatureKeys.has(feature.featureKey),
+    })),
+    productScoreBearingAuthorized: isSubmittedCalculatorProductScoreBearingAuthorizedForCard(input.cardId),
+    researchAgeEstimateEligible: input.researchAgeEstimateEligible,
+    schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION,
+    scoreBearing: input.scoreBearing,
+  };
+}
+
+function isSubmittedCalculatorProductScoreBearingAuthorizedForCard(cardId: MurphAgeModelCardId): boolean {
+  const policy = resolveMurphAgeModelCardPolicy(cardId);
+  return policy ? isMurphAgeModelCardProductAuthorized(policy) : false;
 }
 
 export function summarizeMurphAgePublicLabWearableShadowEvidenceStatus():
