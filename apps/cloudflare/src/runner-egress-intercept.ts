@@ -113,6 +113,7 @@ const OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER = new TextEncoder();
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_DEPTH = 128;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES = 50_000;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT = 8;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
   "computer_call",
   "computer_call_output",
@@ -594,7 +595,11 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
       output: diagnostic,
     });
   }
-  appendOpenAiInputShapeDiagnostics(diagnostic, inputValue);
+  await appendOpenAiInputShapeDiagnostics({
+    diagnostic,
+    fingerprintKey,
+    inputValue,
+  });
 
   diagnostic.toolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
   diagnostic.includeCount = Array.isArray(parsed.include) ? parsed.include.length : 0;
@@ -800,10 +805,13 @@ function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {
   }
 }
 
-function appendOpenAiInputShapeDiagnostics(
-  diagnostic: HostedRunnerDiagnosticJson,
-  inputValue: unknown,
-): void {
+async function appendOpenAiInputShapeDiagnostics(input: {
+  diagnostic: HostedRunnerDiagnosticJson;
+  fingerprintKey: CryptoKey | null;
+  inputValue: unknown;
+}): Promise<void> {
+  const diagnostic = input.diagnostic;
+  const inputValue = input.inputValue;
   if (!Array.isArray(inputValue)) {
     return;
   }
@@ -811,9 +819,10 @@ function appendOpenAiInputShapeDiagnostics(
   const typeCounts = new Map<string, number>();
   const roleCounts = new Map<string, number>();
   let largestItemBytes = 0;
+  let largestItemIndex = -1;
   let largestItemKinds = ["type:missing", "role:missing"];
 
-  for (const item of inputValue) {
+  for (const [index, item] of inputValue.entries()) {
     const typeKind = readOpenAiInputItemTypeKind(item);
     const roleKind = readOpenAiInputItemRoleKind(item);
     incrementDiagnosticCount(typeCounts, typeKind);
@@ -822,6 +831,7 @@ function appendOpenAiInputShapeDiagnostics(
     const itemBytes = encodeOpenAiDiagnosticJsonValue(item)?.byteLength ?? 0;
     if (itemBytes > largestItemBytes) {
       largestItemBytes = itemBytes;
+      largestItemIndex = index;
       largestItemKinds = [`type:${typeKind}`, `role:${roleKind}`];
     }
   }
@@ -835,6 +845,9 @@ function appendOpenAiInputShapeDiagnostics(
   diagnostic.inputItemRoleKinds = roleSummary.kinds;
   diagnostic.inputItemRoleCounts = roleSummary.counts;
   diagnostic.inputLargestItemBytes = largestItemBytes;
+  diagnostic.inputLargestItemIndex = largestItemIndex;
+  diagnostic.inputLargestItemReverseIndex =
+    largestItemIndex >= 0 ? inputValue.length - 1 - largestItemIndex : -1;
   diagnostic.inputLargestItemKinds = largestItemKinds;
   diagnostic.inputNestedMetricKinds = [...OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS];
   diagnostic.inputNestedMetricCounts = [
@@ -849,6 +862,76 @@ function appendOpenAiInputShapeDiagnostics(
   ];
   if (nestedShape.truncated) {
     diagnostic.inputShapeTraversalTruncated = true;
+  }
+
+  await appendOpenAiInputTailItemDiagnostics({
+    diagnostic,
+    fingerprintKey: input.fingerprintKey,
+    inputValue,
+  });
+}
+
+async function appendOpenAiInputTailItemDiagnostics(input: {
+  diagnostic: HostedRunnerDiagnosticJson;
+  fingerprintKey: CryptoKey | null;
+  inputValue: readonly unknown[];
+}): Promise<void> {
+  const tailItems = input.inputValue.slice(-OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT);
+  if (tailItems.length === 0) {
+    return;
+  }
+
+  const startIndex = input.inputValue.length - tailItems.length;
+  const indexes: number[] = [];
+  const reverseIndexes: number[] = [];
+  const typeKinds: string[] = [];
+  const roleKinds: string[] = [];
+  const itemBytes: number[] = [];
+  const contentBytes: number[] = [];
+  const outputBytes: number[] = [];
+  const stringBytes: number[] = [];
+  const fingerprints: string[] = [];
+  let traversalTruncated = false;
+
+  for (const [offset, item] of tailItems.entries()) {
+    const index = startIndex + offset;
+    const encodedItem = encodeOpenAiDiagnosticJsonValue(item);
+    const nestedShape = summarizeOpenAiInputNestedShape(item);
+
+    indexes.push(index);
+    reverseIndexes.push(input.inputValue.length - 1 - index);
+    typeKinds.push(readOpenAiInputItemTypeKind(item));
+    roleKinds.push(readOpenAiInputItemRoleKind(item));
+    itemBytes.push(encodedItem?.byteLength ?? 0);
+    contentBytes.push(nestedShape.contentBytes);
+    outputBytes.push(nestedShape.outputBytes);
+    stringBytes.push(nestedShape.stringBytes);
+    traversalTruncated = traversalTruncated || nestedShape.truncated;
+
+    if (input.fingerprintKey && encodedItem) {
+      fingerprints.push(await hmacDiagnosticFingerprint({
+        bytes: encodedItem,
+        fieldPrefix: "input:item",
+        fingerprintKey: input.fingerprintKey,
+      }));
+    }
+  }
+
+  input.diagnostic.inputTailItemCount = tailItems.length;
+  input.diagnostic.inputTailItemIndexes = indexes;
+  input.diagnostic.inputTailItemReverseIndexes = reverseIndexes;
+  input.diagnostic.inputTailItemTypeKinds = typeKinds;
+  input.diagnostic.inputTailItemRoleKinds = roleKinds;
+  input.diagnostic.inputTailItemBytes = itemBytes;
+  input.diagnostic.inputTailItemContentBytes = contentBytes;
+  input.diagnostic.inputTailItemOutputBytes = outputBytes;
+  input.diagnostic.inputTailItemStringBytes = stringBytes;
+  input.diagnostic.inputTailItemFingerprintPresent = fingerprints.length > 0;
+  if (fingerprints.length > 0) {
+    input.diagnostic.inputTailItemFingerprints = fingerprints;
+  }
+  if (traversalTruncated) {
+    input.diagnostic.inputTailItemShapeTraversalTruncated = true;
   }
 }
 
