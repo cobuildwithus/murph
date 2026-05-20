@@ -32,6 +32,11 @@ import {
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.ts";
 import { createOuraWebhookSubscriptionClient, OURA_DEFAULT_WEBHOOK_TARGETS } from "./oura-webhooks.ts";
+import {
+  buildOAuthTokenRequestDiagnostics,
+  buildProviderRequestDiagnostics,
+  extractProviderQueryParameterNames,
+} from "./provider-diagnostics.ts";
 
 import type {
   DeviceSyncAccount,
@@ -73,6 +78,7 @@ const OURA_WEBHOOK_RESOURCE_PRIORITY = 90;
 const OURA_WEBHOOK_DELETE_PRIORITY = 95;
 const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
 const OURA_MAX_PAGINATION_PAGES = 500;
+const OURA_OAUTH_TOKEN_ENDPOINT_KIND = "oura_oauth_token";
 
 interface OuraTokenResponse {
   access_token?: unknown;
@@ -576,9 +582,37 @@ function buildOuraApiError(
   options: {
     retryable?: boolean;
     accountStatus?: "reauthorization_required" | "disconnected" | null;
+    diagnostics?: Record<string, boolean | number | string | null | undefined>;
   } = {},
 ) {
   return buildProviderApiError(code, message, response, body, options);
+}
+
+function resolveOuraApiEndpointKind(path: string): string {
+  const pathname = safeProviderPathname(path);
+
+  if (pathname === "/oauth/revoke") {
+    return "oura_oauth_revoke";
+  }
+
+  if (pathname === "/v2/usercollection/personal_info") {
+    return "oura_personal_info";
+  }
+
+  const userCollectionMatch = /^\/v2\/usercollection\/([a-z0-9_]+)$/u.exec(pathname);
+  if (userCollectionMatch?.[1]) {
+    return `oura_${userCollectionMatch[1]}_collection`;
+  }
+
+  return "oura_api";
+}
+
+function safeProviderPathname(path: string): string {
+  try {
+    return new URL(path, "https://provider.invalid").pathname;
+  } catch {
+    return path.split("?")[0] ?? "";
+  }
 }
 
 export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
@@ -619,6 +653,11 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         buildOuraApiError("OURA_TOKEN_REQUEST_FAILED", "Oura token request failed.", response, body, {
           retryable: response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          diagnostics: buildOAuthTokenRequestDiagnostics({
+            endpointKind: OURA_OAUTH_TOKEN_ENDPOINT_KIND,
+            parameters,
+            responseBody: body,
+          }),
         }),
     });
   }
@@ -628,6 +667,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     accessToken: string;
     optional?: boolean;
   }): Promise<T | null> {
+    const endpointKind = resolveOuraApiEndpointKind(input.path);
+
     return fetchBearerJson<T>({
       fetchImpl,
       url: `${apiBaseUrl}${input.path}`,
@@ -635,9 +676,19 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       timeoutMs,
       optional: input.optional,
       buildError: (response, body) =>
-        buildOuraApiError("OURA_API_REQUEST_FAILED", `Oura API request failed for ${input.path}.`, response, body, {
+        buildOuraApiError("OURA_API_REQUEST_FAILED", `Oura API request failed for ${endpointKind}.`, response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          diagnostics: buildProviderRequestDiagnostics({
+            method: "GET",
+            endpointKind,
+            authKind: "bearer_access_token",
+            authPlacement: "headers",
+            credentialPresent: Boolean(input.accessToken),
+            contentType: "none",
+            bodyKind: "none",
+            queryParameterNames: extractProviderQueryParameterNames(input.path),
+          }),
         }),
     });
   }
@@ -662,6 +713,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         await parseResponseBody(response),
         {
           retryable: response.status === 429 || response.status >= 500,
+          diagnostics: buildProviderRequestDiagnostics({
+            method: "GET",
+            endpointKind: "oura_oauth_revoke",
+            authKind: "bearer_access_token_query",
+            authPlacement: "query_parameters",
+            credentialPresent: Boolean(accessToken),
+            contentType: "none",
+            bodyKind: "none",
+            queryParameterNames: ["access_token"],
+          }),
         },
       );
     }

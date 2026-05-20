@@ -288,6 +288,61 @@ test("Junction createLinkToken accepts documented Link web URL hosts", async () 
   );
 });
 
+test("Junction client includes safe provider diagnostics for failed API requests", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      assert.equal(readUrl(input), "https://api.sandbox.us.junction.com/v2/link/token");
+      assert.equal(new Headers(init?.headers).get("x-vital-api-key"), "sk_us_test_123");
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "The link token request is missing a provider selection.",
+      }, 400);
+    },
+  });
+
+  await assert.rejects(
+    () => client.createLinkToken({
+      userId: "junction-user-sensitive",
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback?code=secret",
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 502);
+      assert.equal(error.message, "Junction API request failed for junction_link_token_create.");
+      assert.deepEqual(error.details, {
+        accountStatus: null,
+        requestAuthKind: "provider_config_api_key_header",
+        requestAuthPlacement: "headers",
+        requestBodyFieldCount: 2,
+        requestBodyFieldNames: "redirect_url.user_id",
+        requestBodyKind: "json_object",
+        requestContentType: "application_json",
+        requestCredentialPresent: true,
+        requestEndpointKind: "junction_link_token_create",
+        requestMethod: "POST",
+        requestQueryParameterCount: 0,
+        requestQueryParameterNames: null,
+        responseErrorCode: "invalid_request",
+        responseErrorDescription: "The link token request is missing a provider selection.",
+        responseErrorDescriptionFieldPresent: true,
+        responseErrorFieldPresent: true,
+        responseShapeKind: "json_object",
+        retryable: false,
+        status: 400,
+      });
+      const serialized = JSON.stringify(error);
+      assert.equal(serialized.includes("sk_us_test_123"), false);
+      assert.equal(serialized.includes("junction-user-sensitive"), false);
+      assert.equal(serialized.includes("code=secret"), false);
+      return true;
+    },
+  );
+});
+
 test("Junction client derives the API host from environment and region", async () => {
   const requests: string[] = [];
   const client = new JunctionClient({

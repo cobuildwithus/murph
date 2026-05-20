@@ -33,6 +33,11 @@ import {
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.ts";
 import { createStravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
+import {
+  buildOAuthTokenRequestDiagnostics,
+  buildProviderRequestDiagnostics,
+  extractProviderQueryParameterNames,
+} from "./provider-diagnostics.ts";
 
 import type {
   DeviceSyncAccount,
@@ -81,6 +86,7 @@ const STRAVA_ACTIVITY_WEBHOOK_PRIORITY = 90;
 const STRAVA_DELETE_WEBHOOK_PRIORITY = 95;
 const STRAVA_DEAUTHORIZE_WEBHOOK_PRIORITY = 100;
 const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
+const STRAVA_OAUTH_TOKEN_ENDPOINT_KIND = "strava_oauth_token";
 
 type StravaWebhookResourceType = "activity" | "athlete";
 
@@ -199,9 +205,36 @@ function buildStravaApiError(
   options: {
     retryable?: boolean;
     accountStatus?: "reauthorization_required" | "disconnected" | null;
+    diagnostics?: Record<string, boolean | number | string | null | undefined>;
   } = {},
 ) {
   return buildProviderApiError(code, message, response, body, options);
+}
+
+function resolveStravaApiEndpointKind(path: string): string {
+  const pathname = safeProviderPathname(path);
+
+  if (pathname === "/athlete") {
+    return "strava_athlete_profile";
+  }
+
+  if (pathname === "/athlete/activities") {
+    return "strava_activity_collection";
+  }
+
+  if (/^\/activities\/[^/]+$/u.test(pathname)) {
+    return "strava_activity_resource";
+  }
+
+  return "strava_api";
+}
+
+function safeProviderPathname(path: string): string {
+  try {
+    return new URL(path, "https://provider.invalid").pathname;
+  } catch {
+    return path.split("?")[0] ?? "";
+  }
 }
 
 function tokenResponseToAuthTokens(payload: StravaTokenResponse): ProviderAuthTokens {
@@ -569,6 +602,11 @@ export function createStravaDeviceSyncProvider(
         buildStravaApiError("STRAVA_TOKEN_REQUEST_FAILED", "Strava token request failed.", response, body, {
           retryable: response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          diagnostics: buildOAuthTokenRequestDiagnostics({
+            endpointKind: STRAVA_OAUTH_TOKEN_ENDPOINT_KIND,
+            parameters,
+            responseBody: body,
+          }),
         }),
     });
   }
@@ -578,6 +616,8 @@ export function createStravaDeviceSyncProvider(
     accessToken: string;
     optional?: boolean;
   }): Promise<T | null> {
+    const endpointKind = resolveStravaApiEndpointKind(input.path);
+
     return fetchBearerJson<T>({
       fetchImpl,
       url: `${apiBaseUrl}${input.path}`,
@@ -587,12 +627,22 @@ export function createStravaDeviceSyncProvider(
       buildError: (response, body) =>
         buildStravaApiError(
           "STRAVA_API_REQUEST_FAILED",
-          `Strava API request failed for ${input.path}.`,
+          `Strava API request failed for ${endpointKind}.`,
           response,
           body,
           {
             retryable: response.status === 429 || response.status >= 500,
             accountStatus: response.status === 401 ? "reauthorization_required" : null,
+            diagnostics: buildProviderRequestDiagnostics({
+              method: "GET",
+              endpointKind,
+              authKind: "bearer_access_token",
+              authPlacement: "headers",
+              credentialPresent: Boolean(input.accessToken),
+              contentType: "none",
+              bodyKind: "none",
+              queryParameterNames: extractProviderQueryParameterNames(input.path),
+            }),
           },
         ),
     });
@@ -714,6 +764,16 @@ export function createStravaDeviceSyncProvider(
         {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "disconnected" : null,
+          diagnostics: buildProviderRequestDiagnostics({
+            method: "POST",
+            endpointKind: "strava_oauth_deauthorize",
+            authKind: "bearer_access_token_query",
+            authPlacement: "query_parameters",
+            credentialPresent: Boolean(accessToken),
+            contentType: "none",
+            bodyKind: "none",
+            queryParameterNames: ["access_token"],
+          }),
         },
       );
     }

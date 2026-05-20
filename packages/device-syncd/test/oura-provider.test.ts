@@ -300,6 +300,84 @@ test("Oura provider requires an existing refresh token before attempting refresh
   assert.equal(fetchCalled, false);
 });
 
+test("Oura provider includes safe OAuth diagnostics for token request failures", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          error: "invalid_grant",
+          error_description: "Refresh token expired. Reconnect Oura.",
+        }, 401);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () => provider.oauthAdapter.refreshTokens(createAccount(["personal"], {
+      refreshToken: "stored-refresh-token",
+    })),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "OURA_TOKEN_REQUEST_FAILED");
+      assert.equal(error.accountStatus, "reauthorization_required");
+      assert.deepEqual(error.details, {
+        accountStatus: "reauthorization_required",
+        oauthErrorCode: "invalid_grant",
+        oauthErrorDescription: "Refresh token expired. Reconnect Oura.",
+        oauthGrantType: "refresh_token",
+        oauthRequestBodyBuilderKind: "url_search_params_record",
+        oauthRequestClientAuthPlacement: "body_parameters",
+        oauthRequestClientCredentialPresent: true,
+        oauthRequestClientIdPresent: true,
+        oauthRequestContentType: "application_x_www_form_urlencoded",
+        oauthRequestDuplicateParameterCount: 0,
+        oauthRequestEncodingKind: "form_urlencoded",
+        oauthRequestHasDuplicateParameters: false,
+        oauthRequestMethod: "POST",
+        oauthRequestOfflineScopePresent: false,
+        oauthRequestParameterCount: 4,
+        oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token",
+        oauthRequestRefreshCredentialPresent: true,
+        oauthRequestScopeCount: 0,
+        oauthRequestScopePresent: false,
+        oauthRequestScopeValue: null,
+        oauthRequestTokenEndpointKind: "oura_oauth_token",
+        oauthResponseErrorDescriptionFieldPresent: true,
+        oauthResponseErrorFieldPresent: true,
+        oauthResponseShapeKind: "json_object",
+        requestAuthKind: "oauth_client_secret_body",
+        requestAuthPlacement: "body_parameters",
+        requestBodyFieldCount: 4,
+        requestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token",
+        requestBodyKind: "form_urlencoded",
+        requestContentType: "application_x_www_form_urlencoded",
+        requestCredentialPresent: true,
+        requestEndpointKind: "oura_oauth_token",
+        requestMethod: "POST",
+        requestQueryParameterCount: 0,
+        requestQueryParameterNames: null,
+        responseErrorCode: "invalid_grant",
+        responseErrorDescription: "Refresh token expired. Reconnect Oura.",
+        responseErrorDescriptionFieldPresent: true,
+        responseErrorFieldPresent: true,
+        responseShapeKind: "json_object",
+        retryable: false,
+        status: 401,
+      });
+      const serialized = JSON.stringify(error.details);
+      assert.equal(serialized.includes("stored-refresh-token"), false);
+      assert.equal(serialized.includes("oura-client-secret"), false);
+      return true;
+    },
+  );
+});
+
 test("Oura provider revokes access tokens through the OAuth revoke endpoint", async () => {
   const requests: string[] = [];
   const provider = createOuraDeviceSyncProvider({

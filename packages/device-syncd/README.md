@@ -75,6 +75,8 @@ Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so t
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly is now derived from one shared provider-manifest registry in `packages/device-syncd/src/config/provider-manifests.ts`, so env specs, config readers, provider factories, provider-owned job definitions, serializable hosted-runtime config, hosted wake hint shaping, and importer wiring all follow the same provider list.
 
+Provider request failures emit a shared, metadata-only diagnostic shape. Logs and hosted runtime apply payloads may include endpoint kind, method, auth placement, body/query field names and counts, upstream status, response shape, and a sanitized provider error code/description. They must not include provider tokens, client secrets, auth codes, raw request bodies, raw response bodies, raw provider paths, query values, or provider account identifiers. New provider transports should use the shared provider diagnostics helpers instead of adding provider-specific ad hoc logging.
+
 ## Adding another provider
 
 The permanent provider path is:

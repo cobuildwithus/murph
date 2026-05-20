@@ -32,6 +32,11 @@ import {
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.ts";
+import {
+  buildOAuthTokenRequestDiagnostics,
+  buildProviderRequestDiagnostics,
+  extractProviderQueryParameterNames,
+} from "./provider-diagnostics.ts";
 
 import type {
   DeviceSyncAccount,
@@ -358,72 +363,6 @@ function buildWhoopApiError(
   return buildProviderApiError(code, message, response, body, options);
 }
 
-interface WhoopOAuthErrorBodyDiagnostics {
-  errorCode: string | null;
-  errorDescription: string | null;
-  errorDescriptionFieldPresent: boolean;
-  errorFieldPresent: boolean;
-  responseShapeKind: string;
-}
-
-function inspectOAuthErrorBody(body: string): WhoopOAuthErrorBodyDiagnostics {
-  const trimmed = body.trim();
-  if (!trimmed) {
-    return {
-      errorCode: null,
-      errorDescription: null,
-      errorDescriptionFieldPresent: false,
-      errorFieldPresent: false,
-      responseShapeKind: "empty",
-    };
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {
-        errorCode: null,
-        errorDescription: null,
-        errorDescriptionFieldPresent: false,
-        errorFieldPresent: false,
-        responseShapeKind: classifyOAuthJsonShape(parsed),
-      };
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const errorValue = record.error;
-    const errorDescriptionValue = record.error_description;
-
-    return {
-      errorCode: typeof errorValue === "string" ? errorValue.trim().toLowerCase() || null : null,
-      errorDescription: typeof errorDescriptionValue === "string" ? errorDescriptionValue.trim() || null : null,
-      errorDescriptionFieldPresent: Object.prototype.hasOwnProperty.call(record, "error_description"),
-      errorFieldPresent: Object.prototype.hasOwnProperty.call(record, "error"),
-      responseShapeKind: "json_object",
-    };
-  } catch {
-    return {
-      errorCode: null,
-      errorDescription: null,
-      errorDescriptionFieldPresent: false,
-      errorFieldPresent: false,
-      responseShapeKind: "non_json",
-    };
-  }
-}
-
-function classifyOAuthJsonShape(value: unknown): string {
-  if (value === null) {
-    return "json_null";
-  }
-
-  if (Array.isArray(value)) {
-    return "json_array";
-  }
-
-  return `json_${typeof value}`;
-}
-
 function resolveWhoopTokenRequestAccountStatus(input: {
   grantType?: string;
   oauthErrorCode?: string | null;
@@ -440,42 +379,54 @@ function resolveWhoopTokenRequestAccountStatus(input: {
   return null;
 }
 
-function buildWhoopTokenRequestDiagnostics(
-  parameters: Record<string, string>,
-): Record<string, boolean | number | string | null | undefined> {
-  const parameterNames = Object.keys(parameters).sort();
-  const scopes = splitScopes(parameters.scope);
+function resolveWhoopApiEndpointKind(path: string): string {
+  const pathname = safeProviderPathname(path);
 
-  return {
-    oauthGrantType: parameters.grant_type,
-    oauthRequestBodyBuilderKind: "url_search_params_record",
-    oauthRequestClientAuthPlacement: "body_parameters",
-    oauthRequestClientCredentialPresent: Boolean(parameters.client_secret?.trim()),
-    oauthRequestClientIdPresent: Boolean(parameters.client_id?.trim()),
-    oauthRequestContentType: "application_x_www_form_urlencoded",
-    // The request is built from a record before URLSearchParams, so duplicate form keys cannot be emitted here.
-    oauthRequestDuplicateParameterCount: 0,
-    oauthRequestEncodingKind: "form_urlencoded",
-    oauthRequestHasDuplicateParameters: false,
-    oauthRequestMethod: "POST",
-    oauthRequestOfflineScopePresent: scopes.includes("offline"),
-    oauthRequestParameterCount: parameterNames.length,
-    oauthRequestParameterNames: formatOAuthDiagnosticTokenList(parameterNames),
-    oauthRequestRefreshCredentialPresent: Boolean(parameters.refresh_token?.trim()),
-    oauthRequestScopeCount: scopes.length,
-    oauthRequestScopePresent: Boolean(parameters.scope?.trim()),
-    oauthRequestScopeValue: formatOAuthDiagnosticTokenList(scopes),
-    oauthRequestTokenEndpointKind: WHOOP_OAUTH_TOKEN_ENDPOINT_KIND,
-  };
+  if (pathname === "/v2/user/measurement/body") {
+    return "whoop_body_measurement";
+  }
+
+  if (pathname === "/v2/activity/sleep") {
+    return "whoop_sleep_collection";
+  }
+
+  if (/^\/v2\/activity\/sleep\/[^/]+$/u.test(pathname)) {
+    return "whoop_sleep_resource";
+  }
+
+  if (pathname === "/v2/cycle") {
+    return "whoop_cycle_collection";
+  }
+
+  if (/^\/v2\/cycle\/[^/]+\/recovery$/u.test(pathname)) {
+    return "whoop_recovery_resource";
+  }
+
+  if (/^\/v2\/cycle\/[^/]+$/u.test(pathname)) {
+    return "whoop_cycle_resource";
+  }
+
+  if (pathname === "/v2/recovery") {
+    return "whoop_recovery_collection";
+  }
+
+  if (pathname === "/v2/activity/workout") {
+    return "whoop_workout_collection";
+  }
+
+  if (/^\/v2\/activity\/workout\/[^/]+$/u.test(pathname)) {
+    return "whoop_workout_resource";
+  }
+
+  return "whoop_api";
 }
 
-function formatOAuthDiagnosticTokenList(values: readonly string[]): string | null {
-  const formatted = values
-    .map((value) => normalizeString(value))
-    .filter((value): value is string => Boolean(value))
-    .join(".");
-
-  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(formatted) ? formatted : null;
+function safeProviderPathname(path: string): string {
+  try {
+    return new URL(path, "https://provider.invalid").pathname;
+  } catch {
+    return path.split("?")[0] ?? "";
+  }
 }
 
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
@@ -510,23 +461,21 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       timeoutMs,
       parameters,
       buildError: (response, body) => {
-        const oauthErrorBody = inspectOAuthErrorBody(body);
+        const diagnostics = buildOAuthTokenRequestDiagnostics({
+          endpointKind: WHOOP_OAUTH_TOKEN_ENDPOINT_KIND,
+          parameters,
+          responseBody: body,
+        });
+        const oauthErrorCode = typeof diagnostics.oauthErrorCode === "string" ? diagnostics.oauthErrorCode : null;
 
         return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: resolveWhoopTokenRequestAccountStatus({
             grantType: parameters.grant_type,
-            oauthErrorCode: oauthErrorBody.errorCode,
+            oauthErrorCode,
             response,
           }),
-          diagnostics: {
-            ...buildWhoopTokenRequestDiagnostics(parameters),
-            ...(oauthErrorBody.errorCode ? { oauthErrorCode: oauthErrorBody.errorCode } : {}),
-            ...(oauthErrorBody.errorDescription ? { oauthErrorDescription: oauthErrorBody.errorDescription } : {}),
-            oauthResponseErrorDescriptionFieldPresent: oauthErrorBody.errorDescriptionFieldPresent,
-            oauthResponseErrorFieldPresent: oauthErrorBody.errorFieldPresent,
-            oauthResponseShapeKind: oauthErrorBody.responseShapeKind,
-          },
+          diagnostics,
         });
       },
     });
@@ -537,6 +486,8 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     accessToken: string;
     optional?: boolean;
   }): Promise<T | null> {
+    const endpointKind = resolveWhoopApiEndpointKind(input.path);
+
     return fetchBearerJson<T>({
       fetchImpl,
       url: `${baseUrl}${WHOOP_API_PREFIX}${input.path}`,
@@ -544,9 +495,19 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       timeoutMs,
       optional: input.optional,
       buildError: (response, body) =>
-        buildWhoopApiError("WHOOP_API_REQUEST_FAILED", `WHOOP API request failed for ${input.path}.`, response, body, {
+        buildWhoopApiError("WHOOP_API_REQUEST_FAILED", `WHOOP API request failed for ${endpointKind}.`, response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
+          diagnostics: buildProviderRequestDiagnostics({
+            method: "GET",
+            endpointKind,
+            authKind: "bearer_access_token",
+            authPlacement: "headers",
+            credentialPresent: Boolean(input.accessToken),
+            contentType: "none",
+            bodyKind: "none",
+            queryParameterNames: extractProviderQueryParameterNames(input.path),
+          }),
       }),
     });
   }
@@ -572,6 +533,15 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         await parseResponseBody(response),
         {
           retryable: response.status === 429 || response.status >= 500,
+          diagnostics: buildProviderRequestDiagnostics({
+            method: "DELETE",
+            endpointKind: "whoop_revoke_access",
+            authKind: "bearer_access_token",
+            authPlacement: "headers",
+            credentialPresent: Boolean(accessToken),
+            contentType: "none",
+            bodyKind: "none",
+          }),
         },
       );
     }

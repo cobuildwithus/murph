@@ -201,6 +201,22 @@ export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
   failureErrorName?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
+  providerRequestAuthKind?: string;
+  providerRequestAuthPlacement?: string;
+  providerRequestBodyFieldCount?: number;
+  providerRequestBodyFieldNames?: string;
+  providerRequestBodyKind?: string;
+  providerRequestContentType?: string;
+  providerRequestCredentialPresent?: boolean;
+  providerRequestEndpointKind?: string;
+  providerRequestMethod?: string;
+  providerRequestQueryParameterCount?: number;
+  providerRequestQueryParameterNames?: string;
+  providerResponseErrorCode?: string;
+  providerResponseErrorDescription?: string;
+  providerResponseErrorDescriptionFieldPresent?: boolean;
+  providerResponseErrorFieldPresent?: boolean;
+  providerResponseShapeKind?: string;
   providerOAuthErrorCode?: string;
   providerOAuthErrorDescription?: string;
   providerOAuthGrantType?: string;
@@ -1251,6 +1267,22 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     "failureErrorName",
     "providerHttpStatus",
     "providerHttpStatusText",
+    "providerRequestAuthKind",
+    "providerRequestAuthPlacement",
+    "providerRequestBodyFieldCount",
+    "providerRequestBodyFieldNames",
+    "providerRequestBodyKind",
+    "providerRequestContentType",
+    "providerRequestCredentialPresent",
+    "providerRequestEndpointKind",
+    "providerRequestMethod",
+    "providerRequestQueryParameterCount",
+    "providerRequestQueryParameterNames",
+    "providerResponseErrorCode",
+    "providerResponseErrorDescription",
+    "providerResponseErrorDescriptionFieldPresent",
+    "providerResponseErrorFieldPresent",
+    "providerResponseShapeKind",
     "providerOAuthErrorCode",
     "providerOAuthErrorDescription",
     "providerOAuthGrantType",
@@ -1281,6 +1313,16 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
     "failureCauseCode",
     "failureCauseName",
     "failureErrorName",
+    "providerRequestAuthKind",
+    "providerRequestAuthPlacement",
+    "providerRequestBodyFieldNames",
+    "providerRequestBodyKind",
+    "providerRequestContentType",
+    "providerRequestEndpointKind",
+    "providerRequestMethod",
+    "providerRequestQueryParameterNames",
+    "providerResponseErrorCode",
+    "providerResponseShapeKind",
     "providerOAuthErrorCode",
     "providerOAuthGrantType",
     "providerOAuthRequestBodyBuilderKind",
@@ -1306,6 +1348,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   for (const field of [
     "failureErrorCause",
     "providerHttpStatusText",
+    "providerResponseErrorDescription",
     "providerOAuthErrorDescription",
   ] as const) {
     if (record[field] !== undefined) {
@@ -1323,6 +1366,8 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   }
 
   for (const field of [
+    "providerRequestBodyFieldCount",
+    "providerRequestQueryParameterCount",
     "providerOAuthRequestDuplicateParameterCount",
     "providerOAuthRequestParameterCount",
     "providerOAuthRequestScopeCount",
@@ -1333,6 +1378,9 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   }
 
   for (const field of [
+    "providerRequestCredentialPresent",
+    "providerResponseErrorDescriptionFieldPresent",
+    "providerResponseErrorFieldPresent",
     "providerOAuthRequestClientCredentialPresent",
     "providerOAuthRequestClientIdPresent",
     "providerOAuthRequestHasDuplicateParameters",

@@ -689,6 +689,16 @@ const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "failureCauseCode",
   "failureCauseName",
   "failureErrorName",
+  "providerRequestAuthKind",
+  "providerRequestAuthPlacement",
+  "providerRequestBodyFieldNames",
+  "providerRequestBodyKind",
+  "providerRequestContentType",
+  "providerRequestEndpointKind",
+  "providerRequestMethod",
+  "providerRequestQueryParameterNames",
+  "providerResponseErrorCode",
+  "providerResponseShapeKind",
   "providerOAuthErrorCode",
   "providerOAuthGrantType",
   "providerOAuthRequestBodyBuilderKind",
@@ -705,17 +715,23 @@ const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
 const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
   "failureErrorCause",
   "providerHttpStatusText",
+  "providerResponseErrorDescription",
   "providerOAuthErrorDescription",
 ] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
 
 const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "providerHttpStatus",
+  "providerRequestBodyFieldCount",
+  "providerRequestQueryParameterCount",
   "providerOAuthRequestDuplicateParameterCount",
   "providerOAuthRequestParameterCount",
   "providerOAuthRequestScopeCount",
 ] as const satisfies readonly HostedRuntimeFailureDiagnosticNumberField[];
 
 const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
+  "providerRequestCredentialPresent",
+  "providerResponseErrorDescriptionFieldPresent",
+  "providerResponseErrorFieldPresent",
   "providerOAuthRequestClientCredentialPresent",
   "providerOAuthRequestClientIdPresent",
   "providerOAuthRequestHasDuplicateParameters",
