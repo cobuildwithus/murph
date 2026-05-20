@@ -443,7 +443,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v2')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v3')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -454,6 +454,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
     assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
     assert.equal(view.model.productUseAuthorized, false)
+    assert.equal(view.product.ageDisplayReady, false)
+    assert.equal(view.product.riskDisplayReady, false)
     assert.equal(
       view.model.blockers.join('|'),
       'biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized',
@@ -477,6 +479,9 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.model.wearable.scoreBearing, false)
     assert.equal(view.model.wearable.scoreContributionAuthorized, false)
     assert.equal(view.model.wearable.consumerValidationStatus, 'missing')
+    assert.equal(view.model.wearable.shadowEvidenceConclusion, 'public_activity_shadow_signal_mixed_keep_wearable_context_only')
+    assert.equal(view.model.wearable.externalConsumerLabWearableAggregateStillMissing, true)
+    assert.equal(view.model.wearable.usableAsConsumerWearableValidation, false)
     assert.equal(view.model.wearable.nextAction, 'run_external_or_partner_lab_wearable_aggregate_delta')
     assert.equal(
       view.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join('|'),
