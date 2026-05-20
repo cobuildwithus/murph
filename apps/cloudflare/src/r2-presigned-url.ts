@@ -46,7 +46,7 @@ export function readHostedR2PresignEnvironment(
   }
   if (localEndpointAllowed && !isHostedR2LocalPresignSource(source)) {
     throw new TypeError(
-      `${HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV} requires hosted-local test isolation.`,
+      `${HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT_ENV} requires a hosted-local profile or test isolation.`,
     );
   }
   const endpoint = normalizeHostedR2PresignEndpoint(
@@ -323,6 +323,8 @@ function isHostedR2LocalPresignSource(
     && normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_TEST_ROUTES) === "1";
   return normalizeHostedR2PresignMarker(source.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED) === "1"
     || testRoutesEnabled
+    || profile === "dev"
+    || profile === "worker-only"
     || profile === "e2e:stub"
     || profile === "e2e:live";
 }

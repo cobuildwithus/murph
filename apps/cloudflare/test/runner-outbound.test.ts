@@ -2532,6 +2532,63 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
   });
 
+  it("presigns direct-R2 workspace snapshot PUT URLs with hosted-local dev MinIO env", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:39000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const body = requireTestObject(await response.json(), "workspace snapshot start response");
+    const snapshotId = requireTestString(body.snapshotId, "workspace snapshot start snapshotId");
+    const objectKey = requireTestString(body.objectKey, "workspace snapshot start objectKey");
+
+    const presignResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotPresignPutRequest({
+        encryptedByteSize: 4,
+        encryptedObjectSha256: "a".repeat(64),
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(presignResponse.status).toBe(200);
+    const presignBody = requireTestObject(await presignResponse.json(), "workspace snapshot presign response");
+    const putUrl = new URL(requireTestString(presignBody.putUrl, "workspace snapshot putUrl"));
+    expect(putUrl.protocol).toBe("http:");
+    expect(putUrl.host).toBe("host.docker.internal:39000");
+    expect(putUrl.pathname).toBe(`/hosted-local-r2-bundles/${objectKey}`);
+    expect(putUrl.searchParams.get("X-Amz-SignedHeaders")).toBe(
+      "content-type;host;if-none-match;x-amz-checksum-sha256;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
+    );
+    expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
+  });
+
   it("caps direct-R2 presigned PUT expiry to the remaining upload session window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));

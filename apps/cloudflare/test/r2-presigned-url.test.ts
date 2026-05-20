@@ -182,6 +182,26 @@ describe("R2 presigned URL helpers", () => {
       .not.toBe(new URL(head.url).searchParams.get("X-Amz-Signature"));
   });
 
+  it("allows hosted-local dev profiles to use local MinIO endpoints", () => {
+    const environment = readHostedR2PresignEnvironment({
+      HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "access-key",
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "account-id",
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "bucket",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
+      HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
+      HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "secret-key",
+      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+    });
+
+    expect(environment).toEqual(expect.objectContaining({
+      bucketName: "bucket",
+      controlEndpoint: "http://127.0.0.1:9000",
+      endpoint: "http://host.docker.internal:9000",
+      localEndpointAllowed: true,
+    }));
+  });
+
   it("allows only the exact discovered Docker bridge host for hosted-local MinIO", () => {
     expect(readHostedR2PresignEnvironment({
       HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "access-key",
@@ -236,7 +256,7 @@ describe("R2 presigned URL helpers", () => {
       HOSTED_R2_PRESIGN_BUCKET_NAME: "bucket",
       HOSTED_R2_PRESIGN_ENDPOINT: "http://127.0.0.1:9000",
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "secret-key",
-    })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires hosted-local test isolation");
+    })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires a hosted-local profile or test isolation");
 
     expect(() => readHostedR2PresignEnvironment({
       HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "access-key",
@@ -246,7 +266,7 @@ describe("R2 presigned URL helpers", () => {
       HOSTED_R2_PRESIGN_ENDPOINT: "http://127.0.0.1:9000",
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "secret-key",
       NODE_ENV: "test",
-    })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires hosted-local test isolation");
+    })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires a hosted-local profile or test isolation");
   });
 
   it("does not treat hosted-local test routes as local R2 isolation outside NODE_ENV=test", () => {
@@ -260,7 +280,7 @@ describe("R2 presigned URL helpers", () => {
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "secret-key",
         MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         ...(nodeEnv === undefined ? {} : { NODE_ENV: nodeEnv }),
-      })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires hosted-local test isolation");
+      })).toThrow("HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT requires a hosted-local profile or test isolation");
     }
   });
 

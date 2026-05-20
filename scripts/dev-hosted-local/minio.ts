@@ -24,6 +24,8 @@ const HOSTED_LOCAL_MINIO_PORT_ENV = "MURPH_DEV_MINIO_PORT";
 const HOSTED_LOCAL_MINIO_IMAGE_ENV = "MURPH_DEV_MINIO_IMAGE";
 const HOSTED_LOCAL_MINIO_SKIP_ENV = "MURPH_DEV_SKIP_MINIO";
 const HOSTED_LOCAL_MINIO_HEALTH_PATH = "/minio/health/ready";
+const HOSTED_LOCAL_PROFILE_ENV = "MURPH_HOSTED_LOCAL_PROFILE";
+const HOSTED_LOCAL_E2E_ISOLATION_ENV = "MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED";
 const HOSTED_LOCAL_MINIO_ROLE_LABEL_NAME = "murph.hosted-local.role";
 const HOSTED_LOCAL_MINIO_ROLE_LABEL_VALUE = "r2-minio";
 const HOSTED_LOCAL_MINIO_ROLE_LABEL = `${HOSTED_LOCAL_MINIO_ROLE_LABEL_NAME}=${HOSTED_LOCAL_MINIO_ROLE_LABEL_VALUE}`;
@@ -133,6 +135,7 @@ export async function maybeStartHostedLocalMinio(input: {
   if (publishTarget.dockerBridgeHost !== null) {
     bridgeMarkerEnv[HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV] = publishTarget.dockerBridgeHost;
   }
+  const localMarkerEnv = buildHostedLocalR2MarkerEnv(input.env);
   const endpointHost = publishTarget.dockerBridgeHost ?? input.containerHost.trim();
 
   return {
@@ -146,29 +149,53 @@ export async function maybeStartHostedLocalMinio(input: {
       HOSTED_R2_PRESIGN_ENDPOINT: `http://${formatHostedLocalMinioUrlHost(endpointHost)}:${port}`,
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
       ...bridgeMarkerEnv,
-      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      ...localMarkerEnv,
     },
     process: childProcess,
   };
 }
 
 function shouldStartHostedLocalMinio(env: NodeJS.ProcessEnv): boolean {
-  return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
-    || env.MURPH_HOSTED_LOCAL_PROFILE?.trim() === "e2e:stub"
-    || env.MURPH_HOSTED_LOCAL_PROFILE?.trim() === "e2e:live";
+  const profile = env[HOSTED_LOCAL_PROFILE_ENV]?.trim();
+  return isHostedLocalE2eProfileOrMarker(env, profile)
+    || profile === "dev"
+    || profile === "worker-only";
+}
+
+function buildHostedLocalR2MarkerEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const profile = env[HOSTED_LOCAL_PROFILE_ENV]?.trim();
+  return {
+    ...(profile ? { [HOSTED_LOCAL_PROFILE_ENV]: profile } : {}),
+    ...(isHostedLocalE2eProfileOrMarker(env, profile)
+      ? { [HOSTED_LOCAL_E2E_ISOLATION_ENV]: "1" }
+      : {}),
+  };
+}
+
+function isHostedLocalE2eProfileOrMarker(
+  env: NodeJS.ProcessEnv,
+  profile: string | undefined = env[HOSTED_LOCAL_PROFILE_ENV]?.trim(),
+): boolean {
+  return env[HOSTED_LOCAL_E2E_ISOLATION_ENV] === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
 }
 
 function assertExplicitHostedLocalR2EndpointConfigured(env: NodeJS.ProcessEnv): void {
   if (
-    env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?.trim() === "1"
+    env.HOSTED_R2_PRESIGN_ACCESS_KEY_ID?.trim()
+    && env.HOSTED_R2_PRESIGN_ACCOUNT_ID?.trim()
+    && env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?.trim() === "1"
+    && env.HOSTED_R2_PRESIGN_BUCKET_NAME?.trim()
     && env.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?.trim()
     && env.HOSTED_R2_PRESIGN_ENDPOINT?.trim()
+    && env.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?.trim()
   ) {
     return;
   }
 
   throw new Error(
-    `${HOSTED_LOCAL_MINIO_SKIP_ENV}=1 requires explicit hosted-local R2 presign endpoints.`,
+    `${HOSTED_LOCAL_MINIO_SKIP_ENV}=1 requires explicit hosted-local R2 presign endpoints and credentials.`,
   );
 }
 

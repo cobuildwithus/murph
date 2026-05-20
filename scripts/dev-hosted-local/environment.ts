@@ -283,7 +283,7 @@ export function mergeCloudflareLocalEnv(input: {
   const localKmsWrapKey =
     readHostedLocalKey("HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY")
     ?? (useRemoteHostedCryptoKeys ? null : createEnvelopeKey());
-  const hostedLocalTestR2PresignEnv = resolveHostedLocalTestR2PresignEnvironment(resolvedExisting);
+  const hostedLocalR2PresignEnv = resolveHostedLocalR2PresignEnvironment(resolvedExisting);
   stripLegacyHostedCryptoAuthorityEnv(resolvedExisting);
   if (!useRemoteHostedCryptoKeys) {
     stripHostedLocalGeneratedStateEnv(resolvedExisting);
@@ -308,7 +308,7 @@ export function mergeCloudflareLocalEnv(input: {
       ? { HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: authoritySigningKey.privateJwkJson }
       : {}),
     ...(localKmsWrapKey ? { HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: localKmsWrapKey } : {}),
-    ...hostedLocalTestR2PresignEnv,
+    ...hostedLocalR2PresignEnv,
     HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
@@ -336,18 +336,28 @@ export function mergeCloudflareLocalEnv(input: {
   }
 }
 
-function resolveHostedLocalTestR2PresignEnvironment(
+function resolveHostedLocalR2PresignEnvironment(
   env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
   const testRoutesEnabled =
     env.NODE_ENV === "test" && env.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
-  if (!isHostedLocalE2eEnvironment(env) && !testRoutesEnabled) {
-    return {};
-  }
   const allowLocalEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT);
   const controlEndpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT);
   const dockerBridgeHost = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST);
   const endpoint = normalizeOptionalString(env.HOSTED_R2_PRESIGN_ENDPOINT);
+  const localPresignConfigured = Boolean(
+    allowLocalEndpoint
+      || controlEndpoint
+      || dockerBridgeHost
+      || endpoint,
+  );
+  if (
+    !testRoutesEnabled
+    && !isHostedLocalE2eEnvironment(env)
+    && !(isHostedLocalDevProfile(env) && localPresignConfigured)
+  ) {
+    return {};
+  }
 
   return {
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID:
@@ -521,6 +531,13 @@ function isHostedLocalE2eEnvironment(
   return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live";
+}
+
+function isHostedLocalDevProfile(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const profile = normalizeOptionalString(env.MURPH_HOSTED_LOCAL_PROFILE);
+  return profile === "dev" || profile === "worker-only";
 }
 
 function buildCallbackSigningPublicKeyringJson(input: {

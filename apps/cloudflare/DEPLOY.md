@@ -108,7 +108,8 @@ Core execution tuning:
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
-  The local MinIO flags are hosted-local E2E only and must not be set for deploys.
+  Hosted-local dev, worker-only, and E2E profiles inject local MinIO flags;
+  those local flags must not be set for deploys.
 
 `CF_MAX_EVENT_ATTEMPTS` renders to `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` and is
 the per-user Durable Object consecutive failure cap. Exhausted runners stop
