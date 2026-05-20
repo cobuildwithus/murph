@@ -465,6 +465,8 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-hchs-sol-sleep-actigraphy"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-mros-sleep-aging"), true);
   assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-sof-sleep-aging"), true);
+  assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-wsc-sleep-longitudinal"), true);
+  assert.equal(wearableRoutes.some((route) => route.routeId === "nsrr-haassa-sleep-aging"), true);
   assert.equal(
     wearableRoutes.every((route) =>
       route.blockedCurrentUses.some((blockedUse) =>
@@ -503,6 +505,14 @@ test("lists Murph Age source routes as metadata-only model strategy", () => {
   assert.ok(
     priorityRoutes.findIndex((route) => route.routeId === "nsrr-sof-sleep-aging")
       > priorityRoutes.findIndex((route) => route.routeId === "nsrr-mros-sleep-aging"),
+  );
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "nsrr-wsc-sleep-longitudinal")
+      > priorityRoutes.findIndex((route) => route.routeId === "nsrr-sof-sleep-aging"),
+  );
+  assert.ok(
+    priorityRoutes.findIndex((route) => route.routeId === "nsrr-haassa-sleep-aging")
+      > priorityRoutes.findIndex((route) => route.routeId === "nsrr-wsc-sleep-longitudinal"),
   );
   assert.ok(priorityRoutes.findIndex((route) => route.routeId === "mhas-harmonized-aging") > 0);
   assert.ok(
@@ -816,6 +826,8 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(wearable?.sourceRouteIds.includes("nsrr-hchs-sol-sleep-actigraphy"), true);
   assert.equal(wearable?.sourceRouteIds.includes("nsrr-mros-sleep-aging"), true);
   assert.equal(wearable?.sourceRouteIds.includes("nsrr-sof-sleep-aging"), true);
+  assert.equal(wearable?.sourceRouteIds.includes("nsrr-wsc-sleep-longitudinal"), true);
+  assert.equal(wearable?.sourceRouteIds.includes("nsrr-haassa-sleep-aging"), true);
   assert.equal(wearable?.sourceRouteIds.includes("all-of-us-fitbit-labs-ehr"), true);
   assert.equal(wearable?.shadowMetricKeys.includes("steps"), true);
   assert.equal(wearable?.shadowMetricKeys.includes("resting-heart-rate"), true);
@@ -831,6 +843,8 @@ test("summarizes Murph Age architecture layers without product display authoriza
   assert.equal(validation?.sourceRouteIds.includes("nsrr-hchs-sol-sleep-actigraphy"), true);
   assert.equal(validation?.sourceRouteIds.includes("nsrr-mros-sleep-aging"), true);
   assert.equal(validation?.sourceRouteIds.includes("nsrr-sof-sleep-aging"), true);
+  assert.equal(validation?.sourceRouteIds.includes("nsrr-wsc-sleep-longitudinal"), true);
+  assert.equal(validation?.sourceRouteIds.includes("nsrr-haassa-sleep-aging"), true);
   assert.equal(validation?.sourceRouteIds.includes("haalsi-transport-stress"), true);
   assert.equal(validation?.sourceRouteIds.includes("who-sage-south-africa-transport"), true);
 
