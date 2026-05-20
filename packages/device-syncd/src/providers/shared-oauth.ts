@@ -2,6 +2,10 @@ import { deviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
 import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, splitScopeList, subtractDays } from "../shared.ts";
 import { getDeviceSyncAccountOAuthTokens } from "../types.ts";
+import {
+  buildProviderResponseDiagnostics,
+  inspectProviderErrorBody,
+} from "./provider-diagnostics.ts";
 
 import type { DeviceSyncErrorOptions } from "../errors.ts";
 import type {
@@ -52,22 +56,25 @@ export function buildProviderApiError(
     retryable?: boolean;
     accountStatus?: DeviceSyncErrorOptions["accountStatus"];
     diagnostics?: Record<string, ProviderApiErrorDiagnosticValue>;
+    httpStatus?: number;
   } = {},
 ) {
   const retryable = options.retryable ?? (response.status === 429 || response.status >= 500);
   const accountStatus = options.accountStatus ?? null;
+  const responseDiagnostics = buildProviderResponseDiagnostics(inspectProviderErrorBody(_body));
 
   return deviceSyncError({
     code,
     message,
     retryable,
-    httpStatus: response.status,
+    httpStatus: options.httpStatus ?? response.status,
     accountStatus,
     details: sanitizeProviderApiErrorDiagnostics({
       status: response.status,
       httpStatusText: response.statusText,
       retryable,
       accountStatus,
+      ...responseDiagnostics,
       ...options.diagnostics,
     }),
   });

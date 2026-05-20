@@ -4,6 +4,11 @@ import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junct
 
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
+import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
+import {
+  buildProviderRequestDiagnostics,
+  extractProviderQueryParameterNames,
+} from "./provider-diagnostics.ts";
 
 export type JunctionEnvironment = "sandbox" | "production";
 export type JunctionRegion = "us" | "eu";
@@ -131,16 +136,21 @@ export class JunctionClient {
       "GET",
       `/v2/user/resolve/${encodeURIComponent(clientUserId)}`,
       undefined,
-      { optional404: true },
+      { endpointKind: "junction_user_resolve", optional404: true },
     );
 
     return payload ? parseJunctionUser(payload, "Junction resolve user response") : null;
   }
 
   async createUser(clientUserId: string): Promise<JunctionUser> {
-    const payload = await this.requestJson<Record<string, unknown>>("POST", "/v2/user/", {
-      client_user_id: clientUserId,
-    });
+    const payload = await this.requestJson<Record<string, unknown>>(
+      "POST",
+      "/v2/user/",
+      {
+        client_user_id: clientUserId,
+      },
+      { endpointKind: "junction_user_create" },
+    );
     return parseJunctionUser(payload, "Junction create user response");
   }
 
@@ -176,7 +186,12 @@ export class JunctionClient {
       body.filter_on_providers = [...input.providerFilter];
     }
 
-    const payload = await this.requestJson<Record<string, unknown>>("POST", "/v2/link/token", body);
+    const payload = await this.requestJson<Record<string, unknown>>(
+      "POST",
+      "/v2/link/token",
+      body,
+      { endpointKind: "junction_link_token_create" },
+    );
     const linkWebUrl = normalizeString(payload.link_web_url) ?? normalizeString(payload.linkWebUrl);
 
     if (!linkWebUrl) {
@@ -196,6 +211,8 @@ export class JunctionClient {
     const payload = await this.requestJson<unknown>(
       "GET",
       `/v2/user/providers/${encodeURIComponent(userId)}`,
+      undefined,
+      { endpointKind: "junction_user_providers" },
     );
     return parseJunctionProviders(payload);
   }
@@ -204,6 +221,7 @@ export class JunctionClient {
     return this.fetchWindowedCollection(
       `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
       input,
+      { endpointKind: "junction_summary_collection" },
     );
   }
 
@@ -211,7 +229,10 @@ export class JunctionClient {
     return this.fetchWindowedCollection(
       `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.resource)}/grouped`,
       input,
-      { extractRecords: extractTimeseriesRecords },
+      {
+        endpointKind: "junction_timeseries_collection",
+        extractRecords: extractTimeseriesRecords,
+      },
     );
   }
 
@@ -219,6 +240,7 @@ export class JunctionClient {
     path: string,
     input: JunctionWindowInput,
     options: {
+      endpointKind?: string;
       extractRecords?: (payload: unknown, resource: string) => unknown[];
     } = {},
   ): Promise<unknown[]> {
@@ -246,7 +268,12 @@ export class JunctionClient {
         search.set("cursor", cursor);
       }
 
-      const payload = await this.requestJson<unknown>("GET", `${path}?${search.toString()}`);
+      const payload = await this.requestJson<unknown>(
+        "GET",
+        `${path}?${search.toString()}`,
+        undefined,
+        { endpointKind: options.endpointKind },
+      );
       records.push(...extractRecords(payload, input.resource));
       pages += 1;
 
@@ -269,10 +296,22 @@ export class JunctionClient {
     method: "GET" | "POST",
     path: string,
     body?: Record<string, unknown>,
-    options: { optional404?: boolean } = {},
+    options: { endpointKind?: string; optional404?: boolean } = {},
   ): Promise<T> {
     const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
     let lastError: unknown;
+    const endpointKind = options.endpointKind ?? resolveJunctionEndpointKind(path);
+    const requestDiagnostics = buildProviderRequestDiagnostics({
+      method,
+      endpointKind,
+      authKind: "provider_config_api_key_header",
+      authPlacement: "headers",
+      credentialPresent: Boolean(this.apiKey),
+      contentType: body ? "application_json" : "none",
+      bodyKind: body ? "json_object" : "none",
+      bodyFieldNames: body ? Object.keys(body) : [],
+      queryParameterNames: extractProviderQueryParameterNames(path),
+    });
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const controller = new AbortController();
@@ -301,14 +340,14 @@ export class JunctionClient {
             continue;
           }
 
-          throw deviceSyncError({
+          throw buildProviderApiError({
             code: "JUNCTION_API_REQUEST_FAILED",
-            message: `Junction API request failed with status ${response.status}.`,
+            message: `Junction API request failed for ${endpointKind}.`,
+            response,
+            body: text,
             retryable,
             httpStatus: response.status >= 400 && response.status < 600 ? 502 : undefined,
-            details: {
-              status: response.status,
-            },
+            diagnostics: requestDiagnostics,
           });
         }
 
@@ -316,11 +355,11 @@ export class JunctionClient {
       } catch (error) {
         lastError = error;
 
-        if (isDeviceSyncError(error) && !error.retryable) {
-          throw error;
-        }
-
-        if (attempt >= attempts || isDeviceSyncAbortError(error)) {
+        if (isDeviceSyncError(error)) {
+          if (!error.retryable || attempt >= attempts) {
+            throw error;
+          }
+        } else if (attempt >= attempts || isDeviceSyncAbortError(error)) {
           break;
         }
 
@@ -332,11 +371,72 @@ export class JunctionClient {
 
     throw deviceSyncError({
       code: "JUNCTION_API_REQUEST_FAILED",
-      message: "Junction API request failed.",
+      message: `Junction API request failed for ${endpointKind}.`,
       retryable: method === "GET",
       httpStatus: 502,
+      details: requestDiagnostics,
       cause: lastError,
     });
+  }
+}
+
+function buildProviderApiError(input: {
+  code: string;
+  message: string;
+  response: Response;
+  body: string;
+  retryable: boolean;
+  httpStatus?: number;
+  diagnostics: Record<string, boolean | number | string | null | undefined>;
+}) {
+  return buildProviderApiErrorBase(
+    input.code,
+    input.message,
+    input.response,
+    input.body,
+    {
+      retryable: input.retryable,
+      httpStatus: input.httpStatus,
+      diagnostics: input.diagnostics,
+    },
+  );
+}
+
+function resolveJunctionEndpointKind(path: string): string {
+  const pathname = safeProviderPathname(path);
+
+  if (pathname.startsWith("/v2/user/resolve/")) {
+    return "junction_user_resolve";
+  }
+
+  if (pathname === "/v2/user/") {
+    return "junction_user_create";
+  }
+
+  if (pathname === "/v2/link/token") {
+    return "junction_link_token_create";
+  }
+
+  if (pathname.startsWith("/v2/user/providers/")) {
+    return "junction_user_providers";
+  }
+
+  if (pathname.startsWith("/v2/summary/")) {
+    return "junction_summary_collection";
+  }
+
+  if (pathname.startsWith("/v2/timeseries/")) {
+    return "junction_timeseries_collection";
+  }
+
+  return "junction_api";
+}
+
+function safeProviderPathname(path: string): string {
+  try {
+    return new URL(path, "https://provider.invalid").pathname;
+  } catch {
+    return path.split("?")[0] ?? "";
   }
 }
 

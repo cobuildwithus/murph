@@ -102,6 +102,17 @@ function createStoredAccount(scopes: string[], overrides: StoredDeviceSyncAccoun
 
 function expectedWhoopRefreshRequestDiagnostics() {
   return {
+    requestAuthKind: "oauth_client_secret_body",
+    requestAuthPlacement: "body_parameters",
+    requestBodyFieldCount: 5,
+    requestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
+    requestBodyKind: "form_urlencoded",
+    requestContentType: "application_x_www_form_urlencoded",
+    requestCredentialPresent: true,
+    requestEndpointKind: "whoop_oauth_token",
+    requestMethod: "POST",
+    requestQueryParameterCount: 0,
+    requestQueryParameterNames: null,
     oauthGrantType: "refresh_token",
     oauthRequestBodyBuilderKind: "url_search_params_record",
     oauthRequestClientAuthPlacement: "body_parameters",
@@ -125,6 +136,17 @@ function expectedWhoopRefreshRequestDiagnostics() {
 
 function expectedWhoopAuthorizationCodeRequestDiagnostics() {
   return {
+    requestAuthKind: "oauth_client_secret_body",
+    requestAuthPlacement: "body_parameters",
+    requestBodyFieldCount: 5,
+    requestBodyFieldNames: "client_id.client_secret.code.grant_type.redirect_uri",
+    requestBodyKind: "form_urlencoded",
+    requestContentType: "application_x_www_form_urlencoded",
+    requestCredentialPresent: true,
+    requestEndpointKind: "whoop_oauth_token",
+    requestMethod: "POST",
+    requestQueryParameterCount: 0,
+    requestQueryParameterNames: null,
     oauthGrantType: "authorization_code",
     oauthRequestBodyBuilderKind: "url_search_params_record",
     oauthRequestClientAuthPlacement: "body_parameters",
@@ -148,6 +170,9 @@ function expectedWhoopAuthorizationCodeRequestDiagnostics() {
 
 function expectedWhoopJsonOAuthErrorResponseDiagnostics() {
   return {
+    responseErrorDescriptionFieldPresent: true,
+    responseErrorFieldPresent: true,
+    responseShapeKind: "json_object",
     oauthResponseErrorDescriptionFieldPresent: true,
     oauthResponseErrorFieldPresent: true,
     oauthResponseShapeKind: "json_object",
@@ -413,6 +438,8 @@ test("WHOOP provider marks invalid refresh-token grants as reauthorization requi
         accountStatus: "reauthorization_required",
         oauthErrorCode: "invalid_grant",
         oauthErrorDescription: "The refresh token is invalid.",
+        responseErrorCode: "invalid_grant",
+        responseErrorDescription: "The refresh token is invalid.",
         ...expectedWhoopRefreshRequestDiagnostics(),
         ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
@@ -467,6 +494,8 @@ test("WHOOP provider includes safe request-shape diagnostics for auth-code token
         accountStatus: null,
         oauthErrorCode: "invalid_request",
         oauthErrorDescription: "Authorization code expired. Restart WHOOP connection.",
+        responseErrorCode: "invalid_request",
+        responseErrorDescription: "Authorization code expired. Restart WHOOP connection.",
         ...expectedWhoopAuthorizationCodeRequestDiagnostics(),
         ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
@@ -516,6 +545,8 @@ test("WHOOP provider does not mark other refresh-token OAuth errors as reauthori
         accountStatus: null,
         oauthErrorCode: "invalid_request",
         oauthErrorDescription: "The token request is malformed.",
+        responseErrorCode: "invalid_request",
+        responseErrorDescription: "The token request is malformed.",
         ...expectedWhoopRefreshRequestDiagnostics(),
         ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
@@ -560,6 +591,8 @@ test("WHOOP provider does not mark client credential token failures as reauthori
         accountStatus: null,
         oauthErrorCode: "invalid_client",
         oauthErrorDescription: "The OAuth client credentials are invalid.",
+        responseErrorCode: "invalid_client",
+        responseErrorDescription: "The OAuth client credentials are invalid.",
         ...expectedWhoopRefreshRequestDiagnostics(),
         ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
       });
@@ -600,6 +633,9 @@ test("WHOOP provider does not mark opaque token endpoint authorization failures 
         retryable: false,
         accountStatus: null,
         ...expectedWhoopRefreshRequestDiagnostics(),
+        responseErrorDescriptionFieldPresent: false,
+        responseErrorFieldPresent: false,
+        responseShapeKind: "empty",
         oauthResponseErrorDescriptionFieldPresent: false,
         oauthResponseErrorFieldPresent: false,
         oauthResponseShapeKind: "empty",
@@ -638,6 +674,84 @@ test("WHOOP provider treats rate-limited token requests as retryable", async () 
       error.httpStatus === 429 &&
       error.retryable === true &&
       error.accountStatus === null,
+  );
+});
+
+test("WHOOP provider includes safe request and response diagnostics for API failures", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/developer/v2/activity/sleep/sleep-sensitive-id") {
+        assert.equal(readAuthorizationHeader(init), "Bearer stored-access-token");
+        return createJsonResponse({
+          code: "forbidden",
+          message: "Provider access to this resource is forbidden.",
+        }, 403);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["read:sleep"], {
+      accessToken: "stored-access-token",
+    }),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot() {
+      throw new Error("import should not run after an API failure");
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not run after a non-retryable API failure");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      provider.jobExecutor.executeJob(
+        context,
+        createJob("resource", {
+          resourceId: "sleep-sensitive-id",
+          resourceType: "sleep",
+        }),
+      ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_API_REQUEST_FAILED");
+      assert.equal(error.message, "WHOOP API request failed for whoop_sleep_resource.");
+      assert.equal(error.retryable, false);
+      assert.deepEqual(error.details, {
+        accountStatus: null,
+        requestAuthKind: "bearer_access_token",
+        requestAuthPlacement: "headers",
+        requestBodyFieldCount: 0,
+        requestBodyFieldNames: null,
+        requestBodyKind: "none",
+        requestContentType: "none",
+        requestCredentialPresent: true,
+        requestEndpointKind: "whoop_sleep_resource",
+        requestMethod: "GET",
+        requestQueryParameterCount: 0,
+        requestQueryParameterNames: null,
+        responseErrorCode: "forbidden",
+        responseErrorDescription: "Provider access to this resource is forbidden.",
+        responseErrorDescriptionFieldPresent: true,
+        responseErrorFieldPresent: true,
+        responseShapeKind: "json_object",
+        retryable: false,
+        status: 403,
+      });
+      const serialized = JSON.stringify({
+        message: error.message,
+        details: error.details,
+      });
+      assert.equal(serialized.includes("sleep-sensitive-id"), false);
+      assert.equal(serialized.includes("stored-access-token"), false);
+      return true;
+    },
   );
 });
 

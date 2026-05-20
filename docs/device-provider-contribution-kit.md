@@ -182,6 +182,11 @@ The provider implementation should:
 - implement scheduled jobs with bounded reconcile windows
 - keep webhook handlers light: verify, parse, dedupe, and enqueue
 - fetch one provider snapshot inside `executeJob()` and hand that snapshot to `context.importSnapshot()`
+- route provider HTTP failures through the shared metadata-only diagnostics
+  helpers so endpoint kind, request shape, upstream status, response shape, and
+  sanitized provider error reasons are visible without logging tokens, secrets,
+  raw paths, query values, request bodies, response bodies, or provider account
+  identifiers
 
 Do not widen the runtime provider shape with duplicated metadata fields. Shared lifecycle metadata belongs in `descriptor`; the runtime provider surface should own behavior only.
 

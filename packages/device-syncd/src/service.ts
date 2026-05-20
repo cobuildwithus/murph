@@ -1064,7 +1064,9 @@ function normalizeExecutionError(error: unknown): {
 
 function summarizeDeviceSyncErrorMessage(error: DeviceSyncError): string {
   const baseMessage = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
-  const providerReason = readSafeDiagnosticText(error.details?.oauthErrorDescription);
+  const providerReason =
+    readSafeDiagnosticText(error.details?.responseErrorDescription)
+    ?? readSafeDiagnosticText(error.details?.oauthErrorDescription);
   if (!providerReason) {
     return baseMessage;
   }
@@ -1075,9 +1077,32 @@ function summarizeDeviceSyncErrorMessage(error: DeviceSyncError): string {
 function buildDeviceSyncErrorFailureDiagnostics(
   error: DeviceSyncError,
 ): DeviceSyncJobFailureDiagnostic["details"] {
+  const cause = toPlainRecord(error.cause);
+
   return compactFailureDiagnostics({
-    providerHttpStatus: error.httpStatus,
+    failureCauseCode: readSafeDiagnosticToken(cause?.code),
+    failureCauseName: readSafeDiagnosticToken(cause?.name),
+    failureErrorCause: readSafeDiagnosticText(cause?.message),
+    providerHttpStatus: readSafeDiagnosticNumber(error.details?.status) ?? error.httpStatus,
     providerHttpStatusText: readSafeDiagnosticText(error.details?.httpStatusText),
+    providerRequestAuthKind: readSafeDiagnosticToken(error.details?.requestAuthKind),
+    providerRequestAuthPlacement: readSafeDiagnosticToken(error.details?.requestAuthPlacement),
+    providerRequestBodyFieldCount: readSafeDiagnosticNumber(error.details?.requestBodyFieldCount),
+    providerRequestBodyFieldNames: readSafeDiagnosticToken(error.details?.requestBodyFieldNames),
+    providerRequestBodyKind: readSafeDiagnosticToken(error.details?.requestBodyKind),
+    providerRequestContentType: readSafeDiagnosticToken(error.details?.requestContentType),
+    providerRequestCredentialPresent: readSafeDiagnosticBoolean(error.details?.requestCredentialPresent),
+    providerRequestEndpointKind: readSafeDiagnosticToken(error.details?.requestEndpointKind),
+    providerRequestMethod: readSafeDiagnosticToken(error.details?.requestMethod),
+    providerRequestQueryParameterCount: readSafeDiagnosticNumber(error.details?.requestQueryParameterCount),
+    providerRequestQueryParameterNames: readSafeDiagnosticToken(error.details?.requestQueryParameterNames),
+    providerResponseErrorCode: readSafeDiagnosticToken(error.details?.responseErrorCode),
+    providerResponseErrorDescription: readSafeDiagnosticText(error.details?.responseErrorDescription),
+    providerResponseErrorDescriptionFieldPresent: readSafeDiagnosticBoolean(
+      error.details?.responseErrorDescriptionFieldPresent,
+    ),
+    providerResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.responseErrorFieldPresent),
+    providerResponseShapeKind: readSafeDiagnosticToken(error.details?.responseShapeKind),
     providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
     providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
     providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),

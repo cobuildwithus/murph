@@ -98,6 +98,9 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
   assert.equal(rateLimited.httpStatus, 429);
   assert.deepEqual(rateLimited.details, {
     accountStatus: null,
+    responseErrorDescriptionFieldPresent: false,
+    responseErrorFieldPresent: false,
+    responseShapeKind: "json_object",
     retryable: true,
     status: 429,
   });
@@ -116,6 +119,9 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
   assert.equal(unauthorized.accountStatus, "reauthorization_required");
   assert.deepEqual(unauthorized.details, {
     accountStatus: "reauthorization_required",
+    responseErrorDescriptionFieldPresent: false,
+    responseErrorFieldPresent: false,
+    responseShapeKind: "json_object",
     retryable: false,
     status: 401,
   });
@@ -139,6 +145,9 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
     oauthErrorDescription: "Refresh token expired at <redacted-url>",
     oauthErrorCode: "invalid_grant",
     oauthGrantType: "refresh_token",
+    responseErrorDescriptionFieldPresent: false,
+    responseErrorFieldPresent: false,
+    responseShapeKind: "json_object",
     retryable: false,
     status: 400,
   });
@@ -158,8 +167,31 @@ test("shared oauth helpers normalize response parsing, retry metadata, scopes, a
   assert.deepEqual(withUnsafeDiagnostics.details, {
     accountStatus: null,
     oauthErrorCode: "invalid_grant",
+    responseErrorDescriptionFieldPresent: false,
+    responseErrorFieldPresent: false,
+    responseShapeKind: "json_object",
     retryable: false,
     status: 400,
+  });
+
+  const withProviderReason = buildProviderApiError(
+    "PROVIDER_FAILED",
+    "Provider failed",
+    new Response(null, { status: 502 }),
+    JSON.stringify({
+      code: "upstream_timeout",
+      message: "Provider timed out after retrying.",
+    }),
+  );
+  assert.deepEqual(withProviderReason.details, {
+    accountStatus: null,
+    responseErrorCode: "upstream_timeout",
+    responseErrorDescription: "Provider timed out after retrying.",
+    responseErrorDescriptionFieldPresent: true,
+    responseErrorFieldPresent: true,
+    responseShapeKind: "json_object",
+    retryable: true,
+    status: 502,
   });
 
   assert.deepEqual(extractRetryMetadata({ retryable: true, httpStatus: "503" }), {
