@@ -1,3 +1,7 @@
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ASSISTANT_USAGE_SCHEMA,
@@ -5,6 +9,8 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
+  encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
@@ -43,6 +49,9 @@ import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+import {
+  createEncryptedWorkspaceSnapshotFile,
+} from "../src/workspace-snapshot-local.ts";
 
 function requireFetchCallArgs(
   call: readonly unknown[] | undefined,
@@ -211,6 +220,217 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     })).rejects.toThrow("Hosted workspace snapshot restore exceeds the single-part size guard.");
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const putUrl =
+        `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot platform fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        return new Response(null, { status: 200 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      await platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const presignRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot PUT presign");
+      expect(presignRequest.url).toBe(
+        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/presign-put",
+      );
+      await expect(presignRequest.json()).resolves.toEqual({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        snapshotId: "snapshot_runner_platform",
+      });
+      const request = requireFetchRequest(fetchMock.mock.calls[1], "direct R2 workspace snapshot PUT");
+      expect(request.method).toBe("PUT");
+      expect(request.url).toBe(putUrl);
+      expect(request.headers.get("content-length")).toBe(String(encryptedBytes.byteLength));
+      expect(request.headers.get("content-type")).toBe("application/octet-stream");
+      expect(request.headers.get("if-none-match")).toBe("*");
+      expect(request.headers.get("x-amz-meta-encryptedsha256")).toBe("c".repeat(64));
+      expect(request.headers.get("x-amz-meta-schema")).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
+      expect(request.headers.get("x-amz-meta-snapshotid")).toBe("snapshot_runner_platform");
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("restores v2 workspace snapshots through unwrap, presigned GET, and direct R2 fetch", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-restore-"));
+    const sourceRoot = path.join(tempRoot, "source");
+    const scratchRoot = path.join(tempRoot, "scratch");
+    const durableRoot = path.join(tempRoot, "durable");
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+
+    try {
+      await mkdir(sourceRoot, { mode: 0o700, recursive: true });
+      await writeFile(path.join(sourceRoot, "note.md"), "restored through direct r2\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      const snapshotId = "snapshot_runner_platform_restore";
+      const objectKey =
+        `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+      const aad = buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId: "member_123",
+      });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        dataKey: dataKeyBase64,
+        durableRoot: sourceRoot,
+        ivBase64: "AQIDBAUGBwgJCgsM",
+        maxEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+        outputDir: scratchRoot,
+      });
+      const encryptedBytes = await readFile(encrypted.encryptedFilePath);
+      const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot restore fetch");
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
+          return new Response(
+            JSON.stringify({ dataKey: dataKeyBase64 }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              getUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+        if (request.url === getUrl) {
+          return new Response(encryptedBytes, {
+            headers: {
+              "content-length": String(encrypted.encryptedByteSize),
+              "content-type": "application/octet-stream",
+            },
+            status: 200,
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        workspaceCheckpointBridge: {
+          readCurrentLease: () => ({
+            attemptId: "runtime_write_123",
+            leaseGeneration: "7",
+            userId: "member_123",
+            workspaceVersion: "6",
+          }),
+        },
+      });
+
+      await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+        durableRoot,
+        ref: {
+          archive: {
+            compression: encrypted.compression,
+            encryptedByteSize: encrypted.encryptedByteSize,
+            encryptedObjectSha256: encrypted.encryptedObjectSha256,
+            fileCount: encrypted.fileCount,
+            format: "tar",
+            plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+          },
+          createdAt: "2026-05-20T00:00:00.000Z",
+          encryption: {
+            aad,
+            ivBase64: encrypted.ivBase64,
+            rootKeyId: "root_key_test",
+            scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+            wrappedDataKey: "wrapped_data_key_test",
+          },
+          objectKey,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+          snapshotId,
+          upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+          userId: "member_123",
+        },
+        scratchRoot,
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const unwrapRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot unwrap");
+      expect(unwrapRequest.url).toBe(
+        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/data-key/unwrap",
+      );
+      await expect(unwrapRequest.json()).resolves.toEqual({
+        aad,
+        rootKeyId: "root_key_test",
+        wrappedDataKey: "wrapped_data_key_test",
+      });
+      const presignRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot GET presign");
+      expect(presignRequest.url).toBe(
+        "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform_restore/presign-get",
+      );
+      await expect(presignRequest.json()).resolves.toEqual({
+        objectKey,
+        snapshotId,
+      });
+      expect(requireFetchRequest(fetchMock.mock.calls[2], "direct R2 workspace snapshot GET").url).toBe(getUrl);
+      await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
+    } finally {
+      dataKey.fill(0);
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 
   it("logs upstream request failures with safe request metadata", async () => {

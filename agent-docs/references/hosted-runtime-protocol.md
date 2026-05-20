@@ -313,21 +313,22 @@ The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a
 legacy layered `{base, hot}` ref. Live v2 snapshots are one encrypted compressed
 tar object uploaded directly from the container to R2 through a short-lived
-presigned `PUT` URL. The Worker handles only JSON start/complete metadata,
-stores a short-lived upload session without the URL or data key, verifies the
-object by `HEAD` on completion, and never receives the snapshot body. The bridge
-no longer writes foreground working commits. Mailbox import, active-turn
-acceptance, `canonical_runtime_commit`, assistant-runtime commits, provider
-cleanup, system-mailbox receipts, and pre-delivery outbox state must not enter
-workspace snapshot construction; the foreground caller tripwire fails those
-paths before the bridge. Bootstrap or live foreground paths must not fall back
-to broad foreground full snapshots, path-scoped working deltas, legacy hot
+presigned `PUT` URL. The Worker handles only JSON start, presign, complete,
+abort, and data-key unwrap metadata, stores a short-lived upload session without
+the URL or data key, verifies the object by `HEAD` on completion, and never
+receives the snapshot body. The bridge no longer writes foreground working
+commits. Mailbox import, active-turn acceptance, `canonical_runtime_commit`,
+assistant-runtime commits, provider cleanup, system-mailbox receipts, and
+pre-delivery outbox state must not enter workspace snapshot construction; the
+foreground caller tripwire fails those paths before the bridge. Bootstrap or
+live foreground paths must not fall back to broad foreground full snapshots,
+path-scoped working deltas, legacy hot
 producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
 `idle_shutdown` is the only new checkpoint snapshot producer.
-`idle_shutdown` is the compaction boundary for warm-runner wind-down: it maps to
+`idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
-during the broad snapshot walk so stale idle compaction can abort before direct
+during the broad snapshot walk so stale idle shutdown can abort before direct
 R2 upload.
 
 The portable workspace policy excludes explicit unsafe/process-local or
@@ -346,7 +347,7 @@ R2 v2 refs only.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
 or workspace pointer. Provider-native continuity remains a workspace snapshot
-concern: if a container dies before the next idle-shutdown full/base snapshot,
+concern: if a container dies before the next idle-shutdown direct-R2 v2 snapshot,
 restore must still be correct from durable mailbox, transcript, and assistant
 runtime state even if provider-native resume optimization is unavailable.
 

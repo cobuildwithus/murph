@@ -475,7 +475,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       level: "info",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
-        checkpointPolicy: "full",
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
@@ -737,7 +736,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       level: "info",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
-        checkpointPolicy: "full",
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
@@ -1147,7 +1145,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       eventCode: "checkpoint.snapshot_finished",
       redactedJson: expect.objectContaining({
         checkpointReason: "idle_shutdown",
-        checkpointPolicy: "full",
         snapshotMode: "workspace_snapshot_v2",
         workspaceSnapshotEncryptedBytes: snapshotRef.archive.encryptedByteSize,
       }),
@@ -1736,10 +1733,6 @@ function createPlatform(input: {
   }) => Promise<{ loggedCount: number }>;
 }) {
   const workspaceSnapshotUploads = input.workspaceSnapshotUploads ?? new Map<string, WorkspaceSnapshotUpload>();
-  const workspaceSnapshotUploadByPutUrl = new Map<string, {
-    objectKey: string;
-    snapshotId: string;
-  }>();
   let workspaceSnapshotStartOrdinal = 0;
   return {
     artifactStore: {
@@ -1767,8 +1760,8 @@ function createPlatform(input: {
         }
       : {}),
     workspaceSnapshotPort: {
-      completeUploadedSnapshot: async (request: {
-        checkpointRequest: Parameters<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["completeUploadedSnapshot"]>[0]["checkpointRequest"];
+      completeSnapshotSession: async (request: {
+        checkpointRequest: Parameters<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["completeSnapshotSession"]>[0]["checkpointRequest"];
         ref: HostedWorkspaceSnapshotV2Ref;
       }) => ({
         checkpoint: {
@@ -1780,59 +1773,33 @@ function createPlatform(input: {
         },
         snapshotRef: request.ref,
       }),
-      directPutEncryptedObject: async (request: {
-        encryptedByteSize: number;
-        encryptedObjectSha256: string;
-        expiresAt: string;
-        putUrl: string;
-        sourceFilePath: string;
-        snapshotId: string;
-      }) => {
-        const upload = workspaceSnapshotUploadByPutUrl.get(request.putUrl);
-        if (!upload) {
-          throw new Error("Workspace snapshot test direct PUT URL was not started.");
-        }
-        const bytes = await readFile(request.sourceFilePath);
-        workspaceSnapshotUploads.set(upload.objectKey, {
-          bytes,
-          encryptedByteSize: request.encryptedByteSize,
-          encryptedObjectSha256: sha256HostedBundleHex(bytes),
-          objectKey: upload.objectKey,
-          snapshotId: upload.snapshotId,
-        });
-      },
-      presignUploadedObject: async (request: {
+      putSnapshotObjectDirect: async (request: {
         encryptedByteSize: number;
         encryptedObjectSha256: string;
         objectKey: string;
+        sourceFilePath: string;
         snapshotId: string;
       }) => {
-        const putUrl = `https://r2.example.invalid/${encodeURIComponent(request.objectKey)}`;
-        workspaceSnapshotUploadByPutUrl.set(putUrl, {
+        const bytes = await readFile(request.sourceFilePath);
+        workspaceSnapshotUploads.set(request.objectKey, {
+          bytes,
+          encryptedByteSize: request.encryptedByteSize,
+          encryptedObjectSha256: sha256HostedBundleHex(bytes),
           objectKey: request.objectKey,
           snapshotId: request.snapshotId,
         });
-        return {
-          expiresAt: "2099-05-01T00:10:00.000Z",
-          putUrl,
-        };
       },
-      abortUpload: async (request: {
+      abortSnapshotSession: async (request: {
         objectKey: string;
         snapshotId: string;
       }) => {
         input.workspaceSnapshotAborts?.push(request);
-        for (const [putUrl, upload] of workspaceSnapshotUploadByPutUrl.entries()) {
-          if (upload.objectKey === request.objectKey && upload.snapshotId === request.snapshotId) {
-            workspaceSnapshotUploadByPutUrl.delete(putUrl);
-          }
-        }
         workspaceSnapshotUploads.delete(request.objectKey);
       },
       restoreWorkspaceSnapshot: async () => {
         throw new Error("Workspace snapshot restore is not used by bridge snapshot tests.");
       },
-      startUpload: async (request: {
+      startSnapshotSession: async (request: {
         expectedWorkspaceVersion: string;
         nextWakeAt?: string | null;
         nextWakeReason?: string | null;
@@ -1872,10 +1839,6 @@ function createPlatform(input: {
           snapshotId,
         };
       },
-      unwrapDataKey: async () =>
-        encodeHostedWorkspaceSnapshotV2DataKey(
-          Uint8Array.from({ length: 32 }, (_, index) => index + 1),
-        ),
     },
     ...(input.readWorkspace
       ? {

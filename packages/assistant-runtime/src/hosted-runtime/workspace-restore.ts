@@ -59,6 +59,10 @@ import type {
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
+
+// Legacy restore-only compatibility for pre-v2 workspace refs. Production v2
+// checkpoints no longer create base, hot, working, bundle, or delta refs; these
+// caches and paths are deletable after the v2 migration window.
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-base-restore-cache.v2";
 const HOSTED_WORKSPACE_BASE_RESTORE_CACHE_FILE_NAME = ".hosted-workspace-base-restore-cache.json";
 const HOSTED_WORKSPACE_HOT_RESTORE_CACHE_SCHEMA = "murph.hosted-workspace-hot-restore-cache.v2";
@@ -182,6 +186,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     vaultRoot: restored.vaultRoot,
   });
 
+  // Current v2 restore path: restore the single direct-R2 encrypted snapshot
+  // without legacy bundle, hot-layer, delta, or sidecar artifact handling.
   if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
     if (!input.platform.workspaceSnapshotPort) {
       throw new Error("Hosted workspace snapshot v2 restore requires a workspace snapshot port.");
@@ -234,6 +240,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     };
   }
 
+  // Legacy restore-only compatibility for working `{base, delta}` refs produced
+  // before v2 direct snapshots. Delete with the legacy cache helpers after the
+  // v2 migration window.
   if (baseSnapshotRef && deltaSnapshotRef && !hotSnapshotRef) {
     const cachedWorkingRestore = await readHostedWorkspaceWorkingRestoreCache(restored.vaultRoot);
     if (
@@ -284,6 +293,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
 
   let baseRestoreCacheHit = false;
   let restoreWasCold = false;
+  // Legacy restore-only compatibility for old base bundle refs. This branch is
+  // not on the v2 production checkpoint path and can be removed after migration.
   if (baseSnapshotRef) {
     const cachedBaseRestore = await readHostedWorkspaceBaseRestoreCache(restored.vaultRoot);
     let useCachedBaseRestore = false;
@@ -347,6 +358,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }
   }
 
+  // Legacy restore-only compatibility for old hot-layer bundle refs. This
+  // restores the authoritative hot state only for pre-v2 snapshots.
   if (hotSnapshotRef) {
     const cachedHotRestore = baseSnapshotRef && baseRestoreCacheHit
       ? await readHostedWorkspaceHotRestoreCache(restored.vaultRoot)
@@ -403,6 +416,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }
   }
 
+  // Legacy restore-only compatibility for old working deltas. New v2 snapshots
+  // restore above and should never reach this path.
   if (deltaSnapshotRef) {
     restoreWasCold = true;
     if (!baseSnapshotRef) {
@@ -524,6 +539,8 @@ export async function tryOpenExistingWarmWorkspaceForIdleCheckpoint(input: {
   };
 }
 
+// Legacy hot-layer bundle restore helper. Restore-only compatibility for
+// pre-v2 `{base, hot}` snapshots; remove with the legacy snapshot readers.
 async function restoreHostedWorkspaceRuntimeHotLayer(input: {
   hotSnapshotRef: HostedExecutionBundleRef;
   input: {
@@ -813,6 +830,9 @@ function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
 }
 
+// Legacy base/hot/working restore cache helpers. These are local performance
+// markers for restore-only compatibility and are deletable with the pre-v2
+// bundle/delta restore paths after the v2 migration window.
 async function readHostedWorkspaceBaseRestoreCache(
   vaultRoot: string,
 ): Promise<HostedWorkspaceBaseRestoreCache | null> {
@@ -1238,6 +1258,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Legacy bundle restore helper for pre-v2 snapshot refs. The current v2 path
+// uses workspaceSnapshotPort.restoreWorkspaceSnapshot instead.
 async function restoreHostedWorkspaceRuntimeBundle(input: {
   appendSkippedInlineFiles?: boolean;
   bundle?: Uint8Array | ArrayBuffer | null;

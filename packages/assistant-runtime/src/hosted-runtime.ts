@@ -131,7 +131,9 @@ export type {
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
 export type {
+  HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
+  HostedRuntimeArtifactWriter,
   HostedRuntimeBrowserVaultReplicaPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,

@@ -326,7 +326,10 @@ function isHostedWorkspaceSnapshotEnvPath(relativePath: string): boolean {
 async function assertHostedWorkspaceSnapshotTarEntriesSafe(archivePath: string): Promise<void> {
   const entries = await listHostedWorkspaceSnapshotTarEntries(archivePath);
   const verboseEntries = await listHostedWorkspaceSnapshotTarEntries(archivePath, true);
-  if (verboseEntries.some((entry) => entry.startsWith("l") || entry.startsWith("h"))) {
+  if (verboseEntries.some((entry) => {
+    const type = entry[0];
+    return type !== "-" && type !== "d";
+  })) {
     throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
   }
 

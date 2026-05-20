@@ -43,13 +43,20 @@ import type {
   RuntimeLivenessPort,
 } from "./liveness.ts";
 
-export interface HostedRuntimeArtifactStore {
+export interface HostedRuntimeArtifactReader {
   get(sha256: string): Promise<Uint8Array | null>;
+}
+
+export interface HostedRuntimeArtifactWriter {
   put(input: {
     bytes: Uint8Array;
     sha256: string;
   }): Promise<void>;
 }
+
+export interface HostedRuntimeArtifactStore extends
+  HostedRuntimeArtifactReader,
+  HostedRuntimeArtifactWriter {}
 
 export interface HostedRuntimeBrowserVaultReplicaPort {
   publishRef?(input: {
@@ -236,7 +243,7 @@ export interface HostedRuntimeWorkspaceSnapshotDataKey {
   wrappedDataKey: string;
 }
 
-export interface HostedRuntimeWorkspaceSnapshotUploadStart {
+export interface HostedRuntimeWorkspaceSnapshotSessionStart {
   encryption: HostedRuntimeWorkspaceSnapshotDataKey;
   limits: {
     maxSinglePartEncryptedBytes: number;
@@ -246,55 +253,38 @@ export interface HostedRuntimeWorkspaceSnapshotUploadStart {
   snapshotId: string;
 }
 
-export interface HostedRuntimeWorkspaceSnapshotPresignedPut {
-  expiresAt: string;
-  putUrl: string;
-}
-
-export interface HostedRuntimeWorkspaceSnapshotCompleteResult {
+export interface HostedRuntimeWorkspaceSnapshotSessionCompleteResult {
   checkpoint: HostedWorkspaceCheckpointResponse;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 }
 
 export interface HostedRuntimeWorkspaceSnapshotPort {
-  abortUpload(input: {
+  abortSnapshotSession(input: {
     objectKey: string;
     snapshotId: string;
   }): Promise<void>;
-  completeUploadedSnapshot(input: {
+  completeSnapshotSession(input: {
     checkpointRequest: HostedWorkspaceCheckpointRequest;
     ref: HostedWorkspaceSnapshotV2Ref;
-  }): Promise<HostedRuntimeWorkspaceSnapshotCompleteResult>;
-  directPutEncryptedObject(input: {
+  }): Promise<HostedRuntimeWorkspaceSnapshotSessionCompleteResult>;
+  putSnapshotObjectDirect(input: {
     encryptedByteSize: number;
     encryptedObjectSha256: string;
-    expiresAt: string;
-    putUrl: string;
+    objectKey: string;
     sourceFilePath: string;
     snapshotId: string;
   }): Promise<void>;
-  presignUploadedObject(input: {
-    encryptedByteSize: number;
-    encryptedObjectSha256: string;
-    objectKey: string;
-    snapshotId: string;
-  }): Promise<HostedRuntimeWorkspaceSnapshotPresignedPut>;
   restoreWorkspaceSnapshot(input: {
     durableRoot: string;
     ref: HostedWorkspaceSnapshotV2Ref;
     scratchRoot?: string | null;
   }): Promise<void>;
-  unwrapDataKey(input: {
-    aad: HostedWorkspaceSnapshotV2Aad;
-    rootKeyId: string;
-    wrappedDataKey: string;
-  }): Promise<string>;
-  startUpload(input: {
+  startSnapshotSession(input: {
     expectedWorkspaceVersion: string;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     reason: "idle_shutdown";
-  }): Promise<HostedRuntimeWorkspaceSnapshotUploadStart>;
+  }): Promise<HostedRuntimeWorkspaceSnapshotSessionStart>;
 }
 
 export interface HostedRuntimeLogPort {

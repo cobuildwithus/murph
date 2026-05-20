@@ -168,10 +168,6 @@ function createPlatform(input: {
   uploadedObjects: Map<string, Uint8Array>;
   writeBrowserVaultReplica: () => Promise<never>;
 }) {
-  const uploadByPutUrl = new Map<string, {
-    objectKey: string;
-    snapshotId: string;
-  }>();
   let uploadOrdinal = 0;
 
   return {
@@ -193,7 +189,7 @@ function createPlatform(input: {
       read: input.readWorkspace,
     },
     workspaceSnapshotPort: {
-      completeUploadedSnapshot: async (request: {
+      completeSnapshotSession: async (request: {
         checkpointRequest: HostedWorkspaceCheckpointRequest;
         ref: HostedWorkspaceSnapshotV2Ref;
       }) => ({
@@ -206,50 +202,24 @@ function createPlatform(input: {
         },
         snapshotRef: request.ref,
       }),
-      directPutEncryptedObject: async (request: {
+      putSnapshotObjectDirect: async (request: {
         encryptedObjectSha256: string;
-        expiresAt: string;
-        putUrl: string;
+        objectKey: string;
         sourceFilePath: string;
         snapshotId: string;
       }) => {
-        const upload = uploadByPutUrl.get(request.putUrl);
-        if (!upload) {
-          throw new Error("Workspace snapshot test direct PUT URL was not started.");
-        }
-        input.uploadedObjects.set(upload.objectKey, await readFile(request.sourceFilePath));
+        input.uploadedObjects.set(request.objectKey, await readFile(request.sourceFilePath));
       },
-      presignUploadedObject: async (request: {
-        encryptedByteSize: number;
-        encryptedObjectSha256: string;
+      abortSnapshotSession: async (request: {
         objectKey: string;
         snapshotId: string;
       }) => {
-        const putUrl = `https://r2.example.invalid/${encodeURIComponent(request.objectKey)}`;
-        uploadByPutUrl.set(putUrl, {
-          objectKey: request.objectKey,
-          snapshotId: request.snapshotId,
-        });
-        return {
-          expiresAt: "2099-05-01T00:10:00.000Z",
-          putUrl,
-        };
-      },
-      abortUpload: async (request: {
-        objectKey: string;
-        snapshotId: string;
-      }) => {
-        for (const [putUrl, upload] of uploadByPutUrl.entries()) {
-          if (upload.objectKey === request.objectKey && upload.snapshotId === request.snapshotId) {
-            uploadByPutUrl.delete(putUrl);
-          }
-        }
         input.uploadedObjects.delete(request.objectKey);
       },
       restoreWorkspaceSnapshot: async () => {
         throw new Error("Workspace snapshot restore is not used by baseline snapshot tests.");
       },
-      startUpload: async (request: {
+      startSnapshotSession: async (request: {
         expectedWorkspaceVersion: string;
         reason: "idle_shutdown";
       }) => {
@@ -280,7 +250,6 @@ function createPlatform(input: {
           snapshotId,
         };
       },
-      unwrapDataKey: async () => testDataKey,
     },
   };
 }

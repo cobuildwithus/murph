@@ -60,28 +60,22 @@ describe("hosted workspace restore Codex continuity", () => {
           artifactBytesByHash: new Map(),
           artifactGetCalls,
           workspaceSnapshotPort: {
-            async abortUpload() {
-              throw new Error("abortUpload is not used during v2 restore.");
+            async abortSnapshotSession() {
+              throw new Error("abortSnapshotSession is not used during v2 restore.");
             },
-            async completeUploadedSnapshot() {
-              throw new Error("completeUploadedSnapshot is not used during v2 restore.");
+            async completeSnapshotSession() {
+              throw new Error("completeSnapshotSession is not used during v2 restore.");
             },
-            async directPutEncryptedObject() {
-              throw new Error("directPutEncryptedObject is not used during v2 restore.");
-            },
-            async presignUploadedObject() {
-              throw new Error("presignUploadedObject is not used during v2 restore.");
+            async putSnapshotObjectDirect() {
+              throw new Error("putSnapshotObjectDirect is not used during v2 restore.");
             },
             async restoreWorkspaceSnapshot(request) {
               restoreCalls.push(request);
               await mkdir(request.durableRoot, { recursive: true });
               await writeFile(path.join(request.durableRoot, "note.md"), "restored from v2\n", "utf8");
             },
-            async startUpload() {
-              throw new Error("startUpload is not used during v2 restore.");
-            },
-            async unwrapDataKey() {
-              throw new Error("unwrapDataKey is not used by the restore dispatch test.");
+            async startSnapshotSession() {
+              throw new Error("startSnapshotSession is not used during v2 restore.");
             },
           },
         }),
