@@ -2,6 +2,7 @@
 .deepsec/
 node_modules/
 dist/
+.dist-next/
 coverage/
 .DS_Store
 .turbo/
