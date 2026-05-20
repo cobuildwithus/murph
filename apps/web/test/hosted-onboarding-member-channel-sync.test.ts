@@ -39,6 +39,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 });
 
 import {
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
   enqueueHostedMemberChannelsUpdatedTx,
   resolveHostedMemberEmailLinked,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
@@ -90,6 +91,9 @@ describe("hosted onboarding member channel sync", () => {
   });
 
   it("falls back to the canonical hosted member email authorization slice when the session has no verified email", async () => {
+    const tx = {
+      label: "email-link-tx",
+    };
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
       directPublicSender: null,
       memberId: "member_123",
@@ -104,12 +108,13 @@ describe("hosted onboarding member channel sync", () => {
       resolveHostedMemberEmailLinked({
         linkedAccounts: [],
         memberId: "member_123",
+        prisma: tx as never,
       }),
     ).resolves.toBe(true);
 
     expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: expect.anything(),
+      prisma: tx,
     });
   });
 
@@ -168,6 +173,90 @@ describe("hosted onboarding member channel sync", () => {
       tx,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+  });
+
+  it("derives active channel snapshots under the caller transaction lock", async () => {
+    const tx = {
+      label: "test-prisma-tx",
+    };
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "user@example.test",
+        lookupKey: "email:user@example.test",
+        verifiedAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+
+    await expect(
+      enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+        linkedAccounts: [],
+        memberId: "member_123",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        prisma: tx as never,
+        sourceType: "settings.phone.sync",
+      }),
+    ).resolves.toEqual({
+      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
+      occurredAt: "2026-04-15T00:00:00.000Z",
+      userId: "member_123",
+    });
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+    expect(mocks.readHostedMemberEmailAuthorization).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        memberChannels: {
+          email: true,
+          linq: true,
+          telegram: true,
+        },
+      }),
+      tx,
+    });
+  });
+
+  it("skips active channel dispatch when the current locked member is not active", async () => {
+    const tx = {
+      label: "test-prisma-tx",
+    };
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      ...makeMemberSnapshot(),
+      core: {
+        ...makeMemberSnapshot().core,
+        billingStatus: "incomplete",
+      },
+    });
+
+    await expect(
+      enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+        linkedAccounts: [
+          {
+            address: "user@example.test",
+            latest_verified_at: 1743064200,
+            type: "email",
+          },
+        ],
+        memberId: "member_123",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        prisma: tx as never,
+        sourceType: "settings.phone.sync",
+      }),
+    ).resolves.toBeNull();
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+    expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("keeps the returned producer envelope stable when the mailbox append is a duplicate", async () => {

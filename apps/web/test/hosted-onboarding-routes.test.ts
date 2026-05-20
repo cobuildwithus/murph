@@ -869,6 +869,37 @@ describe("hosted onboarding routes", () => {
     });
   });
 
+  it.each([
+    ["missing", {}],
+    ["blank", { sendAttemptId: "  " }],
+    ["non-string", { sendAttemptId: 123 }],
+  ])("rejects %s invite send-code abort attempt ids", async (_label, body) => {
+    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/abort", {
+      body: JSON.stringify(body),
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    const response = await abortSendCodeRoute.POST(request, {
+      params: Promise.resolve({
+        inviteCode: "invite-code",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.abortHostedInvitePhoneCode).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_INVITE_SEND_ATTEMPT_ID_REQUIRED",
+        message: "A send attempt id is required to cancel this code.",
+        retryable: false,
+      },
+    });
+  });
+
   it("forwards invite and session state through the hosted billing checkout route", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
       body: JSON.stringify({

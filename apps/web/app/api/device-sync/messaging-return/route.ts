@@ -17,36 +17,43 @@ export function GET(request: Request): Response {
   const providerLabel = resolveHostedDeviceSyncProviderLabel(
     url.searchParams.get("deviceSyncProvider"),
   );
+  const status = resolveHostedDeviceSyncCallbackStatus(url.searchParams.get("deviceSyncStatus"));
   const messageBody = buildHostedDeviceSyncMessagingReturnMessageBody(providerLabel);
+  const destinationUrl = status === "error"
+    ? null
+    : resolveHostedDeviceSyncMessagingReturnDestination({
+        messageBody,
+        recipient: url.searchParams.get("recipient"),
+        target,
+      });
 
   return htmlResponse(buildMessagingReturnHtml({
-    destinationUrl: resolveHostedDeviceSyncMessagingReturnDestination({
-      messageBody,
-      recipient: url.searchParams.get("recipient"),
-      target,
-    }),
+    destinationUrl,
     providerLabel,
     serviceLabel: target === "imessage" ? "Messages" : "Telegram",
-    status: resolveHostedDeviceSyncCallbackStatus(url.searchParams.get("deviceSyncStatus")),
+    status,
   }));
 }
 
 function buildMessagingReturnHtml(input: {
-  destinationUrl: string;
+  destinationUrl: string | null;
   providerLabel: string | null;
   serviceLabel: string;
   status: "connected" | "error" | null;
 }): string {
   const title = resolveMessagingReturnTitle(input.status, input.providerLabel);
-  const escapedDestination = escapeHtml(input.destinationUrl);
+  const escapedDestination = input.destinationUrl ? escapeHtml(input.destinationUrl) : null;
   const escapedService = escapeHtml(input.serviceLabel);
+  const message = input.status === "error"
+    ? "The connection did not finish. Go home and try again when you are ready."
+    : `Returning you to ${escapedService}. If it does not open automatically, use the button below.`;
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0;url=${escapedDestination}">
+  ${escapedDestination ? `<meta http-equiv="refresh" content="0;url=${escapedDestination}">` : ""}
   <title>${escapeHtml(title)}</title>
   ${pageStyle()}
 </head>
@@ -54,10 +61,10 @@ function buildMessagingReturnHtml(input: {
   <main>
     <p class="eyebrow">Device connection</p>
     <h1>${escapeHtml(title)}</h1>
-    <p>Returning you to ${escapedService}. If it does not open automatically, use the button below.</p>
+    <p>${escapeHtml(message)}</p>
     <div class="actions">
       <a href="/home">Go home</a>
-      <a href="${escapedDestination}" rel="noreferrer" class="secondary">Text Murph</a>
+      ${escapedDestination ? `<a href="${escapedDestination}" rel="noreferrer" class="secondary">Text Murph</a>` : ""}
     </div>
   </main>
 </body>

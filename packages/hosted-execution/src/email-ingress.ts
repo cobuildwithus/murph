@@ -15,6 +15,7 @@ const HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS = 4_000;
 const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_CHARS = 160;
+export const HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS = 320;
 const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
@@ -98,7 +99,7 @@ export function parseHostedEmailIngressWakeAppendRequest(
           selfAddress: readBoundedOptionalNullableString(
             record.selfAddress,
             "Hosted email ingress wake append request selfAddress",
-            HOSTED_EMAIL_PROMPT_ADDRESS_MAX_CHARS,
+            HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
           ),
         }),
     ...(record.subject === undefined

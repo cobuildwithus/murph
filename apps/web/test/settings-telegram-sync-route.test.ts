@@ -4,14 +4,13 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
-  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
   nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
   },
-  resolveHostedMemberEmailLinked: vi.fn(),
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
@@ -35,8 +34,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
-  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
+    mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 }));
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
@@ -68,8 +67,7 @@ describe("settings telegram sync route", () => {
       callback(mocks.prismaClient)
     );
     mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
-    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
-    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+    mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
     });
     mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
@@ -131,12 +129,8 @@ describe("settings telegram sync route", () => {
       prisma: mocks.prismaClient,
       telegramUserId: "456",
     });
-    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
+    expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).toHaveBeenCalledWith({
       linkedAccounts: [],
-      memberId: "member_123",
-    });
-    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
-      emailLinked: false,
       memberId: "member_123",
       occurredAt: expect.any(String),
       prisma: mocks.prismaClient,
@@ -176,6 +170,7 @@ describe("settings telegram sync route", () => {
         ],
       },
     });
+    mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValueOnce(null);
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -191,8 +186,13 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).toHaveBeenCalledWith({
+      linkedAccounts: [],
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.telegram.sync",
+    });
     expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       botLink: "https://t.me/murph_bot?start=connect",
@@ -224,6 +224,7 @@ describe("settings telegram sync route", () => {
         ],
       },
     });
+    mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValueOnce(null);
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -240,7 +241,13 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledTimes(1);
-    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).toHaveBeenCalledWith({
+      linkedAccounts: [],
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.telegram.sync",
+    });
     expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       botLink: "https://t.me/murph_bot?start=connect",
@@ -386,6 +393,7 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(409);
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_TELEGRAM_NOT_READY",

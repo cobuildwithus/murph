@@ -216,3 +216,29 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
   assert.doesNotMatch(markup, /Start your Pulse plan/);
   assert.doesNotMatch(markup, /href="\/settings"/);
 });
+
+test("HomePage shows non-limit denied usage notices without a reset countdown", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 2_500_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-05-08T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "trial_expired_pending_billing",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-05-26T12:05:00.000Z"),
+    spentUsdMicros: 2_500_000n,
+    userNotice: {
+      code: "trial_conversion_pending",
+      message: "Your trial ended and billing is still pending.",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Your trial just ended/);
+  assert.match(markup, /Billing is still finishing up/);
+  assert.doesNotMatch(markup, /Resets in/u);
+});
