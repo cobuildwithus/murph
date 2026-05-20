@@ -6,6 +6,7 @@ import {
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardProductPromotionBlockers,
+  listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   normalizeMetricValue,
   resolveMetricDefinition,
@@ -18,6 +19,7 @@ import {
   type MurphAgeModelCardId,
   type MurphAgeProductPromotionBlocker,
   type MurphAgeScoreBearingCardId,
+  type MurphAgeSubmittedCalculatorInputBundleSpec,
   type MurphAgeWarning,
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
@@ -31,7 +33,7 @@ import type {
 } from "./shared.ts";
 
 export const BROWSER_VAULT_MURPH_AGE_READINESS_SCHEMA =
-  "murph.browser-vault.murph-age-readiness.v1" as const;
+  "murph.browser-vault.murph-age-readiness.v2" as const;
 
 export type BrowserVaultMurphAgeScoreReadinessStatus =
   | "context-only"
@@ -125,6 +127,7 @@ export interface BrowserVaultMurphAgeWearableShadowReadiness {
 export interface BrowserVaultMurphAgeReadiness {
   contextBundles: BrowserVaultMurphAgeBundleReadiness[];
   generatedAt: string;
+  inputBundleSpecs: MurphAgeSubmittedCalculatorInputBundleSpec[];
   primaryBundle: BrowserVaultMurphAgeBundleReadiness;
   runtimeInputs: BrowserVaultMurphAgeRuntimeInputReadiness[];
   schemaVersion: typeof BROWSER_VAULT_MURPH_AGE_READINESS_SCHEMA;
@@ -201,6 +204,7 @@ export function selectBrowserVaultMurphAgeReadiness(
   return {
     contextBundles: contextBundles.map(sanitizeBundle),
     generatedAt: client.replica.generatedAt,
+    inputBundleSpecs: listMurphAgeSubmittedCalculatorInputBundleSpecs(),
     primaryBundle: sanitizeBundle(primaryBundle),
     runtimeInputs: BROWSER_VAULT_MURPH_AGE_RUNTIME_INPUTS.map((input) => ({ ...input })),
     schemaVersion: BROWSER_VAULT_MURPH_AGE_READINESS_SCHEMA,

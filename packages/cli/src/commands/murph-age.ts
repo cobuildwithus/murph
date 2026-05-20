@@ -219,6 +219,39 @@ const murphAgeInputBundleReadinessSchema = z.object({
   status: murphAgeInputBundleStatusSchema,
   warnings: z.array(murphAgePublicWarningSchema),
 })
+const murphAgeSubmittedCalculatorInputBundleFeatureSpecSchema = z.object({
+  displayName: z.string().min(1),
+  featureKey: z.string().min(1),
+  metricKeys: z.array(z.string().min(1)),
+  requiredForCompletion: z.boolean(),
+})
+const murphAgeSubmittedCalculatorInputBundleSpecSchema = z.object({
+  bundleId: z.enum([
+    'function-context',
+    'lab5-bp-bmi',
+    'lab9-bp-body',
+    'r399-nhis-proxy-anchor',
+    'wearable-context',
+  ]),
+  cardId: murphAgeModelCardIdSchema,
+  completion: z.object({
+    alternativeFeatureKeyGroups: z.array(z.array(z.string().min(1))),
+    minReadyFeatureCount: z.number().int().positive().nullable(),
+    requiredFeatureKeys: z.array(z.string().min(1)),
+    rule: z.enum([
+      'all-required-features',
+      'all-lab5-features-plus-bmi-or-blood-pressure',
+      'one-or-more-context-features',
+      'one-or-more-proxy-features',
+    ]),
+  }),
+  displayName: z.string().min(1),
+  featureSpecs: z.array(murphAgeSubmittedCalculatorInputBundleFeatureSpecSchema),
+  productScoreBearingAuthorized: z.boolean(),
+  researchAgeEstimateEligible: z.boolean(),
+  schemaVersion: z.literal('murph.age.submitted-calculator-input-bundle-spec.v1'),
+  scoreBearing: z.boolean(),
+})
 const murphAgePublicInputFeatureReadinessSchema = murphAgeInputFeatureReadinessSchema.omit({
   label: true,
   metricKeys: true,
@@ -655,8 +688,9 @@ const murphAgeWearableResidualLayerViewSchema = z.object({
 export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
+  inputBundleSpecs: z.array(murphAgeSubmittedCalculatorInputBundleSpecSchema),
   runtimeInputs: z.array(murphAgeRuntimeInputReadinessSchema),
-  schemaVersion: z.literal('murph.age.input-readiness.v5'),
+  schemaVersion: z.literal('murph.age.input-readiness.v6'),
   scoreReadiness: murphAgeInputScoreReadinessSchema,
   wearableBridge: murphAgePublicWearableBridgeSummarySchema,
   wearableShadow: murphAgeWearableShadowReadinessSchema,
@@ -1434,7 +1468,7 @@ export function registerMurphAgeCommands(
 
       return {
         ...inputReadiness,
-        schemaVersion: 'murph.age.input-readiness.v5' as const,
+        schemaVersion: 'murph.age.input-readiness.v6' as const,
         wearableShadow,
       }
     },

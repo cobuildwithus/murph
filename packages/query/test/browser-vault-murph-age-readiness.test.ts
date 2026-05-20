@@ -24,12 +24,29 @@ test("reports lab9/BP/body Murph Age research readiness without leaking values o
     ...wearableShadowPoints(),
   ]));
 
-  assert.equal(readiness.schemaVersion, "murph.browser-vault.murph-age-readiness.v1");
+  assert.equal(readiness.schemaVersion, "murph.browser-vault.murph-age-readiness.v2");
   assert.equal(readiness.primaryBundle.bundleId, "lab9-bp-body");
   assert.equal(readiness.primaryBundle.status, "ready");
   assert.equal(readiness.primaryBundle.recommendedCardId, "lab9_bp_body_10y_acm_research");
   assert.equal(readiness.primaryBundle.selectedMetricKeys.includes("hba1c"), true);
   assert.equal(readiness.primaryBundle.selectedMetricKeys.includes("systolic-blood-pressure"), true);
+  assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
+    "lab9-bp-body",
+    "lab5-bp-bmi",
+    "r399-nhis-proxy-anchor",
+    "wearable-context",
+    "function-context",
+  ]);
+  assert.equal(
+    readiness.inputBundleSpecs.find((spec) => spec.bundleId === "lab9-bp-body")
+      ?.completion.requiredFeatureKeys.includes("albumin"),
+    true,
+  );
+  assert.equal(
+    readiness.inputBundleSpecs.find((spec) => spec.bundleId === "wearable-context")
+      ?.scoreBearing,
+    false,
+  );
   assert.equal(readiness.scoreReadiness.status, "research-ready-product-blocked");
   assert.equal(readiness.scoreReadiness.researchUsableIfModelLoaded, true);
   assert.equal(readiness.scoreReadiness.productAgePolicyReady, false);
