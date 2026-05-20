@@ -783,6 +783,8 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       const materializedChatId = requireLinqStub().requireObservedChatId(typingLoopUserId);
       const expectedReplyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
       const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
+      const observedMessageIdsBeforeReply =
+        requireLinqStub().listObservedMessageIds(materializedChatId).length;
       const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyPath);
       requireScenario().queueAssistantResponses([typingLoopReplyText]);
 
@@ -810,47 +812,33 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       });
       expect(requireLinqStub().readObservedMessageText(replySend)).toBe(typingLoopReplyText);
       await requireScenario().waitForHostedCompletion(typingLoopUserId);
+      const outboundReplyMessageId =
+        requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
+      expect(outboundReplyMessageId).not.toBeNull();
+      await requireLinqStub().waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "DELETE",
+        expectedPath: `/messages/${encodeURIComponent(`msg_typing_loop_reply_${typingLoopUserId}`)}`,
+        scenario: requireScenario(),
+        userId: typingLoopUserId,
+      });
+      await requireLinqStub().waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "DELETE",
+        expectedPath: `/messages/${encodeURIComponent(outboundReplyMessageId!)}`,
+        scenario: requireScenario(),
+        userId: typingLoopUserId,
+      });
+      await requireScenario().waitForHostedCompletion(typingLoopUserId);
 
-      const requestCountAfterReply = requireLinqStub().observedRequests.length;
+      const requestCountAfterCleanup = requireLinqStub().observedRequests.length;
+      const outboundCountAfterCleanup = requireLinqStub().countObservedSends(expectedReplyPath);
       await seedStaleWorkspaceWakeFromCurrentCheckpoint(typingLoopUserId);
 
       const alarmStartedAtMs = Date.now();
-      let alarmSettled = false;
-      const alarmAbortController = new AbortController();
-      const alarmOutcomePromise = runHostedAlarmUntilIdleForTest(
+      const alarmOutcome = await runHostedAlarmWithRuntimeWakeProbesForTest(
         typingLoopUserId,
-        alarmAbortController.signal,
-      ).then(
-        (result) => ({
-          kind: "fulfilled" as const,
-          result,
-        }),
-        (error: unknown) => ({
-          errorName: error instanceof Error ? error.name : typeof error,
-          kind: "rejected" as const,
-        }),
-      ).finally(() => {
-        alarmSettled = true;
-      });
-
-      await sendRuntimeWakeProbesWhilePending({
-        intervalMs: 250,
-        isPending: () => !alarmSettled,
-        maxDurationMs: 2_750,
-        userId: typingLoopUserId,
-      });
-
-      let alarmOutcome = await Promise.race([
-        alarmOutcomePromise,
-        sleep(250).then(() => null),
-      ]);
-      if (!alarmOutcome) {
-        alarmAbortController.abort();
-        alarmOutcome = await Promise.race([
-          alarmOutcomePromise,
-          sleep(1_000).then(() => null),
-        ]);
-      }
+      );
 
       const statusAfterAlarm = await readHostedRunnerStatusWithLogLimit(
         typingLoopUserId,
@@ -859,16 +847,23 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       const canonicalRuntimeDeferralsAfterAlarm =
         countAssistantCanonicalRuntimeCommitDeferrals(statusAfterAlarm, alarmStartedAtMs);
       const postReplyTypingStarts = requireLinqStub().observedRequests
-        .slice(requestCountAfterReply)
+        .slice(requestCountAfterCleanup)
         .filter((request) => request.method === "POST" && request.url === expectedTypingPath);
+      const outboundCountAfterAlarm = requireLinqStub().countObservedSends(expectedReplyPath);
 
-      expect(alarmOutcome?.kind).toBe("fulfilled");
-      if (alarmOutcome?.kind !== "fulfilled") {
-        throw new Error("Stale scheduled wake alarm did not settle under runtime wake probes.");
+      if (alarmOutcome.result.status === "scheduled") {
+        expect(alarmOutcome.result.nextWakeAt).toEqual(expect.any(String));
+        const scheduledWakeMs = Date.parse(alarmOutcome.result.nextWakeAt ?? "");
+        expect(Number.isFinite(scheduledWakeMs)).toBe(true);
+        expect(scheduledWakeMs).toBeGreaterThanOrEqual(alarmStartedAtMs);
+      } else {
+        expect(alarmOutcome.result.status).toBe("idle");
+        expect(alarmOutcome.result.nextWakeAt).toBeNull();
       }
-      expect(["idle", "scheduled"]).toContain(alarmOutcome.result.status);
-      expect(canonicalRuntimeDeferralsAfterAlarm).toBeLessThanOrEqual(1);
+      expect(alarmOutcome.probeCount).toBeGreaterThanOrEqual(1);
+      expect(canonicalRuntimeDeferralsAfterAlarm).toBe(0);
       expect(postReplyTypingStarts).toHaveLength(0);
+      expect(outboundCountAfterAlarm).toBe(outboundCountAfterCleanup);
     },
     300_000,
   );
@@ -1222,21 +1217,97 @@ async function runHostedAlarmUntilIdleForTest(
   );
 }
 
-async function sendRuntimeWakeProbesWhilePending(input: {
-  intervalMs: number;
-  isPending(): boolean;
-  maxDurationMs: number;
-  userId: string;
-}): Promise<void> {
-  const deadlineMs = Date.now() + input.maxDurationMs;
-  while (input.isPending() && Date.now() < deadlineMs) {
-    await requireScenario().harness.nudgeUserBestEffort(input.userId);
+async function runHostedAlarmWithRuntimeWakeProbesForTest(
+  userId: string,
+): Promise<{ probeCount: number; result: HostedWorkspaceInvocationResult }> {
+  const alarmAbortController = new AbortController();
+  const alarmOutcomePromise = runHostedAlarmUntilIdleForTest(
+    userId,
+    alarmAbortController.signal,
+  ).then(
+    (result) => ({
+      kind: "fulfilled" as const,
+      result,
+    }),
+    (error: unknown) => ({
+      errorName: error instanceof Error ? error.name : typeof error,
+      kind: "rejected" as const,
+    }),
+  );
+
+  const deadlineMs = Date.now() + 2_750;
+  let probeCount = 0;
+  let alarmSettled = false;
+  void alarmOutcomePromise.then(
+    () => {
+      alarmSettled = true;
+    },
+    () => {
+      alarmSettled = true;
+    },
+  );
+
+  while (!alarmSettled && Date.now() < deadlineMs) {
+    await sendRuntimeWakeProbeForTest(userId);
+    probeCount += 1;
+
     const remainingMs = deadlineMs - Date.now();
     if (remainingMs <= 0) {
-      return;
+      break;
     }
-    await sleep(Math.min(input.intervalMs, remainingMs));
+    await sleep(Math.min(250, remainingMs));
   }
+
+  let alarmOutcome = await Promise.race([
+    alarmOutcomePromise,
+    sleep(250).then(() => null),
+  ]);
+  if (!alarmOutcome) {
+    alarmAbortController.abort();
+    alarmOutcome = await Promise.race([
+      alarmOutcomePromise,
+      sleep(1_000).then(() => null),
+    ]);
+  }
+
+  if (alarmOutcome) {
+    return resolveHostedAlarmProbeOutcome(alarmOutcome, probeCount);
+  }
+
+  throw new Error("Stale scheduled wake alarm did not settle while runtime wake probes were active.");
+}
+
+function resolveHostedAlarmProbeOutcome(
+  outcome:
+    | { kind: "fulfilled"; result: HostedWorkspaceInvocationResult }
+    | { errorName: string; kind: "rejected" },
+  probeCount: number,
+): { probeCount: number; result: HostedWorkspaceInvocationResult } {
+  if (outcome.kind === "fulfilled") {
+    return {
+      probeCount,
+      result: outcome.result,
+    };
+  }
+
+  throw new Error(
+    `Stale scheduled wake alarm rejected while runtime wake probes were active (${outcome.errorName}).`,
+  );
+}
+
+async function sendRuntimeWakeProbeForTest(userId: string): Promise<void> {
+  await requireScenario().harness.requestJson<{ ok: true }>(
+    `/internal/users/${encodeURIComponent(userId)}/nudge`,
+    {
+      body: "{}",
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(2_000),
+    },
+  );
 }
 
 async function readHostedRunnerStatusWithLogLimit(
