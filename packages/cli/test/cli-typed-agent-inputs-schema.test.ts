@@ -484,6 +484,7 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
+    'age evidence',
     'age preview',
     'age preview-view',
     'allergy import-json',

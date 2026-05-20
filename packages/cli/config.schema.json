@@ -3450,6 +3450,27 @@
                       }
                     }
                   }
+                },
+                "evidence": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "description": "Aggregate evidence receipt payload in @file.json form or - for stdin.",
+                          "type": "string"
+                        },
+                        "includeTemplates": {
+                          "default": false,
+                          "description": "Include safe route-slot templates for the next aggregate receipts to collect.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { CURRENT_VAULT_FORMAT_VERSION } from '@murphai/contracts'
 import {
+  MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
@@ -31,6 +32,7 @@ import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   murphAgeReportResultSchema,
+  murphAgeAggregateEvidenceStatusResultSchema,
   murphAgeResearchCalculatorViewResultSchema,
   murphAgeSubmittedPreviewPayloadSchema,
   registerMurphAgeCommands,
@@ -124,6 +126,34 @@ interface MurphAgeModelCardStatusReport {
   researchReadyCardIds: string[]
   schemaVersion: string
   warnings: Array<{ code: string }>
+}
+
+interface MurphAgeAggregateEvidenceStatusReport {
+  assessments: Array<{
+    blockers: string[]
+    layer: string | null
+    routeId: string | null
+    status: string
+    validationStatus: string
+    warningCodes: string[]
+    warningCount: number
+  }>
+  inputCardCount: number
+  missingSourceRouteIds: string[]
+  nextMissingSourceRouteIds: string[]
+  readyCardCount: number
+  readySourceRouteIds: string[]
+  routeSlots: Array<{
+    acceptedAggregateMetricDeltaFields: string[]
+    anchorCardId: string
+    candidateBatchId: string
+    candidateId: string
+    layer: string
+    requiredAggregateSampleFields: string[]
+    sourceRouteId: string
+  }>
+  schemaVersion: string
+  status: string
 }
 
 interface MurphAgeInputReadinessReport {
@@ -280,6 +310,185 @@ test('age model-cards reports local research readiness without model internals',
     }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('age evidence validates aggregate receipts without exposing unsafe receipt details', async () => {
+  const templateStatus = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
+    'age',
+    'evidence',
+    '--include-templates',
+    'true',
+  ]))
+
+  assert.equal(templateStatus.schemaVersion, 'murph.age.aggregate-evidence-status.v1')
+  murphAgeAggregateEvidenceStatusResultSchema.parse(templateStatus)
+  assert.equal(templateStatus.status, 'blocked')
+  assert.equal(templateStatus.inputCardCount, 0)
+  assert.equal(templateStatus.readyCardCount, 0)
+  assert.equal(templateStatus.routeSlots.length > 0, true)
+  assert.equal(
+    templateStatus.routeSlots.some((slot) => slot.sourceRouteId === 'cardia-biomarker-activity'),
+    true,
+  )
+  assert.equal(
+    templateStatus.routeSlots.some((slot) => slot.layer === 'wearable-shadow-increment'),
+    true,
+  )
+  const cardiaBiomarkerSlot = templateStatus.routeSlots.find((slot) =>
+    slot.sourceRouteId === 'cardia-biomarker-activity' &&
+    slot.layer === 'biomarker-increment'
+  )
+  assert.equal(cardiaBiomarkerSlot?.anchorCardId, 'r399_nhis_proxy_10y_acm_research')
+  assert.equal(cardiaBiomarkerSlot?.candidateBatchId, 'ordinary-lab-wearable-aggregate-v1')
+  assert.equal(
+    cardiaBiomarkerSlot?.candidateId,
+    'cardia-biomarker-activity-biomarker-increment',
+  )
+
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-'))
+  try {
+    const receiptPath = path.join(payloadRoot, 'receipts.json')
+    await writeFile(receiptPath, `${JSON.stringify({
+      receipts: [
+        aggregateEvidenceReceipt({
+          candidateId: 'cardia-biomarker-activity-biomarker-increment',
+          layer: 'biomarker-increment',
+          sourceRouteId: 'cardia-biomarker-activity',
+        }),
+        {
+          ...aggregateEvidenceReceipt({
+            candidateId: 'hchs-sol-biomarker-activity-wearable-shadow-increment',
+            layer: 'wearable-shadow-increment',
+            sourceRouteId: 'hchs-sol-biomarker-activity',
+          }),
+          participantIds: ['synthetic-participant'],
+          evaluation: {
+            ...aggregateEvidenceReceipt({
+              candidateId: 'hchs-sol-biomarker-activity-wearable-shadow-increment',
+              layer: 'wearable-shadow-increment',
+              sourceRouteId: 'hchs-sol-biomarker-activity',
+            }).evaluation,
+            aggregateMetricDeltas: {
+              aucDelta: 0.002,
+              coefficients: [0.1],
+            },
+            aggregateSample: {
+              evaluatedRowCount: 320,
+              eventCount: 32,
+              minimumCellCount: 16,
+              rowValues: [1],
+            },
+            splitMembership: ['synthetic-split'],
+          },
+          outputBoundary: {
+            ...aggregateEvidenceReceipt({
+              candidateId: 'hchs-sol-biomarker-activity-wearable-shadow-increment',
+              layer: 'wearable-shadow-increment',
+              sourceRouteId: 'hchs-sol-biomarker-activity',
+            }).outputBoundary,
+            localPath: '/tmp/synthetic',
+          },
+        },
+        aggregateEvidenceReceipt({
+          candidateId: 'spoofed-all-of-us-fitbit-labs-ehr-biomarker-increment',
+          layer: 'biomarker-increment',
+          sourceRouteId: 'all-of-us-fitbit-labs-ehr',
+        }),
+      ],
+    }, null, 2)}\n`)
+
+    const status = requireData(await runSliceCli<MurphAgeAggregateEvidenceStatusReport>([
+      'age',
+      'evidence',
+      '--input',
+      `@${receiptPath}`,
+      '--include-templates',
+      'true',
+    ]))
+
+    assert.equal(status.schemaVersion, 'murph.age.aggregate-evidence-status.v1')
+    murphAgeAggregateEvidenceStatusResultSchema.parse(status)
+    assert.equal(status.status, 'ready')
+    assert.equal(status.inputCardCount, 3)
+    assert.equal(status.readyCardCount, 1)
+    assert.deepEqual(status.readySourceRouteIds, ['cardia-biomarker-activity'])
+    assert.equal(status.nextMissingSourceRouteIds.includes('cardia-biomarker-activity'), false)
+    assert.equal(status.missingSourceRouteIds.includes('hchs-sol-biomarker-activity'), true)
+    assert.equal(status.missingSourceRouteIds.includes('all-of-us-fitbit-labs-ehr'), true)
+
+    const readyAssessment = status.assessments.find((assessment) =>
+      assessment.routeId === 'cardia-biomarker-activity'
+    )
+    assert.equal(readyAssessment?.status, 'ready')
+    assert.deepEqual(readyAssessment?.blockers, [])
+    assert.equal(readyAssessment?.warningCount, 0)
+
+    const blockedAssessment = status.assessments.find((assessment) =>
+      assessment.routeId === 'hchs-sol-biomarker-activity'
+    )
+    assert.equal(blockedAssessment?.status, 'blocked')
+    assert.equal(blockedAssessment?.blockers.includes('increment_evaluation_card_invalid'), true)
+    assert.equal(blockedAssessment?.warningCodes.includes('MODEL_CARD_POLICY_VIOLATION'), true)
+
+    const templateMismatchAssessment = status.assessments.find((assessment) =>
+      assessment.routeId === 'all-of-us-fitbit-labs-ehr'
+    )
+    assert.equal(templateMismatchAssessment?.status, 'blocked')
+    assert.equal(
+      templateMismatchAssessment?.blockers.includes('route_slot_template_mismatch'),
+      true,
+    )
+
+    const encodedStatus = JSON.stringify(status)
+    for (const forbidden of [
+      'synthetic-participant',
+      'synthetic-split',
+      'rowValues',
+      'coefficients',
+      'localPath',
+      payloadRoot,
+      receiptPath,
+    ]) {
+      assert.equal(encodedStatus.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age evidence reports malformed JSON without echoing receipt text', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-invalid-'))
+  try {
+    const receiptPath = path.join(payloadRoot, 'receipts.json')
+    await writeFile(receiptPath, '{"participantIds":["synthetic-participant"],')
+
+    const result = await runSliceCliResult<unknown>([
+      'age',
+      'evidence',
+      '--input',
+      `@${receiptPath}`,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (result.envelope.ok) {
+      assert.fail('expected malformed evidence input to return an error envelope')
+    }
+    assert.equal(result.envelope.error.code, 'invalid_payload')
+    assert.match(result.envelope.error.message ?? '', /must contain valid JSON/u)
+
+    const encodedEnvelope = JSON.stringify(result.envelope)
+    for (const forbidden of [
+      'synthetic-participant',
+      'participantIds',
+      payloadRoot,
+      receiptPath,
+    ]) {
+      assert.equal(encodedEnvelope.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
   }
 })
 
@@ -2060,6 +2269,54 @@ function lab9BpBodyMetricPoints(): MetricPoint[] {
     measurementPoint('diastolic-blood-pressure', 'biomarker:diastolic-blood-pressure', 74, 'mmHg'),
     measurementPoint('bmi', null, 23.5, 'kg/m^2'),
   ]
+}
+
+function aggregateEvidenceReceipt(input: {
+  candidateId: string
+  layer: 'biomarker-increment' | 'wearable-shadow-increment'
+  sourceRouteId: string
+}) {
+  return {
+    anchorCardId: 'r399_nhis_proxy_10y_acm_research',
+    candidateBatchId: 'ordinary-lab-wearable-aggregate-v1',
+    candidateId: input.candidateId,
+    evaluation: {
+      aggregateMetricDeltas: {
+        aucDelta: 0.001,
+        brierDelta: -0.0001,
+      },
+      aggregateSample: {
+        evaluatedRowCount: 240,
+        eventCount: 24,
+        minimumCellCount: 24,
+        suppressedCellCount: 0,
+      },
+      comparator: 'anchor-vs-anchor-plus-increment',
+      evidenceTier: 'external-validation',
+      sameDenominator: true,
+    },
+    flatteningAuthorized: false,
+    layer: input.layer,
+    outputBoundary: {
+      aggregateOnly: true,
+      coefficientsExportAllowed: false,
+      localArtifactPathExportAllowed: false,
+      modelParametersExportAllowed: false,
+      participantIdentifiersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      predictionsExportAllowed: false,
+      productDisplayExportAllowed: false,
+      rowValuesExportAllowed: false,
+      sourceTextExportAllowed: false,
+      splitMembershipExportAllowed: false,
+    },
+    productAuthorized: false,
+    riskEffect: 'aggregate-estimated',
+    schemaVersion: MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
+    scoreBearing: false,
+    scoreContributionAuthorized: false,
+    sourceRouteId: input.sourceRouteId,
+  }
 }
 
 function wearableContextMetricPoints(): MetricPoint[] {

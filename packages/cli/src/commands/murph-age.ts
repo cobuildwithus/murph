@@ -3,6 +3,7 @@ import {
   emptyArgsSchema,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   assessMurphAgeInputReadinessFromVault,
@@ -12,11 +13,14 @@ import {
   loadMurphAgeLocalModelCardArtifacts,
 } from '@murphai/query'
 import {
+  assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
   buildMurphAgeResearchCalculatorView,
   isMurphAgePublicFeatureKey,
   isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
+  listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
@@ -27,6 +31,7 @@ import type { VaultServices } from '@murphai/vault-usecases'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
+  loadTextInput,
 } from '@murphai/vault-usecases'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
@@ -658,6 +663,53 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   wearable: murphAgePublicWearableCalculatorViewSchema,
 })
 
+const murphAgeIncrementEvaluationLayerSchema = z.enum([
+  'biomarker-increment',
+  'wearable-shadow-increment',
+])
+const murphAgeAggregateEvidenceAssessmentSchema = z.object({
+  blockers: z.array(z.string().min(1)),
+  layer: murphAgeIncrementEvaluationLayerSchema.nullable(),
+  routeId: z.string().min(1).nullable(),
+  status: z.enum(['blocked', 'ready']),
+  validationStatus: z.enum(['invalid', 'valid']),
+  warningCodes: z.array(murphAgeWarningCodeSchema),
+  warningCount: z.number().int().nonnegative(),
+})
+const murphAgeAggregateEvidenceRouteSlotSchema = z.object({
+  acceptedAggregateMetricDeltaFields: z.array(z.enum([
+    'aucDelta',
+    'brierDelta',
+    'calibrationInterceptDelta',
+    'calibrationSlopeDelta',
+    'cIndexDelta',
+    'logLossDelta',
+  ])),
+  anchorCardId: z.string().min(1),
+  candidateBatchId: z.string().min(1),
+  candidateId: z.string().min(1),
+  layer: murphAgeIncrementEvaluationLayerSchema,
+  requiredAggregateSampleFields: z.array(z.enum([
+    'evaluatedRowCount',
+    'eventCount',
+    'minimumCellCount',
+    'subgroupCount',
+    'suppressedCellCount',
+  ])),
+  sourceRouteId: z.string().min(1),
+})
+export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
+  assessments: z.array(murphAgeAggregateEvidenceAssessmentSchema),
+  inputCardCount: z.number().int().nonnegative(),
+  missingSourceRouteIds: z.array(z.string().min(1)),
+  nextMissingSourceRouteIds: z.array(z.string().min(1)),
+  readyCardCount: z.number().int().nonnegative(),
+  readySourceRouteIds: z.array(z.string().min(1)),
+  routeSlots: z.array(murphAgeAggregateEvidenceRouteSlotSchema),
+  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v1'),
+  status: z.enum(['blocked', 'ready']),
+})
+
 const strictUtcTimestampSchema = isoTimestampSchema
   .refine((value) => value.endsWith('Z'), 'Expected a UTC timestamp ending in Z.')
 const murphAgeReportCardIdSchema = z.enum([
@@ -946,6 +998,95 @@ export function registerMurphAgeCommands(
     },
   })
 
+  age.command('evidence', {
+    description:
+      'Validate aggregate-only Murph Age lab/wearable evidence receipts and report which source routes are ready.',
+    args: emptyArgsSchema,
+    options: z.object({
+      input: inputFileOptionSchema
+        .optional()
+        .describe('Aggregate evidence receipt payload in @file.json form or - for stdin.'),
+      includeTemplates: z.boolean()
+        .default(false)
+        .describe('Include safe route-slot templates for the next aggregate receipts to collect.'),
+    }),
+    examples: [
+      {
+        description:
+          'Show the current aggregate receipt slots without providing any receipt cards.',
+        options: {
+          includeTemplates: true,
+        },
+      },
+      {
+        description:
+          'Validate aggregate evidence cards produced by an external or local same-denominator evaluator.',
+        options: {
+          input: '@murph-age-aggregate-receipts.json',
+        },
+      },
+    ],
+    hint:
+      'This command accepts only aggregate receipt cards. It does not expose rows, identifiers, predictions, coefficients, local paths, or product claims.',
+    output: murphAgeAggregateEvidenceStatusResultSchema,
+    async run({ options }) {
+      const candidates = options.input
+        ? await loadMurphAgeAggregateEvidenceCandidateCards(options.input)
+        : []
+      const ordinaryRouteIds = new Set(
+        listMurphAgeOrdinaryLabWearableSourceRoutes().map((route) => route.routeId),
+      )
+      const routeSlotTemplateKeys = new Set(
+        listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates()
+          .map((template) => buildMurphAgeAggregateEvidenceRouteSlotKey(template))
+          .filter((key) => key !== null),
+      )
+      const assessments = candidates.map((candidate) => {
+        const assessment = assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard(candidate)
+        return summarizeMurphAgeAggregateEvidenceAssessment({
+          assessment,
+          candidate,
+          ordinaryRouteIds,
+          routeSlotTemplateKeys,
+        })
+      })
+      const readyRouteIds = new Set(
+        assessments
+          .filter((assessment) => assessment.status === 'ready' && assessment.routeId)
+          .map((assessment) => assessment.routeId),
+      )
+      const missingSourceRouteIds = listMurphAgeOrdinaryLabWearableSourceRoutes()
+        .map((route) => route.routeId)
+        .filter((routeId) => !readyRouteIds.has(routeId))
+      const routeSlots = options.includeTemplates
+        ? listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates()
+          .map((template) => ({
+            acceptedAggregateMetricDeltaFields: [...template.acceptedAggregateMetricDeltaFields].sort(),
+            anchorCardId: template.anchorCardId,
+            candidateBatchId: template.candidateBatchId,
+            candidateId: template.candidateId,
+            layer: template.layer,
+            requiredAggregateSampleFields: [...template.requiredAggregateSampleFields],
+            sourceRouteId: template.sourceRouteId,
+          }))
+        : []
+
+      return {
+        assessments,
+        inputCardCount: candidates.length,
+        missingSourceRouteIds,
+        nextMissingSourceRouteIds: missingSourceRouteIds.slice(0, 3),
+        readyCardCount: assessments.filter((assessment) => assessment.status === 'ready').length,
+        readySourceRouteIds: listMurphAgeOrdinaryLabWearableSourceRoutes()
+          .map((route) => route.routeId)
+          .filter((routeId) => readyRouteIds.has(routeId)),
+        routeSlots,
+        schemaVersion: 'murph.age.aggregate-evidence-status.v1' as const,
+        status: readyRouteIds.size > 0 ? 'ready' as const : 'blocked' as const,
+      }
+    },
+  })
+
   cli.command(age)
 }
 
@@ -983,6 +1124,94 @@ async function loadMurphAgeSubmittedPreviewReport(
     ...payload,
     modelCardArtifactRoot: options.modelCardArtifactRoot ?? payload.modelCardArtifactRoot,
   })
+}
+
+async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promise<unknown[]> {
+  const raw = await loadTextInput(input, 'Murph Age aggregate evidence receipt payload', {
+    stdinHint: 'Pass --input @file.json or pipe an aggregate receipt object to --input -.',
+  })
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Murph Age aggregate evidence receipt payload must contain valid JSON.',
+    )
+  }
+  if (Array.isArray(parsed)) return parsed
+  if (!isPlainRecord(parsed)) return []
+  if (Array.isArray(parsed.cards)) return parsed.cards
+  if (Array.isArray(parsed.receipts)) return parsed.receipts
+  if (Array.isArray(parsed.evidenceCards)) return parsed.evidenceCards
+  if (Array.isArray(parsed.incrementEvaluationCards)) return parsed.incrementEvaluationCards
+  return [parsed]
+}
+
+function summarizeMurphAgeAggregateEvidenceAssessment(input: {
+  assessment: ReturnType<typeof assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard>
+  candidate: unknown
+  ordinaryRouteIds: ReadonlySet<string>
+  routeSlotTemplateKeys: ReadonlySet<string>
+}): z.infer<typeof murphAgeAggregateEvidenceAssessmentSchema> {
+  const candidateLayer = isPlainRecord(input.candidate) && typeof input.candidate.layer === 'string'
+    ? input.candidate.layer
+    : null
+  const layer = murphAgeIncrementEvaluationLayerSchema.safeParse(candidateLayer)
+  const routeId = input.assessment.routeId && input.ordinaryRouteIds.has(input.assessment.routeId)
+    ? input.assessment.routeId
+    : null
+  const routeSlotTemplateKey = buildMurphAgeAggregateEvidenceRouteSlotKey(input.candidate)
+  const routeSlotTemplateMatched = routeSlotTemplateKey !== null &&
+    input.routeSlotTemplateKeys.has(routeSlotTemplateKey)
+  const templateBlockers = input.assessment.status === 'ready' && !routeSlotTemplateMatched
+    ? ['route_slot_template_mismatch']
+    : []
+  const blockers = [...input.assessment.blockers, ...templateBlockers].sort()
+
+  return {
+    blockers,
+    layer: layer.success ? layer.data : null,
+    routeId,
+    status: blockers.length === 0 ? 'ready' : 'blocked',
+    validationStatus: input.assessment.validation.status,
+    warningCodes: input.assessment.warnings.map((warning) => warning.code),
+    warningCount: input.assessment.warnings.length,
+  }
+}
+
+function buildMurphAgeAggregateEvidenceRouteSlotKey(value: unknown): string | null {
+  if (!isPlainRecord(value)) return null
+  const anchorCardId = readStringField(value, 'anchorCardId')
+  const candidateBatchId = readStringField(value, 'candidateBatchId')
+  const candidateId = readStringField(value, 'candidateId')
+  const sourceRouteId = readStringField(value, 'sourceRouteId')
+  const layer = readStringField(value, 'layer')
+  if (
+    !anchorCardId ||
+    !candidateBatchId ||
+    !candidateId ||
+    !sourceRouteId ||
+    !layer
+  ) {
+    return null
+  }
+  return [
+    anchorCardId,
+    candidateBatchId,
+    candidateId,
+    sourceRouteId,
+    layer,
+  ].join('\u0000')
+}
+
+function readStringField(value: Record<string, unknown>, key: string): string | null {
+  const field = value[key]
+  return typeof field === 'string' && field.length > 0 ? field : null
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isKnownMurphAgeModelCardId(
