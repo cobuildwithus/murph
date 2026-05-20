@@ -557,10 +557,12 @@ const murphAgeResearchModelStatusViewSchema = z.object({
   wearable: z.object({
     consumerValidationStatus: z.literal('missing'),
     currentUse: z.literal('context-only-shadow'),
+    externalConsumerLabWearableAggregateStillMissing: z.literal(true),
     nextAction: z.literal('run_external_or_partner_lab_wearable_aggregate_delta'),
     nextExternalOrPartnerRouteIdsByPriority: z.array(z.string().min(1)),
     scoreBearing: z.literal(false),
     scoreContributionAuthorized: z.literal(false),
+    shadowEvidenceConclusion: z.literal('public_activity_shadow_signal_mixed_keep_wearable_context_only'),
     shadowEvidencePacketIds: z.array(z.enum([
       'r1038-nhanes-modern-lab-activity-loop',
       'r1049-nhanes-activity-control-diagnostic',
@@ -568,6 +570,7 @@ const murphAgeResearchModelStatusViewSchema = z.object({
       'r1066-nhanes-wrist-activity-robustness-loop',
       'r1067-nhanes-wrist-final-stress-test',
     ])),
+    usableAsConsumerWearableValidation: z.literal(false),
   }),
 })
 export const murphAgeResearchCalculatorViewResultSchema = z.object({

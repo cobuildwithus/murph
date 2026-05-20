@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v1" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v2" as const;
+  "murph.age.research-calculator-view.v3" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -757,11 +757,14 @@ export interface MurphAgeResearchModelStatusView {
   wearable: {
     consumerValidationStatus: "missing";
     currentUse: "context-only-shadow";
+    externalConsumerLabWearableAggregateStillMissing: true;
     nextAction: MurphAgePublicLabWearableShadowEvidenceNextAction;
     nextExternalOrPartnerRouteIdsByPriority: MurphAgeSourceRouteId[];
     scoreBearing: false;
     scoreContributionAuthorized: false;
+    shadowEvidenceConclusion: MurphAgePublicLabWearableShadowEvidenceConclusion;
     shadowEvidencePacketIds: MurphAgePublicLabWearableShadowEvidencePacketId[];
+    usableAsConsumerWearableValidation: false;
   };
 }
 
@@ -4341,11 +4344,14 @@ function buildMurphAgeResearchModelStatusView(input: {
     wearable: {
       consumerValidationStatus: "missing",
       currentUse: "context-only-shadow",
+      externalConsumerLabWearableAggregateStillMissing: shadowEvidence.externalConsumerLabWearableAggregateStillMissing,
       nextAction: shadowEvidence.nextAction,
       nextExternalOrPartnerRouteIdsByPriority: [...shadowEvidence.nextExternalOrPartnerRouteIdsByPriority],
       scoreBearing: false,
       scoreContributionAuthorized: false,
+      shadowEvidenceConclusion: shadowEvidence.conclusion,
       shadowEvidencePacketIds: [...shadowEvidence.includedPacketIds],
+      usableAsConsumerWearableValidation: shadowEvidence.usableAsConsumerWearableValidation,
     },
   };
 }

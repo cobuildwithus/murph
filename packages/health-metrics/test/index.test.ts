@@ -4888,6 +4888,7 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5View.featureContributions.length, 0);
   assert.equal(submittedLab5View.domainContributions.length, 0);
   const submittedLab5ResearchView = buildMurphAgeResearchCalculatorView(submittedLab5Report);
+  const submittedLab5ResearchViewJson = JSON.stringify(submittedLab5ResearchView);
   assert.equal(submittedLab5ResearchView.schemaVersion, MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION);
   assert.equal(submittedLab5ResearchView.researchOnly, true);
   assert.equal(submittedLab5ResearchView.product.productUseAuthorized, false);
@@ -4897,6 +4898,8 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
   assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
   assert.equal(submittedLab5ResearchView.model.productUseAuthorized, false);
+  assert.equal(submittedLab5ResearchViewJson.includes("\"ageDisplayReady\":false"), true);
+  assert.equal(submittedLab5ResearchViewJson.includes("\"riskDisplayReady\":false"), true);
   assert.equal(
     submittedLab5ResearchView.model.blockers.join("|"),
     "biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized",
@@ -4917,6 +4920,9 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.model.wearable.scoreBearing, false);
   assert.equal(submittedLab5ResearchView.model.wearable.scoreContributionAuthorized, false);
   assert.equal(submittedLab5ResearchView.model.wearable.consumerValidationStatus, "missing");
+  assert.equal(submittedLab5ResearchViewJson.includes("\"shadowEvidenceConclusion\":\"public_activity_shadow_signal_mixed_keep_wearable_context_only\""), true);
+  assert.equal(submittedLab5ResearchViewJson.includes("\"externalConsumerLabWearableAggregateStillMissing\":true"), true);
+  assert.equal(submittedLab5ResearchViewJson.includes("\"usableAsConsumerWearableValidation\":false"), true);
   assert.equal(submittedLab5ResearchView.model.wearable.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
   assert.equal(
     submittedLab5ResearchView.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join("|"),
@@ -4961,7 +4967,6 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   ]) {
     assert.equal(submittedLab5ViewJson.includes(forbidden), false, forbidden);
   }
-  const submittedLab5ResearchViewJson = JSON.stringify(submittedLab5ResearchView);
   for (const forbidden of [
     "private metric",
     "metric-point:",
