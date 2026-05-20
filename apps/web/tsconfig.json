@@ -151,6 +151,21 @@
       "@murphai/importers/device-providers/provider-descriptors": [
         "packages/importers/src/device-providers/provider-descriptors.ts"
       ],
+      "@murphai/importers/device-providers/junction-origin": [
+        "packages/importers/src/device-providers/junction-origin.ts"
+      ],
+      "@murphai/importers/device-providers/canonical-wearable-records": [
+        "packages/importers/src/device-providers/canonical-wearable-records.ts"
+      ],
+      "@murphai/importers/device-providers/metric-catalog": [
+        "packages/importers/src/device-providers/metric-catalog.ts"
+      ],
+      "@murphai/importers/device-providers/raw-ingest-envelope": [
+        "packages/importers/src/device-providers/raw-ingest-envelope.ts"
+      ],
+      "@murphai/importers/sample-series-summary": [
+        "packages/importers/src/sample-series-summary.ts"
+      ],
       "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
