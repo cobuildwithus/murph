@@ -71,18 +71,37 @@ test("workspace clean build preserves importers dist until the safe build refres
       tsBuildInfoFile?: string;
     };
   };
+  const importersSafeBuildTsConfig = JSON.parse(
+    readFileSync(path.join(packageDir, "tsconfig.safe-build.json"), "utf8"),
+  ) as {
+    compilerOptions?: {
+      outDir?: string;
+      tsBuildInfoFile?: string;
+    };
+    extends?: string;
+  };
 
   assert.doesNotMatch(cleanTargets, /^packages\/importers\/dist$/mu);
   assert.match(cleanTargets, /^packages\/importers\/\.tsbuildinfo$/mu);
   assert.match(cleanTargets, /^packages\/importers\/\.dist-next$/mu);
+  assert.match(cleanTargets, /^packages\/importers\/\.dist-next\.tsbuildinfo$/mu);
+  assert.match(cleanTargets, /^packages\/importers\/\.dist-publish-\*$/mu);
+  assert.match(cleanTargets, /^packages\/importers\/\.dist-backup-\*$/mu);
+  assert.match(cleanTargets, /^packages\/importers\/\.tsconfig\.build-next\.json$/mu);
   for (const scriptName of ["build:workspace:clean", "build:workspace:incremental", "build:test-runtime"]) {
     assert.match(
       rootPackageManifest.scripts?.[scriptName] ?? "",
       /&& pnpm --dir packages\/importers build$/u,
     );
   }
-  assert.equal(importersTsConfig.compilerOptions?.outDir, "./.dist-next");
-  assert.equal(importersTsConfig.compilerOptions?.tsBuildInfoFile, "./.dist-next/.tsbuildinfo");
+  assert.equal(importersTsConfig.compilerOptions?.outDir, "./dist");
+  assert.equal(importersTsConfig.compilerOptions?.tsBuildInfoFile, ".tsbuildinfo");
+  assert.equal(importersSafeBuildTsConfig.extends, "./tsconfig.json");
+  assert.equal(importersSafeBuildTsConfig.compilerOptions?.outDir, "./.dist-next");
+  assert.equal(
+    importersSafeBuildTsConfig.compilerOptions?.tsBuildInfoFile,
+    "./.dist-next.tsbuildinfo",
+  );
 });
 
 test("safe build publishes temp dist only after TypeScript succeeds", () => {
@@ -111,6 +130,7 @@ test("safe build publishes temp dist only after TypeScript succeeds", () => {
     );
     assert.equal(existsSync(path.join(packageRoot, "dist", "stale.js")), false);
     assert.equal(existsSync(path.join(packageRoot, ".dist-next")), false);
+    assert.equal(existsSync(path.join(packageRoot, ".dist-next.tsbuildinfo")), false);
     assert.equal(existsSync(path.join(packageRoot, ".tsconfig.build-next.json")), false);
   } finally {
     rmSync(packageRoot, { force: true, recursive: true });
@@ -231,6 +251,7 @@ test("safe build refuses staged output symlinks and keeps the previous dist", ()
     assert.equal(readFileSync(path.join(packageRoot, "dist", "index.js"), "utf8"), "old");
     assert.equal(readFileSync(path.join(outsideRoot, "generated.js"), "utf8"), "outside");
     assert.equal(existsSync(path.join(packageRoot, ".dist-next")), false);
+    assert.equal(existsSync(path.join(packageRoot, ".dist-next.tsbuildinfo")), false);
     assert.equal(existsSync(path.join(packageRoot, ".tsconfig.build-next.json")), false);
   } finally {
     rmSync(packageRoot, { force: true, recursive: true });
@@ -253,6 +274,7 @@ test("safe build keeps the previous dist when TypeScript fails", () => {
     assert.equal(status, 1);
     assert.equal(readFileSync(path.join(packageRoot, "dist", "index.js"), "utf8"), "old");
     assert.equal(existsSync(path.join(packageRoot, ".dist-next")), false);
+    assert.equal(existsSync(path.join(packageRoot, ".dist-next.tsbuildinfo")), false);
     assert.equal(existsSync(path.join(packageRoot, ".tsconfig.build-next.json")), false);
   } finally {
     rmSync(packageRoot, { force: true, recursive: true });

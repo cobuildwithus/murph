@@ -82,7 +82,9 @@ import {
 } from "../src/storage-paths.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+  HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  type HostedWorkspaceSnapshotOrphanCandidate,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
 import {
@@ -2523,7 +2525,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(putUrl.hostname).toBe("r2accounttest.r2.cloudflarestorage.com");
     expect(putUrl.pathname).toBe(`/bundles-test/${objectKey}`);
     expect(putUrl.searchParams.get("X-Amz-SignedHeaders")).toBe(
-      "content-type;host;if-none-match;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
+      "content-type;host;if-none-match;x-amz-checksum-sha256;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
     );
     expect(putUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(presignBody.expiresAt).toEqual(expect.stringMatching(/^20/u));
@@ -2775,6 +2777,7 @@ describe("handleRunnerOutboundRequest", () => {
     const getUrl = new URL(requireTestString(body.getUrl, "workspace snapshot getUrl"));
     expect(getUrl.hostname).toBe("r2accounttest.r2.cloudflarestorage.com");
     expect(getUrl.pathname).toBe(`/bundles-test/${objectKey}`);
+    expect(getUrl.searchParams.get("X-Amz-Expires")).toBe("3600");
     expect(getUrl.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
     expect(getUrl.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
     expect(body.expiresAt).toEqual(expect.stringMatching(/^20/u));
@@ -2976,6 +2979,7 @@ describe("handleRunnerOutboundRequest", () => {
           return object
             ? {
                 ...object,
+                checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
                 customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
               }
             : null;
@@ -3038,6 +3042,7 @@ describe("handleRunnerOutboundRequest", () => {
     }));
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
   });
 
@@ -3160,6 +3165,7 @@ describe("handleRunnerOutboundRequest", () => {
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
           customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
           key,
           size: 4,
@@ -3200,6 +3206,17 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
+      createdAt: expect.stringMatching(/^20/u),
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotOrphanCandidates.get(snapshotId)).toMatchObject({
+      objectKey,
+      snapshotId,
+    });
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
@@ -3223,6 +3240,7 @@ describe("handleRunnerOutboundRequest", () => {
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
           customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
           key,
           size: 4,
@@ -3255,6 +3273,12 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    }));
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
@@ -3278,6 +3302,7 @@ describe("handleRunnerOutboundRequest", () => {
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
           customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
           key,
           size: 4,
@@ -3319,6 +3344,12 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    }));
     expect(deleteObject).not.toHaveBeenCalled();
   });
 
@@ -3392,6 +3423,7 @@ describe("handleRunnerOutboundRequest", () => {
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
           customMetadata: {
             ...createWorkspaceSnapshotHeadMetadata(snapshotRef),
             encryptedsha256: "b".repeat(64),
@@ -3448,6 +3480,7 @@ describe("handleRunnerOutboundRequest", () => {
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
         async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
           customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
           key,
           size: 4,
@@ -4461,6 +4494,7 @@ function createWorkspaceSnapshotV2Ref(input: {
       fileCount: 1,
       format: "tar",
       plaintextArchiveSha256: "c".repeat(64),
+      totalPlainBytes: input.encryptedByteSize,
     },
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: {
@@ -4492,6 +4526,22 @@ function createWorkspaceSnapshotHeadMetadata(
   };
 }
 
+function createWorkspaceSnapshotHeadChecksums(
+  snapshotRef: HostedWorkspaceSnapshotV2Ref,
+): { sha256: Uint8Array } {
+  return {
+    sha256: hexToBytes(snapshotRef.archive.encryptedObjectSha256),
+  };
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
 function createWorkspaceSnapshotUploadSession(
   snapshotRef: HostedWorkspaceSnapshotV2Ref,
   input: {
@@ -4517,6 +4567,7 @@ function createWorkspaceSnapshotUploadSession(
 function createWorkspaceSnapshotBucket(
   get: (key: string) => Promise<{ key: string; size?: number } | null>,
   head?: (key: string) => Promise<{
+    checksums?: { sha256: Uint8Array };
     customMetadata?: Record<string, string>;
     key: string;
     size?: number;
@@ -4596,6 +4647,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
   const userId = input.userId ?? "member_123";
   const workspaceVersion = input.workspaceVersion ?? "4";
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
+  const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
   let currentWorkspaceSnapshotUploadSessionId: string | null = null;
   const bindUser = vi.fn(async (boundUserId: string) => ({ userId: boundUserId }));
   const ownsActiveInvocationLease = vi.fn(async (lease: {
@@ -4640,6 +4692,12 @@ function createWorkspaceVersionAwareUserRunner(input: {
     }
     return { deleted };
   });
+  const recordHostedWorkspaceSnapshotOrphanCandidate = vi.fn(async (
+    candidate: HostedWorkspaceSnapshotOrphanCandidate,
+  ) => {
+    workspaceSnapshotOrphanCandidates.set(candidate.snapshotId, candidate);
+    return candidate;
+  });
   const validateRuntimeWriteFence = vi.fn(async (fence: {
     attemptId: string;
     generation: string;
@@ -4670,12 +4728,15 @@ function createWorkspaceVersionAwareUserRunner(input: {
         deleteHostedWorkspaceSnapshotUploadSession,
         ownsActiveInvocationLease,
         readHostedWorkspaceSnapshotUploadSession,
+        recordHostedWorkspaceSnapshotOrphanCandidate,
         validateRuntimeWriteFence,
       };
     },
     ownsActiveInvocationLease,
     readHostedWorkspaceSnapshotUploadSession,
+    recordHostedWorkspaceSnapshotOrphanCandidate,
     validateRuntimeWriteFence,
+    workspaceSnapshotOrphanCandidates,
     workspaceSnapshotUploadSessions,
   };
 }

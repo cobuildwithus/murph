@@ -429,6 +429,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.deleteHostedWorkspaceSnapshotUploadSession(input);
   }
 
+  async recordHostedWorkspaceSnapshotOrphanCandidate(
+    input: Parameters<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedWorkspaceSnapshotOrphanCandidate"]> {
+    return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
+  }
+
   async beginRuntimeWriteFenceForSmoke(input: {
     userId: string;
     workspaceVersion: string;

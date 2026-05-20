@@ -68,6 +68,7 @@ import {
   createEncryptedWorkspaceSnapshotFile,
 } from "./workspace-snapshot-local.ts";
 import {
+  clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
   materializeLegacyWorkspaceRefsForV2Snapshot,
   prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
 } from "./legacy-workspace-snapshot-materialization.ts";
@@ -345,18 +346,17 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_snapshot",
       userId: input.userId,
     });
-    await materializeLegacyWorkspaceRefsForV2Snapshot({
-      artifactStore: input.platform.artifactStore,
-      operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
-      plan: input.legacyMaterialization,
-      vaultRoot: input.vaultRoot,
-    });
-
     snapshotSession = await input.platform.workspaceSnapshotPort.startSnapshotSession({
       expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
       nextWakeAt: input.request.nextWakeAt,
       nextWakeReason: input.request.nextWakeReason,
       reason: "idle_shutdown",
+    });
+    await materializeLegacyWorkspaceRefsForV2Snapshot({
+      artifactStore: input.platform.artifactStore,
+      operatorHomeRoot: resolveWorkspaceOperatorHomeRoot(input.vaultRoot),
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
     });
     const encrypted = await createEncryptedWorkspaceSnapshotFile({
       aad: snapshotSession.encryption.aad,
@@ -416,6 +416,7 @@ async function createHostedWorkspaceV2Snapshot(
         fileCount: encrypted.fileCount,
         format: "tar",
         plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+        totalPlainBytes: encrypted.totalPlainBytes,
       },
       createdAt: new Date().toISOString(),
       encryption: {
@@ -441,6 +442,22 @@ async function createHostedWorkspaceV2Snapshot(
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
+    await clearLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      plan: input.legacyMaterialization,
+      vaultRoot: input.vaultRoot,
+    }).catch((clearError) => {
+      emitHostedExecutionStructuredLog({
+        component: "runner",
+        details: {
+          snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        },
+        error: clearError,
+        level: "warn",
+        message: "Hosted workspace legacy snapshot manifest cleanup failed.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    });
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
     if (snapshotSession && !checkpointAttempted) {

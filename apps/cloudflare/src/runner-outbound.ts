@@ -4,6 +4,9 @@ import type {
   WorkspaceSnapshotR2BucketLike,
 } from "./workspace-snapshot-store.ts";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+} from "./workspace-snapshot-store.ts";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   encodeHostedWorkspaceSnapshotV2DataKey,
@@ -61,9 +64,11 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
+  encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
   buildHostedWorkspaceSnapshotRefFromUploadSession,
+  readHostedWorkspaceSnapshotSha256ChecksumHex,
 } from "./workspace-snapshot-store.ts";
 import {
   hostedWorkspaceSnapshotObjectKey,
@@ -81,6 +86,7 @@ export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.t
 
 const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_EXPIRES_MS = 60 * 60 * 1000;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS = 10 * 60;
+const HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS = 60 * 60;
 const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 
 export async function handleRunnerOutboundRequest(
@@ -664,6 +670,7 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
 
   const presigned = await createHostedR2PresignedPutUrl({
+    checksumSha256Base64: encodeHostedWorkspaceSnapshotSha256Base64(encryptedObjectSha256),
     contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
     environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
     expiresSeconds: Math.min(
@@ -717,6 +724,7 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
 
   const presigned = await createHostedR2PresignedGetUrl({
     environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
+    expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS,
     key: requestedObjectKey,
   });
 
@@ -1001,7 +1009,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
   }
   if (
-    readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256")
+    readHostedWorkspaceSnapshotSha256ChecksumHex(object.checksums?.sha256)
+      !== snapshotRef.archive.encryptedObjectSha256
+    || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "encryptedsha256")
       !== snapshotRef.archive.encryptedObjectSha256
     || readWorkspaceSnapshotObjectMetadata(object.customMetadata, "schema")
       !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA
@@ -1048,14 +1058,17 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     return jsonError("Hosted workspace snapshot checkpoint write fence is stale.", 409);
   }
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: false,
-    env: input.env,
-    objectKey: snapshotRef.objectKey,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  });
+  const retireAfterAmbiguousCheckpoint = async () => {
+    await retireWorkspaceSnapshotUploadSession({
+      bucket: input.bucket,
+      deleteObject: false,
+      env: input.env,
+      objectKey: snapshotRef.objectKey,
+      recordOrphanCandidate: true,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+  };
   let checkpointResponse: Response;
   try {
     checkpointResponse = await fetchHostedExecutionWorkspaceSnapshotCheckpoint({
@@ -1065,21 +1078,26 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       userId: input.userId,
     });
   } catch {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint failed.", 502);
   }
   if (!checkpointResponse.ok) {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint failed.", checkpointResponse.status);
   }
   let checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   try {
     checkpoint = parseHostedWorkspaceCheckpointResponse(await checkpointResponse.json());
   } catch {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint response is invalid.", 502);
   }
   if (checkpoint.workspace.userId !== input.userId) {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
   }
   if (!checkpoint.checkpointed) {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
   }
 
@@ -1091,8 +1109,18 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     || checkpointSnapshotRef.archive.encryptedByteSize !== snapshotRef.archive.encryptedByteSize
     || checkpointSnapshotRef.archive.encryptedObjectSha256 !== snapshotRef.archive.encryptedObjectSha256
   ) {
+    await retireAfterAmbiguousCheckpoint();
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
+
+  await retireWorkspaceSnapshotUploadSession({
+    bucket: input.bucket,
+    deleteObject: false,
+    env: input.env,
+    objectKey: snapshotRef.objectKey,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint,
@@ -1106,9 +1134,18 @@ async function retireWorkspaceSnapshotUploadSession(input: {
   deleteObject: boolean;
   env: RunnerOutboundEnvironmentSource;
   objectKey?: string;
+  recordOrphanCandidate?: boolean;
   snapshotId: string;
   userId: string;
 }): Promise<void> {
+  if (input.recordOrphanCandidate && input.objectKey) {
+    await recordWorkspaceSnapshotOrphanCandidate({
+      env: input.env,
+      objectKey: input.objectKey,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    }).catch(() => undefined);
+  }
   await deleteWorkspaceSnapshotUploadSession({
     env: input.env,
     snapshotId: input.snapshotId,
@@ -1120,6 +1157,25 @@ async function retireWorkspaceSnapshotUploadSession(input: {
       objectKey: input.objectKey,
     });
   }
+}
+
+async function recordWorkspaceSnapshotOrphanCandidate(input: {
+  env: RunnerOutboundEnvironmentSource;
+  objectKey: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  if (typeof stub.recordHostedWorkspaceSnapshotOrphanCandidate !== "function") {
+    return;
+  }
+  await stub.recordHostedWorkspaceSnapshotOrphanCandidate({
+    createdAt: new Date().toISOString(),
+    objectKey: input.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
 }
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {

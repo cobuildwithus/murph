@@ -772,6 +772,33 @@ const murphAgePublicCalculatorViewDisplayCategorySchema = z.enum([
   'product-risk-only',
   'research-preview',
 ])
+const murphAgePublicCalculatorScoreStatusSchema = z.enum([
+  'context-only-no-score',
+  'input-incomplete',
+  'research-estimate-withheld',
+  'validated-age-ready',
+  'validated-risk-only',
+  'validation-pending',
+])
+const murphAgePublicCalculatorUnlockRequirementSchema = z.enum([
+  'complete-score-bearing-inputs',
+  'external-outcome-validation',
+  'product-policy-authorization',
+  'risk-to-age-display-authorization',
+  'validated-wearable-parameter-pack',
+])
+const murphAgePublicCalculatorScoreReadinessViewSchema = z.object({
+  biologicalAgeAvailable: z.boolean(),
+  contextBundleIds: z.array(murphAgeInputBundleIdSchema),
+  contextOnlyFeatureCount: z.number().int().nonnegative(),
+  inputBundleId: murphAgeInputBundleIdSchema,
+  missingScoreBearingFeatureCount: z.number().int().nonnegative(),
+  riskAvailable: z.boolean(),
+  scoreBearingFeatureCount: z.number().int().nonnegative(),
+  status: murphAgePublicCalculatorScoreStatusSchema,
+  unlockRequirements: z.array(murphAgePublicCalculatorUnlockRequirementSchema),
+  wearableReadyFeatureCount: z.number().int().nonnegative(),
+})
 export const murphAgePublicCalculatorViewResultSchema = z.object({
   ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
   blockedFeatureKeys: z.array(z.string().min(1)),
@@ -791,6 +818,7 @@ export const murphAgePublicCalculatorViewResultSchema = z.object({
   }),
   risk: murphAgePublicRiskViewSchema,
   schemaVersion: z.literal(MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION),
+  scoreReadiness: murphAgePublicCalculatorScoreReadinessViewSchema,
   selectedCardId: murphAgePublicAuthorizationSchema.shape.cardId,
   selectedScoreBearingFeatureKeys: z.array(z.string().min(1)),
   selectedScoreBearingMetricKeys: z.array(z.string().min(1)),

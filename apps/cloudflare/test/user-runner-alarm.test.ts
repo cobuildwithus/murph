@@ -13,6 +13,9 @@ import {
 import {
   buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import type {
@@ -29,6 +32,7 @@ import {
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
@@ -2389,7 +2393,7 @@ describe("HostedUserRunner wake scheduling", () => {
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
-  it("best-effort deletes the previous workspace snapshot object when replacing the active upload session", async () => {
+  it("records the previous workspace snapshot object when replacing the active upload session", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const { runner } = createRunnerHarness({ bucket });
     const previousObjectKey =
@@ -2404,6 +2408,10 @@ describe("HostedUserRunner wake scheduling", () => {
         snapshotId: "snapshot_previous",
       }),
     );
+    const recordOrphanCandidate = vi.spyOn(
+      runner,
+      "recordHostedWorkspaceSnapshotOrphanCandidate",
+    );
     await runner.createHostedWorkspaceSnapshotUploadSession(
       createWorkspaceSnapshotUploadSessionForTest({
         objectKey: nextObjectKey,
@@ -2411,8 +2419,13 @@ describe("HostedUserRunner wake scheduling", () => {
       }),
     );
 
-    expect(bucket.deleted).toContain(previousObjectKey);
-    expect(bucket.objects.has(previousObjectKey)).toBe(false);
+    expect(recordOrphanCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      objectKey: previousObjectKey,
+      snapshotId: "snapshot_previous",
+      userId: "member_123",
+    }));
+    expect(bucket.deleted).not.toContain(previousObjectKey);
+    expect(bucket.objects.has(previousObjectKey)).toBe(true);
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: "snapshot_previous",
       userId: "member_123",
@@ -2424,6 +2437,56 @@ describe("HostedUserRunner wake scheduling", () => {
       objectKey: nextObjectKey,
       snapshotId: "snapshot_next",
     });
+  });
+
+  it("cleans old workspace snapshot orphan candidates only after confirming they are not current", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const orphanObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_orphan.snapshot.enc`;
+    const currentObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_current.snapshot.enc`;
+    const nextObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_next.snapshot.enc`;
+    await bucket.put(orphanObjectKey, "orphan-encrypted-snapshot");
+    await bucket.put(currentObjectKey, "current-encrypted-snapshot");
+    const { flushWaitUntil, runner } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2RefForTest({
+          objectKey: currentObjectKey,
+          snapshotId: "snapshot_current",
+        }),
+      }),
+    });
+
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: orphanObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_orphan",
+      userId: "member_123",
+    });
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: currentObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_current",
+      userId: "member_123",
+    });
+
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: nextObjectKey,
+        snapshotId: "snapshot_next",
+      }),
+    );
+    await flushWaitUntil();
+
+    expect(bucket.deleted).toContain(orphanObjectKey);
+    expect(bucket.objects.has(orphanObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
   });
 
   it("does not invoke or recreate state when deletion wins the pre-container drain window", async () => {
@@ -2713,6 +2776,15 @@ function createDurableObjectState(): {
     },
     get: async <T>(key: string): Promise<T | undefined> => values.get(key) as T | undefined,
     getAlarm: async () => null,
+    list: async <T>(options: { prefix?: string } = {}): Promise<Map<string, T>> => {
+      const result = new Map<string, T>();
+      for (const [key, value] of values) {
+        if (!options.prefix || key.startsWith(options.prefix)) {
+          result.set(key, value as T);
+        }
+      }
+      return result;
+    },
     put: async <T>(key: string, value: T): Promise<void> => {
       values.set(key, value);
     },
@@ -2803,6 +2875,40 @@ function createWorkspaceState(
     version: "0",
     ...overrides,
   };
+}
+
+function createWorkspaceSnapshotV2RefForTest(input: {
+  objectKey: string;
+  snapshotId: string;
+}): HostedWorkspaceSnapshotV2Ref {
+  return {
+    archive: {
+      compression: "gzip",
+      encryptedByteSize: 128,
+      encryptedObjectSha256: "b".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "a".repeat(64),
+      totalPlainBytes: 64,
+    },
+    createdAt: FIXED_NOW,
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: input.objectKey,
+        snapshotId: input.snapshotId,
+        userId: "member_123",
+      }),
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_test",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    objectKey: input.objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId: input.snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: "member_123",
+  } satisfies HostedWorkspaceSnapshotV2Ref;
 }
 
 function createBrowserVaultReplicaRef(input: {

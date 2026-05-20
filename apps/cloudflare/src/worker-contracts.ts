@@ -1,6 +1,7 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
+  HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
 } from "./workspace-snapshot-store.ts";
 
@@ -37,6 +38,9 @@ export interface WorkerUserRunnerStubLike {
     snapshotId: string;
     userId: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  recordHostedWorkspaceSnapshotOrphanCandidate?(
+    input: HostedWorkspaceSnapshotOrphanCandidate,
+  ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;

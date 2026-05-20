@@ -35,7 +35,7 @@
       "path": "../core/tsconfig.build.json"
     },
     {
-      "path": "../importers"
+      "path": "../importers/tsconfig.safe-build.json"
     },
     {
       "path": "../inboxd"

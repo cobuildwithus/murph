@@ -9,6 +9,7 @@ import { test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const builtDistTest = process.env.MURPH_INBOXD_TEST_BUILT_DIST === "1" ? test : test.skip;
 
 const removedSubpaths = [
   "./linq",
@@ -50,6 +51,7 @@ const expectedExports = {
 
 type InboxdPackageManifest = {
   exports?: Record<string, PackageExportEntry | undefined>;
+  scripts?: Record<string, string | undefined>;
 };
 
 type PackageExportEntry = {
@@ -84,6 +86,12 @@ function assertBuiltExportEntry(
 test("@murphai/inboxd manifest declares the full narrow built export contract", async () => {
   const packageManifest = await readPackageManifest();
 
+  assert.doesNotMatch(packageManifest.scripts?.test ?? "", /\bpnpm build\b/u);
+  assert.doesNotMatch(packageManifest.scripts?.["test:coverage"] ?? "", /\bpnpm build\b/u);
+  assert.match(
+    packageManifest.scripts?.["verify:package-boundary"] ?? "",
+    /MURPH_INBOXD_TEST_BUILT_DIST=1/u,
+  );
   assert.deepEqual(packageManifest.exports, expectedExports);
 
   for (const exportKey of removedSubpaths) {
@@ -91,7 +99,7 @@ test("@murphai/inboxd manifest declares the full narrow built export contract", 
   }
 });
 
-test("@murphai/inboxd declared export targets exist in the built dist contract", async () => {
+builtDistTest("@murphai/inboxd declared export targets exist in the built dist contract", async () => {
   const packageManifest = await readPackageManifest();
 
   for (const [exportKey, exportEntry] of Object.entries(packageManifest.exports ?? {})) {
@@ -104,7 +112,7 @@ test("@murphai/inboxd declared export targets exist in the built dist contract",
   }
 });
 
-test("@murphai/inboxd declared exports import through built package resolution", async () => {
+builtDistTest("@murphai/inboxd declared exports import through built package resolution", async () => {
   const packageManifest = await readPackageManifest();
 
   for (const exportKey of Object.keys(packageManifest.exports ?? {})) {
@@ -138,22 +146,25 @@ for (const removedSubpath of removedSubpaths) {
   });
 }
 
-test("@murphai/inboxd root barrel no longer exposes removed compatibility or raw-only helpers", async () => {
-  const result = await execFileAsync(process.execPath, [
-    "--input-type=module",
-    "-e",
-    [
-      `const mod = await import(${JSON.stringify("@murphai/inboxd")});`,
-      `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "createLinqWebhookConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
-      "  if (key in mod) {",
-      '    throw new Error(`unexpected removed export: ${key}`);',
-      "  }",
-      "}",
-    ].join(" "),
-  ], {
-    cwd: packageDir,
-  });
+builtDistTest(
+  "@murphai/inboxd root barrel no longer exposes removed compatibility or raw-only helpers",
+  async () => {
+    const result = await execFileAsync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        `const mod = await import(${JSON.stringify("@murphai/inboxd")});`,
+        `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "createLinqWebhookConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
+        "  if (key in mod) {",
+        '    throw new Error(`unexpected removed export: ${key}`);',
+        "  }",
+        "}",
+      ].join(" "),
+    ], {
+      cwd: packageDir,
+    });
 
-  assert.equal(result.stdout.trim(), "");
-  assert.doesNotMatch(result.stderr, /unexpected removed export/u);
-});
+    assert.equal(result.stdout.trim(), "");
+    assert.doesNotMatch(result.stderr, /unexpected removed export/u);
+  },
+);

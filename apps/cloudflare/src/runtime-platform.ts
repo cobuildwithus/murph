@@ -49,6 +49,7 @@ import type {
   HostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  decodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
@@ -99,6 +100,7 @@ import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
+  encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "./workspace-snapshot-store.ts";
 import {
@@ -1520,6 +1522,9 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         throw new Error("Hosted workspace snapshot direct R2 upload URL is expired.");
       }
       const body = Readable.toWeb(createReadStream(request.sourceFilePath)) as BodyInit;
+      const checksumSha256Base64 = encodeHostedWorkspaceSnapshotSha256Base64(
+        request.encryptedObjectSha256,
+      );
       const response = await fetchHostedResponse({
         description: "Hosted workspace snapshot direct R2 upload",
         fetchImpl: input.fetchImpl,
@@ -1530,6 +1535,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
             "content-length": String(request.encryptedByteSize),
             "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
             "if-none-match": "*",
+            "x-amz-checksum-sha256": checksumSha256Base64,
             "x-amz-meta-encryptedsha256": request.encryptedObjectSha256,
             "x-amz-meta-schema": HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
             "x-amz-meta-snapshotid": request.snapshotId,
@@ -1576,7 +1582,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
           fetchImpl: input.fetchImpl,
           getUrl: presignedGet.getUrl,
-          timeoutMs: Math.min(input.timeoutMs, Math.max(1, expiresAtMs - Date.now())),
+          timeoutMs: Math.max(1, expiresAtMs - Date.now() - 5_000),
         });
         if (!fetched) {
           throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
@@ -1804,6 +1810,8 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
   if (typeof dataKey !== "string" || dataKey.length === 0) {
     throw new TypeError("Hosted workspace snapshot data key unwrap response dataKey is required.");
   }
+  const decoded = decodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+  decoded.fill(0);
   return dataKey;
 }
 

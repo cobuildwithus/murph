@@ -15,6 +15,7 @@ import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
 import type { HostedRunnerStuckInvocationTestResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
+  HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
 } from "../workspace-snapshot-store.ts";
 import {
@@ -55,6 +56,9 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
     snapshotId: string;
     userId: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  recordHostedWorkspaceSnapshotOrphanCandidate?(
+    input: HostedWorkspaceSnapshotOrphanCandidate,
+  ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
   runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runUntilIdleForTest?(input: {
     reason: HostedWorkspaceInvocationReason;

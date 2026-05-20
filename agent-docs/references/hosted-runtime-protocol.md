@@ -359,7 +359,7 @@ replica, but they must mark it stale and request refresh after the HTTP response
 Cloudflare treats that request as a low-priority `browser_vault_refresh` runtime
 demand only when explicitly asked by web; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
-schedule refresh as ordinary runtime work, but idle/full checkpoints write only
+schedule refresh as ordinary runtime work, but `idle_shutdown` v2 checkpoints write only
 the workspace snapshot ref; they do not publish browser-vault replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint

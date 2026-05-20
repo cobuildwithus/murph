@@ -20,6 +20,7 @@ import {
   readHostedPortableWorkspaceDeltaManifestFromBundle,
   readHostedPortableWorkspaceManifestFromBundle,
   readHostedWorkspaceSkippedInlineFiles,
+  writeHostedWorkspaceSkippedInlineFiles,
   sha256HostedBundleHex,
   type HostedBundleInlineLocation,
   type HostedPortableWorkspaceDeltaManifest,
@@ -50,9 +51,11 @@ export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(inp
         snapshotRef: currentSnapshotRef,
       })
     : null;
-  const skippedInlineFiles = await readHostedWorkspaceSkippedInlineFilesBestEffort({
-    vaultRoot: input.vaultRoot,
-  });
+  const skippedInlineFiles = legacyBundleRef
+    ? await readHostedWorkspaceSkippedInlineFiles({
+        vaultRoot: input.vaultRoot,
+      })
+    : [];
 
   return {
     currentSnapshotRefPresent: currentSnapshotRef !== null,
@@ -62,6 +65,19 @@ export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(inp
     skippedInlineFiles,
     skippedInlineFileCount: skippedInlineFiles.length,
   };
+}
+
+export async function clearLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
+  plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  vaultRoot: string;
+}): Promise<void> {
+  if (input.plan.skippedInlineFiles.length === 0) {
+    return;
+  }
+  await writeHostedWorkspaceSkippedInlineFiles({
+    files: [],
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 class HostedWorkspaceCommittedStateUnavailableError extends Error {
@@ -99,16 +115,6 @@ async function readHostedWorkspaceCurrentSnapshotRef(input: {
 
   const currentWorkspace = await input.platform.workspacePort.read();
   return currentWorkspace.workspace?.snapshotRef ?? null;
-}
-
-async function readHostedWorkspaceSkippedInlineFilesBestEffort(input: {
-  vaultRoot: string;
-}): Promise<HostedWorkspaceSkippedInlineFile[]> {
-  try {
-    return await readHostedWorkspaceSkippedInlineFiles(input);
-  } catch {
-    return [];
-  }
 }
 
 async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: {

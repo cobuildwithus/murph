@@ -1087,7 +1087,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgePublicCalculatorViewResultSchema.safeParse(productCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(productCalculatorView).success, true)
-    assert.equal(productCalculatorView.schemaVersion, 'murph.age.public-calculator-view.v4')
+    assert.equal(productCalculatorView.schemaVersion, 'murph.age.public-calculator-view.v5')
     assert.equal(productCalculatorView.mode, 'product')
     assert.equal(productCalculatorView.status, 'abstain')
     assert.equal(productCalculatorView.displayCategory, 'abstain')
@@ -1098,6 +1098,19 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.deepEqual(productCalculatorView.selectedScoreBearingMetricKeys, [])
     assert.equal(productCalculatorView.featureDrivers.older.length, 0)
     assert.equal(productCalculatorView.featureDrivers.younger.length, 0)
+    assert.equal(productCalculatorView.scoreReadiness.status, 'validation-pending')
+    assert.equal(productCalculatorView.scoreReadiness.inputBundleId, 'lab5-bp-bmi')
+    assert.equal(productCalculatorView.scoreReadiness.contextBundleIds.includes('wearable-context'), true)
+    assert.equal(productCalculatorView.scoreReadiness.riskAvailable, false)
+    assert.equal(productCalculatorView.scoreReadiness.biologicalAgeAvailable, false)
+    assert.equal(
+      productCalculatorView.scoreReadiness.unlockRequirements.includes('external-outcome-validation'),
+      true,
+    )
+    assert.equal(
+      productCalculatorView.scoreReadiness.unlockRequirements.includes('validated-wearable-parameter-pack'),
+      true,
+    )
     assert.equal(productCalculatorView.wearable.scoreBearing, false)
     assert.equal(productCalculatorView.wearable.scorePolicy.productStatus, 'context-only')
     assert.equal(productCalculatorView.wearable.scorePolicy.productWearableMultiplier, 0)

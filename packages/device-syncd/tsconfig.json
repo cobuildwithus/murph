@@ -11,7 +11,7 @@
       "path": "../runtime-state"
     },
     {
-      "path": "../importers"
+      "path": "../importers/tsconfig.safe-build.json"
     }
   ],
   "include": [
