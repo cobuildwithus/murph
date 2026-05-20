@@ -27,10 +27,15 @@ export type MurphAgeSourceRouteId =
   | "all-of-us-fitbit-labs-ehr"
   | "cardia-biomarker-activity"
   | "creles-transport-stress"
+  | "framingham-activity-cvd"
   | "haalsi-transport-stress"
   | "hchs-sol-biomarker-activity"
+  | "hunt-activity-sensor-biobank"
+  | "lifelines-activelife-biobank"
   | "mhas-harmonized-aging"
   | "midus-biomarker-mortality"
+  | "mipact-apple-watch-ehr"
+  | "nako-accelerometer-biobank"
   | "nhanes-activity-shadow-lmf"
   | "nhanes-bench0-lab-body"
   | "nhanes-iii-lmf-sanity"
@@ -42,7 +47,9 @@ export type MurphAgeSourceRouteId =
   | "nsrr-shhs-sleep-heart-health"
   | "nsrr-sof-sleep-aging"
   | "partner-aggregate-evaluator"
+  | "project-baseline-sensor-clinical"
   | "uk-biobank-integrated"
+  | "whi-opach-womens-health-activity"
   | "who-sage-south-africa-transport";
 
 export type MurphAgeSourceRouteLayer =
@@ -134,6 +141,8 @@ export type MurphAgeOrdinaryLabWearableAutoresearchRankReason =
   | "fastest-public-row-path"
   | "lab-activity-linked-outcome"
   | "partial-age-band-fit"
+  | "registry-linked-biobank"
+  | "sensor-rich-clinical-fit"
   | "young-adult-midlife-fit";
 
 export interface MurphAgeOrdinaryLabWearableAutoresearchSourcePriority {
@@ -298,11 +307,71 @@ const MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_DEFINITIONS =
   },
   {
     blockedUntil: [
+      "authorized data-holder collaboration",
+      "aggregate output policy",
+      "endpoint and denominator card",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 5,
+    nextAction: "Pursue MIPACT as a partner or authorized-data-holder aggregate route for Apple Watch plus clinical outcomes.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "sensor-rich-clinical-fit",
+    ],
+    routeId: "mipact-apple-watch-ehr",
+  },
+  {
+    blockedUntil: [
+      "scientific access approval",
+      "aggregate output policy",
+      "endpoint and denominator card",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 6,
+    nextAction: "Queue NAKO for an aggregate-runner request focused on accelerometry, labs, and cardiometabolic outcomes.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "registry-linked-biobank",
+    ],
+    routeId: "nako-accelerometer-biobank",
+  },
+  {
+    blockedUntil: [
+      "scientific access approval",
+      "register-linkage permission",
+      "aggregate output policy",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 7,
+    nextAction: "Queue HUNT for an aggregate-runner request focused on activity sensors, biological material, and register-linked outcomes.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "registry-linked-biobank",
+    ],
+    routeId: "hunt-activity-sensor-biobank",
+  },
+  {
+    blockedUntil: [
+      "scientific access approval",
+      "outcome linkage confirmation",
+      "aggregate output policy",
+    ],
+    executionMode: "human-admin-workbench",
+    executionPriorityRank: 8,
+    nextAction: "Queue Lifelines ActiveLife for an aggregate-runner request focused on objective activity plus broad lab/body phenotyping.",
+    rankReasonIds: [
+      "admin-heavy-high-fit",
+      "registry-linked-biobank",
+    ],
+    routeId: "lifelines-activelife-biobank",
+  },
+  {
+    blockedUntil: [
       "human-admin workbench authority",
       "source-rights promotion review",
     ],
     executionMode: "human-admin-workbench",
-    executionPriorityRank: 5,
+    executionPriorityRank: 9,
     nextAction: "Keep UK Biobank as a high-powered but partial-age-band workbench route.",
     rankReasonIds: [
       "admin-heavy-high-fit",
@@ -373,7 +442,7 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
         "daily-activity",
         "outcome-followup",
       ],
-      rank: 4,
+      rank: 8,
     },
     outcomeSignal: "linked-mortality",
     priorityRank: 20,
@@ -475,6 +544,155 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 25,
     routeId: "partner-aggregate-evaluator",
     sourceFamily: "Partner-held clinical or cohort data",
+  },
+  {
+    accessMode: "partner-run",
+    activationStatus: "partner-required",
+    allowedResearchUses: [
+      "Apple Watch plus EHR aggregate-delta validation planning",
+      "sensor-rich clinical outcome stress testing",
+      "ordinary wearable feature-family transport checks",
+    ],
+    blockedCurrentUses: [
+      "background access",
+      "row-level data transfer",
+      "wearable score contribution before aggregate validation",
+    ],
+    displayName: "MIPACT Apple Watch/EHR route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "autonomic", "blood-pressure", "clinical-history", "labs", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Find an authorized data holder or collaborator who can run the aggregate wearable/lab evaluator locally.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "autonomic",
+        "blood-pressure",
+        "bloodwork-labs",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+        "sleep",
+      ],
+      rank: 4,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 23,
+    routeId: "mipact-apple-watch-ehr",
+    sourceFamily: "MIPACT",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "accelerometry plus biosample aggregate receipt planning",
+      "registry-linked cardiometabolic transport validation",
+      "ordinary lab/activity feature-family stress",
+    ],
+    blockedCurrentUses: [
+      "silent data access",
+      "source-content storage",
+      "score-bearing product use",
+    ],
+    displayName: "NAKO accelerometry biobank route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Request a scientific aggregate-runner path for accelerometry, labs, and linked clinical outcomes.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 5,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 24,
+    routeId: "nako-accelerometer-biobank",
+    sourceFamily: "NAKO",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "activity sensor plus biological material aggregate receipt planning",
+      "register-linked disease outcome transport validation",
+      "ordinary lab/activity feature-family stress",
+    ],
+    blockedCurrentUses: [
+      "silent data access",
+      "register-linked row transfer",
+      "score-bearing product use",
+    ],
+    displayName: "HUNT activity-sensor biobank route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Request a scientific aggregate-runner path for activity sensors, biological material, and register-linked outcomes.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 6,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 26,
+    routeId: "hunt-activity-sensor-biobank",
+    sourceFamily: "HUNT",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "ActiveLife activity plus Lifelines lab/body aggregate receipt planning",
+      "longitudinal population transport validation",
+      "ordinary lab/activity feature-family stress",
+    ],
+    blockedCurrentUses: [
+      "silent data access",
+      "outcome linkage assumptions before source activation",
+      "score-bearing product use",
+    ],
+    displayName: "Lifelines ActiveLife biobank route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "function", "labs"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Confirm outcome linkage and aggregate export, then request an aggregate-runner path for activity and lab/body features.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 7,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 27,
+    routeId: "lifelines-activelife-biobank",
+    sourceFamily: "Lifelines ActiveLife",
   },
   {
     accessMode: "free-registered",
@@ -620,6 +838,45 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
     priorityRank: 55,
     routeId: "who-sage-south-africa-transport",
     sourceFamily: "WHO SAGE",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "sensor-rich clinical feasibility scouting",
+      "future partner aggregate receipt planning",
+      "wearable feature-family method comparison",
+    ],
+    blockedCurrentUses: [
+      "assuming public row access exists",
+      "source-body storage",
+      "score-bearing product use",
+    ],
+    displayName: "Project Baseline sensor/clinical route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "autonomic", "blood-pressure", "body-composition", "clinical-history", "labs", "sleep"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Scout whether an authorized aggregate-runner or partner path exists before treating this as executable.",
+    ordinarySubmitterFit: {
+      ageBandFit: "primary-16-50",
+      inputFamilies: [
+        "age-sex",
+        "autonomic",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+        "sleep",
+      ],
+      rank: 10,
+    },
+    outcomeSignal: "unknown-until-activated",
+    priorityRank: 58,
+    routeId: "project-baseline-sensor-clinical",
+    sourceFamily: "Project Baseline",
   },
   {
     accessMode: "controlled-institutional",
@@ -812,12 +1069,87 @@ const MURPH_AGE_SOURCE_ROUTE_DEFINITIONS = [
         "outcome-followup",
         "sleep",
       ],
-      rank: 5,
+      rank: 9,
     },
     outcomeSignal: "clinical-event-linked",
     priorityRank: 75,
     routeId: "uk-biobank-integrated",
     sourceFamily: "UK Biobank",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "cardiovascular outcome benchmark planning",
+      "activity availability feasibility",
+      "lab/CVD transport stress",
+    ],
+    blockedCurrentUses: [
+      "assuming wearable/activity overlap before source activation",
+      "silent controlled-data access",
+      "score-bearing product use",
+    ],
+    displayName: "Framingham activity/CVD route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "labs"],
+    layers: ["source-feasibility", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Confirm objective activity availability and aggregate export before ranking as a wearable route.",
+    ordinarySubmitterFit: {
+      ageBandFit: "partial-16-50",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "outcome-followup",
+      ],
+      rank: 11,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 77,
+    routeId: "framingham-activity-cvd",
+    sourceFamily: "Framingham Heart Study",
+  },
+  {
+    accessMode: "controlled-institutional",
+    activationStatus: "admin-required",
+    allowedResearchUses: [
+      "older-women objective activity and outcome stress testing",
+      "sex-specific calibration diagnostics",
+      "falls, frailty, CVD, and mortality aggregate receipt planning",
+    ],
+    blockedCurrentUses: [
+      "generalizing older-women activity effects to ordinary users",
+      "silent controlled-data access",
+      "wearable score-bearing product use",
+    ],
+    displayName: "WHI OPACH / Women's Health Study activity route",
+    evidenceRole: "true-external-candidate",
+    featureFamilies: ["activity", "blood-pressure", "body-composition", "clinical-history", "function", "labs"],
+    layers: ["source-feasibility", "wearable-shadow-increment", "biomarker-increment", "transport-validation"],
+    modelUseStatus: "metadata-only-candidate",
+    nextAction: "Treat as an older-women external stress route; request only aggregate receipts after endpoint and denominator cards are fixed.",
+    ordinarySubmitterFit: {
+      ageBandFit: "older-adult-skewed",
+      inputFamilies: [
+        "age-sex",
+        "blood-pressure",
+        "bloodwork-labs",
+        "body-composition",
+        "clinical-history",
+        "daily-activity",
+        "function",
+        "outcome-followup",
+      ],
+      rank: null,
+    },
+    outcomeSignal: "clinical-event-linked",
+    priorityRank: 78,
+    routeId: "whi-opach-womens-health-activity",
+    sourceFamily: "WHI OPACH / Women's Health Study",
   },
   {
     accessMode: "public-use",

@@ -241,6 +241,14 @@ jobs:
           pnpm hosted-local e2e idle-checkpoint-deferred-progress 2>&1 \
             | tee .artifacts/cloudflare-hosted-e2e/idle-checkpoint-deferred-progress.log
 
+      - name: Run direct R2 presigned PUT hosted E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/cloudflare-hosted-e2e
+          pnpm hosted-local e2e direct-r2-presigned-put 2>&1 \
+            | tee .artifacts/cloudflare-hosted-e2e/direct-r2-presigned-put.log
+
       - name: Upload idle checkpoint deferred progress E2E logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -248,6 +256,7 @@ jobs:
           name: cloudflare-hosted-e2e-idle-checkpoint-deferred-progress-logs
           path: |
             .artifacts/cloudflare-hosted-e2e/idle-checkpoint-deferred-progress.log
+            .artifacts/cloudflare-hosted-e2e/direct-r2-presigned-put.log
             .artifacts/hosted-local/**/state.json
           if-no-files-found: warn
 

@@ -18,6 +18,7 @@ import {
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
   readHostedExecutionSnapshotHotRef,
+  isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
   clearHostedAssistantRuntimeHotState,
@@ -180,6 +181,43 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const materializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: restored.vaultRoot,
   });
+
+  if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    if (!input.platform.workspaceSnapshotPort) {
+      throw new Error("Hosted workspace snapshot v2 restore requires a workspace snapshot port.");
+    }
+    await input.platform.workspaceSnapshotPort.restoreWorkspaceSnapshot({
+      durableRoot: resolveHostedWorkspaceDurableRoot(restored.vaultRoot),
+      ref: snapshotRef,
+      scratchRoot: resolveHostedWorkspaceScratchRoot(restored.vaultRoot),
+    });
+    await Promise.all([
+      createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
+      createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
+      createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
+    ]);
+    const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
+      vaultRoot: restored.vaultRoot,
+    });
+    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      platform: input.platform,
+      status: input.workspace?.redactedStatus ?? null,
+      vaultRoot: restored.vaultRoot,
+    });
+
+    return {
+      ...restored,
+      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
+        materializedArtifactPaths: restoredMaterializedArtifactPaths,
+        platform: input.platform,
+        restored,
+        readBundles: materializerBundles,
+      }),
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+      mode: "snapshot",
+      restoreWasCold: true,
+    };
+  }
 
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     return {
@@ -1131,6 +1169,19 @@ function parseHostedWorkspaceLiveRuntimeState(
 }
 
 function snapshotRefKey(snapshotRef: HostedWorkspaceState["snapshotRef"]): string {
+  if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+    return JSON.stringify({
+      workspaceSnapshotV2: {
+        encryptedByteSize: snapshotRef.archive.encryptedByteSize,
+        encryptedObjectSha256: snapshotRef.archive.encryptedObjectSha256,
+        objectKey: snapshotRef.objectKey,
+        schema: snapshotRef.schema,
+        snapshotId: snapshotRef.snapshotId,
+        upload: snapshotRef.upload,
+      },
+    });
+  }
+
   const base = readHostedExecutionSnapshotBaseRef(snapshotRef);
   const hot = readHostedExecutionSnapshotHotRef(snapshotRef);
   const delta = readHostedExecutionSnapshotDeltaRef(snapshotRef);
@@ -1350,16 +1401,38 @@ function readHostedWorkspaceRuntimeLocalRoots(
 ): HostedRestoredExecutionContext {
   const resolvedVaultRoot = path.resolve(vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(resolvedVaultRoot).assistantStateRoot;
-  const operatorHomeRoot = path.join(
-    path.dirname(resolvedVaultRoot),
-    `${path.basename(resolvedVaultRoot)}-operator-home`,
-  );
+  const operatorHomeRoot = resolveHostedWorkspaceOperatorHomeRoot(resolvedVaultRoot);
 
   return {
     assistantStateRoot,
     operatorHomeRoot,
     vaultRoot: resolvedVaultRoot,
   };
+}
+
+function resolveHostedWorkspaceDurableRoot(vaultRoot: string): string {
+  const resolvedVaultRoot = path.resolve(vaultRoot);
+  if (path.basename(resolvedVaultRoot) === "vault") {
+    return path.dirname(resolvedVaultRoot);
+  }
+  return resolvedVaultRoot;
+}
+
+function resolveHostedWorkspaceScratchRoot(vaultRoot: string): string {
+  const durableRoot = resolveHostedWorkspaceDurableRoot(vaultRoot);
+  if (path.basename(durableRoot) === "durable") {
+    return path.join(path.dirname(durableRoot), "scratch");
+  }
+  return path.join(path.dirname(durableRoot), `${path.basename(durableRoot)}-scratch`);
+}
+
+function resolveHostedWorkspaceOperatorHomeRoot(vaultRoot: string): string {
+  const resolvedVaultRoot = path.resolve(vaultRoot);
+  const parent = path.dirname(resolvedVaultRoot);
+  if (path.basename(resolvedVaultRoot) === "vault" && path.basename(parent) === "durable") {
+    return path.join(parent, "home");
+  }
+  return path.join(parent, `${path.basename(resolvedVaultRoot)}-operator-home`);
 }
 
 async function createHostedWorkspaceRuntimePrivateDirectory(directoryPath: string): Promise<void> {

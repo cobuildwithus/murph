@@ -23,6 +23,7 @@ export type HostedRuntimeBridgeCheckpointLeaseErrorCode =
 export type HostedRuntimeBridgeCheckpointLeaseStage =
   | "before_snapshot"
   | "before_bundle_write"
+  | "before_direct_r2_put"
   | "before_web_checkpoint"
   | "after_web_checkpoint";
 

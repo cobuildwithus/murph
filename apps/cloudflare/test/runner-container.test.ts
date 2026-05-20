@@ -614,6 +614,68 @@ describe("RunnerContainer", () => {
     expect(headers.get("x-hosted-runtime-workspace-version")).toBe("42");
   });
 
+  it("can extend deploy smoke to run a direct R2 presigned PUT probe", async () => {
+    const presignedPutUrl =
+      "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test";
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        expect(url).toBe("http://container/internal/direct-r2-presigned-put-smoke");
+        return new Response(JSON.stringify({
+          directR2PresignedPut: {
+            byteLength: 4096,
+            durationMs: 8,
+            ok: true,
+            payloadSha256: "b".repeat(64),
+            responseBodyBytes: 2,
+            status: 200,
+          },
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.smokeHealth({
+      directR2PresignedPut: {
+        byteLength: 4096,
+        presignedPutUrl,
+      },
+    });
+
+    expect(result.directR2PresignedPut).toEqual({
+      byteLength: 4096,
+      durationMs: 8,
+      ok: true,
+      payloadSha256: "b".repeat(64),
+      responseBodyBytes: 2,
+      status: 200,
+    });
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    const smokeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/direct-r2-presigned-put-smoke")
+    );
+    expect(JSON.parse(smokeCall?.[1]?.body as string)).toEqual({
+      byteLength: 4096,
+      presignedPutUrl,
+    });
+  });
+
   it("recycles any warm deploy smoke shell before checking container health", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",

@@ -1,3 +1,11 @@
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+
 import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
@@ -5,6 +13,7 @@ import {
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimeEffectsPort,
   type HostedRuntimePlatform,
+  type HostedRuntimeWorkspaceSnapshotUploadStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   sha256HostedBundleHex,
@@ -22,6 +31,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedRuntimeLogResponse,
+  parseHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -35,6 +45,17 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import type {
+  HostedWorkspaceCheckpointResponse,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  type HostedWorkspaceSnapshotV2Aad,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "./runner-email-route.ts";
@@ -77,6 +98,12 @@ import {
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+} from "./workspace-snapshot-store.ts";
+import {
+  restoreEncryptedWorkspaceSnapshot,
+} from "./workspace-snapshot-local.ts";
 import {
   assertAllowedHostedRunnerWebControlRequest,
   readHostedRunnerWebControlRoute,
@@ -599,6 +626,17 @@ export function buildHostedExecutionRuntimePlatform(input: {
         await putArtifactOnce({ bytes, sha256 });
       },
     },
+    ...(input.workspaceCheckpointBridge
+      ? {
+          workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
+        }
+      : {}),
     ...(input.workspaceCheckpointBridge
       ? {
           providerFetch: createCloudflareHostedProviderFetch(
@@ -1395,6 +1433,347 @@ function createHostedWebWorkspacePort(input: {
       }
       return response;
     },
+  };
+}
+
+function createCloudflareWorkspaceSnapshotPort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport | null;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
+  const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
+    async completeUploadedSnapshot(request) {
+      const headers = await requireHostedRuntimeWriteFenceHeaders(
+        input.workspaceCheckpointBridge,
+        "Hosted workspace snapshot complete",
+      );
+      const payload = await fetchHostedJson({
+        body: {
+          archive: request.ref.archive,
+          checkpointRequest: request.checkpointRequest,
+          objectKey: request.ref.objectKey,
+          snapshotId: request.ref.snapshotId,
+        },
+        description: "Hosted workspace snapshot complete",
+        fetchImpl: input.fetchImpl,
+        headers,
+        method: "POST",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          `/workspace-snapshots/${encodeURIComponent(request.ref.snapshotId)}/complete`,
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+        ),
+      });
+      const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
+      const { checkpoint, snapshotRef } = completed;
+      if (checkpoint.checkpointed) {
+        await input.workspaceCheckpointBridge.recordCheckpoint?.({
+          workspaceVersion: checkpoint.workspace.version,
+        });
+      }
+      return completed;
+    },
+
+    async directPutEncryptedObject(request) {
+      if (!Number.isSafeInteger(request.encryptedByteSize) || request.encryptedByteSize <= 0) {
+        throw new TypeError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
+      }
+      const source = await stat(request.sourceFilePath);
+      if (source.size !== request.encryptedByteSize) {
+        throw new Error("Hosted workspace snapshot source file size does not match encryptedByteSize.");
+      }
+      const body = Readable.toWeb(createReadStream(request.sourceFilePath)) as BodyInit;
+      const response = await fetchHostedResponse({
+        description: "Hosted workspace snapshot direct R2 upload",
+        fetchImpl: input.fetchImpl,
+        init: {
+          body,
+          duplex: "half",
+          headers: {
+            "content-length": String(request.encryptedByteSize),
+            "content-type": HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+            "if-none-match": "*",
+          },
+          method: "PUT",
+        } as RequestInit & { duplex: "half" },
+        logFailures: false,
+        timeoutMs: input.timeoutMs,
+        url: new URL(request.putUrl),
+      });
+      assertHostedOk(response, "Hosted workspace snapshot direct R2 upload");
+    },
+
+    async restoreWorkspaceSnapshot(request) {
+      if (request.ref.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+        throw new RangeError("Hosted workspace snapshot restore exceeds the single-part size guard.");
+      }
+      const dataKey = await port.unwrapDataKey({
+        aad: request.ref.encryption.aad,
+        rootKeyId: request.ref.encryption.rootKeyId,
+        wrappedDataKey: request.ref.encryption.wrappedDataKey,
+      });
+      const scratchRoot = path.resolve(request.scratchRoot ?? tmpdir());
+      await mkdir(scratchRoot, { mode: 0o700, recursive: true });
+      const tempDir = await mkdtemp(path.join(scratchRoot, "workspace-snapshot-fetch-"));
+      const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
+      try {
+        const fetched = await fetchHostedWorkspaceSnapshotEncryptedObjectToFile({
+          encryptedFilePath,
+          expectedEncryptedByteSize: request.ref.archive.encryptedByteSize,
+          fetchImpl: input.fetchImpl,
+          snapshotId: request.ref.encryption.aad.snapshotId,
+          timeoutMs: input.timeoutMs,
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+        });
+        if (!fetched) {
+          throw new Error("Hosted workspace snapshot encrypted object is unavailable.");
+        }
+        await restoreEncryptedWorkspaceSnapshot({
+          dataKey,
+          durableRoot: request.durableRoot,
+          encryptedFilePath,
+          ref: request.ref,
+          scratchRoot: request.scratchRoot ?? null,
+        });
+      } finally {
+        await rm(tempDir, { force: true, recursive: true });
+      }
+    },
+
+    async unwrapDataKey(request) {
+      const headers = await requireHostedRuntimeWriteFenceHeaders(
+        input.workspaceCheckpointBridge,
+        "Hosted workspace snapshot data key unwrap",
+      );
+      const payload = await fetchHostedJson({
+        body: request,
+        description: "Hosted workspace snapshot data key unwrap",
+        fetchImpl: input.fetchImpl,
+        headers,
+        method: "POST",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          `/workspace-snapshots/${encodeURIComponent(request.aad.snapshotId)}/data-key/unwrap`,
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+        ),
+      });
+
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new TypeError("Hosted workspace snapshot data key unwrap response must be an object.");
+      }
+      const dataKey = (payload as Record<string, unknown>).dataKey;
+      if (typeof dataKey !== "string" || dataKey.length === 0) {
+        throw new TypeError("Hosted workspace snapshot data key unwrap response dataKey is required.");
+      }
+      return dataKey;
+    },
+
+    async startUpload(request) {
+      const headers = await requireHostedRuntimeWriteFenceHeaders(
+        input.workspaceCheckpointBridge,
+        "Hosted workspace snapshot start",
+      );
+      const payload = await fetchHostedJson({
+        body: request,
+        description: "Hosted workspace snapshot start",
+        fetchImpl: input.fetchImpl,
+        headers,
+        method: "POST",
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          "/workspace-snapshots/start",
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+        ),
+      });
+      return parseHostedWorkspaceSnapshotStartPayload(payload);
+    },
+  };
+  return port;
+}
+
+function parseHostedWorkspaceSnapshotStartPayload(
+  value: unknown,
+): HostedRuntimeWorkspaceSnapshotUploadStart {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot start response must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const encryptionRecord = readRequiredHostedRuntimeObject(
+    record.encryption,
+    "Hosted workspace snapshot start encryption",
+  );
+  const scheme = readRequiredHostedRuntimeString(
+    encryptionRecord.scheme,
+    "Hosted workspace snapshot scheme",
+  );
+  if (scheme !== HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME) {
+    throw new TypeError("Hosted workspace snapshot scheme is invalid.");
+  }
+  const limitsRecord = readRequiredHostedRuntimeObject(
+    record.limits,
+    "Hosted workspace snapshot start limits",
+  );
+  const aad = parseHostedWorkspaceSnapshotAad(encryptionRecord.aad);
+  const objectKey = readRequiredHostedRuntimeString(record.objectKey, "Hosted workspace snapshot objectKey");
+  const snapshotId = readRequiredHostedRuntimeString(record.snapshotId, "Hosted workspace snapshot snapshotId");
+  if (aad.objectKey !== objectKey || aad.snapshotId !== snapshotId) {
+    throw new TypeError("Hosted workspace snapshot start response AAD does not match its object binding.");
+  }
+  return {
+    encryption: {
+      aad,
+      dataKeyBase64: readRequiredHostedRuntimeString(
+        encryptionRecord.dataKeyBase64,
+        "Hosted workspace snapshot dataKeyBase64",
+      ),
+      ivBase64: readRequiredHostedRuntimeString(
+        encryptionRecord.ivBase64,
+        "Hosted workspace snapshot ivBase64",
+      ),
+      rootKeyId: readRequiredHostedRuntimeString(
+        encryptionRecord.rootKeyId,
+        "Hosted workspace snapshot rootKeyId",
+      ),
+      scheme,
+      wrappedDataKey: readRequiredHostedRuntimeString(
+        encryptionRecord.wrappedDataKey,
+        "Hosted workspace snapshot wrappedDataKey",
+      ),
+    },
+    expiresAt: readRequiredHostedRuntimeString(record.expiresAt, "Hosted workspace snapshot expiresAt"),
+    limits: {
+      maxSinglePartEncryptedBytes: readRequiredHostedRuntimePositiveInteger(
+        limitsRecord.maxSinglePartEncryptedBytes,
+        "Hosted workspace snapshot maxSinglePartEncryptedBytes",
+      ),
+      warnEncryptedBytes: readRequiredHostedRuntimePositiveInteger(
+        limitsRecord.warnEncryptedBytes,
+        "Hosted workspace snapshot warnEncryptedBytes",
+      ),
+    },
+    objectKey,
+    putUrl: readRequiredHostedRuntimeString(record.putUrl, "Hosted workspace snapshot putUrl"),
+    snapshotId,
+  };
+}
+
+async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
+  encryptedFilePath: string;
+  expectedEncryptedByteSize: number;
+  fetchImpl: typeof fetch;
+  snapshotId: string;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}): Promise<boolean> {
+  const headers = await requireHostedRuntimeWriteFenceHeaders(
+    input.workspaceCheckpointBridge,
+    "Hosted workspace snapshot fetch",
+  );
+  const response = await fetchHostedResponse({
+    description: "Hosted workspace snapshot fetch",
+    fetchImpl: input.fetchImpl,
+    init: {
+      headers,
+      method: "GET",
+    },
+    timeoutMs: input.timeoutMs,
+    url: new URL(
+      `/workspace-snapshots/${encodeURIComponent(input.snapshotId)}`,
+      `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+    ),
+  });
+  if (response.status === 404) {
+    return false;
+  }
+  assertHostedOk(response, "Hosted workspace snapshot fetch");
+  if (!response.body) {
+    throw new Error("Hosted workspace snapshot fetch response body is unavailable.");
+  }
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && contentLength !== String(input.expectedEncryptedByteSize)) {
+    throw new Error("Hosted workspace snapshot fetch content-length does not match its ref.");
+  }
+  await pipeline(
+    Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>),
+    createExpectedByteCountTransform({
+      expectedBytes: input.expectedEncryptedByteSize,
+      label: "Hosted workspace snapshot fetch",
+    }),
+    createWriteStream(input.encryptedFilePath, { mode: 0o600 }),
+  );
+  return true;
+}
+
+function createExpectedByteCountTransform(input: {
+  expectedBytes: number;
+  label: string;
+}): Transform {
+  let byteCount = 0;
+  return new Transform({
+    flush(callback) {
+      if (byteCount !== input.expectedBytes) {
+        callback(new Error(`${input.label} byte count does not match its ref.`));
+        return;
+      }
+      callback();
+    },
+    transform(chunk: Buffer, _encoding, callback) {
+      byteCount += chunk.byteLength;
+      if (byteCount > input.expectedBytes) {
+        callback(new Error(`${input.label} exceeded its ref byte count.`));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
+
+function parseHostedWorkspaceSnapshotCompletePayload(
+  value: unknown,
+): {
+  checkpoint: HostedWorkspaceCheckpointResponse;
+  snapshotRef: HostedWorkspaceSnapshotV2Ref;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot complete response must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    checkpoint: parseHostedWorkspaceCheckpointResponse(record.checkpoint),
+    snapshotRef: parseHostedWorkspaceSnapshotV2Ref(
+      record.snapshotRef,
+      "Hosted workspace snapshot complete response snapshotRef",
+    ),
+  };
+}
+
+function parseHostedWorkspaceSnapshotAad(value: unknown): HostedWorkspaceSnapshotV2Aad {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot AAD must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const purpose = readRequiredHostedRuntimeString(
+    record.purpose,
+    "Hosted workspace snapshot AAD purpose",
+  );
+  const schema = readRequiredHostedRuntimeString(
+    record.schema,
+    "Hosted workspace snapshot AAD schema",
+  );
+  if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
+    throw new TypeError("Hosted workspace snapshot AAD purpose is invalid.");
+  }
+  if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
+    throw new TypeError("Hosted workspace snapshot AAD schema is invalid.");
+  }
+  return {
+    objectKey: readRequiredHostedRuntimeString(record.objectKey, "Hosted workspace snapshot AAD objectKey"),
+    purpose,
+    schema,
+    snapshotId: readRequiredHostedRuntimeString(record.snapshotId, "Hosted workspace snapshot AAD snapshotId"),
+    userId: readRequiredHostedRuntimeString(record.userId, "Hosted workspace snapshot AAD userId"),
   };
 }
 
@@ -2384,6 +2763,27 @@ function readOptionalStringField(value: unknown, field: string): string | null {
   }
 
   return entry;
+}
+
+function readRequiredHostedRuntimeString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function readRequiredHostedRuntimeObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function readRequiredHostedRuntimePositiveInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive safe integer.`);
+  }
+  return value;
 }
 
 function readRequiredField(value: unknown, field: string): unknown {

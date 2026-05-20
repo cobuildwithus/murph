@@ -363,7 +363,7 @@ async function runWorkspaceChildJob(input: {
 }
 
 function resolveHostedWorkspaceChildVaultRoot(): string {
-  return path.join(process.cwd(), "vault");
+  return path.join(process.cwd(), "durable", "vault");
 }
 
 async function readStandardInput(): Promise<string> {

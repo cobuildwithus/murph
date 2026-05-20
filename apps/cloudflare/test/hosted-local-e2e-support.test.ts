@@ -221,10 +221,11 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
 });
 
 describe("hosted local e2e scenario registration", () => {
-  it("keeps container continuity scenarios manual-only while remaining addressable by name", () => {
+  it("keeps heavy hosted-local scenarios manual-only while preserving the direct-R2 invariant in all", () => {
     const allScenarios = resolveHostedLocalE2eScenarios("all");
     const containerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "container-continuity");
     const codexContainerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "codex-container-continuity");
+    const directR2PresignedPut = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "direct-r2-presigned-put");
     const vaultPersistence = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "vault-persistence");
 
     expect(containerContinuity).toMatchObject({
@@ -237,6 +238,10 @@ describe("hosted local e2e scenario registration", () => {
       manualOnly: true,
       name: "codex-container-continuity",
     });
+    expect(directR2PresignedPut).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
+      name: "direct-r2-presigned-put",
+    });
     expect(vaultPersistence).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
       manualOnly: true,
@@ -244,6 +249,7 @@ describe("hosted local e2e scenario registration", () => {
     });
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("container-continuity");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("codex-container-continuity");
+    expect(allScenarios.map((scenario) => scenario.name)).toContain("direct-r2-presigned-put");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("vault-persistence");
     expect(resolveHostedLocalE2eScenarios("container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
@@ -254,6 +260,10 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "codex-container-continuity",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("direct-r2-presigned-put")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
+      name: "direct-r2-presigned-put",
     })]);
     expect(resolveHostedLocalE2eScenarios("vault-persistence")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",

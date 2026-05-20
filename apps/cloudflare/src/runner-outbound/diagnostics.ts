@@ -43,6 +43,9 @@ export function readHostedRunnerInternalHostKind(hostname: string): string {
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_store";
   }
+  if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
+    return "workspace_snapshot_store";
+  }
   if (hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
     return "runner_control";
   }
@@ -66,6 +69,24 @@ export function readHostedRunnerInternalOperation(input: {
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
     return "browser_vault_replica_write";
+  }
+  if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
+    if (input.pathname.startsWith("/__test/r2-presigned-put/")) {
+      return "workspace_snapshot_test_presigned_put";
+    }
+    if (input.pathname === "/workspace-snapshots/start") {
+      return "workspace_snapshot_start";
+    }
+    if (/^\/workspace-snapshots\/[^/]+\/complete$/u.test(input.pathname)) {
+      return "workspace_snapshot_complete";
+    }
+    if (/^\/workspace-snapshots\/[^/]+\/data-key\/unwrap$/u.test(input.pathname)) {
+      return "workspace_snapshot_data_key_unwrap";
+    }
+    if (input.method === "GET") {
+      return "workspace_snapshot_fetch";
+    }
+    return "workspace_snapshot_unknown";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
     return "runner_control";

@@ -62,6 +62,13 @@ interface SmokeOpenAiInterceptResult {
   stdoutBytes?: unknown;
 }
 
+interface SmokeDirectR2PresignedPutResult {
+  byteLength?: unknown;
+  ok?: unknown;
+  payloadSha256?: unknown;
+  status?: unknown;
+}
+
 interface SmokeRunnerRetryPolicy {
   maxAttempts: number;
   retryDelayMs: number;
@@ -136,9 +143,18 @@ export async function runSmokeHostedDeploy(input: {
     source.HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT,
     false,
   );
+  const shouldSmokeDirectR2PresignedPut = readBooleanEnv(
+    source.HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT,
+    false,
+  );
   if (shouldSmokeOpenAiIntercept && !shouldSmokeRunnerContainer) {
     throw new Error(
       "HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
+    );
+  }
+  if (shouldSmokeDirectR2PresignedPut && !shouldSmokeRunnerContainer) {
+    throw new Error(
+      "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
     );
   }
   if (shouldSmokeOpenAiIntercept && !smokeUserId) {
@@ -194,10 +210,12 @@ export async function runSmokeHostedDeploy(input: {
       log,
       source,
       url: buildRunnerContainerSmokeUrl({
+        directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
         openAiIntercept: shouldSmokeOpenAiIntercept,
         smokeBaseUrl,
       }),
       versionOverrideHeaders,
+      expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
       expectOpenAiIntercept: shouldSmokeOpenAiIntercept,
     });
   }
@@ -226,6 +244,7 @@ export async function runSmokeHostedDeploy(input: {
 }
 
 async function assertRunnerContainerSmoke(input: {
+  expectDirectR2PresignedPut: boolean;
   expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   log: (message: string) => void;
@@ -261,6 +280,7 @@ async function assertRunnerContainerSmoke(input: {
 }
 
 async function readRunnerContainerSmoke(input: {
+  expectDirectR2PresignedPut: boolean;
   expectOpenAiIntercept: boolean;
   fetchImpl: FetchLike;
   source: EnvSource;
@@ -297,6 +317,7 @@ async function readRunnerContainerSmoke(input: {
   const responsePayload = await response.json() as {
     ok?: unknown;
     runnerContainer?: {
+      directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       ok?: unknown;
       openAiIntercept?: SmokeOpenAiInterceptResult | null;
       runnerBundle?: SmokeRunnerBundleManifest | null;
@@ -315,17 +336,24 @@ async function readRunnerContainerSmoke(input: {
   if (input.expectOpenAiIntercept) {
     assertSmokeOpenAiInterceptResult(responsePayload.runnerContainer.openAiIntercept);
   }
+  if (input.expectDirectR2PresignedPut) {
+    assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
+  }
 
   return responsePayload.runnerContainer.runnerBundle ?? null;
 }
 
 function buildRunnerContainerSmokeUrl(input: {
+  directR2PresignedPut: boolean;
   openAiIntercept: boolean;
   smokeBaseUrl: string;
 }): string {
   const url = new URL("/internal/deploy/container-smoke", input.smokeBaseUrl);
   if (input.openAiIntercept) {
     url.searchParams.set("openAiIntercept", "1");
+  }
+  if (input.directR2PresignedPut) {
+    url.searchParams.set("directR2PresignedPut", "1");
   }
   return url.toString();
 }
@@ -347,6 +375,23 @@ function assertSmokeOpenAiInterceptResult(
   }
   if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {
     throw new Error("runner container OpenAI intercept smoke reported invalid stderr bytes.");
+  }
+}
+
+function assertSmokeDirectR2PresignedPutResult(
+  value: SmokeDirectR2PresignedPutResult | null | undefined,
+): void {
+  if (!value || typeof value !== "object") {
+    throw new Error("runner container direct R2 presigned PUT smoke did not return metadata.");
+  }
+  if (value.ok !== true || value.status !== 200) {
+    throw new Error("runner container direct R2 presigned PUT smoke did not complete successfully.");
+  }
+  if (typeof value.byteLength !== "number" || value.byteLength <= 150 * 1024 * 1024) {
+    throw new Error("runner container direct R2 presigned PUT smoke did not upload a large payload.");
+  }
+  if (typeof value.payloadSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.payloadSha256)) {
+    throw new Error("runner container direct R2 presigned PUT smoke did not report a payload hash.");
   }
 }
 

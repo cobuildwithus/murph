@@ -17,6 +17,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
     CF_PUBLIC_BASE_URL: "https://worker.example.test",
     CF_WORKER_NAME: "hosted-runner",
+    CLOUDFLARE_ACCOUNT_ID: "r2-account",
     HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION: "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
     HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
@@ -25,6 +26,10 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+    HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
+    HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account",
+    HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
+    HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_ASSISTANT_MODEL: "gpt-5.5",
     HOSTED_ASSISTANT_PROVIDER: "openai",
     HOSTED_ASSISTANT_REASONING_EFFORT: "low",
@@ -61,8 +66,12 @@ describe("deploy preflight helpers", () => {
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
       "HOSTED_CRYPTO_ENV",
+      "HOSTED_R2_PRESIGN_ACCOUNT_ID",
+      "HOSTED_R2_PRESIGN_BUCKET_NAME",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_LOG_FINGERPRINT_SECRET",
+      "HOSTED_R2_PRESIGN_ACCESS_KEY_ID",
+      "HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY",
       "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
       "OPENAI_API_KEY",
     ]);
@@ -95,7 +104,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK OPENAI_API_KEY",
     );
   });
 
@@ -117,6 +126,22 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
     }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("requires the direct-R2 presign bucket to match the Worker R2 binding bucket", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_BUCKET_NAME: "other-bundles",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.",
+    );
+  });
+
+  it("requires the direct-R2 presign account to match the Cloudflare deploy account", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_R2_PRESIGN_ACCOUNT_ID: "other-account",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_R2_PRESIGN_ACCOUNT_ID must match CLOUDFLARE_ACCOUNT_ID.",
+    );
   });
 
   it("rejects production worker deploys that point at preview or development web origins", () => {

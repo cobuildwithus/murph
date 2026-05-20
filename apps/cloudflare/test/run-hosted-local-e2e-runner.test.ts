@@ -226,6 +226,7 @@ function expectVitestSpawnCall(): void {
     "apps/cloudflare/vitest.e2e.config.ts",
     "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
+    "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",

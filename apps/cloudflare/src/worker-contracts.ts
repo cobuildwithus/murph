@@ -1,5 +1,8 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
+import type {
+  HostedWorkspaceSnapshotUploadSession,
+} from "./workspace-snapshot-store.ts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -23,10 +26,22 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<{ completed: boolean }>;
+  createHostedWorkspaceSnapshotUploadSession?(
+    input: HostedWorkspaceSnapshotUploadSession,
+  ): Promise<HostedWorkspaceSnapshotUploadSession>;
+  deleteHostedWorkspaceSnapshotUploadSession?(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<{ deleted: boolean }>;
+  readHostedWorkspaceSnapshotUploadSession?(input: {
+    snapshotId: string;
+    userId: string;
+  }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
     userId: string;
+    workspaceVersion?: string | null;
   }): Promise<boolean>;
 }
 
@@ -65,6 +80,11 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
+  HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
+  HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
+  HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
+  HOSTED_R2_PRESIGN_ENDPOINT?: string;
+  HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   MURPH_HOSTED_LOCAL_TEST_ROUTES?: string;

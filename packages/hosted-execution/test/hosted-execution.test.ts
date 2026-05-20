@@ -423,6 +423,7 @@ describe("hosted execution coverage gaps", () => {
       "./routes",
       "./runtime-control",
       "./side-effects",
+      "./workspace-snapshot-v2",
     ]);
     expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))
       .toEqual([]);

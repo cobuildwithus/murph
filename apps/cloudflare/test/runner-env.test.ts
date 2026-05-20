@@ -42,6 +42,8 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
+  HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
 } as const;
 const REQUIRED_OPENAI_PROVIDER_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",

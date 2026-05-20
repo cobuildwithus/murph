@@ -19,6 +19,13 @@ import {
 import {
   buildHostedExecutionLayeredSnapshotRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 import type {
   HostedRuntimeLogRequest,
   HostedWorkspaceState,
@@ -35,6 +42,64 @@ import type {
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace restore Codex continuity", () => {
+  test("restores v2 workspace snapshots through the snapshot port without artifact sidecars", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-v2-restore-"));
+
+    try {
+      const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+      const artifactGetCalls: string[] = [];
+      const snapshotRef = createWorkspaceSnapshotV2Ref();
+      const restoreCalls: Array<{
+        durableRoot: string;
+        ref: HostedWorkspaceSnapshotV2Ref;
+        scratchRoot?: string | null;
+      }> = [];
+
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createRestorePlatform({
+          artifactBytesByHash: new Map(),
+          artifactGetCalls,
+          workspaceSnapshotPort: {
+            async completeUploadedSnapshot() {
+              throw new Error("completeUploadedSnapshot is not used during v2 restore.");
+            },
+            async directPutEncryptedObject() {
+              throw new Error("directPutEncryptedObject is not used during v2 restore.");
+            },
+            async restoreWorkspaceSnapshot(request) {
+              restoreCalls.push(request);
+              await mkdir(request.durableRoot, { recursive: true });
+              await writeFile(path.join(request.durableRoot, "note.md"), "restored from v2\n", "utf8");
+            },
+            async startUpload() {
+              throw new Error("startUpload is not used during v2 restore.");
+            },
+            async unwrapDataKey() {
+              throw new Error("unwrapDataKey is not used by the restore dispatch test.");
+            },
+          },
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef,
+        }),
+      });
+
+      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(restoreCalls.length, 1);
+      assert.equal(restoreCalls[0]?.ref, snapshotRef);
+      assert.equal(
+        await readFile(path.join(restoredVaultRoot, "note.md"), "utf8"),
+        "restored from v2\n",
+      );
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("preserves Codex provider continuity when hot state includes its exact rollout", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-codex-restore-"));
 
@@ -1250,10 +1315,45 @@ function createBundleRef(input: {
   };
 }
 
+function createWorkspaceSnapshotV2Ref(): HostedWorkspaceSnapshotV2Ref {
+  const userId = "member_synthetic_workspace_restore";
+  const snapshotId = "snapshot_restore_v2";
+  const objectKey =
+    "users/hsn_abcdef0123456789abcdef01/workspace-snapshots/snapshot_restore_v2.snapshot.enc";
+  return {
+    archive: {
+      compression: "gzip",
+      encryptedByteSize: 128,
+      encryptedObjectSha256: "a".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "b".repeat(64),
+    },
+    createdAt: "2026-05-05T00:00:00.000Z",
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      }),
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_restore_v2",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_restore_v2",
+    },
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+    snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId,
+  } satisfies HostedWorkspaceSnapshotV2Ref;
+}
+
 function createRestorePlatform(input: {
   artifactBytesByHash: ReadonlyMap<string, Uint8Array>;
   artifactGetCalls?: string[];
   logRequests?: HostedRuntimeLogRequest[];
+  workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"];
 }): HostedRuntimePlatform {
   return {
     artifactStore: {
@@ -1281,6 +1381,7 @@ function createRestorePlatform(input: {
         };
       },
     },
+    ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
   };
 }
 

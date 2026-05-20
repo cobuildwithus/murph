@@ -8,11 +8,30 @@ import {
 
 export interface EncryptedR2ObjectBodyLike {
   arrayBuffer(): Promise<ArrayBuffer>;
+  body?: ReadableStream<Uint8Array>;
+  customMetadata?: Record<string, string>;
+  key?: string;
+  size?: number;
+}
+
+export type R2PutValueLike =
+  | ArrayBuffer
+  | ArrayBufferView
+  | Blob
+  | ReadableStream<Uint8Array>
+  | string;
+
+export interface R2PutOptionsLike {
+  customMetadata?: Record<string, string>;
+  httpMetadata?: {
+    contentType?: string;
+  };
+  onlyIf?: unknown;
 }
 
 export interface EncryptedR2BucketLike {
   get(key: string): Promise<EncryptedR2ObjectBodyLike | null>;
-  put(key: string, value: string): Promise<void>;
+  put(key: string, value: R2PutValueLike, options?: R2PutOptionsLike): Promise<void>;
 }
 
 const utf8Decoder = new TextDecoder();

@@ -279,6 +279,7 @@ export function mergeCloudflareLocalEnv(input: {
   const localKmsWrapKey =
     readHostedLocalKey("HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY")
     ?? (useRemoteHostedCryptoKeys ? null : createEnvelopeKey());
+  const hostedLocalTestR2PresignEnv = resolveHostedLocalTestR2PresignEnvironment(resolvedExisting);
   stripLegacyHostedCryptoAuthorityEnv(resolvedExisting);
   if (!useRemoteHostedCryptoKeys) {
     stripHostedLocalGeneratedStateEnv(resolvedExisting);
@@ -303,6 +304,7 @@ export function mergeCloudflareLocalEnv(input: {
       ? { HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: authoritySigningKey.privateJwkJson }
       : {}),
     ...(localKmsWrapKey ? { HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: localKmsWrapKey } : {}),
+    ...hostedLocalTestR2PresignEnv,
     HOSTED_DEVICE_ROUTING_INDEX_KEY: hostedDeviceRoutingIndexKey,
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: input.oidcIdentity.teamSlug,
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: input.oidcIdentity.projectName,
@@ -328,6 +330,31 @@ export function mergeCloudflareLocalEnv(input: {
     }
     return value;
   }
+}
+
+function resolveHostedLocalTestR2PresignEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const testRoutesEnabled =
+    env.NODE_ENV === "test" && env.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+  if (!isHostedLocalE2eEnvironment(env) && !testRoutesEnabled) {
+    return {};
+  }
+
+  return {
+    HOSTED_R2_PRESIGN_ACCESS_KEY_ID:
+      normalizeOptionalString(env.HOSTED_R2_PRESIGN_ACCESS_KEY_ID)
+      ?? "hosted-local-r2-access-key",
+    HOSTED_R2_PRESIGN_ACCOUNT_ID:
+      normalizeOptionalString(env.HOSTED_R2_PRESIGN_ACCOUNT_ID)
+      ?? "hosted-local-r2-account",
+    HOSTED_R2_PRESIGN_BUCKET_NAME:
+      normalizeOptionalString(env.HOSTED_R2_PRESIGN_BUCKET_NAME)
+      ?? "hosted-local-r2-bundles",
+    HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY:
+      normalizeOptionalString(env.HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY)
+      ?? "hosted-local-r2-secret-key",
+  };
 }
 
 function resolveHostedLocalAuthoritySigningKey(input: {

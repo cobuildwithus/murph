@@ -9,7 +9,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 - Vercel OIDC-authenticated nudge/control requests from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
-- encrypted hosted workspace snapshots, externalized artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
+- encrypted hosted workspace snapshots, legacy encrypted artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
 
 ## What It Does Not Own
 
@@ -42,12 +42,12 @@ Root `pnpm dev` starts the same local Cloudflare container path and uses the ima
 
 ## Storage Contract
 
-- The `vault` bundle slot stores one encrypted hosted workspace snapshot. That snapshot is still sensitive canonical vault material, not a second product database.
-- Large files are externalized into separately encrypted artifact blobs in the same bucket.
+- The live v2 workspace snapshot is one encrypted compressed tar object under `users/<namespace>/workspace-snapshots/<snapshotId>.snapshot.enc`. The container uploads that object directly to R2 through a short-lived presigned `PUT` URL minted by the Worker; Worker routes carry JSON start/complete metadata only and never receive the snapshot body.
+- Legacy full/base bundle refs and legacy artifact sidecars remain restoreable during migration, but v2 snapshot production does not externalize raw files into artifact blobs.
 - Separate encrypted objects hold runner-specific secret overrides and other execution-only sidecar blobs so those runtime artifacts do not force workspace rewrites.
-- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, and timestamps. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; bundle refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
+- Durable Object SQLite stores execution coordination only: lease and stale-result fencing, alarm hints, timestamps, and short-lived direct-R2 upload sessions without persisted presigned URLs. Canonical mailbox ordering, workspace checkpoint refs, redacted status/logs, and mailbox lag stay web-owned; snapshot refs come from hosted-runtime workspace control responses and may be kept only as an in-memory warm cache.
 - Hosted raw email payloads now live under the encrypted, root-independent `hosted-email/messages/{storageNamespaceId}/` prefix, are deleted after terminal wake cleanup when possible, and also carry a 1-hour R2 lifecycle backstop under `hosted-email/messages/` if eager cleanup misses them. Removed pre-launch root-derived raw-email paths are unsupported under the greenfield hard cut; the same lifecycle prefix bounds any transient leftovers.
-- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
+- Other encrypted execution blobs remain owner-cleaned or durable by design, including workspace snapshots, legacy artifact blobs, and runner-secrets blobs. Hosted device-sync runtime authority stays in `apps/web` behind narrow signed callbacks.
 - Runtime domain-root material comes from a signed web callback as ingress/runtime
   envelopes only. Cloudflare verifies the GCP KMS authority signature and unwraps
   only its configured P-256 automation recipient; it does not receive GCP KMS
@@ -66,6 +66,9 @@ Bindings:
 Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_LOG_FINGERPRINT_SECRET`
+- `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
+- `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 - `OPENAI_API_KEY`
 
@@ -78,6 +81,8 @@ Required worker vars:
 - `HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
 - `HOSTED_CRYPTO_ENV`
+- `HOSTED_R2_PRESIGN_ACCOUNT_ID`
+- `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
@@ -118,8 +123,7 @@ Optional execution vars and secrets:
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
 - `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`, but the child runner receives only an injected-credential placeholder; host Codex bridge/proxy env is not accepted
-- `HOSTED_LOG_FINGERPRINT_SECRET` is a required Worker-owned platform secret for
-  prompt-cache diagnostics. It must not be forwarded into the child runtime env.
+- `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot PUT URL generation. It must be an HTTPS origin when configured.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the child runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.
@@ -169,6 +173,6 @@ generic side-effect authority.
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
 `pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload; its apply step also runs deploy preflight before direct Wrangler upload.
-Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle fingerprint with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`.
+Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle fingerprint with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.

@@ -4,6 +4,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
   effectsPort: "results.worker",
   runnerControl: "runner-control.worker",
   webControlPlane: "web-control.worker",
+  workspaceSnapshotStore: "workspace-snapshots.worker",
 } as const;
 
 export const CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS = {
@@ -12,6 +13,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS = {
   effectsPort: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort}`,
   runnerControl: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl}`,
   webControlPlane: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane}`,
+  workspaceSnapshotStore: `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore}`,
 } as const;
 
 export const CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES = new Set<string>(

@@ -20,11 +20,13 @@ import {
 import {
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
+  type EncryptedR2ObjectBodyLike,
   type EncryptedR2BucketLike,
 } from "./crypto.js";
 
 export interface R2BucketLike extends EncryptedR2BucketLike {
   delete?(key: string): Promise<void>;
+  head?(key: string): Promise<Omit<EncryptedR2ObjectBodyLike, "arrayBuffer" | "body"> | null>;
   list?(input: {
     cursor?: string;
     limit?: number;

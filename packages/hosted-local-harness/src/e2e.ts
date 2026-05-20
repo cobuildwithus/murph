@@ -19,6 +19,7 @@ export type HostedLocalE2eScenarioName =
   | "container-continuity"
   | "device-connect"
   | "device-sync-wake"
+  | "direct-r2-presigned-put"
   | "idle-checkpoint-deferred-progress"
   | "mailbox-platform-env"
   | "linq-first-contact"
@@ -78,6 +79,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
     manualOnly: true,
     name: "device-sync-wake",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
+    name: "direct-r2-presigned-put",
   },
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",

@@ -29,7 +29,7 @@ Hosted assistant delivery recovery now relies on committed side-effect state ins
 
 Before the first deploy:
 
-1. Create the Worker service and the two R2 buckets used for encrypted hosted bundles.
+1. Create the Worker service and the two R2 buckets used for encrypted hosted runtime objects.
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
@@ -47,8 +47,11 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- `HOSTED_R2_PRESIGN_ACCOUNT_ID`
+- `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
 `CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
+`HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload through presigned URLs and are verified through the Worker R2 binding.
 For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
 origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
 HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
@@ -65,6 +68,8 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
+- `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
+- `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 - `OPENAI_API_KEY`
 
@@ -306,6 +311,7 @@ The GitHub-hosted production deploy job downloads that immediate handoff only fo
 - `GET /`
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint
+- if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
 - if `HOSTED_EXECUTION_SMOKE_OPENAI_INTERCEPT=true` is also configured, the managed-container smoke mints a short-lived write fence for `HOSTED_EXECUTION_SMOKE_USER_ID`, then runs a Codex CLI `responses` request from inside the Cloudflare container with `OPENAI_API_KEY=__cloudflare_injected__`, proving the container trusts Cloudflare's HTTPS-interception CA and the Worker injects the real OpenAI secret only under runtime authority
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 

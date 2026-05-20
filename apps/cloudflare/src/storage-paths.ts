@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 const HOSTED_STORAGE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{3,63}$/u;
+const HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const HOSTED_STORAGE_NAMESPACE_SALT = "murph.hosted.storage-namespace.v1";
 const HOSTED_STORAGE_PATH_SALT = "murph.hosted.storage-path.v1";
 
@@ -129,6 +130,28 @@ export async function hostedBrowserVaultReplicaUserPrefix(input: {
   return `users/${resolveHostedStorageNamespaceId(input)}/browser-vault-replicas/`;
 }
 
+export async function hostedWorkspaceSnapshotObjectKey(input: {
+  snapshotId: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  const userSegment = resolveHostedStorageNamespaceId(input);
+  const snapshotId = requireHostedWorkspaceSnapshotId(input.snapshotId);
+
+  return `users/${userSegment}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+}
+
+export function isUserScopedHostedWorkspaceSnapshotObjectKey(key: string): boolean {
+  return /^users\/[a-z0-9][a-z0-9_-]{3,63}\/workspace-snapshots\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.snapshot\.enc$/u.test(key);
+}
+
+export async function hostedWorkspaceSnapshotUserPrefix(input: {
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<string> {
+  return `users/${resolveHostedStorageNamespaceId(input)}/workspace-snapshots/`;
+}
+
 function resolveHostedStorageNamespaceId(input: { storageNamespaceId?: string | null; userId: string }): string {
   if (typeof input.storageNamespaceId === "string" && input.storageNamespaceId.trim().length > 0) {
     const normalized = input.storageNamespaceId.trim();
@@ -162,6 +185,14 @@ function requireStoragePathString(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) {
     throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function requireHostedWorkspaceSnapshotId(value: string): string {
+  const normalized = requireStoragePathString(value, "Hosted workspace snapshot id");
+  if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(normalized)) {
+    throw new TypeError("Hosted workspace snapshot id is invalid.");
   }
   return normalized;
 }

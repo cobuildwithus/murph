@@ -580,6 +580,58 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("runs the managed-container direct R2 presigned PUT smoke through the container network", async () => {
+    const runDirectR2PresignedPutSmoke = vi.fn(async () => ({
+      byteLength: 4096,
+      durationMs: 12,
+      ok: true,
+      payloadSha256: "a".repeat(64),
+      responseBodyBytes: 2,
+      status: 200,
+    }));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runDirectR2PresignedPutSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: JSON.stringify({
+        byteLength: 4096,
+        presignedPutUrl:
+          "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
+      }),
+      path: "/internal/direct-r2-presigned-put-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toEqual({
+      directR2PresignedPut: {
+        byteLength: 4096,
+        durationMs: 12,
+        ok: true,
+        payloadSha256: "a".repeat(64),
+        responseBodyBytes: 2,
+        status: 200,
+      },
+      ok: true,
+    });
+    expect(runDirectR2PresignedPutSmoke).toHaveBeenCalledWith({
+      byteLength: 4096,
+      presignedPutUrl:
+        "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("runs the OpenAI intercept smoke Codex process with an allowlisted environment", async () => {
     const originalPath = process.env.PATH;
     const originalOpenAiApiKey = process.env.OPENAI_API_KEY;

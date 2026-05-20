@@ -579,14 +579,24 @@ export class RunnerStateStore {
     attemptId: string;
     generation: string;
     userId: string;
+    workspaceVersion?: string | null;
   }): Promise<RunnerWriteFenceValidationResult> {
-    const meta = this.requireMetaRowSync();
+    let meta = this.requireMetaRowSync();
+    if (this.clearExpiredActiveRunSync(meta, Date.now())) {
+      this.writeMetaRowSync(meta);
+      meta = this.requireMetaRowSync();
+    }
     const token = this.readWriteFenceTokenSync(meta);
     if (
       !token
       || token.attemptId !== input.attemptId
       || token.generation !== input.generation
       || token.userId !== input.userId
+      || (
+        input.workspaceVersion !== undefined
+        && input.workspaceVersion !== null
+        && token.workspaceVersion !== input.workspaceVersion
+      )
     ) {
       return {
         owns: false,

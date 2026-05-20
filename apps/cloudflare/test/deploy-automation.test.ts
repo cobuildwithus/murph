@@ -102,6 +102,12 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
+  HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
+  HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+} as const;
+const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
+  HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
+  HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
 } as const;
 const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
@@ -713,6 +719,13 @@ describe("hosted deploy automation helpers", () => {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
       expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
     }
+    const deployWorkerStep = workflow.slice(
+      deployWorkerStepIndex,
+      workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
+    );
+    for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
+      expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
+    }
     expect(
       workflow.slice(validateDeployEnvStepIndex, workflow.indexOf("- name: Prepare deploy artifacts")),
     ).toContain("HOSTED_LOG_FINGERPRINT_SECRET: ${{ secrets.HOSTED_LOG_FINGERPRINT_SECRET }}");
@@ -923,6 +936,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -939,6 +953,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -959,6 +974,7 @@ describe("hosted deploy automation helpers", () => {
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -975,6 +991,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -991,6 +1008,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
     });
@@ -1006,6 +1024,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "openai-key",
       OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",

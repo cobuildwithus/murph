@@ -1,0 +1,163 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+  buildHostedWorkspaceSnapshotV2Aad,
+  createHostedWorkspaceSnapshotV2DataKey,
+  encodeHostedWorkspaceSnapshotV2DataKey,
+  decodeHostedWorkspaceSnapshotV2DataKey,
+  unwrapHostedWorkspaceSnapshotV2DataKey,
+  wrapHostedWorkspaceSnapshotV2DataKey,
+} from "../src/workspace-snapshot-v2.ts";
+import {
+  isHostedWorkspaceSnapshotV2Ref,
+  parseHostedExecutionSnapshotRef,
+  parseHostedWorkspaceSnapshotV2Ref,
+  readHostedBrowserVaultSourceStateHash,
+  readHostedExecutionSnapshotBaseRef,
+} from "../src/parsers.ts";
+
+describe("hosted workspace snapshot v2 refs", () => {
+  it("parses the single encrypted object snapshot contract", () => {
+    const ref = createWorkspaceSnapshotV2Ref();
+
+    expect(parseHostedWorkspaceSnapshotV2Ref(ref)).toEqual(ref);
+    expect(parseHostedExecutionSnapshotRef(ref)).toEqual(ref);
+    expect(isHostedWorkspaceSnapshotV2Ref(parseHostedExecutionSnapshotRef(ref))).toBe(true);
+    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(ref))).toBeNull();
+    expect(readHostedBrowserVaultSourceStateHash(parseHostedExecutionSnapshotRef(ref))).toBeNull();
+  });
+
+  it("rejects malformed archive metadata and AAD mismatches", () => {
+    const ref = createWorkspaceSnapshotV2Ref();
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      archive: {
+        ...ref.archive,
+        encryptedObjectSha256: "sha256:bad",
+      },
+    })).toThrow(/encryptedObjectSha256/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      archive: {
+        ...ref.archive,
+        encryptedByteSize: 0,
+      },
+    })).toThrow(/encryptedByteSize/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      archive: {
+        ...ref.archive,
+        compression: "zstd",
+      },
+    })).toThrow(/compression/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      createdAt: "2026-05-20T00:00:00Z",
+    })).toThrow(/createdAt/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      encryption: {
+        ...ref.encryption,
+        aad: {
+          ...ref.encryption.aad,
+          objectKey: "users/hsn_bad/workspace-snapshots/snapshot_1.snapshot.enc",
+        },
+      },
+    })).toThrow(/aad\.objectKey/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      snapshotId: "../snapshot",
+    })).toThrow(/snapshotId/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      objectKey: "users/hsn_abcdef0123456789abcdef01/artifacts/snapshot_1.snapshot.enc",
+    })).toThrow(/objectKey/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      objectKey: "users/hsn_abcdef0123456789abcdef01/workspace-snapshots/snapshot_2.snapshot.enc",
+    })).toThrow(/objectKey/u);
+
+    expect(() => parseHostedWorkspaceSnapshotV2Ref({
+      ...ref,
+      encryption: {
+        ...ref.encryption,
+        ivBase64: "base64url-iv",
+      },
+    })).toThrow(/ivBase64/u);
+  });
+
+  it("wraps snapshot data keys against AAD and the user runtime root", async () => {
+    const ref = createWorkspaceSnapshotV2Ref();
+    const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const dataKey = createHostedWorkspaceSnapshotV2DataKey();
+    const wrappedDataKey = await wrapHostedWorkspaceSnapshotV2DataKey({
+      aad: ref.encryption.aad,
+      dataKey,
+      rootKey,
+      rootKeyId: ref.encryption.rootKeyId,
+    });
+
+    expect(decodeHostedWorkspaceSnapshotV2DataKey(
+      encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+    )).toEqual(dataKey);
+    await expect(unwrapHostedWorkspaceSnapshotV2DataKey({
+      aad: ref.encryption.aad,
+      rootKey,
+      wrappedDataKey,
+    })).resolves.toEqual(dataKey);
+    await expect(unwrapHostedWorkspaceSnapshotV2DataKey({
+      aad: {
+        ...ref.encryption.aad,
+        snapshotId: "snapshot_2",
+      },
+      rootKey,
+      wrappedDataKey,
+    })).rejects.toThrow();
+  });
+});
+
+function createWorkspaceSnapshotV2Ref() {
+  const userId = "member_123";
+  const objectKey = "users/hsn_abcdef0123456789abcdef01/workspace-snapshots/snapshot_1.snapshot.enc";
+  const snapshotId = "snapshot_1";
+
+  return {
+    archive: {
+      compression: "gzip" as const,
+      encryptedByteSize: 1024,
+      encryptedObjectSha256: "b".repeat(64),
+      fileCount: 12,
+      format: "tar" as const,
+      plaintextArchiveSha256: "a".repeat(64),
+    },
+    createdAt: "2026-05-20T00:00:00.000Z",
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId,
+      }),
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "udrk:runtime:test-root",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "base64url-wrapped-key",
+    },
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId,
+  } satisfies HostedWorkspaceSnapshotV2Ref;
+}

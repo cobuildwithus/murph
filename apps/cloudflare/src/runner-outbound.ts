@@ -1,4 +1,31 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
+import type {
+  HostedWorkspaceSnapshotUploadSession,
+  WorkspaceSnapshotR2BucketLike,
+} from "./workspace-snapshot-store.ts";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  createHostedWorkspaceSnapshotV2DataKey,
+  encodeHostedWorkspaceSnapshotV2DataKey,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  readHostedWorkspaceSnapshotV2DataKeyWrapRootKeyId,
+  unwrapHostedWorkspaceSnapshotV2DataKey,
+  wrapHostedWorkspaceSnapshotV2DataKey,
+  type HostedWorkspaceSnapshotV2Aad,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
+import {
+  isHostedWorkspaceSnapshotV2Ref,
+  parseHostedWorkspaceCheckpointRequest,
+  parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+} from "@murphai/hosted-execution/routes";
 import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -13,10 +40,12 @@ import {
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
-import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
+import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
+  requireRunnerRuntimeWriteFenceWorkspaceWrite,
+  writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
@@ -27,8 +56,27 @@ import {
 } from "./runner-outbound/diagnostics.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
+  resolveRunnerOutboundUserRunnerStub,
+  requireRunnerOutboundUserStubMethod,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+  buildHostedWorkspaceSnapshotRefFromUploadSession,
+} from "./workspace-snapshot-store.ts";
+import {
+  hostedWorkspaceSnapshotObjectKey,
+  hostedWorkspaceSnapshotUserPrefix,
+  isUserScopedHostedWorkspaceSnapshotObjectKey,
+} from "./storage-paths.ts";
+import {
+  createHostedR2PresignedPutUrl,
+  readHostedR2PresignEnvironment,
+} from "./r2-presigned-url.ts";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "./web-control-plane.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
@@ -76,6 +124,89 @@ export async function handleRunnerOutboundRequest(
         env,
         environment,
         request,
+        userId,
+      });
+    }
+
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
+      if (url.pathname.startsWith("/__test/r2-presigned-put/")) {
+        if (!isHostedRunnerLocalTestRoutesEnabled(asWorkerStringEnvironment(env))) {
+          return notFound();
+        }
+        if (request.method !== "PUT") {
+          return methodNotAllowed();
+        }
+        const objectKey = readHostedLocalTestPresignedPutObjectKey(url);
+        if (!objectKey) {
+          return notFound();
+        }
+        return handleRunnerWorkspaceSnapshotLocalTestPresignedPutRequest({
+          bucket: env.BUNDLES,
+          env,
+          objectKey,
+          request,
+          url,
+          userId,
+        });
+      }
+
+      if (url.pathname === "/workspace-snapshots/start") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotStartRequest({
+          bucket: env.BUNDLES,
+          env,
+          environment,
+          request,
+          userId,
+        });
+      }
+
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap)?$/u.exec(
+        url.pathname,
+      );
+      if (!match?.groups) {
+        return notFound();
+      }
+
+      if (match.groups.suffix === "/complete") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotCompleteRequest({
+          bucket: env.BUNDLES,
+          env,
+          environment,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix === "/data-key/unwrap") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotDataKeyRequest({
+          bucket: env.BUNDLES,
+          env,
+          environment,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix || request.method !== "GET") {
+        return methodNotAllowed();
+      }
+
+      return handleRunnerWorkspaceSnapshotReadRequest({
+        bucket: env.BUNDLES,
+        env,
+        request,
+        snapshotId: match.groups.snapshotId,
         userId,
       });
     }
@@ -148,6 +279,52 @@ function readRunnerOutboundOperation(url: URL, method: string): string {
     pathname: url.pathname,
   });
   return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
+}
+
+function isHostedRunnerLocalTestRoutesEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return env.NODE_ENV === "test" && env.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+}
+
+function createHostedWorkspaceSnapshotLocalTestPresignedPutUrl(input: {
+  objectKey: string;
+}): { expiresAt: string; url: string } {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const encodedKey = input.objectKey.split("/").map(encodeURIComponent).join("/");
+  const url = new URL(
+    `/__test/r2-presigned-put/${encodedKey}`,
+    `http://${CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore}`,
+  );
+  url.searchParams.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
+  url.searchParams.set("X-Amz-Credential", "hosted-local-test/20260520/auto/s3/aws4_request");
+  url.searchParams.set("X-Amz-Date", now.toISOString().replace(/[:-]|\.\d{3}/gu, ""));
+  url.searchParams.set("X-Amz-Expires", "600");
+  url.searchParams.set("X-Amz-SignedHeaders", "content-type;host;if-none-match");
+  url.searchParams.set("X-Amz-Signature", "hosted-local-test-signature");
+
+  return {
+    expiresAt,
+    url: url.toString(),
+  };
+}
+
+function readHostedLocalTestPresignedPutObjectKey(url: URL): string | null {
+  const prefix = "/__test/r2-presigned-put/";
+  if (!url.pathname.startsWith(prefix)) {
+    return null;
+  }
+  const encodedKey = url.pathname.slice(prefix.length);
+  if (!encodedKey) {
+    return null;
+  }
+
+  try {
+    return encodedKey.split("/").map(decodeURIComponent).join("/");
+  } catch {
+    return null;
+  }
 }
 
 async function handleRunnerArtifactRequest(input: {
@@ -319,6 +496,535 @@ async function handleRunnerArtifactRequest(input: {
   }
 }
 
+async function handleRunnerWorkspaceSnapshotLocalTestPresignedPutRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  objectKey: string;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const signedHeaders = input.url.searchParams.get("X-Amz-SignedHeaders");
+  if (signedHeaders !== "content-type;host;if-none-match") {
+    return jsonError("Hosted workspace snapshot test PUT URL is invalid.", 400);
+  }
+  if (input.request.headers.get("if-none-match") !== "*") {
+    return jsonError("Hosted workspace snapshot test PUT requires if-none-match.", 400);
+  }
+  const contentType = input.request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (contentType !== HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE) {
+    return jsonError("Hosted workspace snapshot test PUT content-type is invalid.", 415);
+  }
+  if (!isUserScopedHostedWorkspaceSnapshotObjectKey(input.objectKey)) {
+    return jsonError("Hosted workspace snapshot test PUT object key is invalid.", 400);
+  }
+  const userPrefix = await hostedWorkspaceSnapshotUserPrefix({
+    userId: input.userId,
+  });
+  if (!input.objectKey.startsWith(userPrefix)) {
+    return unauthorized();
+  }
+
+  const authorized = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!authorized) {
+    return unauthorized();
+  }
+
+  if (!input.request.body) {
+    return jsonError("Hosted workspace snapshot test PUT body is required.", 400);
+  }
+
+  const existing = input.bucket.head
+    ? await input.bucket.head(input.objectKey)
+    : await input.bucket.get(input.objectKey);
+  if (existing) {
+    return new Response(null, { status: 412 });
+  }
+
+  await input.bucket.put(input.objectKey, input.request.body, {
+    httpMetadata: {
+      contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+    },
+  });
+
+  return new Response(null, { status: 200 });
+}
+
+async function handleRunnerWorkspaceSnapshotStartRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const reason = requireSnapshotDataKeyString(body.reason, "reason");
+  if (reason !== "idle_shutdown") {
+    return jsonError("Hosted workspace snapshot start reason must be idle_shutdown.", 400);
+  }
+  const expectedWorkspaceVersion = requireSnapshotDataKeyString(
+    body.expectedWorkspaceVersion,
+    "expectedWorkspaceVersion",
+  );
+  if (expectedWorkspaceVersion !== writeFence.workspaceVersion) {
+    return jsonError("Hosted workspace snapshot start workspace version is stale.", 409);
+  }
+
+  const snapshotId = createHostedWorkspaceSnapshotId();
+  const objectKey = await hostedWorkspaceSnapshotObjectKey({
+    snapshotId,
+    userId: input.userId,
+  });
+  const aad = buildHostedWorkspaceSnapshotV2Aad({
+    objectKey,
+    snapshotId,
+    userId: input.userId,
+  });
+
+  const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "runtime",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+  const dataKey = createHostedWorkspaceSnapshotV2DataKey();
+  const wrappedDataKey = await wrapHostedWorkspaceSnapshotV2DataKey({
+    aad,
+    dataKey,
+    rootKey: cryptoContext.rootKey,
+    rootKeyId: cryptoContext.rootKeyId,
+  });
+  const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(dataKey);
+  dataKey.fill(0);
+  const ivBase64 = createHostedWorkspaceSnapshotIvBase64();
+  const presigned = isHostedRunnerLocalTestRoutesEnabled(asWorkerStringEnvironment(input.env))
+    ? createHostedWorkspaceSnapshotLocalTestPresignedPutUrl({
+        objectKey,
+      })
+    : await createHostedR2PresignedPutUrl({
+        contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+        environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
+        key: objectKey,
+      });
+
+  const session: HostedWorkspaceSnapshotUploadSession = {
+    attemptId: writeFence.attemptId,
+    createdAt: new Date().toISOString(),
+    encryption: {
+      aad,
+      ivBase64,
+      rootKeyId: cryptoContext.rootKeyId,
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey,
+    },
+    expectedWorkspaceVersion,
+    expiresAt: presigned.expiresAt,
+    leaseGeneration: writeFence.generation,
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
+    snapshotId,
+    userId: input.userId,
+    workspaceVersion: writeFence.workspaceVersion,
+  };
+  await createWorkspaceSnapshotUploadSession({
+    env: input.env,
+    session,
+    userId: input.userId,
+  });
+
+  return json({
+    encryption: {
+      aad,
+      dataKeyBase64,
+      ivBase64,
+      rootKeyId: cryptoContext.rootKeyId,
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey,
+    },
+    expiresAt: presigned.expiresAt,
+    limits: {
+      maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      warnEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
+    },
+    objectKey,
+    putUrl: presigned.url,
+    snapshotId,
+  });
+}
+
+async function handleRunnerWorkspaceSnapshotReadRequest(input: {
+  bucket: WorkspaceSnapshotR2BucketLike;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const authorized = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!authorized) {
+    return unauthorized();
+  }
+  if (!input.bucket.get) {
+    return notFound();
+  }
+
+  const objectKey = await hostedWorkspaceSnapshotObjectKey({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  const object = await input.bucket.get(objectKey);
+  if (!object) {
+    return notFound();
+  }
+  if (object.body) {
+    const headers = new Headers({
+      "content-type": "application/octet-stream",
+    });
+    const objectSize = object.size;
+    if (typeof objectSize === "number" && Number.isSafeInteger(objectSize) && objectSize >= 0) {
+      headers.set("content-length", String(objectSize));
+    }
+    return new Response(object.body, {
+      headers,
+    });
+  }
+
+  return jsonError("Hosted workspace snapshot object stream is unavailable.", 503);
+}
+
+async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const authorized = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!authorized) {
+    return unauthorized();
+  }
+
+  const body = await readJsonObject(input.request, {
+    limitBytes: 16 * 1024,
+  });
+  const expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+
+  const cryptoContext = await resolveRunnerOutboundUserCryptoContext({
+    bucket: input.bucket,
+    domain: "runtime",
+    env: input.env,
+    environment: input.environment,
+    userId: input.userId,
+  });
+
+  const aad = readWorkspaceSnapshotAad(body.aad, "aad");
+  if (
+    aad.objectKey !== expectedObjectKey
+    || aad.snapshotId !== input.snapshotId
+    || aad.userId !== input.userId
+  ) {
+    return jsonError("Hosted workspace snapshot AAD is outside the bound user namespace.", 403);
+  }
+  const wrappedDataKey = requireSnapshotDataKeyString(body.wrappedDataKey, "wrappedDataKey");
+  const rootKeyId = requireSnapshotDataKeyString(body.rootKeyId, "rootKeyId");
+  if (readHostedWorkspaceSnapshotV2DataKeyWrapRootKeyId(wrappedDataKey) !== rootKeyId) {
+    return jsonError("Hosted workspace snapshot wrapped data key rootKeyId mismatch.", 400);
+  }
+  const rootKey = rootKeyId === cryptoContext.rootKeyId
+    ? cryptoContext.rootKey
+    : await cryptoContext.resolveKeyById(rootKeyId);
+  if (!rootKey) {
+    return notFound();
+  }
+  const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
+    aad,
+    rootKey,
+    wrappedDataKey,
+  });
+
+  return json({
+    dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+  });
+}
+
+async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
+  bucket: WorkspaceSnapshotR2BucketLike;
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+  const body = await readJsonObject(input.request, {
+    limitBytes: 64 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  const requestedObjectKey = requireSnapshotDataKeyString(body.objectKey, "objectKey");
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot complete snapshotId does not match its route.", 400);
+  }
+  const session = await readWorkspaceSnapshotUploadSession({
+    env: input.env,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (!session) {
+    return notFound();
+  }
+  if (Date.parse(session.expiresAt) <= Date.now()) {
+    await deleteWorkspaceSnapshotUploadSession({
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: session.objectKey,
+    });
+    return jsonError("Hosted workspace snapshot upload session expired.", 410);
+  }
+  if (
+    session.attemptId !== writeFence.attemptId
+    || session.leaseGeneration !== writeFence.generation
+    || session.workspaceVersion !== writeFence.workspaceVersion
+  ) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+  if (
+    session.userId !== input.userId
+    || session.snapshotId !== input.snapshotId
+    || session.objectKey !== requestedObjectKey
+    || session.encryption.aad.objectKey !== requestedObjectKey
+    || session.encryption.aad.snapshotId !== input.snapshotId
+  ) {
+    return jsonError("Hosted workspace snapshot ref is outside the bound user namespace.", 403);
+  }
+  const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
+    buildHostedWorkspaceSnapshotRefFromUploadSession({
+      archive: body.archive,
+      createdAt: new Date().toISOString(),
+      session,
+    }),
+    "Hosted workspace snapshot complete snapshotRef",
+  );
+  if (snapshotRef.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
+    await deleteWorkspaceSnapshotUploadSession({
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: snapshotRef.objectKey,
+    });
+    return jsonError("Hosted workspace snapshot exceeds the single-part size limit.", 413);
+  }
+  if (!input.bucket.head) {
+    return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
+  }
+  const object = await input.bucket.head(snapshotRef.objectKey);
+  if (!object) {
+    return notFound();
+  }
+  if (!Number.isSafeInteger(object.size)) {
+    return jsonError("Hosted workspace snapshot object size is unavailable.", 503);
+  }
+  if (object.size !== snapshotRef.archive.encryptedByteSize) {
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: snapshotRef.objectKey,
+    });
+    return jsonError("Hosted workspace snapshot object size does not match its ref.", 409);
+  }
+  const checkpointRequest = parseHostedWorkspaceCheckpointRequest({
+    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    snapshotRef,
+  });
+  if (
+    checkpointRequest.attemptId !== writeFence.attemptId
+    || checkpointRequest.leaseGeneration !== writeFence.generation
+    || checkpointRequest.expectedWorkspaceVersion !== writeFence.workspaceVersion
+  ) {
+    return jsonError("Hosted workspace snapshot checkpoint write fence is stale.", 409);
+  }
+  const checkpointResponse = await fetchHostedExecutionWorkspaceSnapshotCheckpoint({
+    checkpointRequest,
+    environment: input.environment,
+    fetchImpl: fetch,
+    userId: input.userId,
+  });
+  if (!checkpointResponse.ok) {
+    await deleteWorkspaceSnapshotUploadSession({
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: snapshotRef.objectKey,
+    });
+    return jsonError("Hosted workspace snapshot checkpoint failed.", checkpointResponse.status);
+  }
+  const checkpoint = parseHostedWorkspaceCheckpointResponse(await checkpointResponse.json());
+  if (checkpoint.workspace.userId !== input.userId) {
+    return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
+  }
+  if (!checkpoint.checkpointed) {
+    await deleteWorkspaceSnapshotUploadSession({
+      env: input.env,
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+    });
+    await deleteWorkspaceSnapshotObjectBestEffort({
+      bucket: input.bucket,
+      objectKey: snapshotRef.objectKey,
+    });
+    return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
+  }
+
+  const checkpointSnapshotRef = checkpoint.workspace.snapshotRef;
+  if (
+    !isHostedWorkspaceSnapshotV2Ref(checkpointSnapshotRef)
+    || checkpointSnapshotRef.snapshotId !== snapshotRef.snapshotId
+    || checkpointSnapshotRef.objectKey !== snapshotRef.objectKey
+    || checkpointSnapshotRef.archive.encryptedByteSize !== snapshotRef.archive.encryptedByteSize
+    || checkpointSnapshotRef.archive.encryptedObjectSha256 !== snapshotRef.archive.encryptedObjectSha256
+  ) {
+    return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
+  }
+
+  await deleteWorkspaceSnapshotUploadSession({
+    env: input.env,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+
+  return json({
+    checkpoint,
+    ok: true,
+    snapshotRef,
+  });
+}
+
+async function deleteWorkspaceSnapshotObjectBestEffort(input: {
+  bucket: WorkspaceSnapshotR2BucketLike;
+  objectKey: string;
+}): Promise<void> {
+  if (!input.bucket.delete) {
+    return;
+  }
+  try {
+    await input.bucket.delete(input.objectKey);
+  } catch {
+    // The critical durability outcome is the checkpoint CAS. Failed object
+    // cleanup is retried by later owner cleanup instead of changing the
+    // complete-route result.
+  }
+}
+
+function readWorkspaceSnapshotCompleteCheckpointRequest(
+  value: unknown,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted workspace snapshot complete checkpointRequest must be an object.");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function fetchHostedExecutionWorkspaceSnapshotCheckpoint(input: {
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  fetchImpl: typeof fetch;
+  userId: string;
+}): Promise<Response> {
+  const body = JSON.stringify(input.checkpointRequest);
+  const headers = new Headers();
+  writeRunnerRuntimeWriteFenceHeaders(headers, {
+    attemptId: input.checkpointRequest.attemptId,
+    leaseGeneration: input.checkpointRequest.leaseGeneration,
+    workspaceVersion: input.checkpointRequest.expectedWorkspaceVersion,
+  });
+  return await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.environment.hostedWebAllowHttpHosts
+      ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
+      : {}),
+    baseUrl: input.environment.hostedWebBaseUrl,
+    body,
+    boundUserId: input.userId,
+    callbackSigning: input.environment.webCallbackSigning,
+    fetchImpl: input.fetchImpl,
+    headers,
+    method: "POST",
+    path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+    timeoutMs: input.environment.webControlTimeoutMs,
+  });
+}
+
+function readWorkspaceSnapshotAad(value: unknown, label: string): HostedWorkspaceSnapshotV2Aad {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  const purpose = requireSnapshotDataKeyString(record.purpose, `${label}.purpose`);
+  const schema = requireSnapshotDataKeyString(record.schema, `${label}.schema`);
+  if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
+    throw new TypeError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
+  }
+  if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
+    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
+  }
+
+  return {
+    objectKey: requireSnapshotDataKeyString(record.objectKey, `${label}.objectKey`),
+    purpose,
+    schema,
+    snapshotId: requireSnapshotDataKeyString(record.snapshotId, `${label}.snapshotId`),
+    userId: requireSnapshotDataKeyString(record.userId, `${label}.userId`),
+  };
+}
+
+function requireSnapshotDataKeyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`Hosted workspace snapshot ${label} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
 async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -385,6 +1091,91 @@ async function writeRequestOwnsRuntimeWriteFence(input: {
 
     throw error;
   }
+}
+
+async function requireWorkspaceSnapshotWriteFence(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}) {
+  try {
+    return await requireRunnerRuntimeWriteFenceWorkspaceWrite({
+      ...input,
+      validateWorkspaceVersion: true,
+    });
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function createWorkspaceSnapshotUploadSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  session: HostedWorkspaceSnapshotUploadSession;
+  userId: string;
+}): Promise<HostedWorkspaceSnapshotUploadSession> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const createSession = requireRunnerOutboundUserStubMethod(
+    stub,
+    "createHostedWorkspaceSnapshotUploadSession",
+  );
+  return await createSession(input.session);
+}
+
+async function readWorkspaceSnapshotUploadSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  snapshotId: string;
+  userId: string;
+}): Promise<HostedWorkspaceSnapshotUploadSession | null> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const readSession = requireRunnerOutboundUserStubMethod(
+    stub,
+    "readHostedWorkspaceSnapshotUploadSession",
+  );
+  return await readSession({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+async function deleteWorkspaceSnapshotUploadSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  snapshotId: string;
+  userId: string;
+}): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const deleteSession = requireRunnerOutboundUserStubMethod(
+    stub,
+    "deleteHostedWorkspaceSnapshotUploadSession",
+  );
+  await deleteSession({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+function createHostedWorkspaceSnapshotId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `snapshot_${crypto.randomUUID()}`;
+  }
+  return `snapshot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function createHostedWorkspaceSnapshotIvBase64(): string {
+  return encodeBase64Url(crypto.getRandomValues(new Uint8Array(12)));
+}
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/gu, "-")
+    .replace(/\//gu, "_")
+    .replace(/=+$/u, "");
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
