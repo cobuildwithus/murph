@@ -22,7 +22,7 @@ const steps: {
     id: "devices",
     title: "Connect devices",
     description:
-      "Add Apple Health or a wearable to sync sleep, activity, recovery, and more.",
+      "Add Fitbit or another supported wearable to sync sleep, activity, recovery, and more.",
     cta: "Connect",
     href: "/connect",
     icon: WatchHeartIcon,

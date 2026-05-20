@@ -22,7 +22,7 @@ export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
     title: "Chat wherever you live",
   },
   {
-    body: "Apple Health, wearables, and lab results sync into every experiment automatically.",
+    body: "Fitbit, other supported wearables, and lab results sync into every experiment automatically.",
     icon: ActivityIcon,
     title: "Health connected",
   },
