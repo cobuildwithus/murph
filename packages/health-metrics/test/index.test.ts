@@ -4801,6 +4801,45 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.ok(unrunnableLab9Candidate);
   assert.equal(unrunnableLab9Candidate.modelLoaded, true);
   assert.equal(unrunnableLab9Candidate.selected, false);
+  const unrunnableLab9Arbiter = buildMurphAgeResearchCalculatorView(
+    submittedLab9InputsWithUnrunnableLab9ModelReport,
+  ).arbiter;
+  const unrunnableLab9ArbiterCandidate = unrunnableLab9Arbiter.candidateCards.find((candidate) =>
+    candidate.cardId === "lab9_bp_body_10y_acm_research"
+  );
+  assert.ok(unrunnableLab9ArbiterCandidate);
+  assert.equal(unrunnableLab9ArbiterCandidate.readyForResearchRun, false);
+  const fallbackLab5ArbiterCandidate = unrunnableLab9Arbiter.candidateCards.find((candidate) =>
+    candidate.cardId === "lab5_bp_bmi_transport_research"
+  );
+  assert.ok(fallbackLab5ArbiterCandidate);
+  assert.equal(fallbackLab5ArbiterCandidate.selected, true);
+  assert.equal(fallbackLab5ArbiterCandidate.readyForResearchRun, true);
+
+  const explicitlySelectedButUnscoredLab9Report = calculateMurphAgePublicReportFromSubmittedInputs({
+    asOf,
+    cardId: "lab9_bp_body_10y_acm_research",
+    chronologicalAgeYears: 45,
+    mode: "research",
+    models: {},
+    sex: "female",
+    submittedMetrics: [
+      ...submittedLab9Metrics,
+      ...submittedWearableMetrics,
+    ],
+  });
+  assert.equal(explicitlySelectedButUnscoredLab9Report.result, null);
+  const explicitlySelectedButUnscoredLab9View = buildMurphAgeResearchCalculatorView(
+    explicitlySelectedButUnscoredLab9Report,
+  );
+  assert.equal(explicitlySelectedButUnscoredLab9View.arbiter.selectedCardRole, "primary-lab-bp-body-adjuster");
+  assert.equal(explicitlySelectedButUnscoredLab9View.arbiter.selectionReason, "primary-lab-card-selected");
+  const explicitlySelectedButUnscoredLab9Candidate = explicitlySelectedButUnscoredLab9View.arbiter.candidateCards.find(
+    (candidate) => candidate.cardId === "lab9_bp_body_10y_acm_research",
+  );
+  assert.ok(explicitlySelectedButUnscoredLab9Candidate);
+  assert.equal(explicitlySelectedButUnscoredLab9Candidate.selected, true);
+  assert.equal(explicitlySelectedButUnscoredLab9Candidate.readyForResearchRun, false);
 
   const explicitLab5SensitivityWithFullLab9Inputs = calculateMurphAgeFromInputBundle({
     asOf,
@@ -4894,6 +4933,48 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.product.productUseAuthorized, false);
   assert.equal(submittedLab5ResearchView.displayStatus, "research-only");
   assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
+  assert.equal(
+    submittedLab5ResearchView.arbiter.strategy,
+    "r399-anchor-lab9-primary-lab5-transport-wearables-context",
+  );
+  assert.equal(
+    submittedLab5ResearchView.arbiter.labConflictPolicy,
+    "lab9-primary-lab5-transport-guard-r399-anchor-fallback",
+  );
+  assert.equal(submittedLab5ResearchView.arbiter.wearableScorePolicy, "context-only-not-score-bearing");
+  assert.equal(submittedLab5ResearchView.arbiter.selectedCardRole, "transport-fallback-and-discordance-guard");
+  assert.equal(submittedLab5ResearchView.arbiter.selectionReason, "transport-fallback-selected");
+  const submittedLab5ResearchArbiterCandidate = submittedLab5ResearchView.arbiter.candidateCards.find(
+    (candidate) => candidate.cardId === "lab5_bp_bmi_transport_research",
+  );
+  assert.ok(submittedLab5ResearchArbiterCandidate);
+  assert.equal(submittedLab5ResearchArbiterCandidate.role, "transport-fallback-and-discordance-guard");
+  assert.equal(submittedLab5ResearchArbiterCandidate.readyForResearchRun, true);
+  assert.equal(submittedLab5ResearchArbiterCandidate.selected, true);
+  const contaminatedSubmittedLab5Report = structuredClone(submittedLab5Report);
+  Object.assign(contaminatedSubmittedLab5Report.researchCandidateCards[1] ?? {}, {
+    coefficient: 1.23,
+    label: "private-value-label",
+    path: "<PRIVATE_PATH>",
+    prediction: 0.45,
+    selectedPointIds: ["private-point-id"],
+    unit: "secret-unit",
+    value: 5.67,
+  });
+  const contaminatedSubmittedLab5ArbiterJson = JSON.stringify(
+    buildMurphAgeResearchCalculatorView(contaminatedSubmittedLab5Report).arbiter,
+  );
+  for (const forbidden of [
+    "private-point-id",
+    "private-value-label",
+    "<PRIVATE_PATH>",
+    "secret-unit",
+    "coefficient",
+    "prediction",
+    "\"value\"",
+  ]) {
+    assert.equal(contaminatedSubmittedLab5ArbiterJson.includes(forbidden), false, forbidden);
+  }
   assert.equal(submittedLab5ResearchView.model.currentModelFamily, "frozen-nhis-r399-plus-research-increments");
   assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
   assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
