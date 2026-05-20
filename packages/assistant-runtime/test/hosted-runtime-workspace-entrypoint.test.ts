@@ -5373,7 +5373,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("clears consumed alarm wake when the assistant phase ends idle", async () => {
+  test("does not dirty-checkpoint a consumed alarm wake when the assistant phase ends idle", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -5383,62 +5383,53 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-          reason: "alarm",
-        },
+            reason: "alarm",
+          },
         }),
-      {
-        async createCheckpointSnapshot(snapshotInput) {
-          events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
-          return {
-            snapshotRef: createBundleRef({
-              hash: "7".repeat(64),
-              key: "users/bundles/member-synthetic/alarm-idle.bundle.json",
-              size: 512,
-            }),
-          };
-        },
-        async importItem() {
-          throw new Error("Import should not run when no mailbox items are fetched.");
-        },
-        platform: createPlatform({
-          mailboxPort: createMailboxPort({ events, items: [] }),
-          workspacePort: createWorkspacePort({
-            checkpointRequests,
-            events,
-            workspace: createWorkspaceState({
-              nextWakeAt: staleWakeAt,
-              nextWakeReason: "assistant",
-              version: "0",
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/alarm-idle.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Import should not run when no mailbox items are fetched.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleWakeAt,
+                nextWakeReason: "assistant",
+                version: "0",
+              }),
             }),
           }),
-        }),
-        vaultRoot,
-      });
+          vaultRoot,
+        },
+      );
 
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "snapshot:idle_shutdown:0",
-        "workspace.checkpoint",
       ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-      ]);
+      assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(result, {
         nextWakeAt: null,
         redactedStatus: {
-          hostedAssistantNextWakeAt: null,
-          hostedAssistantProgressed: true,
           hostedMailboxBlockedCount: 0,
           hostedMailboxConversationImportedSeq: "0",
           hostedMailboxFetchedCount: 0,
           hostedMailboxImportedCount: 0,
           hostedMailboxRetryableBlockedCount: 0,
           hostedMailboxSystemImportedSeq: "0",
-          hostedOutboxPendingDeliveryEffects: 0,
-          hostedOutboxTerminalizedSending: 0,
-          hostedSystemMailboxPrepared: 0,
-          hostedSystemMailboxRetryableFailed: 0,
         },
         status: "idle",
       });
