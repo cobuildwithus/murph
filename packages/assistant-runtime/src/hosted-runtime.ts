@@ -1310,6 +1310,7 @@ function shouldReplaceHostedWorkspaceInvocationWake(
 ): boolean {
   return Boolean(
     result.assistantPhaseResult
+      && result.assistantPhaseResult.progressed === true
       && Object.hasOwn(result.assistantPhaseResult, "nextWakeAt"),
   );
 }

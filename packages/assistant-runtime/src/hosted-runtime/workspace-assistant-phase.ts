@@ -2094,10 +2094,6 @@ function hostedAssistantWakeStateProgressed(input: {
     input.nextWakeAt !== null
     || hasFreshHostedConversationInput(input.input)
     || input.assistantMetrics.activeTurnInputIngested === true
-    || input.assistantMetrics.assistantAutomationProgressed === true
-    || input.assistantMetrics.deviceSyncProcessed > 0
-    || input.assistantMetrics.parserProcessed > 0
-    || (input.assistantMetrics.postCheckpointRecord ?? null) !== null
   );
 }
 

@@ -1589,6 +1589,99 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("runtime wake no-progress hints do not replace earlier dirty wake metadata", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const earlierWakeAt = "2099-04-27T00:01:00.000Z";
+    const laterWakeAt = "2099-04-27T00:05:00.000Z";
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_idle_checkpoint_no_progress_hint",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            reason: "nudge",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-idle-checkpoint-no-progress-hint.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => runtimeWakeSignal.notify(), 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: earlierWakeAt,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantNextWakeAt: earlierWakeAt,
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            return {
+              nextWakeAt: laterWakeAt,
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: laterWakeAt,
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, earlierWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, earlierWakeAt);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+        "assistant.phase:2",
+      ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint wake pass can clear previously checkpointed wake metadata", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
