@@ -1231,6 +1231,15 @@ describe("hosted runtime log store", () => {
       provider: "whoop",
       providerHttpStatus: 400,
       providerHttpStatusText: "Bad Request",
+      providerRequestAuthKind: "oauth_client_secret_body",
+      providerRequestBodyFieldCount: 5,
+      providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
+      providerRequestBodyKind: "form_urlencoded",
+      providerRequestEndpointKind: "whoop_oauth_token",
+      providerRequestMethod: "POST",
+      providerResponseErrorCode: "invalid_grant",
+      providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+      providerResponseShapeKind: "json_object",
       providerOAuthErrorCode: "invalid_grant",
       providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
       providerOAuthGrantType: "refresh_token",
@@ -1562,11 +1571,11 @@ describe("hosted runtime log store", () => {
       level: "warn",
       phase: "import",
       redacted: Object.fromEntries(
-        Array.from({ length: 49 }, (_, index) => [`count${index}`, index]),
+        Array.from({ length: 97 }, (_, index) => [`count${index}`, index]),
       ),
       tx,
       userId: "member_workspace_1",
-    })).rejects.toThrow(/at most 48 fields/u);
+    })).rejects.toThrow(/at most 96 fields/u);
 
     await expect(recordHostedRuntimeLogTx({
       at: "2026-04-26T00:02:00.000Z",

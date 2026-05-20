@@ -36,6 +36,7 @@ import {
   buildOAuthTokenRequestDiagnostics,
   buildProviderRequestDiagnostics,
   extractProviderQueryParameterNames,
+  resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
 
 import type {
@@ -649,16 +650,23 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       url: `${apiBaseUrl}${OURA_TOKEN_PATH}`,
       timeoutMs,
       parameters,
-      buildError: (response, body) =>
-        buildOuraApiError("OURA_TOKEN_REQUEST_FAILED", "Oura token request failed.", response, body, {
+      buildError: (response, body) => {
+        const diagnostics = buildOAuthTokenRequestDiagnostics({
+          endpointKind: OURA_OAUTH_TOKEN_ENDPOINT_KIND,
+          parameters,
+          responseBody: body,
+        });
+
+        return buildOuraApiError("OURA_TOKEN_REQUEST_FAILED", "Oura token request failed.", response, body, {
           retryable: response.status >= 500,
-          accountStatus: response.status === 401 ? "reauthorization_required" : null,
-          diagnostics: buildOAuthTokenRequestDiagnostics({
-            endpointKind: OURA_OAUTH_TOKEN_ENDPOINT_KIND,
+          accountStatus: resolveOAuthTokenRequestAccountStatus({
+            diagnostics,
             parameters,
-            responseBody: body,
+            response,
           }),
-        }),
+          diagnostics,
+        });
+      },
     });
   }
 

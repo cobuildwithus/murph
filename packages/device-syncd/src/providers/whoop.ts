@@ -382,6 +382,10 @@ function resolveWhoopTokenRequestAccountStatus(input: {
 function resolveWhoopApiEndpointKind(path: string): string {
   const pathname = safeProviderPathname(path);
 
+  if (pathname === "/v2/user/profile/basic") {
+    return "whoop_user_profile";
+  }
+
   if (pathname === "/v2/user/measurement/body") {
     return "whoop_body_measurement";
   }

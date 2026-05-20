@@ -349,6 +349,50 @@ describe("Strava device-sync provider", () => {
     });
   });
 
+  it("marks refresh-token invalid grants as reauthorization required", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = readUrl(input);
+
+        if (url === "https://www.strava.com/oauth/token") {
+          return new Response(JSON.stringify({
+            error: "invalid_grant",
+            message: "Refresh token expired. Reconnect Strava.",
+          }), {
+            status: 400,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+
+        throw new Error(`Unexpected Strava fetch: ${url}`);
+      }),
+    });
+
+    await expect(
+      provider.oauthAdapter.refreshTokens(buildStravaAccount({
+        refreshToken: "stored-refresh-token",
+      })),
+    ).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "STRAVA_TOKEN_REQUEST_FAILED",
+      details: {
+        accountStatus: "reauthorization_required",
+        oauthErrorCode: "invalid_grant",
+        oauthErrorDescription: "Refresh token expired. Reconnect Strava.",
+        oauthGrantType: "refresh_token",
+        oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token",
+        requestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token",
+        responseErrorCode: "invalid_grant",
+        responseErrorDescription: "Refresh token expired. Reconnect Strava.",
+        status: 400,
+      },
+    });
+  });
+
   it("rejects authorization when neither the token response nor the athlete profile provides a stable id", async () => {
     const provider = createStravaDeviceSyncProvider({
       clientId: "strava-client-id",

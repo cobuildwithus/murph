@@ -364,6 +364,54 @@ test("WHOOP provider avoids persisting connect-time profile or body measurement 
   ]);
 });
 
+test("WHOOP provider reports connect-time profile failures with a semantic endpoint kind", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "offline read:profile",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/profile/basic") {
+        return createJsonResponse({
+          code: "forbidden",
+          message: "Provider access to the profile is forbidden.",
+        }, 403);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.oauthAdapter.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+          state: "state-profile-failure",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-profile-failure",
+      ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_API_REQUEST_FAILED");
+      assert.equal(error.details?.requestEndpointKind, "whoop_user_profile");
+      assert.equal(error.details?.responseErrorDescription, "Provider access to the profile is forbidden.");
+      return true;
+    },
+  );
+});
+
 test("WHOOP provider rejects refresh responses that omit the rotated refresh token", async () => {
   let requestBody: string | null = null;
   const provider = createWhoopDeviceSyncProvider({

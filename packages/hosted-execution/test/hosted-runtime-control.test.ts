@@ -856,6 +856,7 @@ describe("hosted runtime control contracts", () => {
         customProviderErrorDetail: "Provider rejected the request after resume.",
         failureAssistantProviderErrorBodyMessage: "provider rejected the request",
         providerHttpStatusText: "Bad Request",
+        providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
         safeErrorMessage: "Codex app-server failed before producing a reply.",
       },
     }).redactedJson).toEqual({
@@ -863,6 +864,7 @@ describe("hosted runtime control contracts", () => {
       customProviderErrorDetail: "Provider rejected the request after resume.",
       failureAssistantProviderErrorBodyMessage: "provider rejected the request",
       providerHttpStatusText: "Bad Request",
+      providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
       safeErrorMessage: "Codex app-server failed before producing a reply.",
     });
     expect(() => parseHostedRuntimeLogEntry({
@@ -910,9 +912,9 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: Object.fromEntries(
-        Array.from({ length: 49 }, (_, index) => [`count${index}`, index]),
+        Array.from({ length: 97 }, (_, index) => [`count${index}`, index]),
       ),
-    })).toThrow(/at most 48 fields/u);
+    })).toThrow(/at most 96 fields/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

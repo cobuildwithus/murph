@@ -111,6 +111,7 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "payload",
   "payloadValue",
   "providerHttpStatusText",
+  "providerRequestBodyFieldNames",
   "safeErrorMessage",
   "tokenPreview",
 ]);
@@ -140,7 +141,7 @@ const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
   "Type",
   "Types",
 ] as const;
-const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 48;
+const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_LOG_ENTRY_KEYS = new Set([
