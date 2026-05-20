@@ -26,7 +26,6 @@ import {
   RunnerContainer,
 } from "../src/runner-container.ts";
 import {
-  handleHostedRunnerOpenInternetOutbound,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
 
@@ -59,10 +58,10 @@ describe("RunnerContainer", () => {
     vi.clearAllMocks();
   });
 
-  it("registers outbound interception through Cloudflare Containers accessors", () => {
-    expect(RunnerContainer.outbound).toBe(handleHostedRunnerOpenInternetOutbound);
+  it("registers host-specific outbound interception through Cloudflare Containers accessors", () => {
+    expect(RunnerContainer.outbound).toBeUndefined();
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
-    expect(DeploySmokeRunnerContainer.outbound).toBe(handleHostedRunnerOpenInternetOutbound);
+    expect(DeploySmokeRunnerContainer.outbound).toBeUndefined();
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
   });
 
