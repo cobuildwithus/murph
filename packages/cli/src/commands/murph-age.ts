@@ -531,6 +531,45 @@ const murphAgePublicWearableCalculatorViewSchema = z.object({
   scoreBearing: z.literal(false),
   scoreContributionAuthorized: z.literal(false),
 })
+const murphAgeResearchModelStatusViewSchema = z.object({
+  blockers: z.array(z.enum([
+    'biomarker-transport-not-confirmed',
+    'product-use-not-authorized',
+    'wearable-increment-not-validated',
+  ])),
+  contextOnlyMetricKeys: z.array(z.string().min(1)),
+  currentModelFamily: z.literal('frozen-nhis-r399-plus-research-increments'),
+  functionDisability: z.object({
+    currentUse: z.literal('context-only-diagnostic-sidecar'),
+    nextAction: z.literal('fresh-source-feasibility-before-promotion'),
+    scoreBearing: z.literal(false),
+  }),
+  labBody: z.object({
+    currentUse: z.literal('score-bearing-research-when-selected'),
+    nextAction: z.literal('validate-transport-before-product-use'),
+    transportStatus: z.literal('internal-promising-transport-not-confirmed'),
+  }),
+  productUseAuthorized: z.literal(false),
+  scoreBearingFeatureKeys: z.array(z.string().min(1)),
+  scoreBearingMetricKeys: z.array(z.string().min(1)),
+  scoreInterpretation: z.literal('risk-age-equivalent-research-only'),
+  selectedResearchCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  wearable: z.object({
+    consumerValidationStatus: z.literal('missing'),
+    currentUse: z.literal('context-only-shadow'),
+    nextAction: z.literal('run_external_or_partner_lab_wearable_aggregate_delta'),
+    nextExternalOrPartnerRouteIdsByPriority: z.array(z.string().min(1)),
+    scoreBearing: z.literal(false),
+    scoreContributionAuthorized: z.literal(false),
+    shadowEvidencePacketIds: z.array(z.enum([
+      'r1038-nhanes-modern-lab-activity-loop',
+      'r1049-nhanes-activity-control-diagnostic',
+      'r1065-nhanes-wrist-activity-shadow-loop',
+      'r1066-nhanes-wrist-activity-robustness-loop',
+      'r1067-nhanes-wrist-final-stress-test',
+    ])),
+  }),
+})
 export const murphAgeResearchCalculatorViewResultSchema = z.object({
   ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
   blockedFeatureKeys: z.array(z.string().min(1)),
@@ -540,6 +579,7 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
   missingFeatureKeys: z.array(z.string().min(1)),
   mode: murphAgeModeSchema,
+  model: murphAgeResearchModelStatusViewSchema,
   product: z.object({
     ageDisplayReady: z.boolean(),
     productUseAuthorized: z.literal(false),
