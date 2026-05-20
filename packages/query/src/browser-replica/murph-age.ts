@@ -7,9 +7,9 @@ import {
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
-  listMurphAgeWearableBridgeFeatureSpecs,
   normalizeMetricValue,
   resolveMetricDefinition,
+  resolveMurphAgeWearableBridgeMetricSourceKind,
   resolveMurphAgeModelCardPolicy,
   type MetricPoint,
   type MetricSourceKind,
@@ -152,35 +152,6 @@ const BROWSER_VAULT_MURPH_AGE_RUNTIME_INPUTS = [
   },
 ] satisfies readonly BrowserVaultMurphAgeRuntimeInputReadiness[];
 
-const WEARABLE_BRIDGE_METRIC_KEYS = new Set(
-  listMurphAgeWearableBridgeFeatureSpecs().flatMap((spec) => [
-    ...spec.metricKeys,
-    ...spec.requiredQualityMetricKeys,
-  ]),
-);
-
-const SLEEP_METRIC_KEY_HINTS = new Set([
-  "deep-sleep-minutes",
-  "rem-sleep-minutes",
-  "sleep-duration-variability-minutes",
-  "sleep-efficiency",
-  "sleep-midpoint-variability-minutes",
-  "sleep-regularity-score",
-  "sleep-score",
-  "total-sleep-minutes",
-  "wearable-valid-night-count-28d",
-]);
-
-const ACTIVITY_METRIC_KEY_HINTS = new Set([
-  "activity-minutes",
-  "estimated-vo2-max",
-  "mvpa-minutes",
-  "peak-30-minute-cadence",
-  "sedentary-minutes",
-  "steps",
-  "wearable-valid-day-count-28d",
-]);
-
 export function selectBrowserVaultMurphAgeReadiness(
   client: BrowserVaultQueryClient,
 ): BrowserVaultMurphAgeReadiness {
@@ -291,11 +262,8 @@ function inferSourceKind(
   row: BrowserVaultMetricRow | null,
 ): MetricSourceKind {
   if (row?.sourceKind) return row.sourceKind;
-  if (WEARABLE_BRIDGE_METRIC_KEYS.has(selection.metricKey)) {
-    if (SLEEP_METRIC_KEY_HINTS.has(selection.metricKey)) return "sleep-summary";
-    if (ACTIVITY_METRIC_KEY_HINTS.has(selection.metricKey)) return "activity-summary";
-    return "wearable-summary";
-  }
+  const wearableSourceKind = resolveMurphAgeWearableBridgeMetricSourceKind(selection.metricKey);
+  if (wearableSourceKind) return wearableSourceKind;
 
   const category = resolveMetricDefinition(selection.metricKey)?.category;
   if (category === "lab") return "test-result";

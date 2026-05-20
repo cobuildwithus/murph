@@ -20,6 +20,8 @@ import {
   MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
+  MURPH_AGE_WEARABLE_COVERAGE_MIN_VALID_DAYS,
+  MURPH_AGE_WEARABLE_COVERAGE_WINDOW_DAYS,
   MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
@@ -51,6 +53,8 @@ import {
   isMurphAgeInputBundleMetricPointAllowed,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  isMurphAgeWearableBridgeValidDayMetricPoint,
+  isMurphAgeWearableBridgeValidNightMetricPoint,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
@@ -62,6 +66,7 @@ import {
   listMurphAgeSourceRoutesByLayer,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
+  listMurphAgeWearableBridgeMetricSourceHints,
   listMurphAgeWearableShadowIncrementPolicies,
   listMetricPoints,
   listMetricDefinitions,
@@ -76,6 +81,8 @@ import {
   resolveMurphAgeModelCardPolicy,
   resolveMurphAgeSourceRoute,
   resolveMurphAgeWearableBridgeFeatureSpec,
+  resolveMurphAgeWearableBridgeMetricSourceHint,
+  resolveMurphAgeWearableBridgeMetricSourceKind,
   resolveMurphAgeWearableShadowIncrementPolicy,
   selectMetricGoalProgress,
   selectMetricSeries,
@@ -2903,6 +2910,56 @@ test("exposes non-score-bearing wearable bridge feature specs for research routi
   assert.equal(freshActivityVolume?.metricKeys.includes("hba1c"), false);
   assert.equal(freshActivityVolume?.outputBoundary.rowValuesExportAllowed, false);
   assert.equal(freshActivityVolume?.requiredQualityMetricKeys.includes("glucose"), false);
+});
+
+test("exposes one wearable bridge metric source and coverage contract", () => {
+  assert.equal(MURPH_AGE_WEARABLE_COVERAGE_WINDOW_DAYS, 28);
+  assert.equal(MURPH_AGE_WEARABLE_COVERAGE_MIN_VALID_DAYS, 14);
+
+  const hints = listMurphAgeWearableBridgeMetricSourceHints();
+  assert.equal(new Set(hints.map((hint) => hint.metricKey)).size, hints.length);
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_valid_day_count_28d"), "activity-summary");
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_valid_night_count_28d"), "sleep-summary");
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("wearable_coverage_index"), "wearable-summary");
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("sleep_efficiency"), "sleep-summary");
+  assert.equal(resolveMurphAgeWearableBridgeMetricSourceKind("hrv_rmssd"), "wearable-summary");
+
+  const steps = resolveMurphAgeWearableBridgeMetricSourceHint("steps");
+  assert.deepEqual(steps?.validObservationRoles, ["day"]);
+  assert.equal(steps?.sourceKinds.includes("activity-summary"), true);
+  assert.equal(steps?.sourceKinds.includes("wearable-summary"), true);
+  assert.equal(steps?.featureKeys.includes("activity-volume"), true);
+  assert.equal(steps?.featureKeys.includes("steps"), true);
+
+  const totalSleep = resolveMurphAgeWearableBridgeMetricSourceHint("total_sleep_minutes");
+  assert.deepEqual(totalSleep?.validObservationRoles, ["night"]);
+  assert.equal(totalSleep?.sourceKinds.includes("sleep-summary"), true);
+  assert.equal(totalSleep?.sourceKinds.includes("wearable-summary"), true);
+
+  const dayQuality = resolveMurphAgeWearableBridgeMetricSourceHint("wearable-valid-day-count-28d");
+  assert.equal(dayQuality?.qualityMetricRole, "day");
+  assert.deepEqual(dayQuality?.validObservationRoles, []);
+
+  const coverage = resolveMurphAgeWearableBridgeMetricSourceHint("wearable-coverage-index");
+  assert.equal(coverage?.qualityMetricRole, "coverage");
+  assert.equal(coverage?.defaultSourceKind, "wearable-summary");
+
+  assert.equal(isMurphAgeWearableBridgeValidDayMetricPoint({ metricKey: "steps", sourceKind: "activity-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidDayMetricPoint({ metricKey: "mvpa_minutes", sourceKind: "wearable-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidDayMetricPoint({ metricKey: "resting-heart-rate", sourceKind: "wearable-summary" }), false);
+  assert.equal(isMurphAgeWearableBridgeValidDayMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "wearable-summary" }), false);
+  assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "total-sleep-minutes", sourceKind: "sleep-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "sleep-score", sourceKind: "wearable-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "sleep-summary" }), true);
+  assert.equal(isMurphAgeWearableBridgeValidNightMetricPoint({ metricKey: "hrv-rmssd", sourceKind: "wearable-summary" }), false);
+
+  if (steps) {
+    steps.sourceKinds.push("sleep-summary");
+    steps.validObservationRoles.push("night");
+  }
+  const freshSteps = resolveMurphAgeWearableBridgeMetricSourceHint("steps");
+  assert.equal(freshSteps?.sourceKinds.includes("sleep-summary"), false);
+  assert.deepEqual(freshSteps?.validObservationRoles, ["day"]);
 });
 
 test("keeps the wearable scoring strategy explicit while product contribution stays zero", () => {

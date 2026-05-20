@@ -109,6 +109,32 @@ test("keeps wearable-only browser-vault data on a context-only Murph Age path", 
   ]);
 });
 
+test("infers wearable source kinds from the shared Murph Age bridge contract when rows are absent", () => {
+  const generatedAt = "2026-05-10T12:00:00.000Z";
+  const points = [
+    ...lab9BpBodyPoints(),
+    ...wearableShadowPoints(),
+  ];
+  const readiness = selectBrowserVaultMurphAgeReadiness(createBrowserVaultQueryClient(createReplica({
+    generatedAt,
+    metricRows: [],
+    metricSelectionRows: createBrowserVaultMetricSelectionRows({
+      generatedAt,
+      metricPoints: points,
+      metricRowPointIds: new Set(),
+    }),
+  })));
+
+  assert.equal(readiness.primaryBundle.status, "ready");
+  assert.equal(readiness.scoreReadiness.status, "research-ready-product-blocked");
+  assert.deepEqual(readiness.wearableShadow.readyFamilies.sort(), [
+    "activity",
+    "hrv",
+    "resting-heart-rate",
+    "sleep",
+  ]);
+});
+
 test("does not infer Murph Age readiness from raw browser metric rows without selected metric rows", () => {
   const generatedAt = "2026-05-10T12:00:00.000Z";
   const readiness = selectBrowserVaultMurphAgeReadiness(createBrowserVaultQueryClient(createReplica({
