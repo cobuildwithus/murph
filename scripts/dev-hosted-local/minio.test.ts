@@ -1,0 +1,298 @@
+import { EventEmitter } from "node:events";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const runtimeMocks = vi.hoisted(() => ({
+  spawnChildProcess: vi.fn(),
+  terminateChildProcessAndWait: vi.fn(async () => {}),
+  waitForHealthyHttpEndpoint: vi.fn(async () => {}),
+}));
+
+const childProcessMocks = vi.hoisted(() => ({
+  spawnResponses: [] as Array<{
+    exitCode?: number;
+    stderr?: string;
+    stdout?: string;
+  }>,
+  spawn: vi.fn(() => {
+    const child = new EventEmitter();
+    const response = childProcessMocks.spawnResponses.shift() ?? {};
+    Object.assign(child, {
+      stderr: new EventEmitter(),
+      stdout: new EventEmitter(),
+    });
+    queueMicrotask(() => {
+      if (response.stdout) {
+        (child as EventEmitter & { stdout: EventEmitter }).stdout.emit("data", response.stdout);
+      }
+      if (response.stderr) {
+        (child as EventEmitter & { stderr: EventEmitter }).stderr.emit("data", response.stderr);
+      }
+      child.emit("exit", response.exitCode ?? 0);
+    });
+    return child;
+  }),
+}));
+
+const netMocks = vi.hoisted(() => ({
+  listens: [] as Array<{
+    host: string;
+    port: number;
+  }>,
+}));
+
+vi.mock("node:child_process", () => ({
+  spawn: childProcessMocks.spawn,
+}));
+
+vi.mock("node:net", () => ({
+  default: {
+    createServer: () => {
+      const server = new EventEmitter() as EventEmitter & {
+        address: () => { port: number };
+        close: (callback: (error?: Error) => void) => void;
+        listen: (port: number, host: string) => void;
+      };
+      let boundPort = 49_000 + netMocks.listens.length;
+      server.address = () => ({ port: boundPort });
+      server.close = (callback) => queueMicrotask(() => callback());
+      server.listen = (port, host) => {
+        boundPort = port === 0 ? boundPort : port;
+        netMocks.listens.push({ host, port: boundPort });
+        queueMicrotask(() => server.emit("listening"));
+      };
+      return server;
+    },
+  },
+}));
+
+vi.mock("./runtime.ts", () => runtimeMocks);
+
+describe("hosted-local MinIO sidecar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    childProcessMocks.spawnResponses = [];
+    netMocks.listens = [];
+  });
+
+  it("starts a container-reachable S3-compatible endpoint for hosted-local E2E", async () => {
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+
+    expect(server?.process).toBe(child);
+    expect(server?.containerName).toMatch(/^murph-hosted-local-r2-/u);
+    expect(server?.env).toEqual(expect.objectContaining({
+      HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
+      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+    }));
+    expect(server?.env).not.toHaveProperty("MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST");
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["rm", "-f"]),
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+    const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
+    const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
+    expect(publishArg).toEqual(expect.stringMatching(/^127\.0\.0\.1:\d+:9000$/u));
+    expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
+    expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
+    expect(dockerArgs).toContain("MINIO_REGION_NAME");
+    expect(dockerArgs).toContain("minio/minio:RELEASE.2025-09-07T16-13-09Z");
+    expect(runtimeMocks.spawnChildProcess.mock.calls[0]?.[3]).toEqual(expect.objectContaining({
+      MINIO_REGION_NAME: "auto",
+    }));
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      [
+        "ps",
+        "-aq",
+        "--filter",
+        "label=murph.hosted-local.role=r2-minio",
+        "--filter",
+        "label=murph.hosted-local.build-id=build-test",
+      ],
+      expect.objectContaining({ stdio: ["ignore", "pipe", "ignore"] }),
+    );
+  });
+
+  it("accepts an exact Docker bridge gateway and marks the hosted-local R2 endpoint for private bridge presign", async () => {
+    childProcessMocks.spawnResponses = [
+      { stdout: "172.17.0.1\n" },
+      {},
+      { stdout: "" },
+    ];
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "172.17.0.1",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+
+    expect(server?.env).toEqual(expect.objectContaining({
+      HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/172\.17\.0\.1:\d+$/u),
+      HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/172\.17\.0\.1:\d+$/u),
+      MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST: "172.17.0.1",
+    }));
+    const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
+    expect(dockerArgs[dockerArgs.indexOf("-p") + 1]).toEqual(
+      expect.stringMatching(/^172\.17\.0\.1:\d+:9000$/u),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      [
+        "network",
+        "inspect",
+        "bridge",
+        "--format",
+        "{{range .IPAM.Config}}{{if .Gateway}}{{.Gateway}}{{end}}{{end}}",
+      ],
+      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
+    );
+  });
+
+  it("rejects arbitrary private and LAN hosts that are not the exact Docker bridge gateway", async () => {
+    childProcessMocks.spawnResponses = [
+      { stdout: "172.17.0.1\n" },
+    ];
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "192.168.1.20",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).rejects.toThrow("rejects arbitrary private/LAN hosts");
+    expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
+  });
+
+  it("uses label-scoped cleanup for stale hosted-local MinIO containers", async () => {
+    childProcessMocks.spawnResponses = [
+      {},
+      { stdout: "container-a\ncontainer-b\n" },
+      {},
+    ];
+    const { cleanupHostedLocalMinioContainerBestEffort } = await import("./minio.ts");
+
+    await cleanupHostedLocalMinioContainerBestEffort(
+      { DOCKER_CONFIG: ".tmp/docker-config" },
+      "murph-hosted-local-r2-build-test",
+    );
+
+    expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
+      2,
+      "docker",
+      [
+        "ps",
+        "-aq",
+        "--filter",
+        "label=murph.hosted-local.role=r2-minio",
+        "--filter",
+        "label=murph.hosted-local.build-id=build-test",
+      ],
+      expect.objectContaining({
+        env: { DOCKER_CONFIG: ".tmp/docker-config" },
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
+      3,
+      "docker",
+      ["rm", "-f", "container-a", "container-b"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+  });
+
+  it("removes the named MinIO container and label-matching stale containers on startup failure", async () => {
+    childProcessMocks.spawnResponses = [
+      {},
+      { stdout: "" },
+      {},
+      { stdout: "stale-container\n" },
+      {},
+    ];
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    runtimeMocks.waitForHealthyHttpEndpoint.mockRejectedValueOnce(new Error("minio unhealthy"));
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).rejects.toThrow("minio unhealthy");
+
+    expect(runtimeMocks.terminateChildProcessAndWait).toHaveBeenCalledWith(
+      child.child,
+      { signal: "SIGTERM" },
+    );
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      ["rm", "-f", "murph-hosted-local-r2-build-test"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      ["rm", "-f", "stale-container"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+  });
+
+  it("fails fast when MinIO is skipped without explicit hosted-local R2 endpoints", async () => {
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    await expect(maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_DEV_SKIP_MINIO: "1",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    })).rejects.toThrow("MURPH_DEV_SKIP_MINIO=1 requires explicit hosted-local R2 presign endpoints");
+    expect(runtimeMocks.spawnChildProcess).not.toHaveBeenCalled();
+  });
+});
