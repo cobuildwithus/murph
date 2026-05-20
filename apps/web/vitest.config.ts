@@ -29,7 +29,7 @@ export default defineProject({
     name: "hosted-web",
     environment: "node",
     ...resolveMurphVitestConcurrency(),
-    include: ["apps/web/test/**/*.test.ts"],
+    include: ["apps/web/test/**/*.test.ts", "apps/web/test/**/*.test.tsx"],
     setupFiles: [path.join(appDir, "test", "setup-env.ts")],
   },
 });
