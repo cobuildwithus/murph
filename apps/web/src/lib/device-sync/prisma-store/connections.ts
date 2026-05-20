@@ -20,7 +20,7 @@ import {
   maybeDate,
   toIsoTimestamp,
   normalizeNullableString,
-  omitHostedSqlErrorText,
+  sanitizeHostedConnectionLastErrorMessage,
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
@@ -299,7 +299,7 @@ export class PrismaHostedConnectionStore {
           accessTokenExpiresAt: null,
           keyVersion: null,
           lastErrorCode: normalizeNullableString(input.code) ?? "OAUTH_SETUP_FAILED",
-          lastErrorMessage: omitHostedSqlErrorText(input.message),
+          lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(input.message),
           lastSyncErrorAt: new Date(input.now),
           nextReconcileAt: null,
           refreshTokenEncrypted: null,
@@ -335,7 +335,7 @@ export class PrismaHostedConnectionStore {
         lastSyncCompletedAt: maybeDate(account.lastSyncCompletedAt),
         lastSyncErrorAt: maybeDate(account.lastSyncErrorAt),
         lastErrorCode: normalizeNullableString(account.lastErrorCode),
-        lastErrorMessage: omitHostedSqlErrorText(account.lastErrorMessage),
+        lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(account.lastErrorMessage),
         metadataJson: toPrismaJsonObject(sanitizeHostedDeviceSyncConnectionMetadata(account.metadata ?? {})),
         nextReconcileAt: maybeDate(account.nextReconcileAt),
         scopesJson: normalizeStoredScopes(account.scopes),
@@ -982,7 +982,7 @@ function buildHostedLocalHeartbeatUpdateData(
       ? { lastErrorCode: normalizeNullableString(localState.lastErrorCode ?? null) }
       : {}),
     ...("lastErrorMessage" in localState
-      ? { lastErrorMessage: omitHostedSqlErrorText(localState.lastErrorMessage ?? null) }
+      ? { lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(localState.lastErrorMessage ?? null) }
       : {}),
   };
 }

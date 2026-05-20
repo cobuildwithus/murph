@@ -9,6 +9,7 @@ import type { HostedStaticDeviceSyncConnectionRecord } from "../internal-runtime
 import {
   maybeIsoTimestamp,
   normalizeNullableString,
+  sanitizeHostedConnectionLastErrorMessage,
 } from "../shared";
 
 export const hostedConnectionRecordArgs = {
@@ -65,7 +66,7 @@ export function mapHostedConnectionRecord(record: HostedConnectionRecord): Hoste
     externalAccountId: null,
     id: record.id,
     lastErrorCode: normalizeNullableString(record.lastErrorCode),
-    lastErrorMessage: null,
+    lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(record.lastErrorMessage),
     lastSyncCompletedAt: maybeIsoTimestamp(record.lastSyncCompletedAt),
     lastSyncErrorAt: maybeIsoTimestamp(record.lastSyncErrorAt),
     lastSyncStartedAt: maybeIsoTimestamp(record.lastSyncStartedAt),
