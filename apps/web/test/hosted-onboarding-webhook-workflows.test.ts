@@ -344,12 +344,12 @@ describe("hosted onboarding webhook workflows", () => {
 
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "device-sync.dirty-recovery:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("nudges reconcile recovery even when the mailbox pointer is already checkpointed", async () => {
@@ -361,12 +361,60 @@ describe("hosted onboarding webhook workflows", () => {
 
     expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
       context: "device-sync.reconcile-recovery:workflow",
       timeoutMs: 5_000,
       userId: "member_123",
     });
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("keeps device-sync recovery outside the assistant usage gate", async () => {
+    mocks.nudgeHostedAssistantRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: false,
+      alarmScheduled: null,
+      kind: null,
+      configured: true,
+      errorCode: "AI_USAGE_GATE_DENIED",
+      immediateDriveStarted: null,
+      inFlight: null,
+      nextAlarmAtPresent: null,
+      usageGateDenied: true,
+    });
+
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      runnerNudgeIntent: "device-sync-reconcile-recovery",
+      source: "device-sync",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).toHaveBeenCalledWith({
+      context: "device-sync.reconcile-recovery:workflow",
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+  });
+
+  it("retries device-sync recovery when the system nudge is unavailable", async () => {
+    mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
+      accepted: false,
+      alarmScheduled: null,
+      configured: true,
+      errorCode: "HOSTED_RUNNER_UNAVAILABLE",
+      immediateDriveStarted: null,
+      inFlight: null,
+      kind: null,
+      nextAlarmAtPresent: null,
+    });
+
+    await expect(nudgeHostedWebhookMailboxItemStep({
+      mailboxItemId: "mailbox_123",
+      runnerNudgeIntent: "device-sync-reconcile-recovery",
+      source: "device-sync",
+    })).rejects.toBeInstanceOf(RetryableError);
+
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
   it("uses the mailbox item's lane for nudge preflight checks", async () => {
