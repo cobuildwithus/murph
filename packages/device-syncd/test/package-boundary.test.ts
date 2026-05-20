@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 
 import { test } from "vitest";
 
+import * as rootExports from "../src/index.ts";
+import { createSecretCodec } from "../src/local-secret-codec.ts";
+
 test("@murphai/device-syncd package manifest exposes narrow public subpaths", async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -10,6 +13,27 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     exports?: Record<string, { default?: string; types?: string } | undefined>;
   };
 
+  assert.deepEqual(Object.keys(packageManifest.exports ?? {}).sort(), [
+    ".",
+    "./callback-redirect",
+    "./client",
+    "./config",
+    "./connect-config",
+    "./errors",
+    "./hosted-hints",
+    "./hosted-runtime",
+    "./http",
+    "./local-secret-codec",
+    "./provider-label",
+    "./providers/oura",
+    "./providers/strava",
+    "./providers/whoop",
+    "./public-ingress",
+    "./registry",
+    "./runtime-config",
+    "./service",
+    "./types",
+  ]);
   assert.equal(packageManifest.exports?.["./crypto"], undefined);
   assert.deepEqual(packageManifest.exports?.["./connect-config"], {
     default: "./dist/connect-config.js",
@@ -25,9 +49,8 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   });
 });
 
-test("@murphai/device-syncd root barrel re-exports the local secret codec seam", async () => {
-  const rootBarrel = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
-
-  assert.match(rootBarrel, /from "\.\/local-secret-codec\.ts"/u);
-  assert.doesNotMatch(rootBarrel, /from "\.\/crypto\.ts"/u);
+test("@murphai/device-syncd root barrel exposes the local secret codec API", () => {
+  assert.equal(rootExports.createSecretCodec, createSecretCodec);
+  assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
+  assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
 });
