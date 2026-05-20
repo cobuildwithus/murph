@@ -102,6 +102,8 @@ describe("hosted device-sync dirty sweeper cron route", () => {
         expect.objectContaining({
           dirtySweeperErrorName: "Error",
           dirtySweeperFailed: true,
+          dirtyWakeAppendFailed: false,
+          dirtyWakeNotAppended: null,
           dueReconcileWakeAppendFailed: false,
           dueReconcileWakeNotAppended: 0,
           dueReconcileSweeperErrorName: null,
@@ -130,10 +132,48 @@ describe("hosted device-sync dirty sweeper cron route", () => {
         expect.objectContaining({
           dirtySweeperErrorName: null,
           dirtySweeperFailed: false,
+          dirtyWakeAppendFailed: false,
+          dirtyWakeNotAppended: 0,
           dueReconcileWakeAppendFailed: false,
           dueReconcileWakeNotAppended: null,
           dueReconcileSweeperErrorName: "Error",
           dueReconcileSweeperFailed: true,
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("fails the cron when dirty wake appends report failures", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.runHostedDeviceSyncDirtySweeper.mockResolvedValue({
+      dirtyConnections: 2,
+      skippedDirtyConnections: 0,
+      staleAfterMs: 30000,
+      wakeAppended: 1,
+      wakeAttempted: 2,
+      wakeLimit: 25,
+      wakeNotAppended: 1,
+    });
+
+    try {
+      const response = await route.GET(
+        new Request("https://join.example.test/api/internal/device-sync/dirty-sweeper/cron"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(mocks.runHostedDeviceSyncDirtySweeper).toHaveBeenCalledTimes(1);
+      expect(mocks.runHostedDeviceSyncDueReconcileSweeper).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted device-sync sweeper cron failed.",
+        expect.objectContaining({
+          dirtySweeperFailed: false,
+          dirtyWakeAppendFailed: true,
+          dirtyWakeNotAppended: 1,
+          dueReconcileWakeAppendFailed: false,
+          dueReconcileWakeNotAppended: 0,
+          dueReconcileSweeperFailed: false,
         }),
       );
     } finally {
@@ -166,6 +206,8 @@ describe("hosted device-sync dirty sweeper cron route", () => {
         "Hosted device-sync sweeper cron failed.",
         expect.objectContaining({
           dirtySweeperFailed: false,
+          dirtyWakeAppendFailed: false,
+          dirtyWakeNotAppended: 0,
           dueReconcileWakeAppendFailed: true,
           dueReconcileWakeNotAppended: 1,
           dueReconcileSweeperFailed: false,
@@ -194,6 +236,8 @@ describe("hosted device-sync dirty sweeper cron route", () => {
         expect.objectContaining({
           dirtySweeperErrorName: "Error",
           dirtySweeperFailed: true,
+          dirtyWakeAppendFailed: false,
+          dirtyWakeNotAppended: null,
           dueReconcileWakeAppendFailed: false,
           dueReconcileWakeNotAppended: null,
           dueReconcileSweeperErrorName: "Error",

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
+import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -9,6 +10,7 @@ import { StickyNav } from "../sticky-nav";
 
 const SECURITY_METADATA_DESCRIPTION =
   "How Murph protects hosted and local health data. Hosted architecture, encryption, auth, and the local self-hosted lane.";
+const HOSTED_INSTALL_SCRIPT_URL_FALLBACK = "https://www.withmurph.ai/install.sh";
 const SECURITY_OPEN_GRAPH_IMAGE = {
   alt: "Murph Security. How Murph protects health data.",
   height: 630,
@@ -39,6 +41,8 @@ export default async function SecurityPage() {
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
   ]);
+  const installCommandUrl =
+    resolveHostedInstallScriptUrl() ?? HOSTED_INSTALL_SCRIPT_URL_FALLBACK;
 
   return (
     <>
@@ -48,7 +52,7 @@ export default async function SecurityPage() {
         <PromisesSection />
         <HostedOverviewSection />
         <EncryptionSection />
-        <LocalSection />
+        <LocalSection installCommandUrl={installCommandUrl} />
       </main>
       <SiteFooter />
     </>
@@ -600,7 +604,7 @@ const LOCAL_SOURCE_REFS = [
   },
 ] as const;
 
-function LocalSection() {
+function LocalSection({ installCommandUrl }: { installCommandUrl: string }) {
   return (
     <section
       aria-labelledby="security-local-title"
@@ -625,7 +629,7 @@ function LocalSection() {
             <div className="overflow-x-auto">
               <VaultTreeDiagram />
             </div>
-            <LocalInfoList />
+            <LocalInfoList installCommandUrl={installCommandUrl} />
           </div>
         </div>
       </div>
@@ -633,7 +637,7 @@ function LocalSection() {
   );
 }
 
-function LocalInfoList() {
+function LocalInfoList({ installCommandUrl }: { installCommandUrl: string }) {
   return (
     <dl className="space-y-6 lg:pt-4">
       <div className="border-t border-[#2d3436]/15 pt-5">
@@ -659,8 +663,8 @@ function LocalInfoList() {
           Install
         </dt>
         <dd className="mt-2 font-mono text-[12px] leading-[1.5] text-[#2d3436]">
-          <code className="rounded bg-[#2d3436]/5 px-2 py-1">
-            curl -sSL withmurph.ai/install.sh | bash
+          <code className="break-all rounded bg-[#2d3436]/5 px-2 py-1">
+            curl -fsSL {installCommandUrl} | bash
           </code>
         </dd>
       </div>
