@@ -3502,6 +3502,11 @@
                           "default": false,
                           "description": "Include locked aggregate-only public benchmark cards for local evaluator setup.",
                           "type": "boolean"
+                        },
+                        "includeNsrrRequests": {
+                          "default": false,
+                          "description": "Include the safe NSRR dataset-request checklist needed to unblock wearable/sleep validation.",
+                          "type": "boolean"
                         }
                       }
                     }

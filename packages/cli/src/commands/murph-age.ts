@@ -22,6 +22,7 @@ import {
   isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
+  listMurphAgeNsrrDatasetRequests,
   listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
   listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   listMurphAgeOrdinaryLabWearableSourceRoutes,
@@ -33,6 +34,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
@@ -1180,6 +1182,30 @@ const murphAgeWearableActivityBenchmarkCardSchema = z.object({
   }),
   transformIds: z.array(z.string().min(1)),
 })
+const murphAgeNsrrDatasetRequestSchema = z.object({
+  datasetId: z.enum([
+    'haassa',
+    'hchs-sol',
+    'mesa-sleep',
+    'mros-sleep',
+    'shhs',
+    'sof-sleep',
+    'wsc',
+  ]),
+  displayName: z.string().min(1),
+  includeInLeanRequest: z.boolean(),
+  modelUnblockerRoles: z.array(z.string().min(1)),
+  nextLocalCheckCommand: z.string().min(1),
+  productAuthorized: z.literal(false),
+  recommendedDownloadTargets: z.array(z.string().min(1)),
+  requestCheckboxLabel: z.string().min(1),
+  requestPriorityRank: z.number().int().positive(),
+  requestTier: z.enum(['bonus', 'lean-first-five', 'primary']),
+  rowParsingAuthorized: z.literal(false),
+  schemaVersion: z.literal(MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION),
+  sourceRouteId: murphAgeSourceRouteIdSchema,
+  whyRequest: z.string().min(1),
+})
 export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   assessments: z.array(murphAgeAggregateEvidenceAssessmentSchema),
   benchmarkCards: z.array(murphAgeWearableActivityBenchmarkCardSchema),
@@ -1187,12 +1213,13 @@ export const murphAgeAggregateEvidenceStatusResultSchema = z.object({
   missingSourceRouteIds: z.array(z.string().min(1)),
   nextExecutionSourceRouteIds: z.array(z.string().min(1)),
   nextMissingSourceRouteIds: z.array(z.string().min(1)),
+  nsrrDatasetRequests: z.array(murphAgeNsrrDatasetRequestSchema),
   readyCardCount: z.number().int().nonnegative(),
   readySourceRouteIds: z.array(z.string().min(1)),
   receiptSlots: z.array(murphAgeWearableLabAggregateReceiptTemplateSchema),
   routeSlots: z.array(murphAgeAggregateEvidenceRouteSlotSchema),
   sourceRouteIdsByExecutionPriority: z.array(z.string().min(1)),
-  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v4'),
+  schemaVersion: z.literal('murph.age.aggregate-evidence-status.v5'),
   status: z.enum(['blocked', 'ready']),
 })
 
@@ -1540,6 +1567,9 @@ export function registerMurphAgeCommands(
       includeBenchmarkCards: z.boolean()
         .default(false)
         .describe('Include locked aggregate-only public benchmark cards for local evaluator setup.'),
+      includeNsrrRequests: z.boolean()
+        .default(false)
+        .describe('Include the safe NSRR dataset-request checklist needed to unblock wearable/sleep validation.'),
     }),
     examples: [
       {
@@ -1615,6 +1645,9 @@ export function registerMurphAgeCommands(
       const benchmarkCards = options.includeBenchmarkCards
         ? listMurphAgeWearableActivityBenchmarkCards()
         : []
+      const nsrrDatasetRequests = options.includeNsrrRequests
+        ? listMurphAgeNsrrDatasetRequests()
+        : []
 
       return {
         assessments,
@@ -1623,6 +1656,7 @@ export function registerMurphAgeCommands(
         missingSourceRouteIds,
         nextExecutionSourceRouteIds,
         nextMissingSourceRouteIds: missingSourceRouteIds.slice(0, 3),
+        nsrrDatasetRequests,
         readyCardCount: assessments.filter((assessment) => assessment.status === 'ready').length,
         readySourceRouteIds: listMurphAgeOrdinaryLabWearableSourceRoutes()
           .map((route) => route.routeId)
@@ -1630,7 +1664,7 @@ export function registerMurphAgeCommands(
         receiptSlots,
         routeSlots,
         sourceRouteIdsByExecutionPriority,
-        schemaVersion: 'murph.age.aggregate-evidence-status.v4' as const,
+        schemaVersion: 'murph.age.aggregate-evidence-status.v5' as const,
         status: readyRouteIds.size > 0 ? 'ready' as const : 'blocked' as const,
       }
     },
