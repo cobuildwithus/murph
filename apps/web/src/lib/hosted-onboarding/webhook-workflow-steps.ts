@@ -11,7 +11,14 @@ import {
 import {
   isHostedMailboxLaneCheckpointed,
 } from "../hosted-mailbox/lag";
-import { nudgeHostedAssistantRunnerUserBestEffortResult } from "../hosted-runner/assistant-nudge";
+import {
+  nudgeHostedAssistantRunnerUserBestEffortResult,
+  type HostedAssistantRunnerUserNudgeBestEffortResult,
+} from "../hosted-runner/assistant-nudge";
+import {
+  nudgeHostedRunnerUserBestEffortResult,
+  type HostedRunnerUserNudgeBestEffortResult,
+} from "../hosted-runner/control";
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import {
   HOSTED_WEBHOOK_NUDGE_WORKFLOW_RETRY_AFTER,
@@ -52,13 +59,25 @@ export async function nudgeHostedWebhookMailboxItemStep(
     }
   }
 
-  const result = await nudgeHostedAssistantRunnerUserBestEffortResult({
-    context: resolveHostedNudgeWorkflowContext(input),
-    timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
-    userId: mailboxItem.userId,
-  });
+  const context = resolveHostedNudgeWorkflowContext(input);
+  const result = bypassMailboxProgressChecks
+    ? await nudgeHostedRunnerUserBestEffortResult({
+        context,
+        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+        userId: mailboxItem.userId,
+      })
+    : await nudgeHostedAssistantRunnerUserBestEffortResult({
+        context,
+        timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+        userId: mailboxItem.userId,
+      });
 
   if (!result.accepted) {
+    logHostedWebhookNudgeNotAccepted({
+      context,
+      input,
+      result,
+    });
     if ("usageGateDenied" in result && result.usageGateDenied) {
       return;
     }
@@ -98,6 +117,30 @@ function isHostedDeviceSyncRecoveryNudgeIntent(
 ): boolean {
   return intent === "device-sync-dirty-recovery"
     || intent === "device-sync-reconcile-recovery";
+}
+
+function logHostedWebhookNudgeNotAccepted(input: {
+  context: string;
+  input: HostedWebhookNudgeWorkflowInput;
+  result:
+    | HostedAssistantRunnerUserNudgeBestEffortResult
+    | HostedRunnerUserNudgeBestEffortResult;
+}): void {
+  console.warn("Hosted webhook runner nudge was not accepted.", {
+    alarmScheduled: input.result.alarmScheduled,
+    configured: input.result.configured,
+    context: input.context,
+    errorCode: input.result.errorCode,
+    immediateDriveStarted: input.result.immediateDriveStarted,
+    inFlight: input.result.inFlight,
+    kind: input.result.kind,
+    nextAlarmAtPresent: input.result.nextAlarmAtPresent,
+    runnerNudgeIntent: input.input.runnerNudgeIntent ?? null,
+    source: input.input.source,
+    usageGateDenied: "usageGateDenied" in input.result
+      ? input.result.usageGateDenied
+      : null,
+  });
 }
 
 async function isHostedWebhookMailboxItemCheckpointed(
