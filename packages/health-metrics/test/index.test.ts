@@ -17,6 +17,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SOURCE_ROUTE_REGISTRY_SCHEMA_VERSION,
+  MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_MODEL_IDS,
@@ -33,6 +34,7 @@ import {
   assessMurphAgeWearableShadowIncrements,
   buildMetricSeries,
   buildMurphAgePublicCalculatorView,
+  buildMurphAgeSubmittedCalculatorViewBundle,
   buildMurphAgeResearchCalculatorView,
   buildMurphAgeIncrementEvaluationCard,
   buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt,
@@ -5523,6 +5525,58 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     ),
     false,
   );
+
+  const submittedCalculatorViewBundle = buildMurphAgeSubmittedCalculatorViewBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    submittedMetrics: [...submittedLab9Metrics, ...submittedWearableMetrics],
+  }, { includeResearchPreview: true });
+  assert.equal(
+    submittedCalculatorViewBundle.schemaVersion,
+    MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
+  );
+  assert.equal(submittedCalculatorViewBundle.product.report.mode, "product");
+  assert.equal(submittedCalculatorViewBundle.product.view.ageEstimate, null);
+  assert.equal(submittedCalculatorViewBundle.product.view.risk.probability, null);
+  assert.equal(submittedCalculatorViewBundle.product.view.selectedCardId, null);
+  assert.equal(submittedCalculatorViewBundle.product.view.scoreReadiness.status, "validation-pending");
+  assert.ok(submittedCalculatorViewBundle.researchPreview);
+  assert.equal(submittedCalculatorViewBundle.researchPreview.report.mode, "research");
+  assert.equal(
+    submittedCalculatorViewBundle.researchPreview.view.selectedCardId,
+    "lab9_bp_body_10y_acm_research",
+  );
+  assert.equal(
+    typeof submittedCalculatorViewBundle.researchPreview.view.ageEstimate?.biologicalAgeYears,
+    "number",
+  );
+  assert.equal(submittedCalculatorViewBundle.researchPreview.view.wearable.scoreBearing, false);
+  assert.equal(
+    submittedCalculatorViewBundle.researchPreview.view.wearable.readyFeatureKeys.includes("activity-volume"),
+    true,
+  );
+  const submittedCalculatorProductOnlyBundle = buildMurphAgeSubmittedCalculatorViewBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    models: { lab9_bp_body_10y_acm_research: fixtureLab9ResearchModel() },
+    sex: "female",
+    submittedMetrics: [...submittedLab9Metrics, ...submittedWearableMetrics],
+  });
+  assert.equal(submittedCalculatorProductOnlyBundle.researchPreview, null);
+  const submittedCalculatorViewBundleJson = JSON.stringify(submittedCalculatorViewBundle);
+  for (const forbidden of [
+    "\"value\"",
+    "\"unit\"",
+    "\"label\"",
+    "coefficient",
+    "contributionLogit",
+    "metric-point:",
+    "prediction",
+  ]) {
+    assert.equal(submittedCalculatorViewBundleJson.includes(forbidden), false, forbidden);
+  }
 
   const submittedLab9InputsWithBothResearchCardsReport = calculateMurphAgePublicReportFromSubmittedInputs({
     asOf,
