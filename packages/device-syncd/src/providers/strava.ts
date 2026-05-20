@@ -37,6 +37,7 @@ import {
   buildOAuthTokenRequestDiagnostics,
   buildProviderRequestDiagnostics,
   extractProviderQueryParameterNames,
+  resolveOAuthTokenRequestAccountStatus,
 } from "./provider-diagnostics.ts";
 
 import type {
@@ -598,16 +599,23 @@ export function createStravaDeviceSyncProvider(
       url: `${authBaseUrl}${STRAVA_TOKEN_PATH}`,
       timeoutMs,
       parameters,
-      buildError: (response, body) =>
-        buildStravaApiError("STRAVA_TOKEN_REQUEST_FAILED", "Strava token request failed.", response, body, {
+      buildError: (response, body) => {
+        const diagnostics = buildOAuthTokenRequestDiagnostics({
+          endpointKind: STRAVA_OAUTH_TOKEN_ENDPOINT_KIND,
+          parameters,
+          responseBody: body,
+        });
+
+        return buildStravaApiError("STRAVA_TOKEN_REQUEST_FAILED", "Strava token request failed.", response, body, {
           retryable: response.status >= 500,
-          accountStatus: response.status === 401 ? "reauthorization_required" : null,
-          diagnostics: buildOAuthTokenRequestDiagnostics({
-            endpointKind: STRAVA_OAUTH_TOKEN_ENDPOINT_KIND,
+          accountStatus: resolveOAuthTokenRequestAccountStatus({
+            diagnostics,
             parameters,
-            responseBody: body,
+            response,
           }),
-        }),
+          diagnostics,
+        });
+      },
     });
   }
 

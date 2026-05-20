@@ -85,6 +85,26 @@ export function buildOAuthTokenRequestDiagnostics(input: {
   };
 }
 
+export function resolveOAuthTokenRequestAccountStatus(input: {
+  diagnostics: Record<string, ProviderDiagnosticValue>;
+  parameters: Record<string, string>;
+  response: Response;
+}): "reauthorization_required" | null {
+  const oauthErrorCode = typeof input.diagnostics.oauthErrorCode === "string"
+    ? input.diagnostics.oauthErrorCode
+    : null;
+
+  if (
+    input.parameters.grant_type === "refresh_token"
+    && (input.response.status === 400 || input.response.status === 401)
+    && oauthErrorCode === "invalid_grant"
+  ) {
+    return "reauthorization_required";
+  }
+
+  return input.response.status === 401 ? "reauthorization_required" : null;
+}
+
 export function buildProviderRequestDiagnostics(input: {
   method: ProviderApiRequestMethod;
   endpointKind: string;

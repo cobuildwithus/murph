@@ -311,7 +311,7 @@ test("Oura provider includes safe OAuth diagnostics for token request failures",
         return createJsonResponse({
           error: "invalid_grant",
           error_description: "Refresh token expired. Reconnect Oura.",
-        }, 401);
+        }, 400);
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -368,7 +368,7 @@ test("Oura provider includes safe OAuth diagnostics for token request failures",
         responseErrorFieldPresent: true,
         responseShapeKind: "json_object",
         retryable: false,
-        status: 401,
+        status: 400,
       });
       const serialized = JSON.stringify(error.details);
       assert.equal(serialized.includes("stored-refresh-token"), false);
