@@ -587,10 +587,12 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/dexcom/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: undefined,
+    body: JSON.stringify({ connectTarget: "dexcom_v3" }),
     cache: "no-store",
     credentials: "same-origin",
-    headers: {},
+    headers: {
+      "content-type": "application/json",
+    },
     method: "POST",
     keepalive: false,
   });
@@ -673,6 +675,68 @@ test("ConnectPage surfaces reauthorization-required sources as reconnectable", a
   assert.match(markup, /aria-label="Reconnect Whoop"/u);
   assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
+});
+
+test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "whoop" }], [
+      {
+        connectionId: "dsc_whoop_reauth",
+        provider: "whoop",
+        state: "reauthorization_required",
+        upstreamSources: [],
+      },
+      {
+        connectionId: "dsc_whoop_active",
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+    ]),
+    [{
+      connectionId: "dsc_whoop_active",
+      connectProvider: "whoop",
+      connectTarget: null,
+      sourceId: "whoop",
+      state: "active",
+    }],
+  );
+});
+
+test("ConnectPage treats Junction reauthorization as reconnectable even when upstream status is stale", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura");
+  vi.stubEnv("JUNCTION_REGION", "us");
+
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_123",
+        provider: "junction",
+        state: "reauthorization_required",
+        upstreamSources: [
+          {
+            providerLabel: "Oura",
+            resourceCount: 1,
+            sourceProviderSlug: "oura",
+            status: "unavailable",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Oura needs reconnect/);
+  assert.match(markup, /aria-label="Reconnect Oura"/u);
 });
 
 test("resolveConnectedConnectSourceConnections carries connection ids for direct and Junction matches", async () => {
@@ -813,10 +877,12 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/garmin/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: undefined,
+    body: JSON.stringify({ connectTarget: "garmin" }),
     cache: "no-store",
     credentials: "same-origin",
-    headers: {},
+    headers: {
+      "content-type": "application/json",
+    },
     method: "POST",
     keepalive: false,
   });

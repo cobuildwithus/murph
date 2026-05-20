@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import {
   listConfiguredDeviceSyncConnectTargets,
+  listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
@@ -57,6 +58,31 @@ test("connect targets prefer direct providers when direct and Junction routes ar
     label: "WHOOP",
     provider: "whoop",
   });
+});
+
+test("reconnect targets retain duplicate direct and Junction routes for exact recovery", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "whoop",
+    JUNCTION_REGION: "us",
+    WHOOP_CLIENT_ID: "whoop-client-id",
+    WHOOP_CLIENT_SECRET: "whoop-client-secret",
+  });
+
+  assert.deepEqual(
+    listConfiguredDeviceSyncReconnectTargets(configs).map((target) => ({
+      connectSourceId: target.connectSourceId,
+      connectTarget: target.connectTarget,
+      provider: target.provider,
+      sourceProviderSlug: target.sourceProviderSlug ?? null,
+    })),
+    [
+      { connectSourceId: "whoop", connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
+      { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop" },
+    ],
+  );
 });
 
 test("lightweight connect target config reader matches provider config target presence", () => {

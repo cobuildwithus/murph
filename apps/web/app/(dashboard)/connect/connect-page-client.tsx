@@ -36,6 +36,7 @@ type LogoAsset = {
 };
 
 type ConnectSource = {
+  connectProvider?: string;
   connectTarget?: string;
   connected?: boolean;
   description: string;
@@ -241,7 +242,7 @@ export function ConnectSourcesGrid({
 
   async function disconnectConnection(source: ConnectSource) {
     const connectionId = source.disconnectConnectionId?.trim();
-    if (!connectionId || pendingDisconnectSourceId) {
+    if (!connectionId || pendingDisconnectSourceId || pendingSourceId === source.id) {
       return;
     }
 
@@ -482,7 +483,7 @@ function SourceCard({
             <button
               type="button"
               aria-label={`Disconnect ${source.name}`}
-              disabled={pendingDisconnect}
+              disabled={pending || pendingDisconnect}
               onClick={() => onDisconnectTargetChange(source)}
               className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
             >
@@ -685,6 +686,7 @@ async function requestConnectionAuthorizationUrl(
   source: ConnectSource,
   options: { intentClaim?: string } = {},
 ): Promise<string> {
+  const selectorPayload = options.intentClaim ? undefined : buildConnectTargetSelectorPayload(source);
   const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
     ...(options.intentClaim
       ? {
@@ -694,12 +696,24 @@ async function requestConnectionAuthorizationUrl(
         }
       : {}),
     method: "POST",
+    ...(selectorPayload ? { payload: selectorPayload } : {}),
     url: options.intentClaim
       ? `/device/connect/${encodeURIComponent(options.intentClaim)}`
       : `/api/connect-sources/${encodeURIComponent(source.id)}/start`,
   });
 
   return readConnectAuthorizationUrl(result);
+}
+
+function buildConnectTargetSelectorPayload(source: ConnectSource): Record<string, string> | undefined {
+  if (!source.connectProvider && !source.connectTarget) {
+    return undefined;
+  }
+
+  return {
+    ...(source.connectProvider ? { provider: source.connectProvider } : {}),
+    ...(source.connectTarget ? { connectTarget: source.connectTarget } : {}),
+  };
 }
 
 function readDeviceConnectIntentFromCurrentLocation(): InitialDeviceConnectIntent {

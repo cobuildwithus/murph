@@ -34,6 +34,7 @@ type LogoAsset = {
 };
 
 type ConnectSource = {
+  connectProvider?: string;
   connectTarget?: string;
   connected?: boolean;
   description: string;
@@ -54,9 +55,16 @@ type ConnectSourceUi = Omit<ConnectSource, "id">;
 type DeviceConnectRoute = (typeof DEVICE_CONNECT_SOURCES)[number]["routes"][number];
 type ConnectSettingsSourceMatch = Pick<
   HostedDeviceSyncSettingsSource,
-  "provider" | "state" | "upstreamSources"
+  "connectSourceId" | "connectTarget" | "provider" | "state" | "upstreamSources"
 > & {
   connectionId?: string | null;
+};
+type ConnectSourceConnectionState = {
+  connectionId: string | null;
+  connectProvider: string | null;
+  connectTarget: string | null;
+  sourceId: string;
+  state: "active" | "reauthorization_required";
 };
 
 const CONNECT_SOURCE_UI = {
@@ -233,6 +241,8 @@ export default async function ConnectPage({
   const auth = await getHostedPageAuthSnapshot();
   const connectedSourceIds = new Set<string>();
   const reconnectSourceIds = new Set<string>();
+  const reconnectProviderBySourceId = new Map<string, string>();
+  const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
 
@@ -251,6 +261,14 @@ export default async function ConnectPage({
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
         }
+        if (connection.state === "reauthorization_required") {
+          if (connection.connectProvider) {
+            reconnectProviderBySourceId.set(sourceId, connection.connectProvider);
+          }
+          if (connection.connectTarget) {
+            reconnectTargetBySourceId.set(sourceId, connection.connectTarget);
+          }
+        }
       }
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
@@ -266,7 +284,9 @@ export default async function ConnectPage({
   const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
+    reconnectProviderBySourceId,
     reconnectSourceIds,
+    reconnectTargetBySourceId,
   });
 
   return (
@@ -316,7 +336,9 @@ export function resolveConfiguredConnectSources(
   options: {
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
+    reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
+    reconnectTargetBySourceId?: ReadonlyMap<string, string>;
   } = {},
 ): ConnectSource[] {
   const connectTargetBySourceId = new Map(
@@ -331,10 +353,14 @@ export function resolveConfiguredConnectSources(
       const connected = options.connectedSourceIds?.has(source.id) === true;
       const requiresReconnect = !connected && options.reconnectSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
+      const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
+      const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
+      const resolvedConnectTarget = reconnectTarget ?? connectTarget;
 
       return {
         ...source,
-        ...(connectTarget ? { connectTarget } : {}),
+        ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
+        ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(connected ? { connected } : {}),
@@ -346,7 +372,7 @@ export function resolveConfiguredConnectSources(
 export function resolveConnectSourceConnectionStates(
   sources: readonly Pick<ConnectSource, "id">[],
   settingsSources: readonly ConnectSettingsSourceMatch[],
-): { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] {
+): ConnectSourceConnectionState[] {
   return resolveConnectSourceConnectionMatches(sources, settingsSources, {
     includeReauthorizationRequired: true,
   });
@@ -379,9 +405,9 @@ function resolveConnectSourceConnectionMatches(
   sources: readonly Pick<ConnectSource, "id">[],
   settingsSources: readonly ConnectSettingsSourceMatch[],
   options: { includeReauthorizationRequired?: boolean } = {},
-): { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] {
-  const connectedSourceIds = new Set<string>();
-  const connectedConnections: { connectionId: string | null; sourceId: string; state: "active" | "reauthorization_required" }[] = [];
+): ConnectSourceConnectionState[] {
+  const connectedConnections = new Map<string, ConnectSourceConnectionState>();
+  const visibleSourceIds = new Set(sources.map((source) => source.id));
   const sourceIdByDirectProvider = new Map<string, string>();
   const sourceIdByJunctionTarget = new Map<string, string>();
 
@@ -405,15 +431,31 @@ function resolveConnectSourceConnectionMatches(
     )
       ? source.state
       : null;
+    const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
+      ? source.connectionId
+      : null;
+    const connectTarget = typeof source.connectTarget === "string" && source.connectTarget.trim()
+      ? source.connectTarget
+      : null;
+
+    const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
+    if (sourceState && configuredSourceId && visibleSourceIds.has(configuredSourceId)) {
+      upsertConnectSourceConnection(connectedConnections, {
+        connectionId,
+        connectProvider: provider,
+        connectTarget,
+        sourceId: configuredSourceId,
+        state: sourceState,
+      });
+    }
 
     if (sourceState && provider) {
       const sourceId = sourceIdByDirectProvider.get(provider);
-      if (sourceId && !connectedSourceIds.has(sourceId)) {
-        connectedSourceIds.add(sourceId);
-        connectedConnections.push({
-          connectionId: typeof source.connectionId === "string" && source.connectionId.trim()
-            ? source.connectionId
-            : null,
+      if (sourceId) {
+        upsertConnectSourceConnection(connectedConnections, {
+          connectionId,
+          connectProvider: provider,
+          connectTarget,
           sourceId,
           state: sourceState,
         });
@@ -425,7 +467,7 @@ function resolveConnectSourceConnectionMatches(
     }
 
     for (const upstreamSource of source.upstreamSources) {
-      if (upstreamSource.status !== "connected") {
+      if (sourceState === "active" && upstreamSource.status !== "connected") {
         continue;
       }
 
@@ -433,12 +475,11 @@ function resolveConnectSourceConnectionMatches(
       const sourceId = sourceProviderSlug
         ? sourceIdByJunctionTarget.get(sourceProviderSlug)
         : null;
-      if (sourceId && !connectedSourceIds.has(sourceId)) {
-        connectedSourceIds.add(sourceId);
-        connectedConnections.push({
-          connectionId: typeof source.connectionId === "string" && source.connectionId.trim()
-            ? source.connectionId
-            : null,
+      if (sourceId) {
+        upsertConnectSourceConnection(connectedConnections, {
+          connectionId,
+          connectProvider: provider,
+          connectTarget,
           sourceId,
           state: sourceState,
         });
@@ -446,7 +487,28 @@ function resolveConnectSourceConnectionMatches(
     }
   }
 
-  return connectedConnections;
+  return [...connectedConnections.values()];
+}
+
+function upsertConnectSourceConnection(
+  connections: Map<string, ConnectSourceConnectionState>,
+  next: ConnectSourceConnectionState,
+): void {
+  const existing = connections.get(next.sourceId);
+  if (!existing || compareConnectSourceStatePriority(next.state, existing.state) > 0) {
+    connections.set(next.sourceId, next);
+  }
+}
+
+function compareConnectSourceStatePriority(
+  left: ConnectSourceConnectionState["state"],
+  right: ConnectSourceConnectionState["state"],
+): number {
+  return connectSourceStatePriority(left) - connectSourceStatePriority(right);
+}
+
+function connectSourceStatePriority(state: ConnectSourceConnectionState["state"]): number {
+  return state === "active" ? 2 : 1;
 }
 
 function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {

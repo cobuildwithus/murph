@@ -567,7 +567,7 @@ test("WHOOP provider treats token-specific refresh invalid_request errors as rea
       if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
         return createJsonResponse({
           error: "invalid_request",
-          error_description: "The token request is malformed.",
+          error_description: "The refresh token is invalid.",
         }, 400);
       }
 
@@ -591,6 +591,52 @@ test("WHOOP provider treats token-specific refresh invalid_request errors as rea
         status: 400,
         retryable: false,
         accountStatus: "reauthorization_required",
+        oauthErrorCode: "invalid_request",
+        oauthErrorDescription: "The refresh token is invalid.",
+        responseErrorCode: "invalid_request",
+        responseErrorDescription: "The refresh token is invalid.",
+        ...expectedWhoopRefreshRequestDiagnostics(),
+        ...expectedWhoopJsonOAuthErrorResponseDiagnostics(),
+      });
+      return true;
+    },
+  );
+});
+
+test("WHOOP provider keeps generic refresh invalid_request errors non-terminal for diagnostics", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          error: "invalid_request",
+          error_description: "The token request is malformed.",
+        }, 400);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.oauthAdapter.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: "persisted-refresh-token",
+      }),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(error.httpStatus, 400);
+      assert.equal(error.retryable, false);
+      assert.equal(error.accountStatus, null);
+      assert.deepEqual(error.details, {
+        status: 400,
+        retryable: false,
+        accountStatus: null,
         oauthErrorCode: "invalid_request",
         oauthErrorDescription: "The token request is malformed.",
         responseErrorCode: "invalid_request",

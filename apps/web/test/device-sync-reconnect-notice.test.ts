@@ -118,7 +118,7 @@ describe("hosted device sync reconnect notice", () => {
         responsePolicy: {
           kind: "require_send_exact_text",
           text:
-            "Murph needs you to reconnect WHOOP so your wearable data can sync again: https://join.example.test/device/connect/dc_reconnect_opaque",
+            "Murph needs you to reconnect WHOOP so your wearable data can sync again: https://join.example.test/connect#deviceConnectIntent=dc_reconnect_opaque&connectSource=whoop",
         },
         route: {
           channel: "linq",
@@ -165,6 +165,12 @@ describe("hosted device sync reconnect notice", () => {
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_REGION", "us");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+    mocks.createHostedDeviceConnectIntentTx.mockResolvedValueOnce({
+      claim: "dc_reconnect_opaque",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_reconnect_opaque&connectSource=garmin",
+      deviceConnectUrl: "https://join.example.test/device/connect/dc_reconnect_opaque",
+      expiresAt: "2026-05-22T22:03:28.000Z",
+    });
     const { appendHostedDeviceSyncReconnectNoticeTx } = await import("@/src/lib/device-sync/reconnect-notice");
 
     await expect(appendHostedDeviceSyncReconnectNoticeTx({
@@ -192,7 +198,7 @@ describe("hosted device sync reconnect notice", () => {
       notification: {
         responsePolicy: {
           text:
-            "Murph needs you to reconnect Garmin so your wearable data can sync again: https://join.example.test/device/connect/dc_reconnect_opaque",
+            "Murph needs you to reconnect Garmin so your wearable data can sync again: https://join.example.test/connect#deviceConnectIntent=dc_reconnect_opaque&connectSource=garmin",
         },
       },
     });

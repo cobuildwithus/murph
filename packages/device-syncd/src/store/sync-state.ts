@@ -104,14 +104,16 @@ export function markSyncFailed(
   status: DeviceSyncAccountStatus | null | undefined,
 ): void {
   withImmediateTransaction(database, () => {
-    const terminalFailure = status === "reauthorization_required" || status === "disconnected";
+    const existing = getAccountById(database, accountId);
+    const nextStatus = status ?? existing?.status ?? "active";
+    const terminalFailure = nextStatus === "reauthorization_required" || nextStatus === "disconnected";
 
     database.prepare(`
       update device_connection
       set status = ?,
           updated_at = ?
       where id = ?
-    `).run(status ?? getAccountById(database, accountId)?.status ?? "active", now, accountId);
+    `).run(nextStatus, now, accountId);
 
     database.prepare(`
       update device_observation_state

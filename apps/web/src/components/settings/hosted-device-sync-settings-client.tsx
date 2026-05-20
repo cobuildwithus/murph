@@ -164,6 +164,7 @@ export function HostedDeviceSyncSettingsClient(props: {
     try {
       const result = await requestHostedOnboardingJson<HostedDeviceSyncConnectResponse>({
         method: "POST",
+        payload: buildHostedDeviceSyncReconnectTargetSelectorPayload(source),
         url: `/api/connect-sources/${encodeURIComponent(connectSourceId)}/start`,
       });
       const authorizationUrl = readHostedDeviceSyncAuthorizationUrl(result);
@@ -312,6 +313,15 @@ function isHostedDeviceSyncBlockedState(
 
 function isHostedConsentRequiredError(error: unknown): boolean {
   return error instanceof HostedOnboardingApiError && error.code === "HOSTED_CONSENT_REQUIRED";
+}
+
+function buildHostedDeviceSyncReconnectTargetSelectorPayload(
+  source: HostedDeviceSyncSettingsSource,
+): Record<string, string> {
+  return {
+    provider: source.provider,
+    ...(source.connectTarget ? { connectTarget: source.connectTarget } : {}),
+  };
 }
 
 function readHostedDeviceSyncAuthorizationUrl(response: HostedDeviceSyncConnectResponse): string {

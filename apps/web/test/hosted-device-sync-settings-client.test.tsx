@@ -316,10 +316,18 @@ test("HostedDeviceSyncSettingsClient retries reconnect after consent is accepted
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
     method: "POST",
+    payload: {
+      connectTarget: "whoop",
+      provider: "whoop",
+    },
     url: "/api/connect-sources/whoop/start",
   });
   expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
     method: "POST",
+    payload: {
+      connectTarget: "whoop",
+      provider: "whoop",
+    },
     url: "/api/connect-sources/whoop/start",
   });
 });

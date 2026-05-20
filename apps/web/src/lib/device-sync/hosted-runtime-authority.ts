@@ -166,10 +166,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           : await controlPlane.store.getConnectionForUser(input.trustedUserId, update.connectionId, tx);
         const durableExternalAccountId =
           storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null;
+        const sources = await controlPlane.store.listConnectionSources(record.id, tx);
         const baseline = buildHostedRuntimeConnectionSnapshot(
           record,
           storedAccount,
           durableExternalAccountId,
+          sources.map(toHostedRuntimeConnectionSourceSnapshot),
         );
         const stateMutationRequested = update.connection !== undefined || update.localState !== undefined;
         const credentialMutationRequested = update.credential !== undefined;
@@ -343,6 +345,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               tx,
             )
           : null;
+        const refreshedSources = refreshedRecord
+          ? await controlPlane.store.listConnectionSources(refreshedRecord.id, tx)
+          : [];
 
         return {
           connection: refreshedRecord
@@ -350,6 +355,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
                 refreshedRecord,
                 refreshedStoredAccount,
                 durableExternalAccountId,
+                refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
               ).connection
             : null,
           connectionId: update.connectionId,

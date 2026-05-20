@@ -331,6 +331,44 @@ describe("device sync settings routes", () => {
     );
   });
 
+  it("uses an explicit provider selector when a visible source has direct and Junction targets", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "whoop");
+    vi.stubEnv("JUNCTION_REGION", "us");
+
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/whoop/start",
+        {
+          connectTarget: "whoop",
+          provider: "junction",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "whoop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "junction",
+      "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
+      {
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        sourceProviderSlug: "whoop",
+      },
+    );
+  });
+
   it("reports malformed hosted connect provider config as a server configuration failure", async () => {
     vi.stubEnv("OURA_CLIENT_SECRET", "");
 

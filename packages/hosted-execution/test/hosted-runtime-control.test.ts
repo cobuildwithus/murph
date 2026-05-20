@@ -119,6 +119,9 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("assistant.device_connect");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_created");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_duplicate");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_skipped");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");

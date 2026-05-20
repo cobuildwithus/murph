@@ -1,6 +1,10 @@
 import {
+  listConfiguredDeviceSyncReconnectTargets,
+  normalizeDeviceConnectSourceId,
+  normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
+  type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
@@ -30,7 +34,8 @@ export const POST = withJsonError(async (
   context: { params: Promise<{ sourceId: string }> },
 ) => {
   const sourceId = await resolveDecodedRouteParam(context.params, "sourceId");
-  const target = resolveHostedConnectSourceTarget(sourceId);
+  const selector = await readHostedConnectSourceTargetSelector(request);
+  const target = resolveHostedConnectSourceTarget(sourceId, selector);
 
   return jsonOk(await startHostedDeviceSyncConnection({
     defaultReturnTo: buildHostedDeviceConnectCompletionReturnTo({
@@ -43,12 +48,27 @@ export const POST = withJsonError(async (
   }));
 });
 
-function resolveHostedConnectSourceTarget(sourceId: string) {
+type HostedConnectSourceTargetSelector = {
+  connectTarget: string | null;
+  provider: string | null;
+  sourceProviderSlug: string | null;
+};
+
+function resolveHostedConnectSourceTarget(
+  sourceId: string,
+  selector: HostedConnectSourceTargetSelector | null,
+) {
   const configs = readHostedConnectSourceTargetConfigs();
-  const target = resolveConfiguredDeviceSyncConnectTargetBySourceId(
-    configs,
-    sourceId,
-  );
+  const target = selector
+    ? resolveSelectedHostedConnectSourceTarget(
+        listConfiguredDeviceSyncReconnectTargets(configs),
+        sourceId,
+        selector,
+      )
+    : resolveConfiguredDeviceSyncConnectTargetBySourceId(
+        configs,
+        sourceId,
+      );
 
   if (!target) {
     throw deviceSyncError({
@@ -60,6 +80,64 @@ function resolveHostedConnectSourceTarget(sourceId: string) {
   }
 
   return target;
+}
+
+async function readHostedConnectSourceTargetSelector(
+  request: Request,
+): Promise<HostedConnectSourceTargetSelector | null> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
+  const body = await request.clone().json().catch(() => null);
+  if (!isRecord(body)) {
+    throw deviceSyncError({
+      code: "HOSTED_DEVICE_CONNECT_SOURCE_SELECTOR_INVALID",
+      httpStatus: 400,
+      message: "Hosted device connect source selector is invalid.",
+      retryable: false,
+    });
+  }
+
+  const selector = {
+    connectTarget: normalizeDeviceSyncConnectTargetKey(readOptionalString(body.connectTarget) ?? ""),
+    provider: normalizeDeviceSyncConnectTargetKey(readOptionalString(body.provider) ?? ""),
+    sourceProviderSlug: normalizeDeviceSyncConnectTargetKey(readOptionalString(body.sourceProviderSlug) ?? ""),
+  };
+
+  return selector.connectTarget || selector.provider || selector.sourceProviderSlug
+    ? selector
+    : null;
+}
+
+function resolveSelectedHostedConnectSourceTarget(
+  targets: readonly DeviceSyncConnectTarget[],
+  sourceId: string,
+  selector: HostedConnectSourceTargetSelector,
+): DeviceSyncConnectTarget | null {
+  const requestedSourceId = normalizeDeviceConnectSourceId(sourceId);
+  if (!requestedSourceId) {
+    return null;
+  }
+
+  return targets.find((target) =>
+    target.connectSourceId === requestedSourceId
+    && (!selector.provider || selector.provider === target.provider)
+    && (!selector.connectTarget || selector.connectTarget === target.connectTarget)
+    && (
+      !selector.sourceProviderSlug
+      || selector.sourceProviderSlug === (target.sourceProviderSlug ?? null)
+    )
+  ) ?? null;
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function readHostedConnectSourceTargetConfigs() {

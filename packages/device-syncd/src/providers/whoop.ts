@@ -367,6 +367,7 @@ function resolveWhoopTokenRequestAccountStatus(input: {
   clientCredentialPresent?: boolean;
   grantType?: string;
   oauthErrorCode?: string | null;
+  oauthErrorDescription?: string | null;
   refreshCredentialPresent?: boolean;
   response: Response;
 }): "reauthorization_required" | null {
@@ -380,6 +381,7 @@ function resolveWhoopTokenRequestAccountStatus(input: {
       input.oauthErrorCode === "invalid_request"
       && input.clientCredentialPresent === true
       && input.refreshCredentialPresent === true
+      && isWhoopRefreshTokenInvalidRequest(input.oauthErrorDescription)
     );
 
   if ((input.response.status === 400 || input.response.status === 401) && tokenSpecificRefreshFailure) {
@@ -387,6 +389,27 @@ function resolveWhoopTokenRequestAccountStatus(input: {
   }
 
   return null;
+}
+
+function isWhoopRefreshTokenInvalidRequest(description: string | null | undefined): boolean {
+  if (!description) {
+    return false;
+  }
+
+  const normalized = description.toLowerCase();
+  if (!normalized.includes("refresh")) {
+    return false;
+  }
+
+  return [
+    "expired",
+    "inactive",
+    "invalid",
+    "malformed",
+    "not found",
+    "revoked",
+    "unknown",
+  ].some((marker) => normalized.includes(marker));
 }
 
 function resolveWhoopApiEndpointKind(path: string): string {
@@ -481,6 +504,9 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           responseBody: body,
         });
         const oauthErrorCode = typeof diagnostics.oauthErrorCode === "string" ? diagnostics.oauthErrorCode : null;
+        const oauthErrorDescription = typeof diagnostics.oauthErrorDescription === "string"
+          ? diagnostics.oauthErrorDescription
+          : null;
 
         return buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status === 429 || response.status >= 500,
@@ -488,6 +514,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
             clientCredentialPresent: Boolean(parameters.client_id && parameters.client_secret),
             grantType: parameters.grant_type,
             oauthErrorCode,
+            oauthErrorDescription,
             refreshCredentialPresent: Boolean(parameters.refresh_token),
             response,
           }),
