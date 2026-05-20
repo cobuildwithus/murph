@@ -75,8 +75,8 @@ export async function nudgeHostedWebhookMailboxItemStep(
   if (!result.accepted) {
     logHostedWebhookNudgeNotAccepted({
       context,
-      input,
       result,
+      workflowInput: input,
     });
     if ("usageGateDenied" in result && result.usageGateDenied) {
       return;
@@ -119,26 +119,26 @@ function isHostedDeviceSyncRecoveryNudgeIntent(
     || intent === "device-sync-reconcile-recovery";
 }
 
-function logHostedWebhookNudgeNotAccepted(input: {
+function logHostedWebhookNudgeNotAccepted(event: {
   context: string;
-  input: HostedWebhookNudgeWorkflowInput;
   result:
     | HostedAssistantRunnerUserNudgeBestEffortResult
     | HostedRunnerUserNudgeBestEffortResult;
+  workflowInput: HostedWebhookNudgeWorkflowInput;
 }): void {
   console.warn("Hosted webhook runner nudge was not accepted.", {
-    alarmScheduled: input.result.alarmScheduled,
-    configured: input.result.configured,
-    context: input.context,
-    errorCode: input.result.errorCode,
-    immediateDriveStarted: input.result.immediateDriveStarted,
-    inFlight: input.result.inFlight,
-    kind: input.result.kind,
-    nextAlarmAtPresent: input.result.nextAlarmAtPresent,
-    runnerNudgeIntent: input.input.runnerNudgeIntent ?? null,
-    source: input.input.source,
-    usageGateDenied: "usageGateDenied" in input.result
-      ? input.result.usageGateDenied
+    alarmScheduled: event.result.alarmScheduled,
+    configured: event.result.configured,
+    context: event.context,
+    errorCode: event.result.errorCode,
+    immediateDriveStarted: event.result.immediateDriveStarted,
+    inFlight: event.result.inFlight,
+    kind: event.result.kind,
+    nextAlarmAtPresent: event.result.nextAlarmAtPresent,
+    runnerNudgeIntent: event.workflowInput.runnerNudgeIntent ?? null,
+    source: event.workflowInput.source,
+    usageGateDenied: "usageGateDenied" in event.result
+      ? event.result.usageGateDenied
       : null,
   });
 }
