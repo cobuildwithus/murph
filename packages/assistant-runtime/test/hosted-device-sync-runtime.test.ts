@@ -1524,6 +1524,106 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("terminal hosted snapshot status wins over stale explicit terminal wake reasons", async () => {
+    for (const scenario of [
+      {
+        deadJobCode: "HOSTED_CONTROL_PLANE_DISCONNECTED",
+        snapshotStatus: "disconnected",
+        wakeReason: "reauthorization_required",
+      },
+      {
+        deadJobCode: "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
+        snapshotStatus: "reauthorization_required",
+        wakeReason: "disconnected",
+      },
+    ] as const) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+
+      const service = createDeviceSyncServiceForVault(vaultRoot);
+
+      try {
+        const begin = await service.startConnection({
+          provider: "demo",
+        });
+        const connected = await service.handleOAuthCallback({
+          code: `terminal-stale-wake-${scenario.snapshotStatus}`,
+          provider: "demo",
+          state: begin.state,
+        });
+        const pendingJob = getStore(service).enqueueJob({
+          accountId: connected.account.id,
+          availableAt: "2026-04-06T09:05:00.000Z",
+          dedupeKey: `terminal-stale-wake:${scenario.snapshotStatus}`,
+          kind: "resource-sync",
+          payload: {},
+          priority: 1,
+          provider: connected.account.provider,
+        });
+        const snapshot = buildRuntimeSnapshot({
+          connectionId: `hosted_conn_terminal_stale_wake_${scenario.snapshotStatus}`,
+          externalAccountId: connected.account.externalAccountId,
+          status: scenario.snapshotStatus,
+          tokenBundle: scenario.snapshotStatus === "disconnected" ? null : undefined,
+        });
+        let appliedRequest: ApplyUpdatesRequest | null = null;
+        const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+            appliedRequest = input;
+            return {
+              appliedAt: "2026-04-06T10:10:01.000Z",
+              updates: [],
+              userId: "member_123",
+            };
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        };
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildDeviceSyncWake({
+            connectionId: `hosted_conn_terminal_stale_wake_${scenario.snapshotStatus}`,
+            eventId: `evt_device_sync_terminal_stale_wake_${scenario.snapshotStatus}`,
+            occurredAt: "2026-04-06T09:10:00.000Z",
+            reason: scenario.wakeReason,
+          }),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        const stored = getStore(service).getAccountById(connected.account.id);
+        assert.ok(stored);
+        assert.equal(stored.status, scenario.snapshotStatus);
+        const jobs = readJobsForAccount(service, connected.account.id);
+        assert.equal(jobs.length, 1);
+        assert.equal(jobs[0]?.status, "dead");
+        assert.equal(jobs[0]?.lastErrorCode, scenario.deadJobCode);
+        assert.equal(getStore(service).getJobById(pendingJob.id)?.status, "dead");
+
+        await reconcileHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+          state,
+        });
+
+        assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
   test("runtime timer wakes pull pending dirty state without a mailbox wake", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

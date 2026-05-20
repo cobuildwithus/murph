@@ -279,6 +279,17 @@ async function applyHostedDeviceSyncWakeHint(input: {
     return;
   }
 
+  const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
+  if (terminalStatus) {
+    markHostedTerminalDeviceSyncJobsDead({
+      accountId: localAccountId,
+      now: input.wake.occurredAt,
+      status: terminalStatus,
+      store,
+    });
+    return;
+  }
+
   if (input.wake.reason === "disconnected") {
     store.disconnectAccount(localAccountId, input.wake.occurredAt);
     store.markPendingJobsDeadForAccount(
@@ -301,17 +312,6 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
-    return;
-  }
-
-  const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
-  if (terminalStatus) {
-    markHostedTerminalDeviceSyncJobsDead({
-      accountId: localAccountId,
-      now: input.wake.occurredAt,
-      status: terminalStatus,
-      store,
-    });
     return;
   }
 
