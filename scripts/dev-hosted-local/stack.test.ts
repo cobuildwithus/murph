@@ -391,7 +391,7 @@ describe("hosted local dev stack", () => {
         "--local-protocol",
         "http",
         "--persist-to",
-        ".wrangler/state/dev-root",
+        "/tmp/murph-dev-env-test/wrangler-state",
         "--env-file",
         "/tmp/murph-dev-env-test/cloudflare-worker.env",
         "--var",
@@ -515,9 +515,10 @@ describe("hosted local dev stack", () => {
     }));
     expect(cleanupHostedRunnerContainerLocalState).toHaveBeenCalledWith(
       expect.objectContaining({
-        persistDir: ".wrangler/state/dev-root",
+        persistDir: "/tmp/murph-dev-env-test/wrangler-state",
       }),
     );
+    expect(stack.config.workerPersistDir).toBe("/tmp/murph-dev-env-test/wrangler-state");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
@@ -629,12 +630,16 @@ describe("hosted local dev stack", () => {
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "cloudflare",
       expect.any(String),
-      expect.any(Array),
+      expect.arrayContaining([
+        "--persist-to",
+        ".tmp/e2e/wrangler",
+      ]),
       expect.objectContaining({
         DOCKER_CONFIG: "/tmp/murph-dev-env-test/docker-config",
       }),
       expect.any(Object),
     );
+    expect(stack.config.workerPersistDir).toBe(".tmp/e2e/wrangler");
     expect(writeFile).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/config.json",
       '{"auths":{}}\n',

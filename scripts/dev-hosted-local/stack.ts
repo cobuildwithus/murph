@@ -94,6 +94,7 @@ const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
   path.join(webDir, "src", "lib", "health-commons", "measurement-method-detail.ts"),
 ];
 const HOSTED_LOCAL_REQUIRED_ASSISTANT_PROVIDER = "openai";
+const HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME = "wrangler-state";
 
 export interface HostedLocalDevStack {
   config: HostedLocalDevConfig;
@@ -178,6 +179,11 @@ export async function startHostedLocalDevStack(input: {
     await mkdir(tempDir, { mode: 0o700, recursive: true });
   }
   await chmod(tempDir, 0o700);
+  const workerPersistDir = resolveHostedLocalWorkerPersistDir({
+    configuredPersistDir: config.workerPersistDir,
+    env: initialEnv,
+    tempDir,
+  });
 
   const pulledEnvPath = path.join(tempDir, ".env.local");
   const workerEnvPath = path.join(tempDir, "cloudflare-worker.env");
@@ -491,7 +497,7 @@ export async function startHostedLocalDevStack(input: {
       });
       await cleanupHostedRunnerContainerLocalState({
         env: workerProcessEnv ?? workerRuntimeEnv,
-        persistDir: config.workerPersistDir,
+        persistDir: workerPersistDir,
       });
     }
 
@@ -511,7 +517,7 @@ export async function startHostedLocalDevStack(input: {
         "--local-protocol",
         config.workerProtocol,
         "--persist-to",
-        config.workerPersistDir,
+        workerPersistDir,
         "--env-file",
         workerEnvPath,
         ...resolveWranglerDebugArgs(initialEnv),
@@ -760,7 +766,10 @@ export async function startHostedLocalDevStack(input: {
       : [...children, stripeListener];
 
     return {
-      config,
+      config: {
+        ...config,
+        workerPersistDir,
+      },
       kill,
       oidcIdentity,
       oidcToken,
@@ -832,6 +841,19 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+}
+
+function resolveHostedLocalWorkerPersistDir(input: {
+  configuredPersistDir: string;
+  env: NodeJS.ProcessEnv;
+  tempDir: string;
+}): string {
+  const explicitPersistDir = input.env.MURPH_DEV_CF_PERSIST_DIR?.trim();
+  if (explicitPersistDir || input.configuredPersistDir !== DEFAULT_WORKER_PERSIST_DIR) {
+    return input.configuredPersistDir;
+  }
+
+  return path.join(input.tempDir, HOSTED_LOCAL_DEFAULT_WRANGLER_PERSIST_DIR_NAME);
 }
 
 function pickHostedLocalStripeAuthorityEnv(input: {
