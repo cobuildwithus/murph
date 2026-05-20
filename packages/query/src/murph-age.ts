@@ -25,6 +25,7 @@ import {
   resolveMurphAgeModelCardPolicy,
   resolveMetricInputKey,
   summarizeMurphAgeCalculatorPublicOutput,
+  summarizeMurphAgePublicWearableBridgeFromInputBundle,
   toPublicMurphAgeCalculatorReport,
   validateMurphAgeRiskModel,
   validateMurphAgeLocalModelCardArtifactPolicy,
@@ -628,15 +629,10 @@ function buildMurphAgeWearableBridgeReadiness(input: {
   asOf: string;
   points: readonly MetricPoint[];
 }): MurphAgeWearableBridgeInputReadiness {
-  const output = calculateMurphAgeFromInputBundle({
+  return summarizeMurphAgePublicWearableBridgeFromInputBundle({
     asOf: input.asOf,
-    chronologicalAgeYears: 50,
-    mode: "product",
-    models: {},
     points: input.points,
-    sex: "female",
   });
-  return summarizeMurphAgeCalculatorPublicOutput(output).wearableBridge;
 }
 
 export function metricPointFiltersForMurphAgeModel(
