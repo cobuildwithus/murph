@@ -54,6 +54,8 @@ export const MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION =
   "murph.age.wearable-lab-aggregate-receipt-template.v1" as const;
 export const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SCHEMA_VERSION =
   "murph.age.wearable-bridge-feature.v1" as const;
+export const MURPH_AGE_WEARABLE_COVERAGE_WINDOW_DAYS = 28 as const;
+export const MURPH_AGE_WEARABLE_COVERAGE_MIN_VALID_DAYS = 14 as const;
 export const MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION =
   "murph.age.wearable-score-bearing-strategy.v3" as const;
 export const MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION =
@@ -1283,6 +1285,10 @@ export type MurphAgeWearableBridgeSourceKind =
   | "activity-summary"
   | "sleep-summary"
   | "wearable-summary";
+export type MurphAgeWearableBridgeCoverageRole = "day" | "night";
+export type MurphAgeWearableBridgeQualityMetricRole =
+  | "coverage"
+  | MurphAgeWearableBridgeCoverageRole;
 export type MurphAgeWearableBridgeReadinessStatus = "missing" | "partial" | "ready";
 export type MurphAgeWearableBridgeUnlockPriority = "defer" | "first" | "second";
 
@@ -2032,6 +2038,17 @@ export interface MurphAgeWearableBridgeFeatureSpec {
   unlockPriority: MurphAgeWearableBridgeUnlockPriority;
 }
 
+export interface MurphAgeWearableBridgeMetricSourceHint {
+  defaultSourceKind: MurphAgeWearableBridgeSourceKind;
+  featureKeys: string[];
+  metricKey: string;
+  qualityMetricRole: MurphAgeWearableBridgeQualityMetricRole | null;
+  sourceKinds: MurphAgeWearableBridgeSourceKind[];
+  validDaySourceKinds: MurphAgeWearableBridgeSourceKind[];
+  validNightSourceKinds: MurphAgeWearableBridgeSourceKind[];
+  validObservationRoles: MurphAgeWearableBridgeCoverageRole[];
+}
+
 export interface MurphAgeModelValidationResult {
   status: "invalid" | "valid";
   warnings: MurphAgeWarning[];
@@ -2316,6 +2333,45 @@ const MURPH_AGE_WEARABLE_NIGHT_QUALITY_METRIC_KEYS = [
   ...MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS,
 ] as const;
 
+const MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_METRIC_KEYS = [
+  "activity-minutes",
+  "estimated-vo2-max",
+  "mvpa-minutes",
+  "peak-30-minute-cadence",
+  "sedentary-minutes",
+  "steps",
+] as const;
+
+const MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_METRIC_KEYS = [
+  "deep-sleep-minutes",
+  "rem-sleep-minutes",
+  "sleep-duration-variability-minutes",
+  "sleep-efficiency",
+  "sleep-midpoint-variability-minutes",
+  "sleep-regularity-score",
+  "sleep-score",
+  "spo2",
+  "total-sleep-minutes",
+] as const;
+
+const MURPH_AGE_WEARABLE_SLEEP_SUMMARY_ONLY_NIGHT_COVERAGE_OBSERVATION_METRIC_KEYS = [
+  "hrv-rmssd",
+] as const;
+
+const MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_SOURCE_KINDS = [
+  "activity-summary",
+  "wearable-summary",
+] as const satisfies readonly MurphAgeWearableBridgeSourceKind[];
+
+const MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS = [
+  "sleep-summary",
+  "wearable-summary",
+] as const satisfies readonly MurphAgeWearableBridgeSourceKind[];
+
+const MURPH_AGE_WEARABLE_SLEEP_SUMMARY_ONLY_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS = [
+  "sleep-summary",
+] as const satisfies readonly MurphAgeWearableBridgeSourceKind[];
+
 const MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY = {
   aggregateOnly: true,
   coefficientsExportAllowed: false,
@@ -2587,6 +2643,9 @@ const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS = [
 
 const MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS =
   MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPEC_DEFINITIONS.map(completeWearableBridgeFeatureSpec);
+
+const MURPH_AGE_WEARABLE_BRIDGE_METRIC_SOURCE_HINTS =
+  buildWearableBridgeMetricSourceHints();
 
 const MURPH_AGE_WEARABLE_SCORE_BEARING_FAMILY_POLICIES = [
   {
@@ -3389,6 +3448,36 @@ export function listMurphAgeWearableShadowIncrementPolicies(): MurphAgeWearableS
 
 export function listMurphAgeWearableBridgeFeatureSpecs(): MurphAgeWearableBridgeFeatureSpec[] {
   return MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS.map(cloneMurphAgeWearableBridgeFeatureSpec);
+}
+
+export function listMurphAgeWearableBridgeMetricSourceHints(): MurphAgeWearableBridgeMetricSourceHint[] {
+  return MURPH_AGE_WEARABLE_BRIDGE_METRIC_SOURCE_HINTS.map(cloneMurphAgeWearableBridgeMetricSourceHint);
+}
+
+export function resolveMurphAgeWearableBridgeMetricSourceKind(
+  metricKey: string,
+): MurphAgeWearableBridgeSourceKind | null {
+  return resolveMurphAgeWearableBridgeMetricSourceHint(metricKey)?.defaultSourceKind ?? null;
+}
+
+export function isMurphAgeWearableBridgeValidDayMetricPoint(input: {
+  metricKey: string;
+  sourceKind: string | null | undefined;
+}): boolean {
+  const sourceKind = input.sourceKind;
+  if (!sourceKind) return false;
+  const hint = resolveMurphAgeWearableBridgeMetricSourceHint(input.metricKey);
+  return hint?.validDaySourceKinds.some((candidate) => candidate === sourceKind) ?? false;
+}
+
+export function isMurphAgeWearableBridgeValidNightMetricPoint(input: {
+  metricKey: string;
+  sourceKind: string | null | undefined;
+}): boolean {
+  const sourceKind = input.sourceKind;
+  if (!sourceKind) return false;
+  const hint = resolveMurphAgeWearableBridgeMetricSourceHint(input.metricKey);
+  return hint?.validNightSourceKinds.some((candidate) => candidate === sourceKind) ?? false;
 }
 
 export function summarizeMurphAgeWearableParameterPackContract(): MurphAgeWearableParameterPackContract {
@@ -4314,6 +4403,16 @@ export function resolveMurphAgeWearableBridgeFeatureSpec(
     candidate.featureKey === featureKey
   ) ?? null;
   return spec ? cloneMurphAgeWearableBridgeFeatureSpec(spec) : null;
+}
+
+export function resolveMurphAgeWearableBridgeMetricSourceHint(
+  metricKey: string,
+): MurphAgeWearableBridgeMetricSourceHint | null {
+  const resolvedMetricKey = resolveMetricInputKey(metricKey);
+  const hint = MURPH_AGE_WEARABLE_BRIDGE_METRIC_SOURCE_HINTS.find((candidate) =>
+    candidate.metricKey === resolvedMetricKey
+  ) ?? null;
+  return hint ? cloneMurphAgeWearableBridgeMetricSourceHint(hint) : null;
 }
 
 export function assessMurphAgeWearableShadowIncrements(
@@ -7966,6 +8065,176 @@ function completeWearableBridgeFeatureSpec(
   };
 }
 
+function buildWearableBridgeMetricSourceHints(): MurphAgeWearableBridgeMetricSourceHint[] {
+  interface MutableHint {
+    defaultSourceKind: MurphAgeWearableBridgeSourceKind | null;
+    featureKeys: Set<string>;
+    metricKey: string;
+    qualityMetricRole: MurphAgeWearableBridgeQualityMetricRole | null;
+    sourceKinds: Set<MurphAgeWearableBridgeSourceKind>;
+    validDaySourceKinds: Set<MurphAgeWearableBridgeSourceKind>;
+    validNightSourceKinds: Set<MurphAgeWearableBridgeSourceKind>;
+  }
+
+  const hintsByMetricKey = new Map<string, MutableHint>();
+  const upsertHint = (input: {
+    defaultSourceKind: MurphAgeWearableBridgeSourceKind;
+    featureKeys?: readonly string[];
+    metricKey: string;
+    sourceKinds?: readonly MurphAgeWearableBridgeSourceKind[];
+    validDaySourceKinds?: readonly MurphAgeWearableBridgeSourceKind[];
+    validNightSourceKinds?: readonly MurphAgeWearableBridgeSourceKind[];
+  }) => {
+    const metricKey = resolveMetricInputKey(input.metricKey);
+    const existing = hintsByMetricKey.get(metricKey) ?? {
+      defaultSourceKind: null,
+      featureKeys: new Set<string>(),
+      metricKey,
+      qualityMetricRole: resolveWearableBridgeQualityMetricRole(metricKey),
+      sourceKinds: new Set<MurphAgeWearableBridgeSourceKind>(),
+      validDaySourceKinds: new Set<MurphAgeWearableBridgeSourceKind>(),
+      validNightSourceKinds: new Set<MurphAgeWearableBridgeSourceKind>(),
+    };
+    existing.defaultSourceKind ??= input.defaultSourceKind;
+    for (const featureKey of input.featureKeys ?? []) {
+      existing.featureKeys.add(featureKey);
+    }
+    for (const sourceKind of input.sourceKinds ?? [input.defaultSourceKind]) {
+      existing.sourceKinds.add(sourceKind);
+    }
+    for (const sourceKind of input.validDaySourceKinds ?? []) {
+      existing.validDaySourceKinds.add(sourceKind);
+      existing.sourceKinds.add(sourceKind);
+    }
+    for (const sourceKind of input.validNightSourceKinds ?? []) {
+      existing.validNightSourceKinds.add(sourceKind);
+      existing.sourceKinds.add(sourceKind);
+    }
+    hintsByMetricKey.set(metricKey, existing);
+  };
+
+  for (const feature of MURPH_AGE_WEARABLE_CONTEXT_FEATURES) {
+    for (const metricKey of feature.metricKeys) {
+      upsertHint({
+        defaultSourceKind: inferWearableContextMetricDefaultSourceKind(feature.featureKey, metricKey),
+        featureKeys: [feature.featureKey],
+        metricKey,
+      });
+    }
+  }
+
+  for (const spec of MURPH_AGE_WEARABLE_BRIDGE_FEATURE_SPECS) {
+    for (const metricKey of spec.metricKeys) {
+      upsertHint({
+        defaultSourceKind: inferWearableBridgeSpecDefaultSourceKind(spec, metricKey),
+        featureKeys: [spec.featureKey],
+        metricKey,
+        sourceKinds: spec.sourceKinds,
+      });
+    }
+    for (const metricKey of spec.requiredQualityMetricKeys) {
+      upsertHint({
+        defaultSourceKind: inferWearableBridgeQualityMetricDefaultSourceKind(metricKey),
+        featureKeys: [spec.featureKey],
+        metricKey,
+        sourceKinds: spec.sourceKinds,
+      });
+    }
+  }
+
+  for (const metricKey of MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_METRIC_KEYS) {
+    upsertHint({
+      defaultSourceKind: "activity-summary",
+      metricKey,
+      sourceKinds: MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_SOURCE_KINDS,
+      validDaySourceKinds: MURPH_AGE_WEARABLE_DAY_COVERAGE_OBSERVATION_SOURCE_KINDS,
+    });
+  }
+
+  for (const metricKey of MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_METRIC_KEYS) {
+    upsertHint({
+      defaultSourceKind: "sleep-summary",
+      metricKey,
+      sourceKinds: MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS,
+      validNightSourceKinds: MURPH_AGE_WEARABLE_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS,
+    });
+  }
+
+  for (const metricKey of MURPH_AGE_WEARABLE_SLEEP_SUMMARY_ONLY_NIGHT_COVERAGE_OBSERVATION_METRIC_KEYS) {
+    upsertHint({
+      defaultSourceKind: "sleep-summary",
+      metricKey,
+      sourceKinds: MURPH_AGE_WEARABLE_SLEEP_SUMMARY_ONLY_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS,
+      validNightSourceKinds: MURPH_AGE_WEARABLE_SLEEP_SUMMARY_ONLY_NIGHT_COVERAGE_OBSERVATION_SOURCE_KINDS,
+    });
+  }
+
+  return [...hintsByMetricKey.values()]
+    .map((hint) => {
+      const validObservationRoles: MurphAgeWearableBridgeCoverageRole[] = [];
+      if (hint.validDaySourceKinds.size > 0) validObservationRoles.push("day");
+      if (hint.validNightSourceKinds.size > 0) validObservationRoles.push("night");
+      return {
+        defaultSourceKind: hint.defaultSourceKind ?? "wearable-summary",
+        featureKeys: [...hint.featureKeys].sort(),
+        metricKey: hint.metricKey,
+        qualityMetricRole: hint.qualityMetricRole,
+        sourceKinds: [...hint.sourceKinds].sort(),
+        validDaySourceKinds: [...hint.validDaySourceKinds].sort(),
+        validNightSourceKinds: [...hint.validNightSourceKinds].sort(),
+        validObservationRoles,
+      };
+    })
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+}
+
+function inferWearableContextMetricDefaultSourceKind(
+  featureKey: string,
+  metricKey: string,
+): MurphAgeWearableBridgeSourceKind {
+  const qualityMetricRole = resolveWearableBridgeQualityMetricRole(metricKey);
+  if (qualityMetricRole === "day") return "activity-summary";
+  if (qualityMetricRole === "night") return "sleep-summary";
+  if (qualityMetricRole === "coverage") return "wearable-summary";
+  if (MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES.activity.includes(featureKey)) return "activity-summary";
+  if (MURPH_AGE_WEARABLE_CONTEXT_FAMILY_FEATURES.sleep.includes(featureKey)) return "sleep-summary";
+  return "wearable-summary";
+}
+
+function inferWearableBridgeSpecDefaultSourceKind(
+  spec: MurphAgeWearableBridgeFeatureSpec,
+  metricKey: string,
+): MurphAgeWearableBridgeSourceKind {
+  const qualityMetricRole = resolveWearableBridgeQualityMetricRole(metricKey);
+  if (qualityMetricRole) return inferWearableBridgeQualityMetricDefaultSourceKind(metricKey);
+  if (spec.sourceKinds.includes("sleep-summary")) return "sleep-summary";
+  if (spec.sourceKinds.includes("activity-summary")) return "activity-summary";
+  return "wearable-summary";
+}
+
+function inferWearableBridgeQualityMetricDefaultSourceKind(
+  metricKey: string,
+): MurphAgeWearableBridgeSourceKind {
+  const qualityMetricRole = resolveWearableBridgeQualityMetricRole(metricKey);
+  if (qualityMetricRole === "day") return "activity-summary";
+  if (qualityMetricRole === "night") return "sleep-summary";
+  return "wearable-summary";
+}
+
+function resolveWearableBridgeQualityMetricRole(
+  metricKey: string,
+): MurphAgeWearableBridgeQualityMetricRole | null {
+  const resolvedMetricKey = resolveMetricInputKey(metricKey);
+  if (MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS.includes(
+    resolvedMetricKey as typeof MURPH_AGE_WEARABLE_COVERAGE_QUALITY_METRIC_KEYS[number],
+  )) {
+    return "coverage";
+  }
+  if (resolvedMetricKey === "wearable-valid-day-count-28d") return "day";
+  if (resolvedMetricKey === "wearable-valid-night-count-28d") return "night";
+  return null;
+}
+
 function isMurphAgeWearableShadowPoint(point: MetricPoint): boolean {
   return MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS.includes(
     point.source.kind as typeof MURPH_AGE_WEARABLE_SHADOW_SOURCE_KINDS[number],
@@ -9102,6 +9371,19 @@ function cloneMurphAgeWearableBridgeFeatureSpec(
     outputBoundary: { ...spec.outputBoundary },
     requiredQualityMetricKeys: [...spec.requiredQualityMetricKeys],
     sourceKinds: [...spec.sourceKinds],
+  };
+}
+
+function cloneMurphAgeWearableBridgeMetricSourceHint(
+  hint: MurphAgeWearableBridgeMetricSourceHint,
+): MurphAgeWearableBridgeMetricSourceHint {
+  return {
+    ...hint,
+    featureKeys: [...hint.featureKeys],
+    sourceKinds: [...hint.sourceKinds],
+    validDaySourceKinds: [...hint.validDaySourceKinds],
+    validNightSourceKinds: [...hint.validNightSourceKinds],
+    validObservationRoles: [...hint.validObservationRoles],
   };
 }
 
