@@ -13,7 +13,6 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
-  handleHostedRunnerOpenInternetOutbound,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "./runner-egress-intercept.ts";
 import {
@@ -1071,20 +1070,19 @@ registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
 function registerHostedRunnerContainerOutboundInterception(
   containerClass: typeof RunnerContainer,
 ): void {
-  const outboundSetter = Object.getOwnPropertyDescriptor(Container, "outbound")?.set;
   const outboundByHostSetter = Object.getOwnPropertyDescriptor(Container, "outboundByHost")?.set;
 
-  if (outboundSetter && outboundByHostSetter) {
-    outboundSetter.call(containerClass, handleHostedRunnerOpenInternetOutbound);
+  // A static catch-all outbound handler makes Cloudflare Containers intercept all
+  // HTTPS destinations. Keep interception host-specific so direct R2 uploads stay
+  // on the container's internet path instead of the Worker request body path.
+  if (outboundByHostSetter) {
     outboundByHostSetter.call(containerClass, HOSTED_RUNNER_OUTBOUND_BY_HOST);
     return;
   }
 
   const legacyContainerClass = containerClass as typeof RunnerContainer & {
-    outbound: typeof handleHostedRunnerOpenInternetOutbound;
     outboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST;
   };
-  legacyContainerClass.outbound = handleHostedRunnerOpenInternetOutbound;
   legacyContainerClass.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 }
 
