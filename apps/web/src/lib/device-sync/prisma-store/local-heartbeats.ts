@@ -6,6 +6,7 @@ import {
   buildHostedLocalHeartbeatRuntimeLocalStateUpdate,
   type HostedLocalHeartbeatPatch,
 } from "../local-heartbeat";
+import { sanitizeHostedConnectionLastErrorMessage } from "../shared";
 import type { HostedPrismaTransactionClient } from "./types";
 import { PrismaHostedConnectionStore } from "./connections";
 
@@ -32,10 +33,16 @@ export class PrismaHostedLocalHeartbeatStore {
 
     const localState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);
     const durableConnection = await this.connections.syncDurableConnectionLocalHeartbeatState(existing, localState, tx);
+    const responseLocalState = "lastErrorMessage" in localState
+      ? {
+          ...localState,
+          lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(localState.lastErrorMessage ?? null),
+        }
+      : localState;
 
     return {
       ...durableConnection,
-      ...localState,
+      ...responseLocalState,
     };
   }
 }

@@ -239,7 +239,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     });
   });
 
-  it("echoes the caller's heartbeat error text while durable state redacts it", async () => {
+  it("echoes and persists sanitized heartbeat error text", async () => {
     const { store, updateConnection } = createHeartbeatStore();
 
     const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
@@ -252,9 +252,34 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     });
     expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
+        lastErrorMessage: "Sensitive sync failure",
+      }),
+    }));
+  });
+
+  it("drops unsafe heartbeat error text in durable writes and the response", async () => {
+    const { store, updateConnection } = createHeartbeatStore();
+
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastErrorMessage:
+        "Provider request failed for api.example.test/oauth owner@example.test authorization=Bearer secret-token",
+      lastSyncErrorAt: "2026-03-25T01:30:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorMessage: null,
+      lastSyncErrorAt: "2026-03-25T01:30:00.000Z",
+    });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         lastErrorMessage: null,
       }),
     }));
+    const serialized = JSON.stringify(updated);
+    expect(serialized).not.toContain("api.example.test");
+    expect(serialized).not.toContain("owner@example.test");
+    expect(serialized).not.toContain("secret-token");
   });
 
   it("rejects regressive heartbeat timestamps before writing stale state", async () => {

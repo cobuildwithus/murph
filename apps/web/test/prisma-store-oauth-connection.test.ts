@@ -842,7 +842,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         accessTokenExpiresAt: null,
         keyVersion: null,
         lastErrorCode: "OAUTH_SETUP_FAILED",
-        lastErrorMessage: null,
+        lastErrorMessage: "post-connect setup failed",
         nextReconcileAt: null,
         refreshTokenEncrypted: null,
         setupExpiresAt: null,
@@ -854,13 +854,65 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(result).toEqual(expect.objectContaining({
       accessTokenExpiresAt: null,
       lastErrorCode: "OAUTH_SETUP_FAILED",
-      lastErrorMessage: null,
+      lastErrorMessage: "post-connect setup failed",
       nextReconcileAt: null,
       status: "reauthorization_required",
     }));
     expect(stored.accessTokenEncrypted).toBeNull();
     expect(stored.refreshTokenEncrypted).toBeNull();
     expect(stored.setupPhase).toBe("failed");
+  });
+
+  it("drops unsafe post-connect setup failure messages before durable writes", async () => {
+    let stored = createConnection({
+      accessTokenEncrypted: "enc:access-token",
+      accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+      keyVersion: "v1",
+      refreshTokenEncrypted: "enc:refresh-token",
+      status: "active",
+      tokenVersion: 3,
+    });
+
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+          stored = {
+            ...stored,
+            ...data,
+            updatedAt: new Date("2026-03-26T06:00:00.000Z"),
+          };
+          return cloneConnection(stored);
+        }),
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    const result = await store.markConnectionSetupFailed({
+      accountId: "dsc_123",
+      now: "2026-03-26T06:00:00.000Z",
+      code: "OAUTH_SETUP_FAILED",
+      message:
+        "post-connect setup failed for api.example.test/path owner@example.test authorization=Bearer secret-token",
+    });
+
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lastErrorMessage: null,
+      }),
+    }));
+    expect(result?.lastErrorMessage).toBeNull();
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("api.example.test");
+    expect(serialized).not.toContain("owner@example.test");
+    expect(serialized).not.toContain("secret-token");
   });
 
   it("serves ordinary hosted connection lists from durable Prisma metadata without live runtime reads", async () => {
@@ -983,10 +1035,72 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       status: "disconnected",
       metadata: {},
       lastErrorCode: "REMOTE_REVOKE_FAILED",
-      lastErrorMessage: null,
+      lastErrorMessage: "Provider revoke request failed during disconnect.",
       lastWebhookAt: "2026-03-25T07:00:00.000Z",
       updatedAt: "2026-03-25T08:00:00.000Z",
     }));
+  });
+
+  it("returns safe provider failure reasons from durable connection state", async () => {
+    const providerReason =
+      "WHOOP token request failed. Provider reason: The request is missing a required parameter, includes an invalid parameter value, includes a parameter more than once, or is otherwise malformed";
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "whoop",
+      userId: "user-123",
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastErrorMessage: providerReason,
+      lastSyncErrorAt: new Date("2026-03-25T08:00:00.000Z"),
+      status: "active",
+      updatedAt: new Date("2026-03-25T08:00:00.000Z"),
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async () => cloneConnection(connection),
+        },
+      } as never,
+    });
+
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
+      id: "dsc_123",
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastErrorMessage: providerReason,
+      provider: "whoop",
+    }));
+  });
+
+  it("drops unsafe durable connection error messages before returning them", async () => {
+    const connection = createConnection({
+      id: "dsc_123",
+      provider: "whoop",
+      userId: "user-123",
+      lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+      lastErrorMessage:
+        "Provider request failed for https://api.example.test/oauth?refresh_token=secret owner@example.test authorization=Bearer secret-token",
+      lastSyncErrorAt: new Date("2026-03-25T08:00:00.000Z"),
+      status: "active",
+      updatedAt: new Date("2026-03-25T08:00:00.000Z"),
+    });
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst: async () => cloneConnection(connection),
+        },
+      } as never,
+    });
+
+    const result = await store.getConnectionForUser("user-123", "dsc_123");
+
+    expect(result?.lastErrorMessage).toBeNull();
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("secret-token");
+    expect(serialized).not.toContain("owner@example.test");
+    expect(serialized).not.toContain("refresh_token=secret");
   });
 
   it("persists webhook receipt timestamps in durable Prisma state", async () => {
