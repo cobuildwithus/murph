@@ -1,6 +1,6 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { writeFile, mkdtemp, rm, access } from "node:fs/promises";
+import { writeFile, mkdtemp, rm, access, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -69,6 +69,31 @@ describe("workspace snapshot local restore", () => {
         body: Buffer.from("manifest mismatch\n", "utf8"),
         name: "safe/inside.txt",
       }],
+      expectedError: "Hosted workspace snapshot restored state does not match its ref.",
+      unwrittenRelativePath: "safe/inside.txt",
+    });
+  });
+
+  it.each([
+    {
+      archiveOverride: ({ fileCount }: { fileCount: number; totalPlainBytes: number }) => ({
+        fileCount: fileCount - 1,
+      }),
+      name: "file count",
+    },
+    {
+      archiveOverride: ({ totalPlainBytes }: { fileCount: number; totalPlainBytes: number }) => ({
+        totalPlainBytes: totalPlainBytes - 1,
+      }),
+      name: "plain byte count",
+    },
+  ])("rejects tar archives whose $name is understated before extraction", async ({ archiveOverride }) => {
+    await expectUnsafeTarArchive({
+      archiveOverride,
+      entries: [{
+        body: Buffer.from("manifest understatement\n", "utf8"),
+        name: "safe/inside.txt",
+      }],
       expectedError: "Hosted workspace snapshot archive manifest does not match its ref.",
       unwrittenRelativePath: "safe/inside.txt",
     });
@@ -95,6 +120,7 @@ async function expectUnsafeTarArchive(input: {
 }): Promise<void> {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
   const durableRoot = path.join(tempRoot, "durable");
+  const existingDurableFile = path.join(durableRoot, "existing.txt");
   const encryptedFilePath = path.join(tempRoot, "snapshot.enc");
   const snapshotId = "snapshot_unsafe_tar";
   const objectKey = "users/hsn_test/workspace-snapshots/snapshot_unsafe_tar.snapshot.enc";
@@ -113,6 +139,10 @@ async function expectUnsafeTarArchive(input: {
   const totalPlainBytes = input.entries
     .reduce((total, entry) => total + (entry.body?.byteLength ?? 0), 0);
   try {
+    if (input.unwrittenRelativePath) {
+      await mkdir(durableRoot, { mode: 0o700, recursive: true });
+      await writeFile(existingDurableFile, "existing durable root\n", { mode: 0o600 });
+    }
     const cipher = createCipheriv("aes-256-gcm", Buffer.from(dataKey), Buffer.from(iv));
     cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
     const encryptedBody = Buffer.concat([
@@ -156,6 +186,7 @@ async function expectUnsafeTarArchive(input: {
     await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
     if (input.unwrittenRelativePath) {
       await expect(access(path.join(durableRoot, input.unwrittenRelativePath))).rejects.toThrow();
+      await expect(readFile(existingDurableFile, "utf8")).resolves.toBe("existing durable root\n");
     }
   } finally {
     await rm(tempRoot, { force: true, recursive: true });

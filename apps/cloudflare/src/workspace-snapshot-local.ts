@@ -235,16 +235,10 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
-    const tarState = await assertHostedWorkspaceSnapshotTarEntriesSafe(
-      plaintextArchivePath,
-      input.ref.archive.totalPlainBytes,
-    );
-    if (
-      tarState.fileCount !== input.ref.archive.fileCount
-      || tarState.totalPlainBytes !== input.ref.archive.totalPlainBytes
-    ) {
-      throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
-    }
+    await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchivePath, {
+      maxFileCount: input.ref.archive.fileCount,
+      maxTotalPlainBytes: input.ref.archive.totalPlainBytes,
+    });
 
     const zstd = spawn("zstd", [
       "-d",
@@ -411,9 +405,17 @@ function isHostedWorkspaceSnapshotEnvPath(relativePath: string): boolean {
 
 async function assertHostedWorkspaceSnapshotTarEntriesSafe(
   archivePath: string,
-  expectedTotalPlainBytes: number,
-): Promise<{ fileCount: number; totalPlainBytes: number }> {
-  if (!Number.isSafeInteger(expectedTotalPlainBytes) || expectedTotalPlainBytes < 0) {
+  limits: {
+    maxFileCount: number;
+    maxTotalPlainBytes: number;
+  },
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(limits.maxFileCount)
+    || limits.maxFileCount < 0
+    || !Number.isSafeInteger(limits.maxTotalPlainBytes)
+    || limits.maxTotalPlainBytes < 0
+  ) {
     throw new Error("Hosted workspace snapshot archive manifest is unsafe.");
   }
   const entries = await listHostedWorkspaceSnapshotVerboseTarEntries(archivePath);
@@ -440,15 +442,14 @@ async function assertHostedWorkspaceSnapshotTarEntriesSafe(
       fileCount += 1;
       totalPlainBytes += parsed.size;
       if (
-        !Number.isSafeInteger(totalPlainBytes)
-        || totalPlainBytes > expectedTotalPlainBytes
+        fileCount > limits.maxFileCount
+        || !Number.isSafeInteger(totalPlainBytes)
+        || totalPlainBytes > limits.maxTotalPlainBytes
       ) {
         throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
       }
     }
   }
-
-  return { fileCount, totalPlainBytes };
 }
 
 async function listHostedWorkspaceSnapshotVerboseTarEntries(
