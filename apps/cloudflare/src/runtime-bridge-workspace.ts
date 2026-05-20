@@ -513,6 +513,26 @@ async function createFullSnapshot(input: HostedWorkspaceBridgeFullSnapshotInput 
     checkpoint = completed.checkpoint;
   } catch (error) {
     const classifiedError = classifyHostedWorkspaceSnapshotFailure(error);
+    if (startedUpload) {
+      try {
+        await input.platform.workspaceSnapshotPort.abortUpload({
+          objectKey: startedUpload.objectKey,
+          snapshotId: startedUpload.snapshotId,
+        });
+      } catch (abortError) {
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            snapshotMode: "workspace_snapshot_v2",
+          },
+          error: abortError,
+          level: "warn",
+          message: "Hosted workspace snapshot upload abort failed.",
+          phase: "checkpoint",
+          userId: input.userId,
+        });
+      }
+    }
     await writeHostedCheckpointSnapshotLifecycleLog({
       commitKind: input.commitKind,
       details: {

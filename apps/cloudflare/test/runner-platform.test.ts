@@ -3,6 +3,14 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  buildHostedWorkspaceSnapshotV2Aad,
+  HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  type HostedWorkspaceSnapshotV2Ref,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -130,6 +138,40 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
   } as const;
 }
 
+function createWorkspaceSnapshotV2Ref(input: {
+  encryptedByteSize: number;
+}): HostedWorkspaceSnapshotV2Ref {
+  const snapshotId = "snapshot_runner_platform";
+  const objectKey = `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+  return {
+    archive: {
+      compression: "gzip",
+      encryptedByteSize: input.encryptedByteSize,
+      encryptedObjectSha256: "a".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "b".repeat(64),
+    },
+    createdAt: "2026-05-01T00:00:00.000Z",
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey,
+        snapshotId,
+        userId: "member_123",
+      }),
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_test",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    objectKey,
+    schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+    snapshotId,
+    upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+    userId: "member_123",
+  };
+}
+
 describe("buildHostedExecutionRuntimePlatform", () => {
   beforeEach(() => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
@@ -151,6 +193,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.runtimeLivenessIntervalMs).toBeUndefined();
     expect(platform.runtimeLivenessPort).toBeUndefined();
     expect(platform.runtimeLivenessRequired).toBeUndefined();
+  });
+
+  it("rejects oversized workspace snapshot restores before unwrap or fetch", async () => {
+    const fetchMock = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      durableRoot: "unused-durable-root",
+      ref: createWorkspaceSnapshotV2Ref({
+        encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      }),
+      scratchRoot: "unused-scratch-root",
+    })).rejects.toThrow("Hosted workspace snapshot restore exceeds the single-part size guard.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("logs upstream request failures with safe request metadata", async () => {

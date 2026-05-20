@@ -216,6 +216,17 @@ function createPlatform(input: {
         }
         input.uploadedObjects.set(upload.objectKey, await readFile(request.sourceFilePath));
       },
+      abortUpload: async (request: {
+        objectKey: string;
+        snapshotId: string;
+      }) => {
+        for (const [putUrl, upload] of uploadByPutUrl.entries()) {
+          if (upload.objectKey === request.objectKey && upload.snapshotId === request.snapshotId) {
+            uploadByPutUrl.delete(putUrl);
+          }
+        }
+        input.uploadedObjects.delete(request.objectKey);
+      },
       restoreWorkspaceSnapshot: async () => {
         throw new Error("Workspace snapshot restore is not used by baseline snapshot tests.");
       },

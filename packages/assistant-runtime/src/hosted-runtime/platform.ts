@@ -254,6 +254,10 @@ export interface HostedRuntimeWorkspaceSnapshotCompleteResult {
 }
 
 export interface HostedRuntimeWorkspaceSnapshotPort {
+  abortUpload(input: {
+    objectKey: string;
+    snapshotId: string;
+  }): Promise<void>;
   completeUploadedSnapshot(input: {
     checkpointRequest: HostedWorkspaceCheckpointRequest;
     ref: HostedWorkspaceSnapshotV2Ref;

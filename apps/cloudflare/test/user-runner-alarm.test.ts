@@ -21,6 +21,7 @@ import {
   hostedBundleUserPrefix,
   hostedEmailRawMessageUserPrefix,
   hostedRunnerSecretsObjectKey,
+  hostedWorkspaceSnapshotUserPrefix,
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import type {
@@ -2300,6 +2301,8 @@ describe("HostedUserRunner wake scheduling", () => {
     const artifactKey = `${await hostedArtifactUserPrefix({ userId: "member_123" })}artifact.bin`;
     const browserVaultKey =
       `${await hostedBrowserVaultReplicaUserPrefix({ userId: "member_123" })}replica.json`;
+    const workspaceSnapshotKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: "member_123" })}snapshot_abc.snapshot.enc`;
     const rawEmailKey =
       `${await hostedEmailRawMessageUserPrefix({ userId: "member_123" })}message.eml`;
     const runnerSecretsKey = await hostedRunnerSecretsObjectKey({ userId: "member_123" });
@@ -2309,6 +2312,7 @@ describe("HostedUserRunner wake scheduling", () => {
       bundleKey,
       rawEmailKey,
       runnerSecretsKey,
+      workspaceSnapshotKey,
     ]) {
       await bucket.put(key, "test-data");
     }
@@ -2355,7 +2359,7 @@ describe("HostedUserRunner wake scheduling", () => {
     await expect(harness.runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
       ok: true,
       r2: {
-        deletedObjectCount: 5,
+        deletedObjectCount: 6,
         skippedUserScopedPrefixes: false,
         supported: true,
       },
@@ -2370,6 +2374,7 @@ describe("HostedUserRunner wake scheduling", () => {
       bundleKey,
       rawEmailKey,
       runnerSecretsKey,
+      workspaceSnapshotKey,
     ]) {
       expect(bucket.objects.has(key)).toBe(false);
     }

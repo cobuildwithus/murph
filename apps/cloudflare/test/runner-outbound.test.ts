@@ -2856,6 +2856,105 @@ describe("handleRunnerOutboundRequest", () => {
     expect(head).toHaveBeenCalledWith(objectKey);
   });
 
+  it("aborts workspace snapshot upload sessions and deletes any uploaded object", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_abort";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({ key, size: 4 }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotAbortRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      aborted: true,
+      ok: true,
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+  });
+
+  it("retires workspace snapshot upload sessions when complete sees stale session state", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_stale_session";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, {
+      ...createWorkspaceSnapshotUploadSession(snapshotRef),
+      leaseGeneration: "8",
+    });
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({ key, size: 4 }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("retires workspace snapshot upload sessions when the checkpoint request fails", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_complete_cas_failed";
@@ -2990,6 +3089,7 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
@@ -2997,6 +3097,7 @@ describe("handleRunnerOutboundRequest", () => {
           key,
           size: 5,
         }),
+        deleteObject,
       ),
       USER_RUNNER: {
         getByName: runner.getByName,
@@ -3017,6 +3118,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(409);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -3906,6 +4010,29 @@ function createWorkspaceSnapshotCompleteRequest(input: {
         "x-hosted-runtime-workspace-version": input.workspaceVersion,
       }),
       method: "POST",
+    },
+  );
+}
+
+function createWorkspaceSnapshotAbortRequest(input: {
+  objectKey: string;
+  snapshotId: string;
+  workspaceVersion: string;
+}): Request {
+  return new Request(
+    `http://workspace-snapshots.worker/workspace-snapshots/${input.snapshotId}`,
+    {
+      body: JSON.stringify({
+        objectKey: input.objectKey,
+        snapshotId: input.snapshotId,
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        "x-hosted-runtime-attempt-id": "attempt_1",
+        "x-hosted-runtime-lease-generation": "9",
+        "x-hosted-runtime-workspace-version": input.workspaceVersion,
+      }),
+      method: "DELETE",
     },
   );
 }
