@@ -40,4 +40,10 @@ Close the remaining low-severity Clawpatch hygiene findings without broad packag
 
 ## Status
 
-- Active. Subagents will work on disjoint package slices; parent will integrate, verify, audit, and commit.
+- Completed. Package-boundary coverage, script coupling, Node type-floor, dependency audit, and Axios compromise guard fixes landed.
+- Completion audits ran; follow-up fixes restored existing `pnpm exec` package-script behavior and switched the OpenClaw built-package test to `node --run build`.
+- Focused package/tooling verification passed. A follow-up broad `test:diff` was interrupted after package suites and Cloudflare verify because the hosted web production build became idle; an earlier full broad `test:diff` had passed before the audit follow-up.
+- Final `pnpm typecheck` is currently blocked by unrelated dirty `apps/cloudflare` R2 presign work outside this plan's scope.
+Status: completed
+Updated: 2026-05-20
+Completed: 2026-05-20
