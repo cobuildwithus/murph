@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v1" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v1" as const;
+  "murph.age.research-calculator-view.v2" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -731,6 +731,40 @@ export interface MurphAgePublicCalculatorView {
   wearable: MurphAgePublicWearableCalculatorView;
 }
 
+export interface MurphAgeResearchModelStatusView {
+  blockers: Array<
+    | "biomarker-transport-not-confirmed"
+    | "product-use-not-authorized"
+    | "wearable-increment-not-validated"
+  >;
+  contextOnlyMetricKeys: string[];
+  currentModelFamily: "frozen-nhis-r399-plus-research-increments";
+  functionDisability: {
+    currentUse: "context-only-diagnostic-sidecar";
+    nextAction: "fresh-source-feasibility-before-promotion";
+    scoreBearing: false;
+  };
+  labBody: {
+    currentUse: "score-bearing-research-when-selected";
+    nextAction: "validate-transport-before-product-use";
+    transportStatus: "internal-promising-transport-not-confirmed";
+  };
+  productUseAuthorized: false;
+  scoreBearingFeatureKeys: string[];
+  scoreBearingMetricKeys: string[];
+  scoreInterpretation: "risk-age-equivalent-research-only";
+  selectedResearchCardId: MurphAgePublicAuthorization["cardId"];
+  wearable: {
+    consumerValidationStatus: "missing";
+    currentUse: "context-only-shadow";
+    nextAction: MurphAgePublicLabWearableShadowEvidenceNextAction;
+    nextExternalOrPartnerRouteIdsByPriority: MurphAgeSourceRouteId[];
+    scoreBearing: false;
+    scoreContributionAuthorized: false;
+    shadowEvidencePacketIds: MurphAgePublicLabWearableShadowEvidencePacketId[];
+  };
+}
+
 export interface MurphAgeResearchCalculatorView {
   ageEstimate: MurphAgePublicAgeEstimateView | null;
   blockedFeatureKeys: string[];
@@ -740,6 +774,7 @@ export interface MurphAgeResearchCalculatorView {
   featureContributions: MurphAgePublicFeatureContributionView[];
   missingFeatureKeys: string[];
   mode: MurphAgeCalculatorMode;
+  model: MurphAgeResearchModelStatusView;
   product: {
     ageDisplayReady: boolean;
     promotionBlockers: MurphAgeProductPromotionBlocker[];
@@ -4199,10 +4234,18 @@ export function buildMurphAgeResearchCalculatorView(
 ): MurphAgeResearchCalculatorView {
   const summary = report.displaySummary;
   const result = report.mode === "research" ? report.result : null;
+  const selectedScoreBearingFeatureKeys = result ? [...summary.selectedScoreBearingFeatureKeys] : [];
+  const selectedScoreBearingMetricKeys = result ? [...summary.selectedScoreBearingMetricKeys] : [];
   const wearableMetricKeys = new Set(summary.wearableBridge.features.flatMap((feature) => feature.metricKeys));
   const contextOnlyWearableMetricKeys = summary.contextOnlyMetricKeys.filter((metricKey) =>
     wearableMetricKeys.has(metricKey)
   );
+  const modelStatus = buildMurphAgeResearchModelStatusView({
+    contextOnlyMetricKeys: summary.contextOnlyMetricKeys,
+    selectedResearchCardId: result ? report.authorization.cardId : null,
+    selectedScoreBearingFeatureKeys,
+    selectedScoreBearingMetricKeys,
+  });
 
   return {
     ageEstimate: result ? {
@@ -4229,6 +4272,7 @@ export function buildMurphAgeResearchCalculatorView(
     })) : [],
     missingFeatureKeys: [...summary.missingFeatureKeys],
     mode: report.mode,
+    model: modelStatus,
     product: {
       ageDisplayReady: summary.productAgeDisplayReady,
       productUseAuthorized: false,
@@ -4248,8 +4292,8 @@ export function buildMurphAgeResearchCalculatorView(
     },
     schemaVersion: MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
     selectedCardId: result ? report.authorization.cardId : null,
-    selectedScoreBearingFeatureKeys: result ? [...summary.selectedScoreBearingFeatureKeys] : [],
-    selectedScoreBearingMetricKeys: result ? [...summary.selectedScoreBearingMetricKeys] : [],
+    selectedScoreBearingFeatureKeys,
+    selectedScoreBearingMetricKeys,
     status: report.status,
     warnings: report.warnings.map((warning) => ({ ...warning })),
     wearable: {
@@ -4260,6 +4304,48 @@ export function buildMurphAgeResearchCalculatorView(
       readyFeatureKeys: [...summary.wearableBridge.readyFeatureKeys],
       scoreBearing: false,
       scoreContributionAuthorized: false,
+    },
+  };
+}
+
+function buildMurphAgeResearchModelStatusView(input: {
+  contextOnlyMetricKeys: readonly string[];
+  selectedResearchCardId: MurphAgePublicAuthorization["cardId"];
+  selectedScoreBearingFeatureKeys: readonly string[];
+  selectedScoreBearingMetricKeys: readonly string[];
+}): MurphAgeResearchModelStatusView {
+  const shadowEvidence = summarizeMurphAgePublicLabWearableShadowEvidenceStatus();
+  return {
+    blockers: [
+      "biomarker-transport-not-confirmed",
+      "wearable-increment-not-validated",
+      "product-use-not-authorized",
+    ],
+    contextOnlyMetricKeys: [...input.contextOnlyMetricKeys],
+    currentModelFamily: "frozen-nhis-r399-plus-research-increments",
+    functionDisability: {
+      currentUse: "context-only-diagnostic-sidecar",
+      nextAction: "fresh-source-feasibility-before-promotion",
+      scoreBearing: false,
+    },
+    labBody: {
+      currentUse: "score-bearing-research-when-selected",
+      nextAction: "validate-transport-before-product-use",
+      transportStatus: "internal-promising-transport-not-confirmed",
+    },
+    productUseAuthorized: false,
+    scoreBearingFeatureKeys: [...input.selectedScoreBearingFeatureKeys],
+    scoreBearingMetricKeys: [...input.selectedScoreBearingMetricKeys],
+    scoreInterpretation: "risk-age-equivalent-research-only",
+    selectedResearchCardId: input.selectedResearchCardId,
+    wearable: {
+      consumerValidationStatus: "missing",
+      currentUse: "context-only-shadow",
+      nextAction: shadowEvidence.nextAction,
+      nextExternalOrPartnerRouteIdsByPriority: [...shadowEvidence.nextExternalOrPartnerRouteIdsByPriority],
+      scoreBearing: false,
+      scoreContributionAuthorized: false,
+      shadowEvidencePacketIds: [...shadowEvidence.includedPacketIds],
     },
   };
 }

@@ -443,13 +443,50 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v1')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v2')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
     assert.equal(view.mode, 'research')
     assert.equal(view.displayStatus, 'research-only')
     assert.equal(view.selectedCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(view.model.currentModelFamily, 'frozen-nhis-r399-plus-research-increments')
+    assert.equal(view.model.scoreInterpretation, 'risk-age-equivalent-research-only')
+    assert.equal(view.model.selectedResearchCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(view.model.productUseAuthorized, false)
+    assert.equal(
+      view.model.blockers.join('|'),
+      'biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized',
+    )
+    assert.equal(view.model.functionDisability.currentUse, 'context-only-diagnostic-sidecar')
+    assert.equal(view.model.functionDisability.nextAction, 'fresh-source-feasibility-before-promotion')
+    assert.equal(view.model.functionDisability.scoreBearing, false)
+    assert.equal(view.model.labBody.currentUse, 'score-bearing-research-when-selected')
+    assert.equal(view.model.labBody.nextAction, 'validate-transport-before-product-use')
+    assert.equal(view.model.labBody.transportStatus, 'internal-promising-transport-not-confirmed')
+    assert.equal(
+      view.model.scoreBearingFeatureKeys.join('|'),
+      'creatinine|hba1c|hdl-c|triglycerides|systolic-blood-pressure|diastolic-blood-pressure|bmi',
+    )
+    assert.equal(view.model.scoreBearingMetricKeys.join('|'), view.selectedScoreBearingMetricKeys.join('|'))
+    assert.equal(
+      view.model.scoreBearingMetricKeys.join('|'),
+      'creatinine|hba1c|hdl-c|triglycerides|systolic-blood-pressure|diastolic-blood-pressure|bmi',
+    )
+    assert.equal(view.model.wearable.currentUse, 'context-only-shadow')
+    assert.equal(view.model.wearable.scoreBearing, false)
+    assert.equal(view.model.wearable.scoreContributionAuthorized, false)
+    assert.equal(view.model.wearable.consumerValidationStatus, 'missing')
+    assert.equal(view.model.wearable.nextAction, 'run_external_or_partner_lab_wearable_aggregate_delta')
+    assert.equal(
+      view.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join('|'),
+      'cardia-biomarker-activity|hchs-sol-biomarker-activity|all-of-us-fitbit-labs-ehr|uk-biobank-integrated',
+    )
+    assert.equal(
+      view.model.wearable.shadowEvidencePacketIds.join('|'),
+      'r1065-nhanes-wrist-activity-shadow-loop|r1066-nhanes-wrist-activity-robustness-loop|r1067-nhanes-wrist-final-stress-test|r1038-nhanes-modern-lab-activity-loop|r1049-nhanes-activity-control-diagnostic',
+    )
+    assert.equal(view.model.contextOnlyMetricKeys.includes('steps'), true)
     assert.equal(typeof view.ageEstimate?.biologicalAgeYears, 'number')
     assert.equal(typeof view.risk.probability, 'number')
     assert.equal(view.featureContributions.some((feature) => feature.metricKey === 'hba1c'), true)

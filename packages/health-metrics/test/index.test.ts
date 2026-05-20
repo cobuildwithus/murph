@@ -4893,6 +4893,43 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5ResearchView.product.productUseAuthorized, false);
   assert.equal(submittedLab5ResearchView.displayStatus, "research-only");
   assert.equal(submittedLab5ResearchView.selectedCardId, "lab5_bp_bmi_transport_research");
+  assert.equal(submittedLab5ResearchView.model.currentModelFamily, "frozen-nhis-r399-plus-research-increments");
+  assert.equal(submittedLab5ResearchView.model.scoreInterpretation, "risk-age-equivalent-research-only");
+  assert.equal(submittedLab5ResearchView.model.selectedResearchCardId, "lab5_bp_bmi_transport_research");
+  assert.equal(submittedLab5ResearchView.model.productUseAuthorized, false);
+  assert.equal(
+    submittedLab5ResearchView.model.blockers.join("|"),
+    "biomarker-transport-not-confirmed|wearable-increment-not-validated|product-use-not-authorized",
+  );
+  assert.equal(submittedLab5ResearchView.model.functionDisability.currentUse, "context-only-diagnostic-sidecar");
+  assert.equal(submittedLab5ResearchView.model.functionDisability.nextAction, "fresh-source-feasibility-before-promotion");
+  assert.equal(submittedLab5ResearchView.model.functionDisability.scoreBearing, false);
+  assert.equal(submittedLab5ResearchView.model.labBody.currentUse, "score-bearing-research-when-selected");
+  assert.equal(submittedLab5ResearchView.model.labBody.nextAction, "validate-transport-before-product-use");
+  assert.equal(submittedLab5ResearchView.model.labBody.transportStatus, "internal-promising-transport-not-confirmed");
+  assert.equal(submittedLab5ResearchView.model.scoreBearingFeatureKeys.join("|"), "glucose|egfr|bmi");
+  assert.equal(
+    submittedLab5ResearchView.model.scoreBearingMetricKeys.join("|"),
+    submittedLab5ResearchView.selectedScoreBearingMetricKeys.join("|"),
+  );
+  assert.equal(submittedLab5ResearchView.model.scoreBearingMetricKeys.join("|"), "glucose|egfr|bmi");
+  assert.equal(submittedLab5ResearchView.model.wearable.currentUse, "context-only-shadow");
+  assert.equal(submittedLab5ResearchView.model.wearable.scoreBearing, false);
+  assert.equal(submittedLab5ResearchView.model.wearable.scoreContributionAuthorized, false);
+  assert.equal(submittedLab5ResearchView.model.wearable.consumerValidationStatus, "missing");
+  assert.equal(submittedLab5ResearchView.model.wearable.nextAction, "run_external_or_partner_lab_wearable_aggregate_delta");
+  assert.equal(
+    submittedLab5ResearchView.model.wearable.nextExternalOrPartnerRouteIdsByPriority.join("|"),
+    "cardia-biomarker-activity|hchs-sol-biomarker-activity|all-of-us-fitbit-labs-ehr|uk-biobank-integrated",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.wearable.shadowEvidencePacketIds.join("|"),
+    "r1065-nhanes-wrist-activity-shadow-loop|r1066-nhanes-wrist-activity-robustness-loop|r1067-nhanes-wrist-final-stress-test|r1038-nhanes-modern-lab-activity-loop|r1049-nhanes-activity-control-diagnostic",
+  );
+  assert.equal(
+    submittedLab5ResearchView.model.contextOnlyMetricKeys.includes("steps"),
+    true,
+  );
   assert.equal(submittedLab5ResearchView.ageEstimate?.biologicalAgeYears, submittedLab5Report.result?.biologicalAgeYears);
   assert.equal(submittedLab5ResearchView.risk.probability, submittedLab5Report.result?.risk?.probability);
   assert.equal(
