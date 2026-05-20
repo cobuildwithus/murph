@@ -57,10 +57,12 @@ type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydr
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
 type HostedDirtyDeviceSyncStateSkipReason =
   | "connection_missing"
+  | "disconnected"
   | "local_account_missing"
   | "provider_mismatch"
   | "provider_not_registered"
   | "reauthorization_required";
+type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
 
 const HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT = 10;
 
@@ -110,21 +112,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
-    if (stored.status === "disconnected" && existing?.status !== "disconnected") {
-      store.markPendingJobsDeadForAccount(
-        stored.id,
+    const terminalStatus = readHostedTerminalDeviceSyncStatus(stored);
+    if (terminalStatus) {
+      markHostedTerminalDeviceSyncJobsDead({
+        accountId: stored.id,
         now,
-        "HOSTED_CONTROL_PLANE_DISCONNECTED",
-        "Hosted control plane marked the device-sync connection as disconnected.",
-      );
-    }
-    if (stored.status === "reauthorization_required" && existing?.status !== "reauthorization_required") {
-      store.markPendingJobsDeadForAccount(
-        stored.id,
-        now,
-        "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
-        "Hosted control plane marked the device-sync connection as requiring reconnection.",
-      );
+        status: terminalStatus,
+        store,
+      });
     }
 
     state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
@@ -227,6 +222,40 @@ function resolveHostedDeviceSyncRuntimeClientForUser(
   return deviceSyncPort ?? null;
 }
 
+function readHostedTerminalDeviceSyncStatus(
+  account: Pick<StoredDeviceSyncAccount, "status">,
+): HostedTerminalDeviceSyncStatus | null {
+  if (account.status === "disconnected" || account.status === "reauthorization_required") {
+    return account.status;
+  }
+
+  return null;
+}
+
+function markHostedTerminalDeviceSyncJobsDead(input: {
+  accountId: string;
+  now: string;
+  status: HostedTerminalDeviceSyncStatus;
+  store: HostedRuntimeDeviceSyncStore;
+}): void {
+  if (input.status === "disconnected") {
+    input.store.markPendingJobsDeadForAccount(
+      input.accountId,
+      input.now,
+      "HOSTED_CONTROL_PLANE_DISCONNECTED",
+      "Hosted control plane marked the device-sync connection as disconnected.",
+    );
+    return;
+  }
+
+  input.store.markPendingJobsDeadForAccount(
+    input.accountId,
+    input.now,
+    "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
+    "Hosted control plane marked the device-sync connection as requiring reconnection.",
+  );
+}
+
 async function applyHostedDeviceSyncWakeHint(input: {
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
@@ -272,6 +301,17 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
+    return;
+  }
+
+  const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
+  if (terminalStatus) {
+    markHostedTerminalDeviceSyncJobsDead({
+      accountId: localAccountId,
+      now: input.wake.occurredAt,
+      status: terminalStatus,
+      store,
+    });
     return;
   }
 
@@ -362,6 +402,28 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
+  const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
+  if (terminalStatus) {
+    reportHostedDirtyDeviceSyncStateSkipped({
+      account,
+      dirtyState: input.dirtyState,
+      reason: terminalStatus,
+      wake: input.wake,
+    });
+    markHostedTerminalDeviceSyncJobsDead({
+      accountId: localAccountId,
+      now: input.wake.occurredAt,
+      status: terminalStatus,
+      store,
+    });
+    return {
+      connectionId: input.dirtyState.connectionId,
+      localAccountId,
+      nextWakeAt: input.nextWakeAt,
+      processedRevision: input.dirtyState.dirtyRevision,
+    };
+  }
+
   if (!input.service.registry.get(account.provider)) {
     reportHostedDirtyDeviceSyncStateSkipped({
       account,
@@ -370,21 +432,6 @@ function applyHostedDirtyDeviceSyncState(input: {
       wake: input.wake,
     });
     return null;
-  }
-
-  if (account.status === "reauthorization_required") {
-    reportHostedDirtyDeviceSyncStateSkipped({
-      account,
-      dirtyState: input.dirtyState,
-      reason: "reauthorization_required",
-      wake: input.wake,
-    });
-    return {
-      connectionId: input.dirtyState.connectionId,
-      localAccountId,
-      nextWakeAt: input.nextWakeAt,
-      processedRevision: input.dirtyState.dirtyRevision,
-    };
   }
 
   for (const job of buildHostedDirtyDeviceSyncJobs(input.dirtyState, input.wake.occurredAt)) {

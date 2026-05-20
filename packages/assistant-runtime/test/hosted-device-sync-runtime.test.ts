@@ -1467,6 +1467,63 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("device-sync wake hints skip terminal hydrated accounts", async () => {
+    for (const status of ["disconnected", "reauthorization_required"] as const) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+
+      const service = createDeviceSyncServiceForVault(vaultRoot);
+
+      try {
+        const begin = await service.startConnection({
+          provider: "demo",
+        });
+        const connected = await service.handleOAuthCallback({
+          code: `terminal-wake-${status}`,
+          provider: "demo",
+          state: begin.state,
+        });
+        const snapshot = buildRuntimeSnapshot({
+          connectionId: `hosted_conn_terminal_wake_${status}`,
+          externalAccountId: connected.account.externalAccountId,
+          status,
+          tokenBundle: status === "disconnected" ? null : undefined,
+        });
+
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake: buildDeviceSyncWake({
+            connectionId: `hosted_conn_terminal_wake_${status}`,
+            eventId: `evt_device_sync_terminal_wake_${status}`,
+            hint: {
+              jobs: [
+                {
+                  availableAt: "2026-04-04T10:05:00.000Z",
+                  dedupeKey: `wake:terminal-resource-sync:${status}`,
+                  kind: "resource-sync",
+                },
+              ],
+            },
+            occurredAt: "2026-04-04T10:00:00.000Z",
+            reason: "webhook_hint",
+          }),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        const stored = getStore(service).getAccountById(connected.account.id);
+        assert.ok(stored);
+        assert.equal(stored.status, status);
+        assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
   test("runtime timer wakes pull pending dirty state without a mailbox wake", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -1823,6 +1880,92 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("terminal pending dirty state for an unregistered provider is acknowledged without enqueuing jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_junction_dirty_terminal",
+        credential: {
+          kind: "provider_config",
+          credentialMetadata: {},
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-user-terminal",
+        provider: "junction",
+        status: "disconnected",
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_junction_dirty_terminal",
+        dirtyRevision: "15",
+        dirtyResources: [
+          {
+            count: 1,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        provider: "junction",
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: "2026-04-04T10:15:00.000Z",
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const stored = getStore(service).getAccountByExternalAccount(
+        "junction",
+        "junction-user-terminal",
+      );
+
+      assert.ok(stored);
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_junction_dirty_terminal",
+        localAccountId: stored.id,
+        nextWakeAt: "2026-04-04T10:15:00.000Z",
+        processedRevision: "15",
+      });
+      assert.equal(readJobsForAccount(service, stored.id).length, 0);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.disconnected",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("pending dirty state with a provider mismatch is not enqueued or acknowledged", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -1997,6 +2140,95 @@ describe("hosted device-sync runtime", () => {
       assert.equal(
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
         "dirty_state.reauthorization_required",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("pending dirty state for disconnected accounts is acknowledged without enqueuing jobs", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "dirty-disconnected",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_dirty_disconnected",
+        externalAccountId: connected.account.externalAccountId,
+        status: "disconnected",
+        tokenBundle: null,
+      });
+      const dirtyState = buildDirtyState({
+        connectionId: "hosted_conn_dirty_disconnected",
+        dirtyRevision: "14",
+        dirtyResources: [
+          {
+            count: 4,
+            jobKind: "resource",
+            resource: "steps",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+            windowEnd: "2026-04-04T00:00:00.000Z",
+            windowStart: "2026-04-03T00:00:00.000Z",
+          },
+        ],
+        eventCount: "4",
+        resourceCategoryCounts: {
+          timeseries: 4,
+        },
+        sourceProviderCounts: {
+          garmin: 4,
+        },
+      });
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: "2026-04-04T10:15:00.000Z",
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.deepEqual(state.pendingDirtyAck, {
+        connectionId: "hosted_conn_dirty_disconnected",
+        localAccountId: connected.account.id,
+        nextWakeAt: "2026-04-04T10:15:00.000Z",
+        processedRevision: "14",
+      });
+      assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
+      assert.equal(
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
+        "dirty_state.disconnected",
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -2399,6 +2631,35 @@ describe("hosted device-sync runtime", () => {
         code: "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
         status: "dead",
       }]);
+
+      const stalePendingJob = getStore(service).enqueueJob({
+        accountId: connected.account.id,
+        availableAt: "2026-04-06T09:11:00.000Z",
+        kind: "stale-pending-after-hydration-reauth",
+        payload: {},
+        provider: "demo",
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+          connectionId: "hosted_conn_reauth_snapshot",
+          externalAccountId: connected.account.externalAccountId,
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
+          },
+          status: "reauthorization_required",
+        })),
+        wake: buildCronWake("2026-04-06T09:12:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const staleDeadJob = getStore(service).getJobById(stalePendingJob.id);
+      assert.equal(staleDeadJob?.status, "dead");
+      assert.equal(
+        staleDeadJob?.lastErrorCode,
+        "HOSTED_CONTROL_PLANE_REAUTHORIZATION_REQUIRED",
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
