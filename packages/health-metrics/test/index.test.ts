@@ -5170,6 +5170,28 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productDefaultView.wearableResidualLayer, null);
   assert.equal(productDefaultView.featureContributions.length, 0);
   assert.equal(productDefaultView.domainContributions.length, 0);
+  assert.equal(productDefaultView.scoreReadiness.status, "validation-pending");
+  assert.equal(productDefaultView.scoreReadiness.biologicalAgeAvailable, false);
+  assert.equal(productDefaultView.scoreReadiness.riskAvailable, false);
+  assert.equal(productDefaultView.scoreReadiness.inputBundleId, "lab9-bp-body");
+  assert.equal(productDefaultView.scoreReadiness.contextBundleIds.includes("wearable-context"), true);
+  assert.equal(productDefaultView.scoreReadiness.scoreBearingFeatureCount > 0, true);
+  assert.equal(
+    productDefaultView.scoreReadiness.unlockRequirements.includes("external-outcome-validation"),
+    true,
+  );
+  assert.equal(
+    productDefaultView.scoreReadiness.unlockRequirements.includes("product-policy-authorization"),
+    true,
+  );
+  assert.equal(
+    productDefaultView.scoreReadiness.unlockRequirements.includes("risk-to-age-display-authorization"),
+    true,
+  );
+  assert.equal(
+    productDefaultView.scoreReadiness.unlockRequirements.includes("validated-wearable-parameter-pack"),
+    true,
+  );
   assert.equal(productDefaultReport.inputReadiness.bundle.bundleId, "lab9-bp-body");
   assert.equal(productDefaultReport.inputReadiness.bundle.availableFeatureKeys.includes("glycemia"), true);
   assert.equal(productDefaultReport.inputReadiness.bundle.selectedMetricKeys.includes("hba1c"), true);
@@ -5252,6 +5274,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productRiskOnlyView.featureContributions.length, 0);
   assert.equal(productRiskOnlyView.domainContributions.length, 0);
   assert.equal(productRiskOnlyView.selectedCardId, productRiskOnlyReport.authorization.cardId);
+  assert.equal(productRiskOnlyView.scoreReadiness.status, "validated-risk-only");
+  assert.equal(productRiskOnlyView.scoreReadiness.riskAvailable, true);
+  assert.equal(productRiskOnlyView.scoreReadiness.biologicalAgeAvailable, false);
+  assert.deepEqual(productRiskOnlyView.scoreReadiness.unlockRequirements, ["risk-to-age-display-authorization"]);
 
   const productAgeReadySummary = summarizeMurphAgeCalculatorOutput({
     ...research,
@@ -5300,6 +5326,10 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(productAgeReadyView.risk.probability, productAgeReadyReport.result?.risk?.probability);
   assert.equal(productAgeReadyView.featureContributions.some((feature) => feature.metricKey === "hba1c"), true);
   assert.equal(productAgeReadyView.domainContributions.some((module) => module.moduleId === "metabolic"), true);
+  assert.equal(productAgeReadyView.scoreReadiness.status, "validated-age-ready");
+  assert.equal(productAgeReadyView.scoreReadiness.riskAvailable, true);
+  assert.equal(productAgeReadyView.scoreReadiness.biologicalAgeAvailable, true);
+  assert.deepEqual(productAgeReadyView.scoreReadiness.unlockRequirements, []);
   if (research.cardPolicy) {
     (research.cardPolicy.scoreBearingSourceKinds as string[]).push("wearable-summary");
   }
@@ -5700,6 +5730,18 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(submittedLab5View.selectedCardId, null);
   assert.equal(submittedLab5View.product.ageDisplayReady, false);
   assert.equal(submittedLab5View.product.riskDisplayReady, false);
+  assert.equal(submittedLab5View.scoreReadiness.status, "research-estimate-withheld");
+  assert.equal(submittedLab5View.scoreReadiness.inputBundleId, "lab5-bp-bmi");
+  assert.equal(submittedLab5View.scoreReadiness.riskAvailable, false);
+  assert.equal(submittedLab5View.scoreReadiness.biologicalAgeAvailable, false);
+  assert.equal(
+    submittedLab5View.scoreReadiness.unlockRequirements.includes("external-outcome-validation"),
+    true,
+  );
+  assert.equal(
+    submittedLab5View.scoreReadiness.unlockRequirements.includes("validated-wearable-parameter-pack"),
+    true,
+  );
   assert.equal(
     submittedLab5View.product.promotionBlockers.includes("PRODUCT_PROMOTION_EVIDENCE_MISSING"),
     true,
@@ -6092,6 +6134,19 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.equal(wearableOnlyView.risk.probability, null);
   assert.equal(wearableOnlyView.risk.riskEndpoint, "none");
   assert.equal(wearableOnlyView.wearable.contextOnlyMetricKeys.includes("steps"), true);
+  assert.equal(wearableOnlyView.scoreReadiness.status, "context-only-no-score");
+  assert.equal(wearableOnlyView.scoreReadiness.inputBundleId, "wearable-context");
+  assert.equal(wearableOnlyView.scoreReadiness.biologicalAgeAvailable, false);
+  assert.equal(wearableOnlyView.scoreReadiness.riskAvailable, false);
+  assert.equal(wearableOnlyView.scoreReadiness.wearableReadyFeatureCount > 0, true);
+  assert.equal(
+    wearableOnlyView.scoreReadiness.unlockRequirements.includes("complete-score-bearing-inputs"),
+    true,
+  );
+  assert.equal(
+    wearableOnlyView.scoreReadiness.unlockRequirements.includes("validated-wearable-parameter-pack"),
+    true,
+  );
   assert.equal(wearableOnlyView.wearable.scorePolicy.productStatus, "context-only");
   assert.equal(wearableOnlyView.wearable.scorePolicy.productWearableMultiplier, 0);
   assert.equal(

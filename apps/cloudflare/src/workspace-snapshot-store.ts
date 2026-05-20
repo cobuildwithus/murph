@@ -9,10 +9,15 @@ import {
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
   "murph.hosted-workspace-snapshot-upload.v1";
+export const HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA =
+  "murph.hosted-workspace-snapshot-orphan.v1";
 
 export interface WorkspaceSnapshotR2ObjectLike {
   arrayBuffer?(): Promise<ArrayBuffer>;
   body?: ReadableStream<Uint8Array>;
+  checksums?: {
+    sha256?: ArrayBuffer | string | Uint8Array;
+  };
   customMetadata?: Record<string, string>;
   key?: string;
   size?: number;
@@ -42,6 +47,14 @@ export interface HostedWorkspaceSnapshotUploadSession {
   snapshotId: string;
   userId: string;
   workspaceVersion: string;
+}
+
+export interface HostedWorkspaceSnapshotOrphanCandidate {
+  createdAt: string;
+  objectKey: string;
+  schema: typeof HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA;
+  snapshotId: string;
+  userId: string;
 }
 
 export function parseHostedWorkspaceSnapshotUploadSession(
@@ -80,6 +93,25 @@ export function parseHostedWorkspaceSnapshotUploadSession(
   };
 }
 
+export function parseHostedWorkspaceSnapshotOrphanCandidate(
+  value: unknown,
+  label = "Hosted workspace snapshot orphan candidate",
+): HostedWorkspaceSnapshotOrphanCandidate {
+  const record = requireObject(value, label);
+  const schema = requireString(record.schema, `${label}.schema`);
+  if (schema !== HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA) {
+    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA}.`);
+  }
+
+  return {
+    createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
+    objectKey: requireString(record.objectKey, `${label}.objectKey`),
+    schema,
+    snapshotId: requireString(record.snapshotId, `${label}.snapshotId`),
+    userId: requireString(record.userId, `${label}.userId`),
+  };
+}
+
 export function buildHostedWorkspaceSnapshotRefFromUploadSession(input: {
   archive: unknown;
   createdAt: string;
@@ -95,6 +127,33 @@ export function buildHostedWorkspaceSnapshotRefFromUploadSession(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: input.session.userId,
   };
+}
+
+export function encodeHostedWorkspaceSnapshotSha256Base64(sha256Hex: string): string {
+  if (!/^[a-f0-9]{64}$/u.test(sha256Hex)) {
+    throw new TypeError("Hosted workspace snapshot SHA-256 digest must be lowercase hex.");
+  }
+  return btoa(String.fromCharCode(...hexToBytes(sha256Hex)));
+}
+
+export function readHostedWorkspaceSnapshotSha256ChecksumHex(
+  value: ArrayBuffer | string | Uint8Array | undefined,
+): string | null {
+  try {
+    if (value === undefined) {
+      return null;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (/^[a-f0-9]{64}$/u.test(trimmed)) {
+        return trimmed;
+      }
+      return bytesToHex(decodeBase64(trimmed));
+    }
+    return bytesToHex(value instanceof ArrayBuffer ? new Uint8Array(value) : value);
+  } catch {
+    return null;
+  }
 }
 
 function parseHostedWorkspaceSnapshotAad(
@@ -141,4 +200,30 @@ function requireIsoString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a canonical ISO timestamp.`);
   }
   return text;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  if (bytes.byteLength !== 32) {
+    throw new TypeError("Hosted workspace snapshot SHA-256 checksum must decode to 32 bytes.");
+  }
+  return bytes;
 }

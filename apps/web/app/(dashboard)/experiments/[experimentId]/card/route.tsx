@@ -154,13 +154,33 @@ function Card({ data, logoSrc }: { data: ExperimentCardData; logoSrc: string }) 
           borderTopWidth: 1,
           borderTopStyle: "solid",
           borderTopColor: COLOR.border,
-          paddingTop: 26,
+          marginTop: 28,
+          paddingTop: 32,
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- satori render, not a DOM image */}
         <img src={logoSrc} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="murph" />
-        <div style={{ display: "flex", fontSize: 22, color: COLOR.faint }}>
-          Health experiments with friends.
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 4,
+          }}
+        >
+          <div style={{ display: "flex", fontSize: 22, color: COLOR.faint }}>
+            Health experiments with friends.
+          </div>
+          <div
+            style={{
+              display: "flex",
+              fontSize: 20,
+              color: COLOR.primary,
+              letterSpacing: "0.01em",
+            }}
+          >
+            withmurph.ai
+          </div>
         </div>
       </div>
     </div>

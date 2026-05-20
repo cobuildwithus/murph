@@ -14,6 +14,7 @@ import {
   stat,
 } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -165,10 +166,20 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
 
   const durableRoot = path.resolve(input.durableRoot);
   const durableParent = path.dirname(durableRoot);
+  const scratchRoot = input.scratchRoot ? path.resolve(input.scratchRoot) : null;
+  if (scratchRoot && isSameOrDescendantPath(scratchRoot, durableRoot)) {
+    throw new Error("Hosted workspace snapshot restore scratchRoot must be outside durableRoot.");
+  }
   await mkdir(durableParent, { mode: 0o700, recursive: true });
-  const tempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
-  const restoreRoot = path.join(tempDir, "durable-root");
-  const backupRoot = path.join(tempDir, "previous-durable-root");
+  if (scratchRoot) {
+    await mkdir(scratchRoot, { mode: 0o700, recursive: true });
+  }
+  const restoreTempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
+  const scratchTempDir = scratchRoot
+    ? await mkdtemp(path.join(scratchRoot, "workspace-snapshot-restore-"))
+    : restoreTempDir;
+  const restoreRoot = path.join(restoreTempDir, "durable-root");
+  const backupRoot = path.join(restoreTempDir, "previous-durable-root");
   let dataKey: Uint8Array | null = null;
 
   try {
@@ -187,7 +198,7 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     decipher.setAuthTag(authTag);
 
     const plaintextArchiveHash = createHash("sha256");
-    const plaintextArchivePath = path.join(tempDir, "workspace.snapshot.tar.gz");
+    const plaintextArchivePath = path.join(scratchTempDir, "workspace.snapshot.tar.gz");
     await pipeline(
       createReadStream(encryptedFilePath, {
         end: encryptedStat.size - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
@@ -202,7 +213,16 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     if (plaintextArchiveSha256 !== input.ref.archive.plaintextArchiveSha256) {
       throw new Error("Hosted workspace snapshot plaintext archive digest does not match its ref.");
     }
-    await assertHostedWorkspaceSnapshotTarEntriesSafe(plaintextArchivePath);
+    const tarState = await assertHostedWorkspaceSnapshotTarEntriesSafe(
+      plaintextArchivePath,
+      input.ref.archive.totalPlainBytes,
+    );
+    if (
+      tarState.fileCount !== input.ref.archive.fileCount
+      || tarState.totalPlainBytes !== input.ref.archive.totalPlainBytes
+    ) {
+      throw new Error("Hosted workspace snapshot archive manifest does not match its ref.");
+    }
 
     const tar = spawn("tar", [
       "-C",
@@ -218,8 +238,11 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     await waitForTarArchiveProcess(tar);
 
     const restoredState = await preflightHostedWorkspaceSnapshotDurableRoot(restoreRoot);
-    if (restoredState.fileCount !== input.ref.archive.fileCount) {
-      throw new Error("Hosted workspace snapshot restored file count does not match its ref.");
+    if (
+      restoredState.fileCount !== input.ref.archive.fileCount
+      || restoredState.totalPlainBytes !== input.ref.archive.totalPlainBytes
+    ) {
+      throw new Error("Hosted workspace snapshot restored state does not match its ref.");
     }
 
     await replaceHostedWorkspaceSnapshotDurableRoot({
@@ -229,7 +252,10 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
     });
   } finally {
     dataKey?.fill(0);
-    await rm(tempDir, { force: true, recursive: true });
+    if (scratchTempDir !== restoreTempDir) {
+      await rm(scratchTempDir, { force: true, recursive: true });
+    }
+    await rm(restoreTempDir, { force: true, recursive: true });
   }
 }
 
@@ -323,14 +349,21 @@ function isHostedWorkspaceSnapshotEnvPath(relativePath: string): boolean {
     .some((segment) => segment === ".env" || segment.startsWith(".env."));
 }
 
-async function assertHostedWorkspaceSnapshotTarEntriesSafe(archivePath: string): Promise<void> {
+async function assertHostedWorkspaceSnapshotTarEntriesSafe(
+  archivePath: string,
+  maxTotalPlainBytes: number,
+): Promise<{ fileCount: number; totalPlainBytes: number }> {
   const entries = await listHostedWorkspaceSnapshotTarEntries(archivePath);
   const verboseEntries = await listHostedWorkspaceSnapshotTarEntries(archivePath, true);
-  if (verboseEntries.some((entry) => {
+  let fileCount = 0;
+  for (const entry of verboseEntries) {
     const type = entry[0];
-    return type !== "-" && type !== "d";
-  })) {
-    throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
+    if (type !== "-" && type !== "d") {
+      throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
+    }
+    if (type === "-") {
+      fileCount += 1;
+    }
   }
 
   for (const entry of entries) {
@@ -346,6 +379,12 @@ async function assertHostedWorkspaceSnapshotTarEntriesSafe(archivePath: string):
       throw new Error("Hosted workspace snapshot tar entry path is unsafe.");
     }
   }
+
+  const totalPlainBytes = await countHostedWorkspaceSnapshotTarPlainBytes(
+    archivePath,
+    maxTotalPlainBytes,
+  );
+  return { fileCount, totalPlainBytes };
 }
 
 async function listHostedWorkspaceSnapshotTarEntries(
@@ -362,16 +401,78 @@ async function listHostedWorkspaceSnapshotTarEntries(
     throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
   }
   tar.stderr?.resume();
-  const chunks: string[] = [];
   tar.stdout.setEncoding("utf8");
-  for await (const chunk of tar.stdout) {
-    chunks.push(String(chunk));
+  const lines = createInterface({
+    crlfDelay: Number.POSITIVE_INFINITY,
+    input: tar.stdout,
+  });
+  const entries: string[] = [];
+  try {
+    for await (const line of lines) {
+      const entry = line.trim();
+      if (entry.length === 0) {
+        continue;
+      }
+      entries.push(entry);
+      if (entries.length > 1_000_000) {
+        throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
+      }
+    }
+  } catch (error) {
+    tar.kill("SIGTERM");
+    await waitForTarArchiveProcess(tar).catch(() => {});
+    throw error;
   }
   await waitForTarArchiveProcess(tar);
-  return chunks.join("")
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+  return entries;
+}
+
+async function countHostedWorkspaceSnapshotTarPlainBytes(
+  archivePath: string,
+  maxTotalPlainBytes: number,
+): Promise<number> {
+  if (!Number.isSafeInteger(maxTotalPlainBytes) || maxTotalPlainBytes < 0) {
+    throw new Error("Hosted workspace snapshot archive manifest is unsafe.");
+  }
+  const tar = spawn("tar", [
+    "-xOzf",
+    archivePath,
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!tar.stdout) {
+    throw new Error("Hosted workspace snapshot tar output stdout is unavailable.");
+  }
+  tar.stderr?.resume();
+  const counter = createPlainByteCountTransform(maxTotalPlainBytes);
+  const tarExit = waitForTarArchiveProcess(tar);
+  try {
+    await pipeline(tar.stdout, counter);
+    await tarExit;
+  } catch (error) {
+    tar.kill("SIGTERM");
+    await tarExit.catch(() => {});
+    throw error;
+  }
+  return counter.byteCount;
+}
+
+function createPlainByteCountTransform(maxBytes: number): Transform & { byteCount: number } {
+  let byteCount = 0;
+  const transform = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      byteCount += chunk.byteLength;
+      if (!Number.isSafeInteger(byteCount) || byteCount > maxBytes) {
+        callback(new Error("Hosted workspace snapshot archive manifest does not match its ref."));
+        return;
+      }
+      callback();
+    },
+  }) as Transform & { byteCount: number };
+  Object.defineProperty(transform, "byteCount", {
+    get: () => byteCount,
+  });
+  return transform;
 }
 
 function decodeHostedWorkspaceSnapshotIv(value: string): Buffer {

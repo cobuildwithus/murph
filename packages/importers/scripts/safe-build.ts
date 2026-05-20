@@ -6,10 +6,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   renameSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -23,11 +21,15 @@ const REMOVE_OPTIONS = {
 
 const currentModulePath = fileURLToPath(import.meta.url);
 const defaultPackageRoot = path.resolve(path.dirname(currentModulePath), "..");
+const legacyTempConfigName = ".tsconfig.build-next.json";
+const publishTempPrefix = ".dist-publish-";
+const backupTempPrefix = ".dist-backup-";
 
 export type BuildCommandContext = {
   packageRoot: string;
-  tempConfigPath: string;
+  safeBuildConfigPath: string;
   tempDistPath: string;
+  tempTsBuildInfoPath: string;
 };
 
 export type BuildCommandResult = {
@@ -39,47 +41,6 @@ export type SafeBuildOptions = {
   packageRoot?: string;
   runBuildCommand?: (context: BuildCommandContext) => BuildCommandResult;
 };
-
-type TsConfigReference = {
-  path: string;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function readTsConfigReferences(packageRoot: string): TsConfigReference[] | undefined {
-  const parsed: unknown = JSON.parse(
-    readFileSync(path.join(packageRoot, "tsconfig.json"), "utf8"),
-  );
-
-  if (!isRecord(parsed) || !Array.isArray(parsed.references)) {
-    return undefined;
-  }
-
-  const references = parsed.references.flatMap((reference): TsConfigReference[] => {
-    if (!isRecord(reference) || typeof reference.path !== "string") {
-      return [];
-    }
-    return [{ path: reference.path }];
-  });
-
-  return references.length > 0 ? references : undefined;
-}
-
-function writeTempBuildConfig(context: BuildCommandContext): void {
-  const references = readTsConfigReferences(context.packageRoot);
-  const tempConfig = {
-    extends: "./tsconfig.json",
-    compilerOptions: {
-      outDir: "./.dist-next",
-      tsBuildInfoFile: "./.dist-next/.tsbuildinfo",
-    },
-    ...(references ? { references } : {}),
-  };
-
-  writeFileSync(`${context.tempConfigPath}`, `${JSON.stringify(tempConfig, null, 2)}\n`);
-}
 
 function listFiles(root: string): string[] {
   if (!existsSync(root)) {
@@ -122,112 +83,113 @@ function assertPathInside(rootPath: string, candidatePath: string): void {
   }
 }
 
-function removeStaleEntry(entryPath: string, rootDistPath: string): void {
-  assertPathInside(rootDistPath, entryPath);
-  rmSync(entryPath, REMOVE_OPTIONS);
-}
-
-function pruneStaleEntries(
-  rootDistPath: string,
-  currentDistPath: string,
-  expectedRelativeFiles: Set<string>,
-): void {
-  if (!existsSync(currentDistPath)) {
+function removePackageEntriesWithPrefix(packageRoot: string, prefix: string): void {
+  if (!existsSync(packageRoot)) {
     return;
   }
 
-  for (const entry of readdirSync(currentDistPath)) {
-    const entryPath = path.join(currentDistPath, entry);
-    assertPathInside(rootDistPath, entryPath);
-
-    const stat = lstatSync(entryPath);
-    const relativePath = path.relative(rootDistPath, entryPath);
-    if (stat.isSymbolicLink()) {
-      if (!expectedRelativeFiles.has(relativePath)) {
-        removeStaleEntry(entryPath, rootDistPath);
-      }
+  for (const entry of readdirSync(packageRoot)) {
+    if (!entry.startsWith(prefix)) {
       continue;
     }
 
-    if (stat.isDirectory()) {
-      pruneStaleEntries(rootDistPath, entryPath, expectedRelativeFiles);
-      if (readdirSync(entryPath).length === 0) {
-        removeStaleEntry(entryPath, rootDistPath);
-      }
-      continue;
-    }
-
-    if (!expectedRelativeFiles.has(relativePath)) {
-      removeStaleEntry(entryPath, rootDistPath);
-    }
+    const entryPath = path.join(packageRoot, entry);
+    assertPathInside(packageRoot, entryPath);
+    rmSync(entryPath, REMOVE_OPTIONS);
   }
 }
 
-function ensureSafeTargetParent(distPath: string, targetPath: string): void {
-  assertPathInside(distPath, targetPath);
+function listPackageEntriesWithPrefix(packageRoot: string, prefix: string): string[] {
+  if (!existsSync(packageRoot)) {
+    return [];
+  }
 
-  let currentPath = distPath;
-  const relativeParent = path.relative(distPath, path.dirname(targetPath));
-  if (!containsRelativePath(relativeParent)) {
+  return readdirSync(packageRoot)
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => path.join(packageRoot, entry));
+}
+
+function restoreInterruptedPublish(packageRoot: string, distPath: string): void {
+  removePackageEntriesWithPrefix(packageRoot, publishTempPrefix);
+
+  const backupPaths = listPackageEntriesWithPrefix(packageRoot, backupTempPrefix);
+  if (existsSync(distPath)) {
+    for (const backupPath of backupPaths) {
+      assertPathInside(packageRoot, backupPath);
+      rmSync(backupPath, REMOVE_OPTIONS);
+    }
     return;
   }
 
-  for (const part of relativeParent.split(path.sep)) {
-    currentPath = path.join(currentPath, part);
-    if (existsSync(currentPath) && lstatSync(currentPath).isSymbolicLink()) {
-      throw new Error(`Refusing to write through symlinked build output path: ${currentPath}`);
-    }
-  }
-}
-
-function ensureOutputDirectory(rootPath: string): void {
-  if (existsSync(rootPath)) {
-    const stat = lstatSync(rootPath);
-    if (stat.isDirectory() && !stat.isSymbolicLink()) {
-      return;
-    }
-    rmSync(rootPath, REMOVE_OPTIONS);
+  if (backupPaths.length === 0) {
+    return;
   }
 
-  mkdirSync(rootPath, { recursive: true });
+  if (backupPaths.length > 1) {
+    throw new Error("Refusing to pick between multiple interrupted importers dist backups.");
+  }
+
+  const backupPath = backupPaths[0];
+  if (backupPath) {
+    renameSync(backupPath, distPath);
+  }
 }
 
 export function syncBuiltDist(tempDistPath: string, distPath: string): void {
-  ensureOutputDirectory(distPath);
-
   const tempFiles = listFiles(tempDistPath);
-  const expectedRelativeFiles = new Set<string>();
+  const packageRoot = path.dirname(distPath);
+  const publishTempRoot = mkdtempSync(path.join(packageRoot, publishTempPrefix));
 
-  for (const tempFilePath of tempFiles) {
-    const relativePath = path.relative(tempDistPath, tempFilePath);
-    expectedRelativeFiles.add(relativePath);
-  }
-
-  pruneStaleEntries(distPath, distPath, expectedRelativeFiles);
-
-  const publishTempRoot = mkdtempSync(path.join(path.dirname(distPath), ".dist-publish-"));
   try {
     for (const tempFilePath of tempFiles) {
       const relativePath = path.relative(tempDistPath, tempFilePath);
-
-      const targetPath = path.join(distPath, relativePath);
       const tempTargetPath = path.join(publishTempRoot, relativePath);
       assertPathInside(publishTempRoot, tempTargetPath);
-      ensureSafeTargetParent(distPath, targetPath);
       mkdirSync(path.dirname(tempTargetPath), { recursive: true });
-      mkdirSync(path.dirname(targetPath), { recursive: true });
       copyFileSync(tempFilePath, tempTargetPath);
-      renameSync(tempTargetPath, targetPath);
     }
+
+    replaceDistDirectory(distPath, publishTempRoot);
   } finally {
     rmSync(publishTempRoot, REMOVE_OPTIONS);
   }
 }
 
+function replaceDistDirectory(distPath: string, publishTempRoot: string): void {
+  const packageRoot = path.dirname(distPath);
+  let backupPath: string | undefined;
+
+  try {
+    if (existsSync(distPath)) {
+      const distStat = lstatSync(distPath);
+      if (distStat.isDirectory() && !distStat.isSymbolicLink()) {
+        backupPath = mkdtempSync(path.join(packageRoot, backupTempPrefix));
+        rmSync(backupPath, REMOVE_OPTIONS);
+        renameSync(distPath, backupPath);
+      } else {
+        rmSync(distPath, REMOVE_OPTIONS);
+      }
+    }
+
+    renameSync(publishTempRoot, distPath);
+
+    if (backupPath) {
+      rmSync(backupPath, REMOVE_OPTIONS);
+    }
+  } catch (error) {
+    if (backupPath && existsSync(backupPath) && !existsSync(distPath)) {
+      renameSync(backupPath, distPath);
+    }
+
+    throw error;
+  }
+}
+
 function runTypeScriptBuild(context: BuildCommandContext): BuildCommandResult {
+  const relativeConfigPath = path.relative(context.packageRoot, context.safeBuildConfigPath);
   const result = spawnSync(
     "pnpm",
-    ["exec", "tsc", "-b", path.basename(context.tempConfigPath), "--force"],
+    ["exec", "tsc", "-b", relativeConfigPath, "--pretty", "false"],
     {
       cwd: context.packageRoot,
       stdio: "inherit",
@@ -244,17 +206,20 @@ export function runSafeBuild(options: SafeBuildOptions = {}): number {
   const packageRoot = options.packageRoot ?? defaultPackageRoot;
   const distPath = path.join(packageRoot, "dist");
   const tempDistPath = path.join(packageRoot, ".dist-next");
-  const tempConfigPath = path.join(packageRoot, ".tsconfig.build-next.json");
+  const safeBuildConfigPath = path.join(packageRoot, "tsconfig.safe-build.json");
+  const tempTsBuildInfoPath = path.join(packageRoot, ".dist-next.tsbuildinfo");
   const context = {
     packageRoot,
-    tempConfigPath,
+    safeBuildConfigPath,
     tempDistPath,
+    tempTsBuildInfoPath,
   };
   const runBuildCommand = options.runBuildCommand ?? runTypeScriptBuild;
 
+  restoreInterruptedPublish(packageRoot, distPath);
   rmSync(tempDistPath, REMOVE_OPTIONS);
-  rmSync(tempConfigPath, REMOVE_OPTIONS);
-  writeTempBuildConfig(context);
+  rmSync(tempTsBuildInfoPath, REMOVE_OPTIONS);
+  rmSync(path.join(packageRoot, legacyTempConfigName), REMOVE_OPTIONS);
 
   try {
     const result = runBuildCommand(context);
@@ -275,7 +240,8 @@ export function runSafeBuild(options: SafeBuildOptions = {}): number {
     return 0;
   } finally {
     rmSync(tempDistPath, REMOVE_OPTIONS);
-    rmSync(tempConfigPath, REMOVE_OPTIONS);
+    rmSync(tempTsBuildInfoPath, REMOVE_OPTIONS);
+    rmSync(path.join(packageRoot, legacyTempConfigName), REMOVE_OPTIONS);
   }
 }
 

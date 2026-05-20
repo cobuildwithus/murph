@@ -1,7 +1,13 @@
+import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+const execFileAsync = promisify(execFile);
+const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const builtDistTest = process.env.MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST === "1" ? it : it.skip;
 
 describe("@murphai/messaging-ingress package boundary", () => {
@@ -15,9 +21,10 @@ describe("@murphai/messaging-ingress package boundary", () => {
       types?: string;
     };
 
-    expect(packageJson.scripts?.test).toMatch(/^pnpm build && MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1 /u);
-    expect(packageJson.scripts?.["test:coverage"]).toMatch(
-      /^pnpm build && MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1 /u,
+    expect(packageJson.scripts?.test ?? "").not.toContain("pnpm build");
+    expect(packageJson.scripts?.["test:coverage"] ?? "").not.toContain("pnpm build");
+    expect(packageJson.scripts?.["verify:package-boundary"] ?? "").toMatch(
+      /MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1/u,
     );
     expect(packageJson.exports).toEqual({
       "./linq-webhook": {
@@ -65,26 +72,21 @@ describe("@murphai/messaging-ingress package boundary", () => {
     });
   });
 
-  builtDistTest("keeps built export targets importable after the package test prebuild", async () => {
-    const importBuiltModule = async (relativePath: string) =>
-      import(new URL(relativePath, import.meta.url).href);
+  builtDistTest("keeps built export targets importable through package resolution", async () => {
+    const result = await execFileAsync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "await import('@murphai/messaging-ingress/linq-webhook');",
+        "await import('@murphai/messaging-ingress/telegram-webhook');",
+        "await import('@murphai/messaging-ingress/telegram-webhook-payload');",
+        "await import('@murphai/messaging-ingress/whatsapp-webhook');",
+      ].join("\n"),
+    ], {
+      cwd: packageDir,
+    });
 
-    await expect(importBuiltModule("../dist/linq-webhook.js")).resolves.toMatchObject({
-      verifyAndParseLinqWebhookRequest: expect.any(Function),
-    });
-    await expect(importBuiltModule("../dist/telegram-webhook.js")).resolves.toMatchObject({
-      buildTelegramThreadId: expect.any(Function),
-      summarizeTelegramUpdate: expect.any(Function),
-    });
-    await expect(importBuiltModule("../dist/telegram-webhook-payload.js")).resolves.toMatchObject({
-      minimizeTelegramUpdate: expect.any(Function),
-      parseTelegramWebhookUpdate: expect.any(Function),
-      verifyAndParseTelegramWebhookRequest: expect.any(Function),
-    });
-    await expect(importBuiltModule("../dist/whatsapp-webhook.js")).resolves.toMatchObject({
-      buildWhatsAppWebhookEventId: expect.any(Function),
-      parseWhatsAppInboundTexts: expect.any(Function),
-      verifyAndParseWhatsAppWebhookRequest: expect.any(Function),
-    });
+    expect(result.stdout.trim()).toBe("");
+    expect(result.stderr.trim()).toBe("");
   });
 });

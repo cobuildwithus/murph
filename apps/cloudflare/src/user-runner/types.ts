@@ -26,6 +26,7 @@ export interface DurableObjectStorageLike {
   deleteAlarm?(): Promise<void>;
   get<T>(key: string): Promise<T | undefined>;
   getAlarm(): Promise<number | null>;
+  list?<T>(options?: { prefix?: string }): Promise<Map<string, T>>;
   put<T>(key: string, value: T): Promise<void>;
   setAlarm(scheduledTime: number | Date): Promise<void>;
   sql?: DurableObjectSqlStorageLike;

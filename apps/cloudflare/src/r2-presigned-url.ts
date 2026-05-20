@@ -55,6 +55,7 @@ export function readHostedR2PresignEnvironment(
 }
 
 export async function createHostedR2PresignedPutUrl(input: {
+  checksumSha256Base64?: string;
   contentType: string;
   environment: HostedR2PresignEnvironment;
   expiresSeconds?: number;
@@ -72,11 +73,15 @@ export async function createHostedR2PresignedPutUrl(input: {
   const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/${AWS4_REQUEST}`;
   const endpoint = new URL(input.environment.endpoint);
   const canonicalUri = `/${encodeR2PathSegment(input.environment.bucketName)}/${encodeR2ObjectKey(input.key)}`;
+  const checksumSha256Base64 = input.checksumSha256Base64 === undefined
+    ? null
+    : normalizeHostedR2Sha256ChecksumBase64(input.checksumSha256Base64);
   const metadataHeaders = normalizeHostedR2PresignMetadataHeaders(input.metadata ?? {});
   const signedHeaders = [
     "content-type",
     "host",
     "if-none-match",
+    ...(checksumSha256Base64 === null ? [] : ["x-amz-checksum-sha256"]),
     ...metadataHeaders.map(([key]) => key),
   ].join(";");
   const query = new URLSearchParams({
@@ -92,6 +97,7 @@ export async function createHostedR2PresignedPutUrl(input: {
     `content-type:${input.contentType}`,
     `host:${endpoint.host}`,
     "if-none-match:*",
+    ...(checksumSha256Base64 === null ? [] : [`x-amz-checksum-sha256:${checksumSha256Base64}`]),
     ...metadataHeaders.map(([key, value]) => `${key}:${value}`),
     "",
   ].join("\n");
@@ -119,6 +125,18 @@ export async function createHostedR2PresignedPutUrl(input: {
     expiresAt: new Date(now.getTime() + expiresSeconds * 1000).toISOString(),
     url: `${endpoint.origin}${canonicalUri}?${canonicalizeSearchParams(query)}`,
   };
+}
+
+function normalizeHostedR2Sha256ChecksumBase64(value: string): string {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(normalized)) {
+    throw new TypeError("Hosted R2 SHA-256 checksum must be base64.");
+  }
+  const decoded = Uint8Array.from(atob(normalized), (character) => character.charCodeAt(0));
+  if (decoded.byteLength !== 32) {
+    throw new TypeError("Hosted R2 SHA-256 checksum must decode to 32 bytes.");
+  }
+  return normalized;
 }
 
 export async function createHostedR2PresignedGetUrl(input: {

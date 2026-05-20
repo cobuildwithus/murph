@@ -722,6 +722,11 @@ run_all_package_coverage() {
   return 0
 }
 
+run_package_boundary_verification() {
+  run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary
+  run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
+}
+
 run_typecheck_preflight() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
@@ -841,6 +846,7 @@ run_test_packages_coverage() {
     verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
+  run_package_boundary_verification
 }
 
 run_test_coverage() {

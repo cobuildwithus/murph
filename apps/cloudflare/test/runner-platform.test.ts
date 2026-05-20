@@ -80,6 +80,19 @@ function requireFetchRequest(call: readonly unknown[] | undefined, label: string
   return input instanceof Request ? input : new Request(input, init);
 }
 
+async function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(resolve, delayMs);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timeout);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
 function createAssistantUsageRecord(): AssistantUsageRecord {
   return {
     apiKeyEnv: null,
@@ -160,6 +173,7 @@ function createWorkspaceSnapshotV2Ref(input: {
       fileCount: 1,
       format: "tar",
       plaintextArchiveSha256: "b".repeat(64),
+      totalPlainBytes: input.encryptedByteSize,
     },
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: {
@@ -282,6 +296,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("content-length")).toBe(String(encryptedBytes.byteLength));
       expect(request.headers.get("content-type")).toBe("application/octet-stream");
       expect(request.headers.get("if-none-match")).toBe("*");
+      expect(request.headers.get("x-amz-checksum-sha256")).toBe(
+        Buffer.from("c".repeat(64), "hex").toString("base64"),
+      );
       expect(request.headers.get("x-amz-meta-encryptedsha256")).toBe("c".repeat(64));
       expect(request.headers.get("x-amz-meta-schema")).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
       expect(request.headers.get("x-amz-meta-snapshotid")).toBe("snapshot_runner_platform");
@@ -353,6 +370,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url === getUrl) {
+          await delayWithAbort(25, request.signal);
           return new Response(encryptedBytes, {
             headers: {
               "content-length": String(encrypted.encryptedByteSize),
@@ -365,6 +383,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       const platform = buildTestHostedExecutionRuntimePlatform({
         boundUserId: "member_123",
+        commitTimeoutMs: 10,
         fetchImpl: fetchMock as typeof fetch,
         workspaceCheckpointBridge: {
           readCurrentLease: () => ({
@@ -386,6 +405,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             fileCount: encrypted.fileCount,
             format: "tar",
             plaintextArchiveSha256: encrypted.plaintextArchiveSha256,
+            totalPlainBytes: encrypted.totalPlainBytes,
           },
           createdAt: "2026-05-20T00:00:00.000Z",
           encryption: {

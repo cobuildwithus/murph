@@ -27,7 +27,7 @@ export const MURPH_AGE_PUBLIC_DISPLAY_SUMMARY_SCHEMA_VERSION = "murph.age.public
 export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
   "murph.age.public-calculator-report.v5" as const;
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.public-calculator-view.v4" as const;
+  "murph.age.public-calculator-view.v5" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v9" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
@@ -886,6 +886,34 @@ export type MurphAgePublicCalculatorViewDisplayCategory =
   | "product-risk-only"
   | "research-preview";
 
+export type MurphAgePublicCalculatorScoreStatus =
+  | "context-only-no-score"
+  | "input-incomplete"
+  | "research-estimate-withheld"
+  | "validated-age-ready"
+  | "validated-risk-only"
+  | "validation-pending";
+
+export type MurphAgePublicCalculatorUnlockRequirement =
+  | "complete-score-bearing-inputs"
+  | "external-outcome-validation"
+  | "product-policy-authorization"
+  | "risk-to-age-display-authorization"
+  | "validated-wearable-parameter-pack";
+
+export interface MurphAgePublicCalculatorScoreReadinessView {
+  biologicalAgeAvailable: boolean;
+  contextBundleIds: MurphAgeInputBundleId[];
+  contextOnlyFeatureCount: number;
+  inputBundleId: MurphAgeInputBundleId;
+  missingScoreBearingFeatureCount: number;
+  riskAvailable: boolean;
+  scoreBearingFeatureCount: number;
+  status: MurphAgePublicCalculatorScoreStatus;
+  unlockRequirements: MurphAgePublicCalculatorUnlockRequirement[];
+  wearableReadyFeatureCount: number;
+}
+
 export interface MurphAgePublicAgeEstimateView {
   ageDeltaYears: number | null;
   biologicalAgeYears: number | null;
@@ -982,6 +1010,7 @@ export interface MurphAgePublicCalculatorView {
   };
   risk: MurphAgePublicRiskView;
   schemaVersion: typeof MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION;
+  scoreReadiness: MurphAgePublicCalculatorScoreReadinessView;
   selectedCardId: MurphAgePublicAuthorization["cardId"];
   selectedScoreBearingFeatureKeys: string[];
   selectedScoreBearingMetricKeys: string[];
@@ -6362,6 +6391,7 @@ export function buildMurphAgePublicCalculatorView(
       riskEndpoint: summary.outcomeContext.riskEndpoint,
     },
     schemaVersion: MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
+    scoreReadiness: buildMurphAgePublicCalculatorScoreReadinessView(report),
     selectedCardId: canExposeScoreIdentity ? report.authorization.cardId : null,
     selectedScoreBearingFeatureKeys: canExposeScoreIdentity ? [...summary.selectedScoreBearingFeatureKeys] : [],
     selectedScoreBearingMetricKeys: canExposeScoreIdentity ? [...summary.selectedScoreBearingMetricKeys] : [],
@@ -6370,6 +6400,66 @@ export function buildMurphAgePublicCalculatorView(
     wearable: buildMurphAgePublicWearableCalculatorView(summary, contextOnlyWearableMetricKeys),
     wearableResidualLayer: null,
   };
+}
+
+function buildMurphAgePublicCalculatorScoreReadinessView(
+  report: MurphAgePublicCalculatorReport,
+): MurphAgePublicCalculatorScoreReadinessView {
+  const summary = report.displaySummary;
+  const inputBundle = report.inputReadiness.bundle;
+  const unlockRequirements = new Set<MurphAgePublicCalculatorUnlockRequirement>();
+  const status = resolveMurphAgePublicCalculatorScoreStatus(report);
+  if (status === "validated-risk-only") {
+    unlockRequirements.add("risk-to-age-display-authorization");
+  } else if (status !== "validated-age-ready") {
+    if (inputBundle.status !== "ready") {
+      unlockRequirements.add("complete-score-bearing-inputs");
+    }
+    if (!summary.productRiskDisplayReady) {
+      unlockRequirements.add("product-policy-authorization");
+    }
+    if (!summary.productAgeDisplayReady) {
+      unlockRequirements.add("risk-to-age-display-authorization");
+    }
+    for (const blocker of summary.productPromotionBlockers) {
+      if (
+        blocker === "VALIDATION_GATE_BLOCKED"
+        || blocker === "PRODUCT_PROMOTION_EVIDENCE_MISSING"
+        || blocker === "PRODUCT_PROMOTION_EVIDENCE_TIER_MISSING"
+      ) {
+        unlockRequirements.add("external-outcome-validation");
+        break;
+      }
+    }
+    if (summary.wearableBridge.readyFeatureKeys.length > 0 && !summary.wearableBridge.scoreBearing) {
+      unlockRequirements.add("validated-wearable-parameter-pack");
+    }
+  }
+
+  return {
+    biologicalAgeAvailable: summary.productAgeDisplayReady,
+    contextBundleIds: report.inputReadiness.contextBundles.map((bundle) => bundle.bundleId),
+    contextOnlyFeatureCount: summary.contextOnlyFeatureKeys.length,
+    inputBundleId: inputBundle.bundleId,
+    missingScoreBearingFeatureCount: inputBundle.missingFeatureKeys.length,
+    riskAvailable: summary.productRiskDisplayReady,
+    scoreBearingFeatureCount: inputBundle.availableFeatureKeys.length,
+    status,
+    unlockRequirements: [...unlockRequirements],
+    wearableReadyFeatureCount: summary.wearableBridge.readyFeatureKeys.length,
+  };
+}
+
+function resolveMurphAgePublicCalculatorScoreStatus(
+  report: MurphAgePublicCalculatorReport,
+): MurphAgePublicCalculatorScoreStatus {
+  const summary = report.displaySummary;
+  if (summary.productAgeDisplayReady) return "validated-age-ready";
+  if (summary.productRiskDisplayReady) return "validated-risk-only";
+  if (summary.displayStatus === "context-only") return "context-only-no-score";
+  if (report.inputReadiness.bundle.status === "abstain") return "input-incomplete";
+  if (summary.researchEstimateAvailable) return "research-estimate-withheld";
+  return "validation-pending";
 }
 
 export function buildMurphAgeResearchCalculatorView(

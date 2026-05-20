@@ -29,6 +29,7 @@ export interface HostedWorkspaceSnapshotV2ArchiveMetadata {
   fileCount: number;
   format: "tar";
   plaintextArchiveSha256: string;
+  totalPlainBytes: number;
 }
 
 export interface HostedWorkspaceSnapshotV2Aad {

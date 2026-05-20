@@ -141,6 +141,7 @@ function createWorkspaceSnapshotV2Ref() {
       fileCount: 12,
       format: "tar" as const,
       plaintextArchiveSha256: "a".repeat(64),
+      totalPlainBytes: 2048,
     },
     createdAt: "2026-05-20T00:00:00.000Z",
     encryption: {

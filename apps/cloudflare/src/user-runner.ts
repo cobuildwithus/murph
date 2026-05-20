@@ -16,12 +16,16 @@ import {
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeWebStatusResponse,
+  parseHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import {
@@ -79,7 +83,10 @@ import {
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 import {
+  HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+  parseHostedWorkspaceSnapshotOrphanCandidate,
   parseHostedWorkspaceSnapshotUploadSession,
+  type HostedWorkspaceSnapshotOrphanCandidate,
   type HostedWorkspaceSnapshotUploadSession,
 } from "./workspace-snapshot-store.ts";
 
@@ -88,6 +95,7 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 const IMMEDIATE_WAKE_RETRY_DELAY_MS = 1_000;
 const FRESH_WRITE_FENCE_STARTUP_GRACE_MS = 15_000;
 const RETRY_CAP_RECOVERY_PROBE_DELAY_MS = 30 * 60_000;
+const WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS = 65 * 60_000;
 
 type RunnerProgressSnapshot = {
   durableDemand:
@@ -419,12 +427,102 @@ export class HostedUserRunner {
     if (previousCurrent !== undefined) {
       const previousSession = parseHostedWorkspaceSnapshotUploadSession(previousCurrent);
       if (previousSession.userId === input.userId && previousSession.snapshotId !== session.snapshotId) {
-        await deleteR2ObjectIfSupported(this.bucket, previousSession.objectKey)
-          .catch(() => undefined);
+        await this.recordHostedWorkspaceSnapshotOrphanCandidate({
+          createdAt: new Date().toISOString(),
+          objectKey: previousSession.objectKey,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+          snapshotId: previousSession.snapshotId,
+          userId: previousSession.userId,
+        });
       }
     }
     await this.state.storage.put(workspaceSnapshotUploadSessionCurrentStorageKey(), session);
+    this.state.waitUntil?.(
+      this.cleanupHostedWorkspaceSnapshotOrphanCandidatesBestEffort(input.userId),
+    );
     return session;
+  }
+
+  async recordHostedWorkspaceSnapshotOrphanCandidate(
+    input: HostedWorkspaceSnapshotOrphanCandidate,
+  ): Promise<HostedWorkspaceSnapshotOrphanCandidate> {
+    await this.stateStore.bindUser(input.userId);
+    const candidate = parseHostedWorkspaceSnapshotOrphanCandidate(input);
+    if (candidate.userId !== input.userId) {
+      throw new Error("Hosted workspace snapshot orphan candidate user mismatch.");
+    }
+    await this.state.storage.put(
+      workspaceSnapshotOrphanCandidateStorageKey(candidate.snapshotId),
+      candidate,
+    );
+    return candidate;
+  }
+
+  private async cleanupHostedWorkspaceSnapshotOrphanCandidatesBestEffort(
+    userId: string,
+  ): Promise<void> {
+    try {
+      await this.cleanupHostedWorkspaceSnapshotOrphanCandidates(userId);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: safeCleanupErrorCode(error),
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner workspace snapshot orphan cleanup failed.",
+        phase: "wake.running",
+        userId,
+      });
+    }
+  }
+
+  private async cleanupHostedWorkspaceSnapshotOrphanCandidates(
+    userId: string,
+  ): Promise<void> {
+    if (!this.bucket.delete || !this.state.storage.list) {
+      return;
+    }
+    await this.stateStore.bindUser(userId);
+    const candidates = await this.state.storage.list<unknown>({
+      prefix: workspaceSnapshotOrphanCandidateStoragePrefix(),
+    });
+    if (candidates.size === 0) {
+      return;
+    }
+    const nowMs = Date.now();
+    const eligibleCandidates: Array<[string, HostedWorkspaceSnapshotOrphanCandidate]> = [];
+
+    for (const [key, value] of candidates) {
+      const candidate = parseHostedWorkspaceSnapshotOrphanCandidate(value);
+      if (candidate.userId !== userId) {
+        continue;
+      }
+      const createdAtMs = Date.parse(candidate.createdAt);
+      if (
+        !Number.isFinite(createdAtMs)
+        || nowMs - createdAtMs < WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS
+      ) {
+        continue;
+      }
+      eligibleCandidates.push([key, candidate]);
+    }
+    if (eligibleCandidates.length === 0) {
+      return;
+    }
+
+    const workspaceRead = await this.readHostedWorkspaceFromWeb(userId);
+    this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, userId);
+    const currentObjectKey = readHostedWorkspaceV2SnapshotObjectKey(workspaceRead.workspace);
+
+    for (const [key, candidate] of eligibleCandidates) {
+      if (candidate.objectKey === currentObjectKey) {
+        continue;
+      }
+      await deleteR2ObjectIfSupported(this.bucket, candidate.objectKey);
+      await this.state.storage.delete(key);
+    }
   }
 
   async readHostedWorkspaceSnapshotUploadSession(input: {
@@ -2904,4 +3002,33 @@ function buildHostedRunnerMetadataOnlyErrorDetails(error: unknown): HostedExecut
 
 function workspaceSnapshotUploadSessionCurrentStorageKey(): string {
   return "workspace-snapshot-upload-session:current";
+}
+
+function workspaceSnapshotOrphanCandidateStoragePrefix(): string {
+  return "workspace-snapshot-orphan-candidate:";
+}
+
+function workspaceSnapshotOrphanCandidateStorageKey(snapshotId: string): string {
+  return `${workspaceSnapshotOrphanCandidateStoragePrefix()}${snapshotId}`;
+}
+
+function readHostedWorkspaceV2SnapshotObjectKey(
+  workspace: HostedWorkspaceState | null,
+): string | null {
+  const snapshotRef = workspace?.snapshotRef;
+  const record = readObjectRecord(snapshotRef);
+  if (!record || record.schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
+    return null;
+  }
+  return parseHostedWorkspaceSnapshotV2Ref(
+    record,
+    "Hosted workspace snapshot orphan cleanup current snapshotRef",
+  ).objectKey;
+}
+
+function readObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
 }

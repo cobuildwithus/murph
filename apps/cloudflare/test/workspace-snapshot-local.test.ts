@@ -68,6 +68,8 @@ async function expectUnsafeTarArchive(input: {
   const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
   const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 10);
   const plaintextArchive = gzipSync(createTarArchive(input.entries));
+  const totalPlainBytes = input.entries
+    .reduce((total, entry) => total + (entry.body?.byteLength ?? 0), 0);
   try {
     const cipher = createCipheriv("aes-256-gcm", Buffer.from(dataKey), Buffer.from(iv));
     cipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(aad)));
@@ -85,6 +87,7 @@ async function expectUnsafeTarArchive(input: {
         fileCount: 1,
         format: "tar",
         plaintextArchiveSha256: sha256Hex(plaintextArchive),
+        totalPlainBytes,
       },
       createdAt: "2026-05-20T00:00:00.000Z",
       encryption: {

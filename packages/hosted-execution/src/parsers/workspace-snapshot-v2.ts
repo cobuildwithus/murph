@@ -95,6 +95,7 @@ function parseHostedWorkspaceSnapshotV2Archive(
       record.plaintextArchiveSha256,
       `${label}.plaintextArchiveSha256`,
     ),
+    totalPlainBytes: requireNonNegativeSafeInteger(record.totalPlainBytes, `${label}.totalPlainBytes`),
   };
 }
 

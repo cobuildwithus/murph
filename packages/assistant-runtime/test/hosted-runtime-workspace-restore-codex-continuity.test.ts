@@ -1328,6 +1328,7 @@ function createWorkspaceSnapshotV2Ref(): HostedWorkspaceSnapshotV2Ref {
       fileCount: 1,
       format: "tar",
       plaintextArchiveSha256: "b".repeat(64),
+      totalPlainBytes: 7,
     },
     createdAt: "2026-05-05T00:00:00.000Z",
     encryption: {

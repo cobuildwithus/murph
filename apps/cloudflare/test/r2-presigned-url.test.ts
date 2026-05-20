@@ -29,6 +29,7 @@ describe("R2 presigned URL helpers", () => {
 
   it("includes signed object metadata headers when requested", async () => {
     const result = await createHostedR2PresignedPutUrl({
+      checksumSha256Base64: Buffer.from("a".repeat(64), "hex").toString("base64"),
       contentType: "application/octet-stream",
       environment: {
         accessKeyId: "AKIDEXAMPLE",
@@ -48,7 +49,7 @@ describe("R2 presigned URL helpers", () => {
     const url = new URL(result.url);
 
     expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe(
-      "content-type;host;if-none-match;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
+      "content-type;host;if-none-match;x-amz-checksum-sha256;x-amz-meta-encryptedsha256;x-amz-meta-schema;x-amz-meta-snapshotid",
     );
     expect(url.searchParams.get("X-Amz-Signature")).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/u));
   });
