@@ -72,10 +72,20 @@ accounting is wrong.
   runtime log is still persisted.
 - Full-body JSON parsing and full-body fingerprints are capped; prefix
   fingerprints remain bounded to fixed windows.
+- Production OpenAI egress diagnostics summarize Responses `input` shape with
+  allowlisted type/role buckets, largest-item byte size/kinds, and compact
+  nested `content`/`output`/string count-byte metrics. The summary is bounded
+  by request JSON size, traversal depth, traversal node count, runtime-log
+  field count, and runtime-log array length; subtree byte measurement is
+  best-effort so extreme nesting cannot drop the whole diagnostic.
 - Provider prompt-size diagnostics live at the Codex provider prompt
   composition boundary and emit only byte counts, presence booleans, and
   prompt-plan enums. Prompt text, developer instructions, message bodies,
   route ids, and provider session ids are not logged.
+- Provider prompt-size diagnostics now split the composed prompt into system
+  prompt, active-turn replay, conversation context, runtime context, developer
+  instructions, and user prompt byte counts so production logs can compare the
+  Murph-composed prompt against the final OpenAI request size.
 - Session-resolution diagnostics live on the assistant session lookup result
   and emit only lookup source, key counts, indexed-candidate counts, matched
   scope, and indexed booleans. Raw lookup keys and session ids are not logged.
@@ -127,3 +137,12 @@ accounting is wrong.
 - Final review narrowed request-body drop detection to compare normal `/v1/responses` calls only, so the E2E proves the post-compact assistant turn shrinks instead of counting the compact call itself.
 - `MURPH_HOSTED_LOCAL_ARTIFACT_DIR=.artifacts/codex-long-thread-final-proof MURPH_E2E_CODEX_LONG_THREAD_TURN_COUNT=12 pnpm hosted-local e2e codex-long-thread --profile e2e:live` passed after that narrowing. Metadata-only diagnostic summary: 12 completed turns, first usage row over target at ordinal 11, max usage input tokens 50,111, one compact request, normal response body drop from 200,442 bytes to 51,004 bytes, and usage-token drop from 50,111 to 12,751.
 - Final scoped `git diff --check` passed, the untracked long-thread E2E file passed `git diff --no-index --check`, and `pnpm logs:guard` passed.
+- `pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts test/runner-egress-intercept.test.ts` passed after adding production input-shape diagnostics.
+- `pnpm exec vitest run packages/assistant-engine/test/codex-runtime-helpers.test.ts` passed after adding provider prompt-section byte diagnostics.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts test/hosted-runtime-events.test.ts` passed after allowing the new hosted prompt-size diagnostic fields.
+- `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir packages/assistant-engine typecheck` passed.
+- `pnpm exec tsc --noEmit --pretty false --project packages/assistant-runtime/tsconfig.json` passed.
+- `pnpm logs:guard` passed.
+- `git diff --check -- apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts packages/assistant-engine/src/assistant/providers/codex-cli.ts packages/assistant-engine/src/assistant/providers/helpers.ts packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts` passed.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/src/runner-egress-intercept.ts apps/cloudflare/test/runner-egress-intercept.test.ts packages/assistant-engine/src/assistant/providers/codex-cli.ts packages/assistant-engine/src/assistant/providers/helpers.ts packages/assistant-engine/test/codex-runtime-helpers.test.ts packages/assistant-runtime/src/hosted-runtime/events.ts packages/assistant-runtime/test/hosted-runtime-events.test.ts` was attempted after the final diagnostics update. It reached the packages/cli test lane and failed on unrelated dirty Murph Age CLI/schema expectations in `packages/cli/test/murph-age-command.test.ts` and `packages/cli/test/cli-typed-agent-inputs-schema.test.ts`; the diagnostics diff does not touch those files or the Murph Age feature.

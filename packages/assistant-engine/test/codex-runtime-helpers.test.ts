@@ -29,7 +29,10 @@ import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assis
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-import { createAssistantBinding } from '../src/assistant/bindings.ts'
+import {
+  createAssistantBinding,
+  getAssistantBindingContextLines,
+} from '../src/assistant/bindings.ts'
 import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
   DEFAULT_CODEX_MODELS,
@@ -1154,6 +1157,17 @@ describe('Codex assistant registry helpers', () => {
 
   it('emits metadata-only provider prompt-size diagnostics', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
+    const activeTurnHistoryPrompt =
+      'Active turn so far:\nAssistant:\nprivate draft should not be logged'
+    const sessionBinding = createAssistantBinding({
+      actorId: 'actor-private',
+      channel: 'telegram',
+      identityId: 'identity-private',
+      threadId: 'thread-private',
+      threadIsDirect: true,
+    })
+    const conversationContextPrompt =
+      `Conversation context:\n${getAssistantBindingContextLines(sessionBinding).join('\n')}`
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'ok',
       jsonEvents: [],
@@ -1181,14 +1195,9 @@ describe('Codex assistant registry helpers', () => {
       }),
       refreshThreadInstructions: true,
       sessionContext: {
-        binding: createAssistantBinding({
-          actorId: 'actor-private',
-          channel: 'telegram',
-          identityId: 'identity-private',
-          threadId: 'thread-private',
-          threadIsDirect: true,
-        }),
+        binding: sessionBinding,
       },
+      systemPrompt: 'Private system prompt 💚.',
       turnContextPrompt: 'Private runtime context.',
       userPrompt: 'hello',
       workingDirectory: '/tmp/provider-tests',
@@ -1206,7 +1215,9 @@ describe('Codex assistant registry helpers', () => {
     )
     expect(diagnostic).toMatchObject({
       activeTurnHistoryCount: 1,
+      activeTurnHistoryBytes: Buffer.byteLength(activeTurnHistoryPrompt, 'utf8'),
       activeTurnHistoryPresent: true,
+      conversationContextBytes: Buffer.byteLength(conversationContextPrompt, 'utf8'),
       conversationContextPresent: true,
       developerInstructionsBytes: Buffer.byteLength(
         'Private developer instructions.',
@@ -1219,6 +1230,7 @@ describe('Codex assistant registry helpers', () => {
       refreshThreadInstructions: true,
       resumeCodexThreadIdPresent: false,
       schema: 'murph.assistant-provider-prompt-size-diagnostics.v1',
+      systemPromptBytes: Buffer.byteLength('Private system prompt 💚.', 'utf8'),
       turnContextPromptBytes: Buffer.byteLength(
         'Private runtime context.',
         'utf8',
@@ -1230,6 +1242,7 @@ describe('Codex assistant registry helpers', () => {
     expect(serializedDiagnostic).not.toContain('hello')
     expect(serializedDiagnostic).not.toContain('private draft')
     expect(serializedDiagnostic).not.toContain('Private developer')
+    expect(serializedDiagnostic).not.toContain('Private system')
     expect(serializedDiagnostic).not.toContain('Private runtime')
     expect(serializedDiagnostic).not.toContain('actor-private')
     expect(serializedDiagnostic).not.toContain('identity-private')

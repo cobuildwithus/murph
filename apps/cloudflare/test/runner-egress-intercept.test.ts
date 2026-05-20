@@ -36,6 +36,9 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -57,6 +60,28 @@ const BOUND_USER_WRITE_FENCE_HEADERS = {
   ...WRITE_FENCE_HEADERS,
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
 } as const;
+const TEST_TEXT_ENCODER = new TextEncoder();
+
+function testByteLength(value: string): number {
+  return TEST_TEXT_ENCODER.encode(value).byteLength;
+}
+
+function testJsonByteLength(value: unknown): number {
+  return testByteLength(JSON.stringify(value));
+}
+
+function parseDiagnosticRuntimeLog(redactedJson: Record<string, unknown>): void {
+  parseHostedRuntimeLogRequest({
+    entries: [{
+      at: "2026-05-19T00:00:00.000Z",
+      component: "runner",
+      eventCode: HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
+      level: "debug",
+      phase: "fetch",
+      redactedJson,
+    }],
+  });
+}
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -510,6 +535,10 @@ describe("hostedRunnerIntercept", () => {
       }>;
     };
     const entry = runtimeLogBody.entries?.[0];
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+    if (entry?.redactedJson) {
+      parseDiagnosticRuntimeLog(entry.redactedJson);
+    }
     expect(entry).toEqual(expect.objectContaining({
       attemptId: "attempt_1",
       component: "runner",
@@ -526,6 +555,13 @@ describe("hostedRunnerIntercept", () => {
       fingerprintKind: "hmac-sha256",
       inputCount: 1,
       inputFingerprintPresent: true,
+      inputItemRoleCounts: [1],
+      inputItemRoleKinds: ["user"],
+      inputItemTypeCounts: [1],
+      inputItemTypeKinds: ["missing"],
+      inputLargestItemKinds: ["type:missing", "role:user"],
+      inputNestedMetricCounts: [1, 0, 3],
+      inputNestedMetricKinds: ["content", "output", "string"],
       inputType: "array",
       jsonType: "object",
       jsonValid: true,
@@ -537,6 +573,16 @@ describe("hostedRunnerIntercept", () => {
       streamPresent: true,
       toolCount: 1,
     }));
+    expect(entry?.redactedJson?.inputLargestItemBytes)
+      .toBe(testJsonByteLength(requestBody.input[0]));
+    expect(entry?.redactedJson?.inputNestedMetricBytes).toEqual([
+      testJsonByteLength(requestBody.input[0].content),
+      0,
+      testByteLength(`${syntheticStablePrefix}${syntheticHiddenText}`)
+        + testByteLength("input_text")
+        + testByteLength("user"),
+    ]);
+    expect(Object.keys(entry?.redactedJson ?? {}).length).toBeLessThanOrEqual(45);
     expect(entry?.redactedJson?.cacheNamespaceFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.previousResponseFingerprint).toMatch(/^hmac-sha256:[a-f0-9]{64}$/u);
     expect(entry?.redactedJson?.requestPrefixFingerprints).toEqual(
@@ -623,6 +669,128 @@ describe("hostedRunnerIntercept", () => {
     }));
   });
 
+  it("summarizes OpenAI input shape with bounded metadata", async () => {
+    const largestText = "hello 💚 ".repeat(10);
+    const input = [
+      {
+        content: [{ text: largestText, type: "input_text" }],
+        role: "user",
+        type: "message",
+      },
+      {
+        output: "tool result",
+        role: "assistant",
+        type: "function_call",
+      },
+      {
+        content: "hidden",
+        role: "banana",
+        type: "unexpected_call",
+      },
+      {
+        role: "",
+        type: "  ",
+      },
+      "plain input",
+    ] as const;
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.5",
+      })),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      inputCount: 5,
+      inputItemRoleCounts: [1, 2, 1, 1],
+      inputItemRoleKinds: ["assistant", "missing", "other", "user"],
+      inputItemTypeCounts: [1, 1, 2, 1],
+      inputItemTypeKinds: ["function_call", "message", "missing", "other"],
+      inputLargestItemBytes: testJsonByteLength(input[0]),
+      inputLargestItemKinds: ["type:message", "role:user"],
+      inputNestedMetricCounts: [2, 1, 13],
+      inputNestedMetricKinds: ["content", "output", "string"],
+      inputNestedMetricBytes: [
+        testJsonByteLength(input[0].content) + testJsonByteLength(input[2].content),
+        testJsonByteLength(input[1].output),
+        [
+          "message",
+          "user",
+          "input_text",
+          largestText,
+          "function_call",
+          "assistant",
+          "tool result",
+          "unexpected_call",
+          "banana",
+          "hidden",
+          "  ",
+          "",
+          "plain input",
+        ].reduce((total, value) => total + testByteLength(value), 0),
+      ],
+    }));
+  });
+
+  it("keeps maximal OpenAI input classification diagnostics runtime-log safe", async () => {
+    const input = [
+      "computer_call",
+      "computer_call_output",
+      "file_search_call",
+      "function_call",
+      "function_call_output",
+      "image_generation_call",
+      "local_shell_call",
+      "local_shell_call_output",
+      "message",
+      "reasoning",
+      "web_search_call",
+    ].map((type) => ({ role: "user", type }));
+    input.push(
+      { role: "assistant", type: "message" },
+      { role: "developer", type: "message" },
+      { role: "system", type: "message" },
+      { role: "tool", type: "message" },
+      { role: "unknown_role", type: "unknown_type" },
+      { role: "", type: "" },
+    );
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.5",
+      })),
+    });
+
+    expect(diagnostic.inputItemTypeKinds).toHaveLength(13);
+    expect(diagnostic.inputItemRoleKinds).toHaveLength(7);
+    parseDiagnosticRuntimeLog(diagnostic);
+  });
+
+  it("bounds OpenAI input shape traversal for deeply nested requests", async () => {
+    const nestedJson = `${"[".repeat(10_000)}"leaf"${"]".repeat(10_000)}`;
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(
+        `{"input":[${nestedJson}],"model":"gpt-5.5"}`,
+      ),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      inputCount: 1,
+      inputLargestItemBytes: 0,
+      inputShapeTraversalTruncated: true,
+      jsonValid: true,
+    }));
+    expect(diagnostic.inputBytes).toBeUndefined();
+  });
+
   it("builds bounded OpenAI cache diagnostics for degraded request bodies", async () => {
     const smallBody = JSON.stringify({
       input: "hello",
@@ -646,6 +814,10 @@ describe("hostedRunnerIntercept", () => {
       modelKind: "other",
       requestFingerprintPresent: false,
     }));
+    expect(smallDiagnostic.inputItemTypeKinds).toBeUndefined();
+    expect(smallDiagnostic.inputItemRoleKinds).toBeUndefined();
+    expect(smallDiagnostic.inputNestedMetricBytes).toBeUndefined();
+    expect(smallDiagnostic.inputLargestItemBytes).toBeUndefined();
     expect(JSON.stringify(smallDiagnostic)).not.toContain("tenant-private-model-123");
     expect(JSON.stringify(smallDiagnostic)).not.toContain("cache-namespace-synthetic");
 
@@ -662,6 +834,32 @@ describe("hostedRunnerIntercept", () => {
       jsonValid: false,
       requestFingerprintPresent: false,
     }));
+
+    const tooLargeBody = JSON.stringify({
+      input: "x".repeat(6 * 1024 * 1024),
+      model: "gpt-5.5",
+    });
+    const tooLargeDiagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      fingerprintSecret: "diagnostic-fingerprint-secret",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(tooLargeBody),
+    });
+
+    expect(tooLargeDiagnostic).toEqual(expect.objectContaining({
+      fingerprintKind: "hmac-sha256",
+      jsonSkippedReasonKind: "too_large",
+      jsonType: "unknown",
+      jsonValid: false,
+      requestFingerprintPresent: false,
+      requestFullFingerprintSkipped: true,
+      requestPrefixLengths: [8 * 1024, 32 * 1024, 128 * 1024],
+    }));
+    expect(tooLargeDiagnostic.requestPrefixFingerprints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u)]),
+    );
+    expect(tooLargeDiagnostic.inputType).toBeUndefined();
+    expect(tooLargeDiagnostic.inputNestedMetricBytes).toBeUndefined();
   });
 
   it("rejects OpenAI paths outside the explicit hosted runner policy", async () => {

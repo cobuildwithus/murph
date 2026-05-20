@@ -25,6 +25,7 @@ import {
 import {
   extractCodexAssistantProviderUsage,
   mergeCodexConfigOverrides,
+  resolveAssistantProviderFlatPromptActiveTurnSection,
   resolveAssistantProviderPrompt,
 } from './helpers.js'
 import {
@@ -435,13 +436,21 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
   const developerInstructions = normalizeNullableString(
     input.input.developerInstructions,
   )
+  const systemPrompt = normalizeNullableString(input.input.systemPrompt)
   const userPrompt = normalizeNullableString(input.input.userPrompt)
   const turnContextPrompt = normalizeNullableString(input.input.turnContextPrompt)
+  const activeTurnHistoryPrompt =
+    resolveAssistantProviderFlatPromptActiveTurnSection(input.input)
   const activeTurnHistoryCount = input.input.activeTurnMessages?.length ?? 0
-  const conversationContextPresent =
+  const conversationContextLines =
     input.input.sessionContext?.binding
-      ? getAssistantBindingContextLines(input.input.sessionContext.binding).length > 0
-      : false
+      ? getAssistantBindingContextLines(input.input.sessionContext.binding)
+      : []
+  const conversationContextPrompt =
+    conversationContextLines.length > 0
+      ? `Conversation context:\n${conversationContextLines.join('\n')}`
+      : null
+  const conversationContextPresent = conversationContextPrompt !== null
 
   try {
     onTraceEvent({
@@ -452,12 +461,15 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         providerTraceKind: 'provider.prompt_size',
         providerPromptDiagnosticKind: input.diagnosticKind,
         providerPromptBytes: byteLength(input.prompt),
+        systemPromptBytes: byteLength(systemPrompt),
         userPromptBytes: byteLength(userPrompt),
         turnContextPromptBytes: byteLength(turnContextPrompt),
         developerInstructionsBytes: byteLength(developerInstructions),
+        activeTurnHistoryBytes: byteLength(activeTurnHistoryPrompt),
         developerInstructionsPresent: developerInstructions !== null,
         activeTurnHistoryCount,
         activeTurnHistoryPresent: activeTurnHistoryCount > 0,
+        conversationContextBytes: byteLength(conversationContextPrompt),
         conversationContextPresent,
         refreshThreadInstructions:
           input.refreshThreadInstructions ?? input.input.refreshThreadInstructions === true,
