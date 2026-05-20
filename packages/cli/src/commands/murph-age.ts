@@ -238,6 +238,29 @@ const murphAgePublicResearchCandidateCardAssessmentSchema = z.object({
   selectedMetricKeys: z.array(murphAgePublicMetricKeySchema),
   warnings: z.array(murphAgePublicWarningSchema),
 })
+const murphAgeResearchCardRoleSchema = z.enum([
+  'outcome-risk-anchor-and-fallback',
+  'primary-lab-bp-body-adjuster',
+  'transport-fallback-and-discordance-guard',
+])
+const murphAgeResearchArbiterCandidateCardViewSchema =
+  murphAgePublicResearchCandidateCardAssessmentSchema.extend({
+    readyForResearchRun: z.boolean(),
+    role: murphAgeResearchCardRoleSchema,
+  })
+const murphAgeResearchArbiterViewSchema = z.object({
+  candidateCards: z.array(murphAgeResearchArbiterCandidateCardViewSchema),
+  labConflictPolicy: z.literal('lab9-primary-lab5-transport-guard-r399-anchor-fallback'),
+  selectedCardRole: murphAgeResearchCardRoleSchema.nullable(),
+  selectionReason: z.enum([
+    'anchor-selected',
+    'no-score-bearing-card-selected',
+    'primary-lab-card-selected',
+    'transport-fallback-selected',
+  ]),
+  strategy: z.literal('r399-anchor-lab9-primary-lab5-transport-wearables-context'),
+  wearableScorePolicy: z.literal('context-only-not-score-bearing'),
+})
 const murphAgeInputScoreReadinessStatusSchema = z.enum([
   'context-only',
   'input-incomplete',
@@ -608,6 +631,7 @@ const murphAgeResearchModelStatusViewSchema = z.object({
 })
 export const murphAgeResearchCalculatorViewResultSchema = z.object({
   ageEstimate: murphAgePublicAgeEstimateViewSchema.nullable(),
+  arbiter: murphAgeResearchArbiterViewSchema,
   blockedFeatureKeys: z.array(z.string().min(1)),
   displayBlockedReason: murphAgeDisplayBlockedReasonSchema.nullable(),
   displayStatus: murphAgeDisplayStatusSchema,

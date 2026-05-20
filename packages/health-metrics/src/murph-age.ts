@@ -29,7 +29,7 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION =
 export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.public-calculator-view.v1" as const;
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
-  "murph.age.research-calculator-view.v4" as const;
+  "murph.age.research-calculator-view.v5" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
   "murph.age.architecture-summary.v3" as const;
 export const MURPH_AGE_PUBLIC_LAB_WEARABLE_SHADOW_EVIDENCE_STATUS_SCHEMA_VERSION =
@@ -795,8 +795,34 @@ export interface MurphAgeResearchModelStatusView {
   };
 }
 
+export type MurphAgeResearchCardRole =
+  | "outcome-risk-anchor-and-fallback"
+  | "primary-lab-bp-body-adjuster"
+  | "transport-fallback-and-discordance-guard";
+
+export type MurphAgeResearchArbiterSelectionReason =
+  | "anchor-selected"
+  | "no-score-bearing-card-selected"
+  | "primary-lab-card-selected"
+  | "transport-fallback-selected";
+
+export interface MurphAgeResearchArbiterCandidateCardView extends MurphAgePublicResearchCandidateCardAssessment {
+  readyForResearchRun: boolean;
+  role: MurphAgeResearchCardRole;
+}
+
+export interface MurphAgeResearchArbiterView {
+  candidateCards: MurphAgeResearchArbiterCandidateCardView[];
+  labConflictPolicy: "lab9-primary-lab5-transport-guard-r399-anchor-fallback";
+  selectedCardRole: MurphAgeResearchCardRole | null;
+  selectionReason: MurphAgeResearchArbiterSelectionReason;
+  strategy: "r399-anchor-lab9-primary-lab5-transport-wearables-context";
+  wearableScorePolicy: "context-only-not-score-bearing";
+}
+
 export interface MurphAgeResearchCalculatorView {
   ageEstimate: MurphAgePublicAgeEstimateView | null;
+  arbiter: MurphAgeResearchArbiterView;
   blockedFeatureKeys: string[];
   displayBlockedReason: MurphAgeDisplayBlockedReason | null;
   displayStatus: MurphAgeDisplayStatus;
@@ -4284,6 +4310,7 @@ export function buildMurphAgeResearchCalculatorView(
       chronologicalAgeYears: result.chronologicalAgeYears,
       intervalYears: result.intervalYears ? { ...result.intervalYears } : null,
     } : null,
+    arbiter: buildMurphAgeResearchArbiterView(report),
     blockedFeatureKeys: [...summary.blockedFeatureKeys],
     displayBlockedReason: summary.displayBlockedReason,
     displayStatus: summary.displayStatus,
@@ -4336,6 +4363,70 @@ export function buildMurphAgeResearchCalculatorView(
       scoreContributionAuthorized: false,
     },
   };
+}
+
+function buildMurphAgeResearchArbiterView(
+  report: MurphAgePublicCalculatorReport,
+): MurphAgeResearchArbiterView {
+  const selectedCandidateCardId = report.researchCandidateCards.find((candidate) => candidate.selected)?.cardId ?? null;
+  const scoredCardId = report.result ? report.authorization.cardId : null;
+  return {
+    candidateCards: report.researchCandidateCards.map((candidate) => ({
+      availableFeatureKeys: [...candidate.availableFeatureKeys],
+      blockerCodes: [...candidate.blockerCodes],
+      bundleId: candidate.bundleId,
+      cardId: candidate.cardId,
+      inputStatus: candidate.inputStatus,
+      missingFeatureKeys: [...candidate.missingFeatureKeys],
+      modelLoaded: candidate.modelLoaded,
+      readyForResearchRun: candidate.selected
+        && candidate.cardId === scoredCardId
+        && report.status === "ready"
+        && report.result?.status === "ready"
+        && candidate.inputStatus === "ready"
+        && candidate.modelLoaded
+        && candidate.blockerCodes.length === 0,
+      role: resolveMurphAgeResearchCardRole(candidate.cardId),
+      selected: candidate.selected,
+      selectedMetricKeys: [...candidate.selectedMetricKeys],
+      warnings: candidate.warnings.map((warning) => ({ ...warning })),
+    })),
+    labConflictPolicy: "lab9-primary-lab5-transport-guard-r399-anchor-fallback",
+    selectedCardRole: selectedCandidateCardId
+      ? resolveMurphAgeResearchCardRole(selectedCandidateCardId)
+      : null,
+    selectionReason: resolveMurphAgeResearchArbiterSelectionReason(selectedCandidateCardId),
+    strategy: "r399-anchor-lab9-primary-lab5-transport-wearables-context",
+    wearableScorePolicy: "context-only-not-score-bearing",
+  };
+}
+
+function resolveMurphAgeResearchCardRole(cardId: MurphAgeScoreBearingCardId): MurphAgeResearchCardRole {
+  switch (cardId) {
+    case "lab9_bp_body_10y_acm_research":
+      return "primary-lab-bp-body-adjuster";
+    case "lab5_bp_bmi_transport_research":
+      return "transport-fallback-and-discordance-guard";
+    case "r399_nhis_proxy_10y_acm_research":
+      return "outcome-risk-anchor-and-fallback";
+  }
+}
+
+function resolveMurphAgeResearchArbiterSelectionReason(
+  cardId: MurphAgePublicAuthorization["cardId"],
+): MurphAgeResearchArbiterSelectionReason {
+  switch (cardId) {
+    case "lab9_bp_body_10y_acm_research":
+      return "primary-lab-card-selected";
+    case "lab5_bp_bmi_transport_research":
+      return "transport-fallback-selected";
+    case "r399_nhis_proxy_10y_acm_research":
+      return "anchor-selected";
+    case "function_context_no_risk":
+    case "wearable_context_no_risk":
+    case null:
+      return "no-score-bearing-card-selected";
+  }
 }
 
 function buildMurphAgeResearchModelStatusView(input: {
