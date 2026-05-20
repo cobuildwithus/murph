@@ -122,7 +122,7 @@ function sanitizeAssistantModelContentParts(
   })
 }
 
-function resolveAssistantProviderFlatPromptActiveTurnSection(
+export function resolveAssistantProviderFlatPromptActiveTurnSection(
   input: AssistantProviderTurnExecutionInput,
 ): string | null {
   const activeTurnLines = (input.activeTurnMessages ?? []).flatMap((message) => {

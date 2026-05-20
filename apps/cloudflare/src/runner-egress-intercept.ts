@@ -100,7 +100,7 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
 const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 1;
-const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 2 * 1024 * 1024;
+const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MIN_DIGEST_BYTES = 4 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_PREFIX_WINDOWS = [8 * 1024, 32 * 1024, 128 * 1024] as const;
@@ -109,6 +109,35 @@ const OPENAI_CACHE_DIAGNOSTIC_FINGERPRINT_CONTEXT =
   "murph.hosted-openai-cache-diagnostic.v1";
 const OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER = new TextDecoder();
 const OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER = new TextEncoder();
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_DEPTH = 128;
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES = 50_000;
+const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
+  "computer_call",
+  "computer_call_output",
+  "file_search_call",
+  "function_call",
+  "function_call_output",
+  "image_generation_call",
+  "local_shell_call",
+  "local_shell_call_output",
+  "message",
+  "reasoning",
+  "web_search_call",
+] as const;
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_ROLE_KINDS = [
+  "assistant",
+  "developer",
+  "system",
+  "tool",
+  "user",
+] as const;
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_KEYS = new Set(["content", "output"]);
+const OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS = [
+  "content",
+  "output",
+  "string",
+] as const;
 
 const MAPBOX_EGRESS_POLICY = [
   {
@@ -563,6 +592,7 @@ export async function buildHostedOpenAiCacheDiagnostic(input: {
       output: diagnostic,
     });
   }
+  appendOpenAiInputShapeDiagnostics(diagnostic, inputValue);
 
   diagnostic.toolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
   diagnostic.includeCount = Array.isArray(parsed.include) ? parsed.include.length : 0;
@@ -758,10 +788,218 @@ function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {
   if (value === undefined) {
     return null;
   }
-  const serialized = JSON.stringify(value);
-  return typeof serialized === "string"
-    ? OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized)
-    : null;
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === "string"
+      ? OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function appendOpenAiInputShapeDiagnostics(
+  diagnostic: HostedRunnerDiagnosticJson,
+  inputValue: unknown,
+): void {
+  if (!Array.isArray(inputValue)) {
+    return;
+  }
+
+  const typeCounts = new Map<string, number>();
+  const roleCounts = new Map<string, number>();
+  let largestItemBytes = 0;
+  let largestItemKinds = ["type:missing", "role:missing"];
+
+  for (const item of inputValue) {
+    const typeKind = readOpenAiInputItemTypeKind(item);
+    const roleKind = readOpenAiInputItemRoleKind(item);
+    incrementDiagnosticCount(typeCounts, typeKind);
+    incrementDiagnosticCount(roleCounts, roleKind);
+
+    const itemBytes = encodeOpenAiDiagnosticJsonValue(item)?.byteLength ?? 0;
+    if (itemBytes > largestItemBytes) {
+      largestItemBytes = itemBytes;
+      largestItemKinds = [`type:${typeKind}`, `role:${roleKind}`];
+    }
+  }
+
+  const nestedShape = summarizeOpenAiInputNestedShape(inputValue);
+  const typeSummary = summarizeOpenAiDiagnosticCounts(typeCounts);
+  const roleSummary = summarizeOpenAiDiagnosticCounts(roleCounts);
+
+  diagnostic.inputItemTypeKinds = typeSummary.kinds;
+  diagnostic.inputItemTypeCounts = typeSummary.counts;
+  diagnostic.inputItemRoleKinds = roleSummary.kinds;
+  diagnostic.inputItemRoleCounts = roleSummary.counts;
+  diagnostic.inputLargestItemBytes = largestItemBytes;
+  diagnostic.inputLargestItemKinds = largestItemKinds;
+  diagnostic.inputNestedMetricKinds = [...OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS];
+  diagnostic.inputNestedMetricCounts = [
+    nestedShape.contentCount,
+    nestedShape.outputCount,
+    nestedShape.stringCount,
+  ];
+  diagnostic.inputNestedMetricBytes = [
+    nestedShape.contentBytes,
+    nestedShape.outputBytes,
+    nestedShape.stringBytes,
+  ];
+  if (nestedShape.truncated) {
+    diagnostic.inputShapeTraversalTruncated = true;
+  }
+}
+
+function readOpenAiInputItemTypeKind(value: unknown): string {
+  return readOpenAiInputItemAllowedKind(
+    value,
+    "type",
+    OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS,
+  );
+}
+
+function readOpenAiInputItemRoleKind(value: unknown): string {
+  return readOpenAiInputItemAllowedKind(
+    value,
+    "role",
+    OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_ROLE_KINDS,
+  );
+}
+
+function readOpenAiInputItemAllowedKind(
+  value: unknown,
+  field: "role" | "type",
+  allowed: readonly string[],
+): string {
+  if (!isHostedOpenAiDiagnosticRecord(value)) {
+    return "missing";
+  }
+
+  const raw = value[field];
+  if (typeof raw !== "string") {
+    return "missing";
+  }
+
+  const normalized = raw.trim();
+  if (normalized.length === 0) {
+    return "missing";
+  }
+  return allowed.includes(normalized) ? normalized : "other";
+}
+
+function summarizeOpenAiInputNestedShape(value: unknown): {
+  contentBytes: number;
+  contentCount: number;
+  outputBytes: number;
+  outputCount: number;
+  stringCount: number;
+  stringBytes: number;
+  truncated: boolean;
+} {
+  const summary = {
+    contentBytes: 0,
+    contentCount: 0,
+    outputBytes: 0,
+    outputCount: 0,
+    stringCount: 0,
+    stringBytes: 0,
+    truncated: false,
+  };
+
+  const stack: Array<{ depth: number; value: unknown }> = [{ depth: 0, value }];
+  let visitedNodes = 0;
+  while (stack.length > 0) {
+    if (visitedNodes >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
+      summary.truncated = true;
+      break;
+    }
+    visitedNodes += 1;
+
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+
+    if (typeof current.value === "string") {
+      summary.stringCount += 1;
+      summary.stringBytes += byteLengthOfDiagnosticText(current.value);
+      continue;
+    }
+
+    if (!current.value || typeof current.value !== "object") {
+      continue;
+    }
+
+    if (current.depth >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_DEPTH) {
+      summary.truncated = true;
+      continue;
+    }
+
+    if (Array.isArray(current.value)) {
+      for (const entry of current.value) {
+        if (visitedNodes + stack.length >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
+          summary.truncated = true;
+          break;
+        }
+        stack.push({ depth: current.depth + 1, value: entry });
+      }
+      continue;
+    }
+
+    for (const [key, entry] of Object.entries(current.value)) {
+      if (OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_KEYS.has(key)) {
+        const entryBytes = encodeOpenAiDiagnosticJsonValue(entry)?.byteLength ?? 0;
+        if (key === "content") {
+          summary.contentCount += 1;
+          summary.contentBytes += entryBytes;
+        } else {
+          summary.outputCount += 1;
+          summary.outputBytes += entryBytes;
+        }
+      }
+      if (visitedNodes + stack.length >= OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES) {
+        summary.truncated = true;
+        break;
+      }
+      stack.push({ depth: current.depth + 1, value: entry });
+    }
+  }
+
+  return summary;
+}
+
+function incrementDiagnosticCount(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+function summarizeOpenAiDiagnosticCounts(counts: Map<string, number>): {
+  counts: number[];
+  kinds: string[];
+} {
+  const entries = [...counts.entries()].sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  if (entries.length > OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS) {
+    const visible = entries.slice(0, OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1);
+    const overflowCount = entries
+      .slice(OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS - 1)
+      .reduce((total, [, count]) => total + count, 0);
+    const otherIndex = visible.findIndex(([kind]) => kind === "other");
+    if (otherIndex >= 0) {
+      const [kind, count] = visible[otherIndex] ?? ["other", 0];
+      visible[otherIndex] = [kind, count + overflowCount];
+    } else {
+      visible.push(["other", overflowCount]);
+    }
+    return {
+      counts: visible.map(([, count]) => count),
+      kinds: visible.map(([kind]) => kind),
+    };
+  }
+  return {
+    counts: entries.map(([, count]) => count),
+    kinds: entries.map(([kind]) => kind),
+  };
 }
 
 function byteLengthOfDiagnosticText(value: string): number {
