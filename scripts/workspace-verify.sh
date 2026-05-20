@@ -727,6 +727,19 @@ run_package_boundary_verification() {
   run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
 }
 
+run_diff_package_boundary_verification() {
+  local package_dir="$1"
+
+  case "$package_dir" in
+    "packages/messaging-ingress")
+      run_timed_step "packages/messaging-ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary
+      ;;
+    "packages/inboxd")
+      run_timed_step "packages/inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
+      ;;
+  esac
+}
+
 run_typecheck_preflight() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
@@ -971,6 +984,7 @@ run_test_diff() {
       continue
     fi
     run_timed_step "${package_dir} test" run_package_command_with_retry "$package_dir" test
+    run_diff_package_boundary_verification "$package_dir"
   done
 
   local app_dir

@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -21,6 +22,40 @@ import { runSafeBuild } from "../scripts/safe-build.ts";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
+const packagesRoot = path.join(repoRoot, "packages");
+
+type MinimalTsConfig = {
+  compilerOptions?: {
+    tsBuildInfoFile?: string;
+  };
+  extends?: string;
+};
+
+function readMergedTsConfig(configPath: string, seen = new Set<string>()): MinimalTsConfig {
+  if (seen.has(configPath)) {
+    throw new Error(`Circular tsconfig extends chain at ${path.relative(repoRoot, configPath)}`);
+  }
+  seen.add(configPath);
+
+  const tsConfig = JSON.parse(readFileSync(configPath, "utf8")) as MinimalTsConfig;
+  if (typeof tsConfig.extends !== "string") {
+    return tsConfig;
+  }
+
+  const extendedConfigPath = path.resolve(
+    path.dirname(configPath),
+    tsConfig.extends.endsWith(".json") ? tsConfig.extends : `${tsConfig.extends}.json`,
+  );
+  const baseConfig = readMergedTsConfig(extendedConfigPath, seen);
+  return {
+    ...baseConfig,
+    ...tsConfig,
+    compilerOptions: {
+      ...baseConfig.compilerOptions,
+      ...tsConfig.compilerOptions,
+    },
+  };
+}
 
 test("package manifest exposes the sample-series summary subpath used by query", async () => {
   const packageManifest = JSON.parse(
@@ -80,6 +115,15 @@ test("workspace clean build preserves importers dist until the safe build refres
     };
     extends?: string;
   };
+  const tsConfigPathsWithImporterReferences = [
+    "tsconfig.json",
+    "tsconfig.test-runtime.json",
+    "packages/cli/tsconfig.json",
+    "packages/device-syncd/tsconfig.json",
+    "packages/query/tsconfig.json",
+    "packages/query/tsconfig.test.json",
+    "packages/vault-usecases/tsconfig.json",
+  ];
 
   assert.doesNotMatch(cleanTargets, /^packages\/importers\/dist$/mu);
   assert.match(cleanTargets, /^packages\/importers\/\.tsbuildinfo$/mu);
@@ -102,6 +146,56 @@ test("workspace clean build preserves importers dist until the safe build refres
     importersSafeBuildTsConfig.compilerOptions?.tsBuildInfoFile,
     "./.dist-next.tsbuildinfo",
   );
+  for (const tsConfigPath of tsConfigPathsWithImporterReferences) {
+    const tsConfig = JSON.parse(readFileSync(path.join(repoRoot, tsConfigPath), "utf8")) as {
+      references?: Array<{ path?: string }>;
+    };
+    const referencePaths = (tsConfig.references ?? []).map((reference) => reference.path ?? "");
+    assert.equal(
+      referencePaths.some((referencePath) => referencePath.includes("tsconfig.safe-build")),
+      false,
+      `${tsConfigPath} must keep importers safe-build staging private to the importers package build`,
+    );
+  }
+});
+
+test("non-forced package TypeScript builds clean matching build info", () => {
+  const packageNames = readdirSync(packagesRoot).sort();
+
+  for (const packageName of packageNames) {
+    const packageRoot = path.join(packagesRoot, packageName);
+    const packageJsonPath = path.join(packageRoot, "package.json");
+    if (!existsSync(packageJsonPath)) {
+      continue;
+    }
+
+    const packageManifest = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      scripts?: Record<string, string | undefined>;
+    };
+    const buildScript = packageManifest.scripts?.build ?? "";
+    if (
+      !/rm-paths\.mjs\s+dist\b/u.test(buildScript) ||
+      !/\btsc\s+-b\b/u.test(buildScript) ||
+      /\b--force\b/u.test(buildScript)
+    ) {
+      continue;
+    }
+
+    const tsConfigMatch = buildScript.match(/\btsc\s+-b\s+([^&\s]+)/u);
+    const tsConfigPath = path.join(packageRoot, tsConfigMatch?.[1] ?? "tsconfig.json");
+    const tsConfig = readMergedTsConfig(tsConfigPath);
+    const tsBuildInfoFile = tsConfig.compilerOptions?.tsBuildInfoFile;
+
+    if (typeof tsBuildInfoFile !== "string") {
+      assert.fail(
+        `${path.relative(repoRoot, tsConfigPath)} must define tsBuildInfoFile for non-forced package builds`,
+      );
+    }
+    assert.ok(
+      (buildScript.split("&&", 1)[0] ?? "").split(/\s+/u).includes(tsBuildInfoFile),
+      `${path.relative(repoRoot, packageJsonPath)} build must clean ${tsBuildInfoFile} with dist`,
+    );
+  }
 });
 
 test("safe build publishes temp dist only after TypeScript succeeds", () => {

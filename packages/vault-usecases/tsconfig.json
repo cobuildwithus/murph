@@ -17,7 +17,7 @@
       "path": "../operator-config"
     },
     {
-      "path": "../importers/tsconfig.safe-build.json"
+      "path": "../importers"
     },
     {
       "path": "../query"

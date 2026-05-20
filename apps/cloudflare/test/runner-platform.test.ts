@@ -236,6 +236,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed workspace snapshot data-key unwraps before presign GET", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 128,
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot unwrap");
+      if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
+        return new Response(
+          JSON.stringify({ dataKey: "not-valid" }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      durableRoot: "unused-durable-root",
+      ref,
+      scratchRoot: "unused-scratch-root",
+    })).rejects.toThrow("Invalid character");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const unwrapRequest = requireFetchRequest(fetchMock.mock.calls[0], "workspace snapshot unwrap");
+    expect(unwrapRequest.url).toBe(
+      "http://workspace-snapshots.worker/workspace-snapshots/snapshot_runner_platform/data-key/unwrap",
+    );
+  });
+
   it("sends direct R2 workspace snapshot PUTs with signed metadata headers", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));

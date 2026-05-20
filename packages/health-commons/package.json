@@ -27,7 +27,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json --force --pretty false && node dist/build.js",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json --pretty false && node dist/build.js",
     "typecheck": "pnpm generate && tsc -p tsconfig.typecheck.json --pretty false",
     "generate": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts",
     "generate:watch": "pnpm --dir ../.. health-commons:generate:watch",

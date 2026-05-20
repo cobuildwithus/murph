@@ -786,15 +786,20 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
   if (!rootKey) {
     return notFound();
   }
-  const dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
-    aad,
-    rootKey,
-    wrappedDataKey,
-  });
+  let dataKey: Uint8Array | null = null;
+  try {
+    dataKey = await unwrapHostedWorkspaceSnapshotV2DataKey({
+      aad,
+      rootKey,
+      wrappedDataKey,
+    });
 
-  return json({
-    dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-  });
+    return json({
+      dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+    });
+  } finally {
+    dataKey?.fill(0);
+  }
 }
 
 async function handleRunnerWorkspaceSnapshotAbortRequest(input: {

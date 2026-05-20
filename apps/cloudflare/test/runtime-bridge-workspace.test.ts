@@ -1,6 +1,8 @@
+import { createDecipheriv } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,6 +54,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_WARN_BYTES,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  serializeHostedWorkspaceSnapshotV2Aad,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
@@ -863,6 +866,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const putArtifact = vi.fn(async ({ bytes, sha256 }) => {
       artifactBundles.set(sha256, bytes);
     });
+    const workspaceSnapshotUploads = new Map<string, WorkspaceSnapshotUpload>();
     const options = createHostedWorkspaceRuntimeBridgeJobOptions({
       platform: createPlatform({
         getArtifact: async (hash) => artifactBundles.get(hash) ?? null,
@@ -871,6 +875,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotRef: legacyLayeredRef,
           version: "8",
         }),
+        workspaceSnapshotUploads,
       }),
       readCurrentLease: () => ({
         attemptId: "attempt_1",
@@ -891,6 +896,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     const result = await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
     const snapshotRef = requireWorkspaceSnapshotV2Ref(result.snapshotRef);
+    const uploaded = workspaceSnapshotUploads.get(snapshotRef.objectKey);
+    expect(uploaded).toBeDefined();
+    const entries = listEncryptedWorkspaceSnapshotTarEntries(uploaded!.bytes, snapshotRef);
+    expect(entries).toContain("raw/layered-preserved.txt");
+    expect(entries).not.toContain(".runtime/cache/hosted-skipped-inline-files.json");
     expect(snapshotRef.schema).toBe(HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA);
     expect(putArtifact).not.toHaveBeenCalled();
   });
@@ -1859,6 +1869,58 @@ interface WorkspaceSnapshotUpload {
   encryptedObjectSha256: string;
   objectKey: string;
   snapshotId: string;
+}
+
+function listEncryptedWorkspaceSnapshotTarEntries(
+  encryptedObject: Uint8Array,
+  snapshotRef: HostedWorkspaceSnapshotV2Ref,
+): string[] {
+  const encrypted = Buffer.from(encryptedObject);
+  const authTag = encrypted.subarray(encrypted.byteLength - 16);
+  const encryptedBody = encrypted.subarray(0, encrypted.byteLength - 16);
+  const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      Buffer.from(dataKey),
+      Buffer.from(snapshotRef.encryption.ivBase64, "base64url"),
+    );
+    decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(snapshotRef.encryption.aad)));
+    decipher.setAuthTag(authTag);
+    const archive = gunzipSync(Buffer.concat([
+      decipher.update(encryptedBody),
+      decipher.final(),
+    ]));
+    return listTarArchiveEntries(archive);
+  } finally {
+    dataKey.fill(0);
+  }
+}
+
+function listTarArchiveEntries(archive: Buffer): string[] {
+  const entries: string[] = [];
+  for (let offset = 0; offset + 512 <= archive.byteLength;) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      break;
+    }
+    const name = readTarHeaderString(header, 0, 100);
+    const prefix = readTarHeaderString(header, 345, 500);
+    const sizeText = readTarHeaderString(header, 124, 136).trim();
+    const size = sizeText.length === 0 ? 0 : Number.parseInt(sizeText, 8);
+    if (!Number.isFinite(size) || size < 0) {
+      throw new Error("Test tar archive entry size is invalid.");
+    }
+    entries.push((prefix.length > 0 ? `${prefix}/${name}` : name).replace(/^\.\/+/u, ""));
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+function readTarHeaderString(header: Buffer, start: number, end: number): string {
+  const value = header.subarray(start, end);
+  const nul = value.indexOf(0);
+  return value.subarray(0, nul === -1 ? value.byteLength : nul).toString("utf8");
 }
 
 function createBundleRef(hashCharacter: string) {

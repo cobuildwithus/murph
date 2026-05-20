@@ -48,11 +48,40 @@ describe("workspace snapshot local restore", () => {
       expectedError: "Hosted workspace snapshot tar entry type is unsafe.",
     });
   });
+
+  it.each([
+    {
+      archiveOverride: ({ fileCount }: { fileCount: number; totalPlainBytes: number }) => ({
+        fileCount: fileCount + 1,
+      }),
+      name: "file count",
+    },
+    {
+      archiveOverride: ({ totalPlainBytes }: { fileCount: number; totalPlainBytes: number }) => ({
+        totalPlainBytes: totalPlainBytes + 1,
+      }),
+      name: "plain byte count",
+    },
+  ])("rejects tar archives whose $name does not match the snapshot ref", async ({ archiveOverride }) => {
+    await expectUnsafeTarArchive({
+      archiveOverride,
+      entries: [{
+        body: Buffer.from("manifest mismatch\n", "utf8"),
+        name: "safe/inside.txt",
+      }],
+      expectedError: "Hosted workspace snapshot archive manifest does not match its ref.",
+      unwrittenRelativePath: "safe/inside.txt",
+    });
+  });
 });
 
 async function expectUnsafeTarArchive(input: {
+  archiveOverride?: (
+    archive: { fileCount: number; totalPlainBytes: number },
+  ) => Partial<HostedWorkspaceSnapshotV2Ref["archive"]>;
   entries: TarArchiveEntry[];
   expectedError: string;
+  unwrittenRelativePath?: string;
 }): Promise<void> {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
   const durableRoot = path.join(tempRoot, "durable");
@@ -68,6 +97,9 @@ async function expectUnsafeTarArchive(input: {
   const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
   const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 10);
   const plaintextArchive = gzipSync(createTarArchive(input.entries));
+  const fileCount = input.entries
+    .filter((entry) => entry.typeFlag === undefined || entry.typeFlag === "" || entry.typeFlag === "0")
+    .length;
   const totalPlainBytes = input.entries
     .reduce((total, entry) => total + (entry.body?.byteLength ?? 0), 0);
   try {
@@ -84,10 +116,11 @@ async function expectUnsafeTarArchive(input: {
         compression: "gzip",
         encryptedByteSize: encryptedObject.byteLength,
         encryptedObjectSha256: sha256Hex(encryptedObject),
-        fileCount: 1,
+        fileCount,
         format: "tar",
         plaintextArchiveSha256: sha256Hex(plaintextArchive),
         totalPlainBytes,
+        ...(input.archiveOverride?.({ fileCount, totalPlainBytes }) ?? {}),
       },
       createdAt: "2026-05-20T00:00:00.000Z",
       encryption: {
@@ -111,6 +144,9 @@ async function expectUnsafeTarArchive(input: {
       ref,
     })).rejects.toThrow(input.expectedError);
     await expect(access(path.join(tempRoot, "escape.txt"))).rejects.toThrow();
+    if (input.unwrittenRelativePath) {
+      await expect(access(path.join(durableRoot, input.unwrittenRelativePath))).rejects.toThrow();
+    }
   } finally {
     await rm(tempRoot, { force: true, recursive: true });
     dataKey.fill(0);

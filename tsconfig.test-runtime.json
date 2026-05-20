@@ -32,7 +32,7 @@
       "path": "./packages/core/tsconfig.build.json"
     },
     {
-      "path": "./packages/importers/tsconfig.safe-build.json"
+      "path": "./packages/importers"
     },
     {
       "path": "./packages/device-syncd"

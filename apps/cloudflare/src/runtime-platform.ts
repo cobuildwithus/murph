@@ -1491,7 +1491,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
         ),
       });
       const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
-      const { checkpoint, snapshotRef } = completed;
+      const { checkpoint } = completed;
       if (checkpoint.checkpointed) {
         await input.workspaceCheckpointBridge.recordCheckpoint?.({
           workspaceVersion: checkpoint.workspace.version,
@@ -1542,7 +1542,7 @@ function createCloudflareWorkspaceSnapshotPort(input: {
           },
           method: "PUT",
         } as RequestInit & { duplex: "half" },
-        logFailures: false,
+        logPath: "/workspace-snapshot-object",
         timeoutMs: Math.max(1, expiresAtMs - Date.now()),
         url: new URL(presignedPut.putUrl),
       });
@@ -1828,6 +1828,7 @@ async function fetchHostedWorkspaceSnapshotEncryptedObjectToFile(input: {
     init: {
       method: "GET",
     },
+    logPath: "/workspace-snapshot-object",
     timeoutMs: input.timeoutMs,
     url: new URL(input.getUrl),
   });
@@ -2062,7 +2063,6 @@ async function fetchHostedWebControlPlaneJson(input: {
           }),
           method,
         },
-        logFailures: false,
         logPath: createHostedWebControlLogPath(route.pathname),
         signal: input.signal ?? null,
         timeoutMs: input.timeoutMs,
