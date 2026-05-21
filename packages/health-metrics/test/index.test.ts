@@ -5781,6 +5781,13 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     "test-result",
     "wearable-summary",
   ]);
+  assert.deepEqual(submittedCalculatorCapabilities.acceptedUserInputFamilies, [
+    "bloodwork-common-labs",
+    "vitals-body-composition",
+    "wearable-activity",
+    "wearable-recovery-autonomic",
+    "wearable-sleep",
+  ]);
   assert.deepEqual(submittedCalculatorCapabilities.bundleIds, [
     "lab9-bp-body",
     "lab5-bp-bmi",

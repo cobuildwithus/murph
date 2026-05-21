@@ -1350,6 +1350,13 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'test-result',
       'wearable-summary',
     ])
+    assert.deepEqual(calculatorBundle.capabilities.acceptedUserInputFamilies, [
+      'bloodwork-common-labs',
+      'vitals-body-composition',
+      'wearable-activity',
+      'wearable-recovery-autonomic',
+      'wearable-sleep',
+    ])
     assert.equal(calculatorBundle.capabilities.wearableContextMetricKeys.includes('total-sleep-minutes'), true)
     assert.equal(calculatorBundle.capabilities.wearableFirstPriorityFeatureKeys.includes('activity-volume'), true)
     assert.equal(calculatorBundle.capabilities.wearableSecondPriorityFeatureKeys.includes('resting-heart-rate'), true)
