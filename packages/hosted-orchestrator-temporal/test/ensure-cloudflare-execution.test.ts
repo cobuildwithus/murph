@@ -129,7 +129,11 @@ describe("ensureCloudflareExecution", () => {
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
-    })).rejects.toThrow("Hosted runtime ensure-execution response kind");
+    })).rejects.toMatchObject({
+      message: expect.stringContaining("Hosted runtime ensure-execution response kind"),
+      nonRetryable: true,
+      type: "hosted_orchestrator_invalid_protocol_response",
+    });
   });
 
   it("throws transport errors for retryable Cloudflare network failures", async () => {
@@ -144,6 +148,39 @@ describe("ensureCloudflareExecution", () => {
       userId: "member_test",
     })).rejects.toMatchObject({
       name: "HostedOrchestratorTransportError",
+    });
+  });
+
+  it("marks Cloudflare auth failures as non-retryable Activity failures", async () => {
+    await stubCloudflareEnvironment();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      code: "invalid_signature",
+    }, 401)));
+
+    await expect(ensureCloudflareExecution({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      userId: "member_test",
+    })).rejects.toMatchObject({
+      message: "Hosted orchestrator runtime ensure execution failed with HTTP 401.",
+      nonRetryable: true,
+      type: "hosted_orchestrator_http_non_retryable",
+    });
+  });
+
+  it("keeps Cloudflare server failures retryable", async () => {
+    await stubCloudflareEnvironment();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      code: "internal_error",
+    }, 500)));
+
+    await expect(ensureCloudflareExecution({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      userId: "member_test",
+    })).rejects.toMatchObject({
+      name: "HostedOrchestratorHttpResponseError",
+      status: 500,
     });
   });
 });
