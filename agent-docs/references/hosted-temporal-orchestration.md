@@ -134,7 +134,7 @@ Forbidden Temporal state:
 - Vault contents, workspace snapshot bodies, local filesystem paths, or
   checkpoint archives.
 - Full `HostedWorkspaceState`, full `HostedWorkspaceInvocationResult`,
-  `redactedStatus`, signed `aiUsageAllowDecision`, or usage ledger rows.
+  `redactedStatus`, signed usage decisions, or usage ledger rows.
 - Assistant automation rules, outbox selection state, provider cleanup queues,
   device provider dirty details, usage ledger rows, billing facts, or product
   policy decisions.
@@ -209,6 +209,11 @@ Execution responses are limited to:
 The workflow stores `runtimeResultWakeAt` and `runtimeResultWakeReason` from
 `runtimeResultNextWakeAt` and `runtimeResultNextWakeReason`, then waits on the
 earlier of that value and the web workspace wake projection.
+When Cloudflare returns `runtime_completed` with `runtimeStatus: "failed"` and
+no runtime-provided next wake, the workflow records a bounded
+`runtime.failed` retry wake and waits signal-interruptibly before re-reading
+demand. That is orchestration backoff only; runtime/provider logic remains the
+owner of business recovery and spend enforcement.
 Cloudflare should set `recommendedRecheckAt` from execution policy, such as the
 idle checkpoint delay plus a small margin, so Temporal does not send repeated
 one-second active-wake probes while the runtime is legitimately waiting for its

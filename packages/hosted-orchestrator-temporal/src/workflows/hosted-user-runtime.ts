@@ -274,20 +274,33 @@ export function createHostedUserRuntimeWorkflowMachine(
       state.lastExecutionKind = execution.kind;
 
       if (execution.kind === "runtime_completed") {
-        state.runtimeResultWakeAt = execution.runtimeResultNextWakeAt;
-        state.runtimeResultWakeReason = execution.runtimeResultNextWakeAt
-          ? execution.runtimeResultNextWakeReason
-          : null;
+        const failureRetryAt = recordRuntimeCompletionWake(
+          runtime,
+          state,
+          execution,
+        );
         if (demand.source === "workspace_wake") {
           state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
         }
-      }
 
-      if (state.signalVersion === versionBeforeExecution) {
-        clearConsumedFlagsAfterRun(state, demand.source);
+        if (state.signalVersion === versionBeforeExecution) {
+          clearConsumedFlagsAfterRun(state, demand.source);
+          if (failureRetryAt !== null) {
+            await waitUntilTimestampOrSignal(
+              runtime,
+              failureRetryAt,
+              state.signalVersion,
+              state,
+            );
+          }
+        }
+        continue;
       }
 
       if (execution.kind === "runtime_wake_sent") {
+        if (state.signalVersion === versionBeforeExecution) {
+          clearConsumedFlagsAfterRun(state, demand.source);
+        }
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
@@ -321,6 +334,33 @@ export function createWorkspaceWakeKey(
     workspace.nextWakeAt,
     workspace.nextWakeReason ?? "",
   ].join(":");
+}
+
+function recordRuntimeCompletionWake(
+  runtime: HostedUserRuntimeWorkflowRuntime,
+  state: HostedRuntimeWorkflowState,
+  execution: Extract<
+    HostedRuntimeEnsureExecutionResponse,
+    { kind: "runtime_completed" }
+  >,
+): string | null {
+  if (
+    execution.runtimeStatus === "failed"
+    && execution.runtimeResultNextWakeAt === null
+  ) {
+    const retryAt = new Date(
+      runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+    ).toISOString();
+    state.runtimeResultWakeAt = retryAt;
+    state.runtimeResultWakeReason = "runtime.failed";
+    return retryAt;
+  }
+
+  state.runtimeResultWakeAt = execution.runtimeResultNextWakeAt;
+  state.runtimeResultWakeReason = execution.runtimeResultNextWakeAt
+    ? execution.runtimeResultNextWakeReason
+    : null;
+  return null;
 }
 
 function createInitialWorkflowState(
