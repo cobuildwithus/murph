@@ -818,11 +818,19 @@ test('age scaffold emits a submitted-data research preview payload', async () =>
   assert.equal(metricKeys.includes('peak-30-minute-cadence'), true)
   assert.equal(metricKeys.includes('sedentary-minutes'), true)
   assert.equal(metricKeys.includes('total-sleep-minutes'), true)
+  assert.equal(metricKeys.includes('deep-sleep-minutes'), true)
+  assert.equal(metricKeys.includes('rem-sleep-minutes'), true)
   assert.equal(metricKeys.includes('sleep-duration-variability-minutes'), true)
+  assert.equal(metricKeys.includes('sleep-efficiency'), true)
   assert.equal(metricKeys.includes('sleep-regularity-score'), true)
+  assert.equal(metricKeys.includes('sleep-score'), true)
   assert.equal(metricKeys.includes('sleep-midpoint-variability-minutes'), true)
+  assert.equal(metricKeys.includes('spo2'), true)
+  assert.equal(metricKeys.includes('respiratory-rate'), true)
   assert.equal(metricKeys.includes('resting-heart-rate'), true)
   assert.equal(metricKeys.includes('hrv-rmssd'), true)
+  assert.equal(metricKeys.includes('readiness-score'), true)
+  assert.equal(metricKeys.includes('skin-temperature-deviation'), true)
   assert.equal(metricKeys.includes('estimated-vo2-max'), true)
   assert.equal(metricKeys.includes('wearable_valid_day_count_28d'), true)
   assert.equal(metricKeys.includes('wearable_valid_night_count_28d'), true)
@@ -1340,6 +1348,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
     )
     assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('hba1c'), true)
     assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('steps'), true)
+    assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('respiratory-rate'), true)
+    assert.equal(calculatorBundle.capabilities.acceptedMetricKeys.includes('skin-temperature-deviation'), true)
     assert.deepEqual(calculatorBundle.capabilities.acceptedSourceKinds, [
       'activity-summary',
       'measurement',
@@ -1358,6 +1368,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
       'wearable-sleep',
     ])
     assert.equal(calculatorBundle.capabilities.wearableContextMetricKeys.includes('total-sleep-minutes'), true)
+    assert.equal(calculatorBundle.capabilities.wearableContextMetricKeys.includes('sleep-score'), true)
+    assert.equal(calculatorBundle.capabilities.wearableContextMetricKeys.includes('readiness-score'), true)
     assert.equal(calculatorBundle.capabilities.wearableFirstPriorityFeatureKeys.includes('activity-volume'), true)
     assert.equal(calculatorBundle.capabilities.wearableSecondPriorityFeatureKeys.includes('resting-heart-rate'), true)
     assert.deepEqual(calculatorBundle.capabilities.wearableScoreBearingMetricKeys, [])
