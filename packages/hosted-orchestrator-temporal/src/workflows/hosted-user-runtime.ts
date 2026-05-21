@@ -276,6 +276,8 @@ export function createHostedUserRuntimeWorkflowMachine(
       state.lastExecutionAt = isoNow(runtime);
       state.lastExecutionErrorCode = null;
       state.lastExecutionKind = execution.kind;
+      const signalArrivedDuringExecution =
+        state.signalVersion !== versionBeforeExecution;
 
       if (execution.kind === "runtime_completed") {
         const failureRetryAt = recordRuntimeCompletionWake(
@@ -285,7 +287,7 @@ export function createHostedUserRuntimeWorkflowMachine(
           options.runtimeCompletedFailureRecheckDelayMs,
         );
 
-        if (state.signalVersion === versionBeforeExecution) {
+        if (!signalArrivedDuringExecution) {
           if (demand.source === "workspace_wake") {
             state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
           }
@@ -303,9 +305,10 @@ export function createHostedUserRuntimeWorkflowMachine(
       }
 
       if (execution.kind === "runtime_wake_sent") {
-        if (state.signalVersion === versionBeforeExecution) {
-          clearConsumedFlagsAfterRun(state, demand.source);
+        if (signalArrivedDuringExecution) {
+          continue;
         }
+        clearConsumedFlagsAfterRun(state, demand.source);
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
