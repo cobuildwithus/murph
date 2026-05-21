@@ -116,17 +116,10 @@ const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT = 8;
 const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS = 96;
 const OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND = "duplicate";
-const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_KINDS = new Set([
-  "apply_patch",
-  "exec_command",
-  "imagegen",
-  "local_shell",
-  "shell",
-  "tool_search",
-  "update_plan",
-  "view_image",
-  "write_stdin",
-]);
+const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u;
+const OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN =
+  /authorization|bearer|cookie|password|secret|token|api_?key|(?:sk|pk|rk)_(?:live|test)_|whsec_/iu;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
   "computer_call",
   "computer_call_output",
@@ -1118,22 +1111,10 @@ function normalizeOpenAiInputFunctionNameKind(value: string | null): string {
   if (value.length > OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS) {
     return "other";
   }
-  if (value.startsWith("mcp__")) {
-    return "mcp";
-  }
-  if (value.startsWith("browser.") || value.startsWith("browser_")) {
-    return "browser";
-  }
-  if (value.startsWith("computer.") || value.startsWith("computer_")) {
-    return "computer";
-  }
-  if (value.startsWith("image.") || value.startsWith("image_")) {
-    return "image";
-  }
-  if (value.startsWith("web.") || value.startsWith("web_")) {
-    return "web";
-  }
-  if (!OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_KINDS.has(value)) {
+  if (
+    !OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN.test(value)
+    || OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN.test(value)
+  ) {
     return "other";
   }
   return value;
