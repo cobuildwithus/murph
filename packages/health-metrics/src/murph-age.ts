@@ -31,7 +31,9 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v10" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
-  "murph.age.submitted-calculator-view-bundle.v1" as const;
+  "murph.age.submitted-calculator-view-bundle.v2" as const;
+export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
+  "murph.age.submitted-calculator-capability.v1" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
   "murph.age.submitted-calculator-input-bundle-spec.v1" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
@@ -697,6 +699,43 @@ export interface MurphAgeSubmittedCalculatorInputBundleSpec {
   scoreBearing: boolean;
 }
 
+export type MurphAgeSubmittedCalculatorRuntimeInputKey =
+  | "chronological-age-years"
+  | "sex";
+
+export interface MurphAgeSubmittedCalculatorOutputBoundary {
+  modelParametersExportAllowed: false;
+  participantLevelExportAllowed: false;
+  productScoreDisplayAuthorized: boolean;
+  researchPreviewRequiresExplicitOptIn: true;
+  rowValuesExportAllowed: false;
+  submittedMetricScalarEchoAllowed: false;
+}
+
+export interface MurphAgeSubmittedCalculatorCapabilitySummary {
+  acceptedMetricKeys: string[];
+  acceptedSourceKinds: MurphAgeSubmittedMetricSourceKind[];
+  bundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
+  contextBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
+  outputBoundary: MurphAgeSubmittedCalculatorOutputBoundary;
+  productAgeDisplayAuthorized: boolean;
+  productRiskDisplayAuthorized: boolean;
+  productScoreBearingMetricKeys: string[];
+  researchAgeEstimateEligibleBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
+  researchPreviewSupported: true;
+  researchScoreBearingMetricKeys: string[];
+  runtimeInputKeys: MurphAgeSubmittedCalculatorRuntimeInputKey[];
+  schemaVersion: typeof MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION;
+  scoreBearingBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
+  wearableContextMetricKeys: string[];
+  wearableDeferredFeatureKeys: string[];
+  wearableFirstPriorityFeatureKeys: string[];
+  wearableFirstPriorityMetricKeys: string[];
+  wearableScoreBearingMetricKeys: string[];
+  wearableSecondPriorityFeatureKeys: string[];
+  wearableSecondPriorityMetricKeys: string[];
+}
+
 export interface MurphAgeInputBundleAssessmentInput {
   asOf?: string;
   points: readonly MetricPoint[];
@@ -1241,6 +1280,7 @@ export interface MurphAgeResearchCalculatorReportAndView {
 }
 
 export interface MurphAgeSubmittedCalculatorViewBundle {
+  capabilities: MurphAgeSubmittedCalculatorCapabilitySummary;
   product: MurphAgeCalculatorReportAndView;
   researchPreview: MurphAgeResearchCalculatorReportAndView | null;
   schemaVersion: typeof MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION;
@@ -4097,6 +4137,133 @@ export function listMurphAgeSubmittedCalculatorInputBundleSpecs():
   ];
 }
 
+export function summarizeMurphAgeSubmittedCalculatorCapabilities():
+  MurphAgeSubmittedCalculatorCapabilitySummary {
+  const metricSpecs = listMurphAgeSubmittedCalculatorMetricInputSpecs();
+  const bundleSpecs = listMurphAgeSubmittedCalculatorInputBundleSpecs();
+  const wearableBridgeSpecs = listMurphAgeWearableBridgeFeatureSpecs();
+  const cardPolicies = listMurphAgeModelCardPolicies();
+  let productAgeDisplayAuthorized = false;
+  let productRiskDisplayAuthorized = false;
+  for (const policy of cardPolicies) {
+    if (isMurphAgeModelCardRiskToAgeDisplayAuthorized(policy)) {
+      productAgeDisplayAuthorized = true;
+    }
+    if (isMurphAgeModelCardProductAuthorized(policy)) {
+      productRiskDisplayAuthorized = true;
+    }
+  }
+
+  const acceptedMetricKeys: string[] = [];
+  const acceptedSourceKinds = new Set<MurphAgeSubmittedMetricSourceKind>();
+  const productScoreBearingMetricKeys: string[] = [];
+  const researchScoreBearingMetricKeys: string[] = [];
+  const wearableContextMetricKeys: string[] = [];
+  const wearableScoreBearingMetricKeys: string[] = [];
+  for (const spec of metricSpecs) {
+    acceptedMetricKeys.push(spec.metricKey);
+    for (const sourceKind of spec.allowedSourceKinds) {
+      acceptedSourceKinds.add(sourceKind);
+    }
+    if (spec.productScoreBearingAuthorized) {
+      productScoreBearingMetricKeys.push(spec.metricKey);
+    }
+    if (spec.researchScoreBearingCardIds.length > 0) {
+      researchScoreBearingMetricKeys.push(spec.metricKey);
+    }
+    if (spec.calculatorRoles.includes("wearable-context")) {
+      wearableContextMetricKeys.push(spec.metricKey);
+    }
+    if (spec.wearableScoreBearingAuthorized) {
+      wearableScoreBearingMetricKeys.push(spec.metricKey);
+    }
+  }
+
+  const bundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[] = [];
+  const contextBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[] = [];
+  const researchAgeEstimateEligibleBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[] = [];
+  const scoreBearingBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[] = [];
+  for (const spec of bundleSpecs) {
+    bundleIds.push(spec.bundleId);
+    if (!spec.scoreBearing) {
+      contextBundleIds.push(spec.bundleId);
+    }
+    if (spec.researchAgeEstimateEligible) {
+      researchAgeEstimateEligibleBundleIds.push(spec.bundleId);
+    }
+    if (spec.scoreBearing) {
+      scoreBearingBundleIds.push(spec.bundleId);
+    }
+  }
+
+  return {
+    acceptedMetricKeys: sortCapabilityStringValues(acceptedMetricKeys),
+    acceptedSourceKinds: sortSubmittedMetricSourceKinds([...acceptedSourceKinds]),
+    bundleIds,
+    contextBundleIds,
+    outputBoundary: {
+      modelParametersExportAllowed: false,
+      participantLevelExportAllowed: false,
+      productScoreDisplayAuthorized: productAgeDisplayAuthorized || productRiskDisplayAuthorized,
+      researchPreviewRequiresExplicitOptIn: true,
+      rowValuesExportAllowed: false,
+      submittedMetricScalarEchoAllowed: false,
+    },
+    productAgeDisplayAuthorized,
+    productRiskDisplayAuthorized,
+    productScoreBearingMetricKeys: sortCapabilityStringValues(productScoreBearingMetricKeys),
+    researchAgeEstimateEligibleBundleIds,
+    researchPreviewSupported: true,
+    researchScoreBearingMetricKeys: sortCapabilityStringValues(researchScoreBearingMetricKeys),
+    runtimeInputKeys: ["chronological-age-years", "sex"],
+    schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
+    scoreBearingBundleIds,
+    wearableContextMetricKeys: sortCapabilityStringValues(wearableContextMetricKeys),
+    wearableDeferredFeatureKeys: listWearableCapabilityFeatureKeys(wearableBridgeSpecs, "defer"),
+    wearableFirstPriorityFeatureKeys: listWearableCapabilityFeatureKeys(wearableBridgeSpecs, "first"),
+    wearableFirstPriorityMetricKeys: listWearableCapabilityMetricKeys(wearableBridgeSpecs, "first"),
+    wearableScoreBearingMetricKeys: sortCapabilityStringValues(wearableScoreBearingMetricKeys),
+    wearableSecondPriorityFeatureKeys: listWearableCapabilityFeatureKeys(wearableBridgeSpecs, "second"),
+    wearableSecondPriorityMetricKeys: listWearableCapabilityMetricKeys(wearableBridgeSpecs, "second"),
+  };
+}
+
+function listWearableCapabilityFeatureKeys(
+  specs: readonly MurphAgeWearableBridgeFeatureSpec[],
+  unlockPriority: MurphAgeWearableBridgeUnlockPriority,
+): string[] {
+  const featureKeys: string[] = [];
+  for (const spec of specs) {
+    if (spec.unlockPriority === unlockPriority) {
+      featureKeys.push(spec.featureKey);
+    }
+  }
+  return sortCapabilityStringValues(featureKeys);
+}
+
+function listWearableCapabilityMetricKeys(
+  specs: readonly MurphAgeWearableBridgeFeatureSpec[],
+  unlockPriority: MurphAgeWearableBridgeUnlockPriority,
+): string[] {
+  const metricKeys: string[] = [];
+  for (const spec of specs) {
+    if (spec.unlockPriority === unlockPriority) {
+      metricKeys.push(...spec.metricKeys);
+    }
+  }
+  return sortCapabilityStringValues(uniqueStrings(metricKeys));
+}
+
+function sortCapabilityStringValues(values: readonly string[]): string[] {
+  return [...values].sort((left, right) => left.localeCompare(right));
+}
+
+function sortSubmittedMetricSourceKinds(
+  values: readonly MurphAgeSubmittedMetricSourceKind[],
+): MurphAgeSubmittedMetricSourceKind[] {
+  return [...values].sort((left, right) => left.localeCompare(right));
+}
+
 function buildSubmittedCalculatorInputBundleSpec(input: {
   bundleId: MurphAgeSubmittedCalculatorInputBundleSpecId;
   cardId: MurphAgeModelCardId;
@@ -6559,6 +6726,7 @@ export function buildMurphAgeSubmittedCalculatorViewBundle(
     ? buildMurphAgeResearchPreviewFromSubmittedInputs(input)
     : null;
   return {
+    capabilities: summarizeMurphAgeSubmittedCalculatorCapabilities(),
     product,
     researchPreview,
     schemaVersion: MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,

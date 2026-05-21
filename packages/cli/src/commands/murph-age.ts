@@ -35,6 +35,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
@@ -234,15 +235,26 @@ const murphAgeSubmittedCalculatorInputBundleFeatureSpecSchema = z.object({
   metricKeys: z.array(z.string().min(1)),
   requiredForCompletion: z.boolean(),
 })
+const murphAgeSubmittedCalculatorInputBundleSpecIdSchema = z.enum([
+  'function-context',
+  'l1-glycemia',
+  'lab5-bp-bmi',
+  'lab9-bp-body',
+  'r399-nhis-proxy-anchor',
+  'wearable-context',
+])
+const murphAgeSubmittedMetricSourceKindSchema = z.enum([
+  'activity-summary',
+  'measurement',
+  'profile',
+  'questionnaire',
+  'sleep-summary',
+  'survey-response',
+  'test-result',
+  'wearable-summary',
+])
 const murphAgeSubmittedCalculatorInputBundleSpecSchema = z.object({
-  bundleId: z.enum([
-    'function-context',
-    'l1-glycemia',
-    'lab5-bp-bmi',
-    'lab9-bp-body',
-    'r399-nhis-proxy-anchor',
-    'wearable-context',
-  ]),
+  bundleId: murphAgeSubmittedCalculatorInputBundleSpecIdSchema,
   cardId: murphAgeModelCardIdSchema,
   completion: z.object({
     alternativeFeatureKeyGroups: z.array(z.array(z.string().min(1))),
@@ -996,7 +1008,38 @@ export const murphAgeCalculatorViewResultSchema = z.union([
   murphAgePublicCalculatorViewResultSchema,
   murphAgeResearchCalculatorViewResultSchema,
 ])
+const murphAgeSubmittedCalculatorCapabilitySchema = z.object({
+  acceptedMetricKeys: z.array(z.string().min(1)),
+  acceptedSourceKinds: z.array(murphAgeSubmittedMetricSourceKindSchema),
+  bundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
+  contextBundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
+  outputBoundary: z.object({
+    modelParametersExportAllowed: z.literal(false),
+    participantLevelExportAllowed: z.literal(false),
+    productScoreDisplayAuthorized: z.boolean(),
+    researchPreviewRequiresExplicitOptIn: z.literal(true),
+    rowValuesExportAllowed: z.literal(false),
+    submittedMetricScalarEchoAllowed: z.literal(false),
+  }),
+  productAgeDisplayAuthorized: z.boolean(),
+  productRiskDisplayAuthorized: z.boolean(),
+  productScoreBearingMetricKeys: z.array(z.string().min(1)),
+  researchAgeEstimateEligibleBundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
+  researchPreviewSupported: z.literal(true),
+  researchScoreBearingMetricKeys: z.array(z.string().min(1)),
+  runtimeInputKeys: z.array(z.enum(['chronological-age-years', 'sex'])),
+  schemaVersion: z.literal(MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION),
+  scoreBearingBundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
+  wearableContextMetricKeys: z.array(z.string().min(1)),
+  wearableDeferredFeatureKeys: z.array(z.string().min(1)),
+  wearableFirstPriorityFeatureKeys: z.array(z.string().min(1)),
+  wearableFirstPriorityMetricKeys: z.array(z.string().min(1)),
+  wearableScoreBearingMetricKeys: z.array(z.string().min(1)),
+  wearableSecondPriorityFeatureKeys: z.array(z.string().min(1)),
+  wearableSecondPriorityMetricKeys: z.array(z.string().min(1)),
+})
 export const murphAgeSubmittedCalculatorViewBundleResultSchema = z.object({
+  capabilities: murphAgeSubmittedCalculatorCapabilitySchema,
   product: z.object({
     report: murphAgeReportResultSchema,
     view: murphAgePublicCalculatorViewResultSchema,
