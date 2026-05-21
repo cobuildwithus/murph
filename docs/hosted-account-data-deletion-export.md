@@ -27,7 +27,7 @@ The export and delete paths are intentionally stricter than normal settings read
 9. Provider revocation runs before local database deletion while local token references are still readable.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
-12. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
+12. Temporal workflow termination and Cloudflare runner/R2 cleanup run only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed orchestration or runner state.
 
 ## Export contract
 
@@ -87,8 +87,10 @@ The account metadata export explicitly omits:
 1. Load the hosted member and device connection identities.
 2. Best-effort revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook, currently covering configured Oura, WHOOP, and Strava connectors. Garmin connections routed through Junction are deleted locally; provider-side retention remains controlled by Junction/Garmin until Junction revocation is implemented.
 3. Delete Prisma-hosted account rows in a transaction.
-4. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
-5. Return schema `murph.hosted-account-data-deletion-result.v1` with deletion counts, provider revocation outcomes, Cloudflare cleanup status, and retention notes.
+4. Best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted`.
+5. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
+6. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
+7. Return schema `murph.hosted-account-data-deletion-result.v1` with deletion counts, provider revocation outcomes, Cloudflare cleanup status, and retention notes.
 
 ## Store coverage
 
@@ -124,6 +126,7 @@ The account metadata export explicitly omits:
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
 | `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
+| `temporal.per_user_runtime_workflow` | Best-effort delete | Documented only | Account deletion terminates the per-user hosted Temporal runtime workflow after the Prisma deletion commits and around Cloudflare cleanup, neutralizing sleeping wake flags and runtime-result wake state. |
 | `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
 | `providers.linq_telegram_email_messages` | Local reference delete | Metadata/counts | Deletes Murph-hosted mailbox and routing records; external carrier, Telegram, Linq, and email-provider copies are outside this endpoint. |
 | `providers.stripe_privy` | Documented retention | Documented only | Deletes local references only. Vendor account records need Stripe/Privy/legal workflows. |
@@ -145,6 +148,12 @@ The Durable Object deletion method:
 - best-effort destroys the warm runner container for the deleted user so live container state does not linger until normal container expiry.
 
 Container workspace artifacts are covered to the extent they are persisted through the existing R2/runner-state contract. Ephemeral live container filesystem state is not separately addressable by this MVP because the existing worker/container contract does not expose a per-user container filesystem wipe primitive.
+
+## Temporal workflow cleanup
+
+Hosted deletion treats the per-user Temporal runtime workflow as orchestration state, not product truth. After Prisma account rows are deleted successfully, the deletion service best-effort terminates the workflow with reason `account-deleted` before Cloudflare cleanup and repeats the same bounded best-effort termination afterward. A missing or already-finished workflow is considered cleaned up, and timeout or transport failures are logged as sanitized best-effort cleanup errors without blocking Cloudflare cleanup.
+
+The hosted runtime demand endpoint also fails closed for stale workflow wakeups: if the member is missing, suspended, or not active, demand returns `blocked` with reason `user_not_active` and no retry. If an active member has selected run demand but no hosted workspace row, demand returns `blocked` with reason `hosted_runtime_not_configured` and no retry. Those guards prevent a sleeping workflow from turning stale runtime-result, manual, or workspace wake state into a new Cloudflare execution after deletion or deactivation.
 
 ## External providers, vendors, and backups
 
@@ -169,5 +178,6 @@ The MVP deletes Murph live stores and local references. Provider/vendor erasure 
 - non-empty notes plus valid deletion/export modes for each store.
 - high-value data export contents, bounded/truncated export metadata, omitted mailbox payload bodies, omitted runtime logs, and redaction of lookup keys, token hashes, invite codes, API key environment names, and workspace object refs.
 - deletion ordering that keeps Cloudflare cleanup after Prisma commit and skips Cloudflare cleanup when the transaction fails.
+- Temporal workflow termination ordering after Prisma commit, plus hosted demand blocking for deleted, inactive, or unconfigured users.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.
