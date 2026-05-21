@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { Writable } from "node:stream";
 import { promisify } from "node:util";
 
 import {
@@ -34,6 +35,8 @@ import {
   createHostedRunnerNativeParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
+  HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   parseHostedRunnerSmokeInput,
   type HostedRunnerSmokeResult,
@@ -43,10 +46,17 @@ const execFileAsync = promisify(execFile);
 const FINNISH_DRY_SAUNA_KEY =
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
-const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 20_000;
-const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 30_000;
+const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 45_000;
+const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 90_000;
 const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
 const PDF_SMOKE_RELATIVE_PATH = "raw/smoke/hosted-runner.pdf";
+const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC = "strict-pull-ups";
+const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE =
+  "max strict pull-up baseline, dead hang";
+const CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID =
+  "vault_01K11111111111111111111111";
+const CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG =
+  "hosted-smoke-pull-up-baseline-reminder";
 
 async function main(): Promise<void> {
   const input = parseHostedRunnerSmokeInput(parseJsonValue(await readStandardInput()));
@@ -112,7 +122,11 @@ async function runSmokeChecks(input: {
   await runTextCommand("vault-cli", ["--help"]);
   const codexPreflight = await runCodexPreflight();
   const hostedCodexConfig =
-    await runHostedCodexConfigShellEnvironmentPolicySmoke(input.workspaceRoot);
+    await runHostedCodexConfigShellEnvironmentPolicySmoke({
+      expectedVaultId: input.expectedVaultId,
+      vaultRoot: input.vaultRoot,
+      workspaceRoot: input.workspaceRoot,
+    });
   const pythonVersion = await runPythonToolchainSmoke();
 
   const vaultShowOutput = await runTextCommand("vault-cli", [
@@ -168,6 +182,9 @@ async function runSmokeChecks(input: {
     codexCommandDiscovered: true,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
       hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
+    codexHostedCliSchemaVaultOptionHidden: hostedCodexConfig.schemaVaultOptionHidden,
+    codexHostedCliVaultCommandProofCount: hostedCodexConfig.vaultCommandProofCount,
+    codexHostedCliVaultWriteProofCount: hostedCodexConfig.vaultWriteProofCount,
     codexHostedShellMurphPathBytes: hostedCodexConfig.murphPathBytes,
     codexHostedShellPythonVersion: hostedCodexConfig.pythonVersion,
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
@@ -189,7 +206,7 @@ async function runSmokeChecks(input: {
     pdfParserProviderId: pdfParse.providerId,
     pdfTextSha256: sha256Hex(pdfParse.text),
     pythonVersion,
-    reportedVaultId,
+    reportedVaultIdMatchesExpected: true,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliCommandDiscovered: true,
     vaultRootRebound: true,
@@ -535,15 +552,24 @@ async function runPythonToolchainSmoke(): Promise<string> {
   return pythonVersion;
 }
 
-async function runHostedCodexConfigShellEnvironmentPolicySmoke(
-  workspaceRoot: string,
-): Promise<{
+async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
+  expectedVaultId: string;
+  vaultRoot: string;
+  workspaceRoot: string;
+}): Promise<{
   murphPathBytes: number;
   pythonVersion: string;
+  schemaVaultOptionHidden: boolean;
   shellEnvironmentPolicyAllowlisted: boolean;
+  vaultCommandProofCount: number;
   vaultCliLlmsBytes: number;
+  vaultWriteProofCount: number;
 }> {
-  const codexHome = path.join(workspaceRoot, "hosted-codex-config-smoke-home", ".codex-hosted");
+  const codexHome = path.join(
+    input.workspaceRoot,
+    "hosted-codex-config-smoke-home",
+    ".codex-hosted",
+  );
   await mkdir(codexHome, {
     mode: 0o700,
     recursive: true,
@@ -583,19 +609,23 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
 
   const shellProbe = await runCodexAppServerShellEnvironmentProbe({
     codexHome,
+    expectedVaultId: input.expectedVaultId,
     runtimeEnv: {
       PATH: process.env.PATH ?? "",
       VAULT: process.env.VAULT ?? "",
       OPENAI_API_KEY: "hosted-runner-smoke-secret",
     },
-    vaultRoot: process.env.VAULT ?? "",
+    vaultRoot: input.vaultRoot,
   });
 
   return {
     murphPathBytes: shellProbe.murphPathBytes,
     pythonVersion: shellProbe.pythonVersion,
+    schemaVaultOptionHidden: shellProbe.schemaVaultOptionHidden,
     shellEnvironmentPolicyAllowlisted: true,
+    vaultCommandProofCount: shellProbe.vaultCommandProofCount,
     vaultCliLlmsBytes: shellProbe.vaultCliLlmsBytes,
+    vaultWriteProofCount: shellProbe.vaultWriteProofCount,
   };
 }
 
@@ -626,14 +656,19 @@ function tomlStringArray(values: readonly string[]): string {
 
 async function runCodexAppServerShellEnvironmentProbe(input: {
   codexHome: string;
+  expectedVaultId: string;
   runtimeEnv: Record<string, string>;
   vaultRoot: string;
 }): Promise<{
   murphPathBytes: number;
   pythonVersion: string;
+  schemaVaultOptionHidden: boolean;
+  vaultCommandProofCount: number;
   vaultCliLlmsBytes: number;
+  vaultWriteProofCount: number;
 }> {
   const child = spawn("codex", ["app-server"], {
+    detached: process.platform !== "win32",
     env: {
       ...process.env,
       ...input.runtimeEnv,
@@ -653,154 +688,791 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
 
   let stdoutBuffer = "";
   let stderr = "";
-  let settled = false;
+  let nextRequestId = 1;
+  let terminalError: Error | null = null;
+  const pendingRequests = new Map<number, CodexAppServerPendingRequest>();
 
-  const completed = new Promise<{
-    murphPathBytes: number;
-    pythonVersion: string;
-    vaultCliLlmsBytes: number;
-  }>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(
-        `Timed out waiting for Codex app-server shell env probe. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
-      ));
-    }, CODEX_SHELL_ENV_PROBE_TIMEOUT_MS);
+  const rejectPendingRequests = (error: Error): void => {
+    for (const [id, pending] of pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      pendingRequests.delete(id);
+    }
+  };
+  const failCodexAppServer = (error: Error): void => {
+    terminalError ??= error;
+    rejectPendingRequests(error);
+  };
 
-    const finish = (
-      error?: Error,
-      result?: {
-        murphPathBytes: number;
-        pythonVersion: string;
-        vaultCliLlmsBytes: number;
-      },
-    ): void => {
-      if (settled) {
+  child.once("error", failCodexAppServer);
+  child.once("exit", (code, signal) => {
+    failCodexAppServer(new Error(
+      `Codex app-server exited before shell env probe completed: ${code ?? signal}. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+    ));
+  });
+  childStdin.once("error", (error: Error) => {
+    failCodexAppServer(new Error(
+      `Codex app-server stdin failed. errorName=${error.name}`,
+    ));
+  });
+  childStderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  childStdout.on("data", (chunk) => {
+    stdoutBuffer += String(chunk);
+    const lines = stdoutBuffer.split(/\r?\n/u);
+    stdoutBuffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        rejectPendingRequests(new Error("Codex app-server emitted malformed JSON."));
         return;
       }
 
-      settled = true;
-      clearTimeout(timeout);
-      if (error) {
-        reject(error);
-        return;
+      const message = readObject(parsed, "Codex app-server response");
+      const id = message.id;
+      if (typeof id !== "number") {
+        continue;
       }
 
-      if (!result) {
-        reject(new Error("Codex app-server shell env probe finished without a result."));
-        return;
+      const pending = pendingRequests.get(id);
+      if (!pending) {
+        continue;
       }
 
-      resolve(result);
-    };
-
-    child.once("error", finish);
-    child.once("exit", (code, signal) => {
-      if (!settled) {
-        finish(new Error(
-          `Codex app-server exited before shell env probe completed: ${code ?? signal}. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(id);
+      if (message.error) {
+        pending.reject(new Error(
+          `Codex app-server request failed for ${pending.label}. errorBytes=${Buffer.byteLength(JSON.stringify(message.error), "utf8")}`,
         ));
+        continue;
       }
-    });
-    childStderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    childStdout.on("data", (chunk) => {
-      stdoutBuffer += String(chunk);
-      const lines = stdoutBuffer.split(/\r?\n/u);
-      stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
 
-        const message = JSON.parse(trimmed) as Record<string, unknown>;
-        if (message.id !== 2) {
-          continue;
-        }
-
-        if (message.error) {
-          finish(new Error(`Codex app-server shell env probe failed: ${JSON.stringify(message.error)}`));
-          return;
-        }
-
-        const result = readCodexCommandExecResult(message.result);
-        const probe = assertCodexShellEnvironmentProbeResult({
-          result,
-          vaultRoot: input.vaultRoot,
-        });
-        finish(undefined, probe);
-      }
-    });
+      pending.resolve(message);
+    }
   });
 
-  try {
-    childStdin.write(`${JSON.stringify({
-      id: 1,
-      method: "initialize",
-      params: {
-        clientInfo: {
-          name: "hosted-runner-smoke",
-          version: "1",
-        },
-      },
-    })}\n`);
-    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 2,
-      method: "command/exec",
-      params: {
-        command: [
-          "/bin/sh",
-          "-c",
-          [
-            "vault_cli_path=$(command -v vault-cli || true)",
-            "murph_path=$(command -v murph || true)",
-            "python_path=$(command -v python || true)",
-            "python3_path=$(command -v python3 || true)",
-            "if [ -z \"$vault_cli_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-vault-cli'; exit 127; fi",
-            "if [ -z \"$murph_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-murph'; exit 127; fi",
-            "if [ -z \"$python_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python'; exit 127; fi",
-            "if [ -z \"$python3_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-python3'; exit 127; fi",
-            "probe_tmp=$(mktemp -d)",
-            "vault_cli_manifest_path=\"$probe_tmp/vault-cli-llms.json\"",
-            "\"$vault_cli_path\" --llms --format json > \"$vault_cli_manifest_path\" || { status=$?; printf '%s\\n' 'probe_step_failed:vault-cli-llms'; exit \"$status\"; }",
-            "vault_cli_manifest_bytes=$(wc -c < \"$vault_cli_manifest_path\" | tr -d '[:space:]')",
-            "murph_path_bytes=${#murph_path}",
-            "rm -rf \"$probe_tmp\"",
-            "python_version=$(\"$python3_path\" --version) || { status=$?; printf '%s\\n' 'probe_step_failed:python3-version'; exit \"$status\"; }",
-            "\"$python_path\" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' || { status=$?; printf '%s\\n' 'probe_step_failed:python-major'; exit \"$status\"; }",
-            "printf '%s\\n' \"$vault_cli_path\"",
-            "printf '%s\\n' \"$murph_path\"",
-            "printf '%s\\n' \"$python_path\"",
-            "printf '%s\\n' \"$python3_path\"",
-            "printf '%s\\n' \"$vault_cli_manifest_bytes\"",
-            "printf '%s\\n' \"$murph_path_bytes\"",
-            "printf '%s\\n' \"$python_version\"",
-            "printf '%s\\n' \"${VAULT:-}\"",
-            "printf '%s\\n' \"${OPENAI_API_KEY:-}\"",
-          ].join("; "),
-        ],
+  const sendRequest = (
+    label: string,
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> => {
+    const id = nextRequestId;
+    nextRequestId += 1;
+
+    return new Promise((resolve, reject) => {
+      if (terminalError) {
+        reject(terminalError);
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        pendingRequests.delete(id);
+        const error = new Error(
+          `Timed out waiting for Codex app-server request ${label}. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+        );
+        failCodexAppServer(error);
+        killProcessGroup(child.pid);
+        child.kill("SIGKILL");
+        reject(error);
+      }, timeoutMs);
+
+      pendingRequests.set(id, {
+        label,
+        reject,
+        resolve,
+        timeout,
+      });
+
+      void writeJsonRpcLine(childStdin, {
+        id,
+        method,
+        params,
+      }, label).catch((error: Error) => {
+        clearTimeout(timeout);
+        pendingRequests.delete(id);
+        failCodexAppServer(error);
+        reject(error);
+      });
+    });
+  };
+
+  const execCommand = async (
+    label: string,
+    command: readonly string[],
+  ): Promise<CodexCommandExecResult> => {
+    const message = await sendRequest(
+      label,
+      "command/exec",
+      {
+        command,
         timeoutMs: CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS,
       },
-    })}\n`);
-    return await completed;
+      CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
+    );
+    const result = readCodexCommandExecResult(message.result);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+      );
+    }
+
+    return result;
+  };
+
+  try {
+    await sendRequest("initialize", "initialize", {
+      clientInfo: {
+        name: "hosted-runner-smoke",
+        version: "1",
+      },
+    }, CODEX_SHELL_ENV_PROBE_TIMEOUT_MS);
+    await writeJsonRpcLine(
+      childStdin,
+      { method: "initialized", params: {} },
+      "initialized",
+    );
+
+    const environmentProbe = parseCodexEnvironmentProbe(
+      (await execCommand("environment-probe", [
+        "node",
+        "-e",
+        buildCodexEnvironmentProbeScript(),
+        input.vaultRoot,
+      ])).stdout,
+      input.vaultRoot,
+    );
+    const pythonVersion = readPythonVersionProbeResult(
+      (await execCommand("python3-version", ["python3", "--version"])).stdout,
+    );
+    await execCommand("python-major", [
+      "python",
+      "-c",
+      "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)",
+    ]);
+    const vaultCliLlms = await execCommand("vault-cli-llms", [
+      "vault-cli",
+      "--llms",
+      "--format",
+      "json",
+    ]);
+    assertRootLlmsHidesVault(vaultCliLlms.stdout);
+    const vaultCliProof = await runCodexVaultCliProof({
+      execCommand,
+      expectedVaultId: input.expectedVaultId,
+      vaultRoot: input.vaultRoot,
+    });
+
+    return {
+      murphPathBytes: environmentProbe.murphPathBytes,
+      pythonVersion,
+      schemaVaultOptionHidden: vaultCliProof.schemaVaultOptionHidden,
+      vaultCommandProofCount: vaultCliProof.vaultCommandProofCount,
+      vaultCliLlmsBytes: parsePositiveByteCount(
+        String(Buffer.byteLength(vaultCliLlms.stdout, "utf8")),
+        "vault-cli --llms --format json",
+      ),
+      vaultWriteProofCount: vaultCliProof.vaultWriteProofCount,
+    };
   } finally {
     childStdin.end();
-    child.kill();
+    killProcessGroup(child.pid);
+    child.kill("SIGKILL");
+    rejectPendingRequests(new Error("Codex app-server shell env probe was stopped."));
   }
 }
 
-function readCodexCommandExecResult(value: unknown): {
+function buildCodexEnvironmentProbeScript(): string {
+  return `
+const fs = require("node:fs");
+const path = require("node:path");
+const expectedVaultRoot = process.argv[1];
+function findExecutable(name) {
+  const pathValue = process.env.PATH || "";
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  return "";
+}
+const proof = {
+  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
+  providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY || process.env.VERCEL_AI_API_KEY),
+  python3PathBytes: Buffer.byteLength(findExecutable("python3"), "utf8"),
+  pythonPathBytes: Buffer.byteLength(findExecutable("python"), "utf8"),
+  vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
+  vaultRootInherited: process.env.VAULT === expectedVaultRoot,
+};
+process.stdout.write(JSON.stringify(proof));
+`;
+}
+
+function parseCodexEnvironmentProbe(
+  stdout: string,
+  vaultRoot: string,
+): {
+  murphPathBytes: number;
+} {
+  const record = readObject(parseJsonFromCommandStdout(stdout, "environment-probe"), "environment probe");
+  const vaultCliPathBytes = readPositiveNumber(
+    record.vaultCliPathBytes,
+    "environment probe.vaultCliPathBytes",
+  );
+  const murphPathBytes = readPositiveNumber(
+    record.murphPathBytes,
+    "environment probe.murphPathBytes",
+  );
+  readPositiveNumber(record.pythonPathBytes, "environment probe.pythonPathBytes");
+  readPositiveNumber(record.python3PathBytes, "environment probe.python3PathBytes");
+
+  if (vaultCliPathBytes <= 0) {
+    throw new Error("Codex app-server environment probe did not resolve vault-cli.");
+  }
+
+  if (record.vaultRootInherited !== true) {
+    throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
+  }
+
+  if (record.providerCredentialPresent === true) {
+    throw new Error("Codex app-server shell env probe leaked the provider credential env.");
+  }
+
+  if (process.env.VAULT !== vaultRoot) {
+    throw new Error("Hosted runner smoke process did not keep the restored VAULT path.");
+  }
+
+  return {
+    murphPathBytes,
+  };
+}
+
+function readPythonVersionProbeResult(stdout: string): string {
+  const pythonVersion = stdout.trim();
+  if (!/^Python\s+3\./u.test(pythonVersion)) {
+    throw new Error("Codex app-server shell env probe did not execute python3 --version.");
+  }
+
+  return pythonVersion;
+}
+
+function assertRootLlmsHidesVault(stdout: string): void {
+  const manifest = parseJsonFromCommandStdout(stdout, "vault-cli-llms");
+  readArray(readObject(manifest, "vault-cli-llms").commands, "vault-cli-llms.commands");
+
+  if (stdout.includes("--vault")) {
+    throw new Error("Codex app-server vault-cli proof exposed --vault in root LLM metadata.");
+  }
+}
+
+async function createExplicitVaultProofRoot(activeVaultRoot: string): Promise<string> {
+  const explicitVaultRoot = path.join(path.dirname(activeVaultRoot), "explicit-vault-proof");
+  await mkdir(explicitVaultRoot, { recursive: true });
+  await writeFile(
+    path.join(explicitVaultRoot, "vault.json"),
+    `${JSON.stringify({
+      createdAt: "2026-05-21T00:00:00Z",
+      formatVersion: 1,
+      timezone: "UTC",
+      title: "Explicit Vault Proof",
+      vaultId: CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID,
+    }, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    path.join(explicitVaultRoot, "CORE.md"),
+    [
+      "---",
+      "schemaVersion: hv/core@v1",
+      `vaultId: ${CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID}`,
+      "title: Explicit Vault Proof",
+      "---",
+      "# Explicit Vault Proof",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+
+  return explicitVaultRoot;
+}
+
+async function runCodexVaultCliProof(input: {
+  execCommand: (
+    label: string,
+    command: readonly string[],
+  ) => Promise<CodexCommandExecResult>;
+  expectedVaultId: string;
+  vaultRoot: string;
+}): Promise<{
+  schemaVaultOptionHidden: boolean;
+  vaultCommandProofCount: number;
+  vaultWriteProofCount: number;
+}> {
+  let vaultCommandProofCount = 0;
+  let vaultWriteProofCount = 0;
+  const runVaultJson = async (
+    label: string,
+    args: readonly string[],
+  ): Promise<unknown> => {
+    const result = await input.execCommand(label, ["vault-cli", ...args]);
+    vaultCommandProofCount += 1;
+    return parseJsonFromCommandStdout(result.stdout, label);
+  };
+  const explicitVaultProofRoot = await createExplicitVaultProofRoot(input.vaultRoot);
+  const assertVaultShow = (
+    value: unknown,
+    label: string,
+    expectedVaultId: string,
+  ): void => {
+    const record = readObject(value, label);
+    const vaultId = readString(record.vaultId, `${label}.vaultId`);
+    if (vaultId !== expectedVaultId) {
+      throw new Error(`Codex app-server vault-cli proof ${label} did not match the expected vault id.`);
+    }
+  };
+
+  assertVaultShow(
+    await runVaultJson("vault-show-default", ["vault", "show", "--format", "json"]),
+    "vault-show-default",
+    input.expectedVaultId,
+  );
+  assertVaultShow(
+    await runVaultJson("vault-show-explicit", [
+      "--vault",
+      explicitVaultProofRoot,
+      "vault",
+      "show",
+      "--format",
+      "json",
+    ]),
+    "vault-show-explicit",
+    CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID,
+  );
+
+  const measurementAdd = readObject(
+    await runVaultJson("measurement-add", [
+      "measurement",
+      "add",
+      "--metric",
+      CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC,
+      "--value",
+      "26",
+      "--unit",
+      "reps",
+      "--measurement-note",
+      CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE,
+      "--format",
+      "json",
+    ]),
+    "measurement-add",
+  );
+  if (measurementAdd.created !== true || measurementAdd.kind !== "measurement") {
+    throw new Error("Codex app-server vault-cli proof did not create a measurement.");
+  }
+  const createdMeasurement = readFirstObject(
+    measurementAdd.measurements,
+    "measurement-add.measurements",
+  );
+  assertMeasurementProof(createdMeasurement, "measurement-add.measurements[0]");
+  vaultWriteProofCount += 1;
+
+  const measurementList = await runVaultJson("measurement-list", [
+    "measurement",
+    "list",
+    "--limit",
+    "10",
+    "--format",
+    "json",
+  ]);
+  assertMeasurementListIncludesProof(
+    measurementList,
+    "measurement-list",
+  );
+
+  const scheduledLogSave = readObject(
+    await runVaultJson("scheduled-log-save", [
+      "scheduled-log",
+      "save",
+      "Hosted smoke pull-up baseline reminder",
+      "--slug",
+      CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG,
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:00",
+      "--action-kind",
+      "measurement.add",
+      "--action-title",
+      "Hosted smoke pull-up baseline",
+      "--measurement-metric",
+      CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC,
+      "--measurement-value",
+      "26",
+      "--measurement-unit",
+      "reps",
+      "--measurement-note",
+      CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE,
+      "--format",
+      "json",
+    ]),
+    "scheduled-log-save",
+  );
+  if (scheduledLogSave.created !== true) {
+    throw new Error("Codex app-server vault-cli proof did not create a scheduled log.");
+  }
+  vaultWriteProofCount += 1;
+
+  const scheduledLogShow = readObject(
+    await runVaultJson("scheduled-log-show", [
+      "scheduled-log",
+      "show",
+      CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG,
+      "--format",
+      "json",
+    ]),
+    "scheduled-log-show",
+  );
+  const scheduledLog = readObject(scheduledLogShow.scheduledLog, "scheduled-log-show.scheduledLog");
+  const scheduledAction = readObject(scheduledLog.action, "scheduled-log-show.scheduledLog.action");
+  if (scheduledAction.kind !== "measurement.add") {
+    throw new Error("Codex app-server vault-cli proof scheduled log action had the wrong kind.");
+  }
+  assertMeasurementProof(
+    readFirstObject(
+      scheduledAction.measurements,
+      "scheduled-log-show.scheduledLog.action.measurements",
+    ),
+    "scheduled-log-show.scheduledLog.action.measurements[0]",
+  );
+
+  const scheduledLogList = await runVaultJson("scheduled-log-list", [
+    "scheduled-log",
+    "list",
+    "--limit",
+    "10",
+    "--format",
+    "json",
+  ]);
+  assertScheduledLogListIncludesProof(
+    scheduledLogList,
+    "scheduled-log-list",
+  );
+
+  assertListProof(
+    await runVaultJson("workout-list", [
+      "workout",
+      "list",
+      "--limit",
+      "5",
+      "--format",
+      "json",
+    ]),
+    "workout-list",
+  );
+  assertListProof(
+    await runVaultJson("experiment-list", [
+      "experiment",
+      "list",
+      "--limit",
+      "5",
+      "--format",
+      "json",
+    ]),
+    "experiment-list",
+  );
+
+  const measurementSchema = readObject(
+    await runVaultJson("measurement-add-schema", [
+      "measurement",
+      "add",
+      "--schema",
+      "--format",
+      "json",
+    ]),
+    "measurement-add-schema",
+  );
+  const schemaVaultHidden = schemaHidesVaultAndKeepsMeasurementNote(measurementSchema);
+  const llmsFull = readObject(
+    await runVaultJson("measurement-llms-full", [
+      "--llms-full",
+      "--format",
+      "json",
+      "measurement",
+    ]),
+    "measurement-llms-full",
+  );
+  const manifestVaultHidden = measurementAddManifestHidesVault(llmsFull);
+
+  if (!schemaVaultHidden || !manifestVaultHidden) {
+    throw new Error("Codex app-server vault-cli proof exposed vault in schema metadata.");
+  }
+
+  return {
+    schemaVaultOptionHidden: true,
+    vaultCommandProofCount: assertMinimumProofCount(
+      vaultCommandProofCount,
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+      "vault command",
+    ),
+    vaultWriteProofCount: assertMinimumProofCount(
+      vaultWriteProofCount,
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+      "vault write",
+    ),
+  };
+}
+
+function assertMeasurementProof(record: Record<string, unknown>, label: string): void {
+  const metric = readString(record.metric, `${label}.metric`);
+  if (metric !== CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC) {
+    throw new Error(`Codex app-server vault-cli proof ${label} had the wrong metric.`);
+  }
+
+  const note = readString(record.note, `${label}.note`);
+  if (note !== CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE) {
+    throw new Error(`Codex app-server vault-cli proof ${label} did not preserve the prose note.`);
+  }
+}
+
+function assertMeasurementListIncludesProof(value: unknown, label: string): void {
+  const record = readObject(value, label);
+  const items = readArray(record.items, `${label}.items`);
+  if (
+    !items.some((item, index) =>
+      objectHasMeasurementProof(item, `${label}.items[${index}]`)
+    )
+  ) {
+    throw new Error(`Codex app-server vault-cli proof ${label} did not include the measurement write.`);
+  }
+}
+
+function assertScheduledLogListIncludesProof(value: unknown, label: string): void {
+  const record = readObject(value, label);
+  const items = readArray(record.items, `${label}.items`);
+  for (const [index, itemValue] of items.entries()) {
+    const item = readObject(itemValue, `${label}.items[${index}]`);
+    if (item.slug !== CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG) {
+      continue;
+    }
+
+    const action = readObject(item.action, `${label}.items[${index}].action`);
+    if (action.kind !== "measurement.add") {
+      continue;
+    }
+
+    if (
+      readArray(action.measurements, `${label}.items[${index}].action.measurements`)
+        .some((measurement, measurementIndex) =>
+          objectHasMeasurementProof(
+            measurement,
+            `${label}.items[${index}].action.measurements[${measurementIndex}]`,
+          )
+        )
+    ) {
+      return;
+    }
+  }
+
+  throw new Error(`Codex app-server vault-cli proof ${label} did not include the scheduled write.`);
+}
+
+function objectHasMeasurementProof(value: unknown, label: string): boolean {
+  const record = readObject(value, label);
+  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
+    return objectHasMeasurementProof(record.data, `${label}.data`);
+  }
+  const measurements = Array.isArray(record.measurements)
+    ? record.measurements
+    : [record];
+
+  return measurements.some((measurementValue, index) => {
+    const measurement = readObject(measurementValue, `${label}.measurements[${index}]`);
+    return (
+      measurement.metric === CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC
+      && measurement.note === CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE
+    );
+  });
+}
+
+function assertListProof(value: unknown, label: string): void {
+  const record = readObject(value, label);
+  readNonNegativeNumber(record.count, `${label}.count`);
+  const filters = readObject(record.filters, `${label}.filters`);
+  if (filters.limit !== 5) {
+    throw new Error(`Codex app-server vault-cli proof ${label} did not preserve the list limit.`);
+  }
+}
+
+function schemaHidesVaultAndKeepsMeasurementNote(schema: Record<string, unknown>): boolean {
+  const options = readObject(schema.options, "measurement-add-schema.options");
+  const properties = readObject(options.properties, "measurement-add-schema.options.properties");
+
+  return !Object.hasOwn(properties, "vault") && Object.hasOwn(properties, "measurementNote");
+}
+
+function measurementAddManifestHidesVault(manifest: Record<string, unknown>): boolean {
+  const commands = readArray(manifest.commands, "measurement-llms-full.commands");
+  for (const commandValue of commands) {
+    const command = readObject(commandValue, "measurement-llms-full.commands[]");
+    if (command.name !== "measurement add") {
+      continue;
+    }
+
+    const schema = readObject(command.schema, "measurement-llms-full.measurement-add.schema");
+    const options = readObject(
+      schema.options,
+      "measurement-llms-full.measurement-add.schema.options",
+    );
+    const properties = readObject(
+      options.properties,
+      "measurement-llms-full.measurement-add.schema.options.properties",
+    );
+    const examples = JSON.stringify(command.examples ?? []);
+
+    return !Object.hasOwn(properties, "vault") && !examples.includes("--vault");
+  }
+
+  throw new Error("Codex app-server vault-cli proof did not find measurement add in the manifest.");
+}
+
+function parseJsonFromCommandStdout(stdout: string, label: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(
+      `Codex app-server command ${label} did not return JSON. stdoutBytes=${Buffer.byteLength(stdout, "utf8")}`,
+    );
+  }
+}
+
+function readObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return value;
+}
+
+function readFirstObject(value: unknown, label: string): Record<string, unknown> {
+  const values = readArray(value, label);
+  if (values.length === 0) {
+    throw new TypeError(`${label} must not be empty.`);
+  }
+
+  return readObject(values[0], `${label}[0]`);
+}
+
+function readString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function readPositiveNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive finite number.`);
+  }
+
+  return value;
+}
+
+function readNonNegativeNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative finite number.`);
+  }
+
+  return value;
+}
+
+function assertMinimumProofCount(value: number, minimum: number, label: string): number {
+  if (value < minimum) {
+    throw new Error(`Codex app-server vault-cli proof ran too few ${label} checks.`);
+  }
+
+  return value;
+}
+
+function writeJsonRpcLine(
+  stream: Writable,
+  value: unknown,
+  label: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(new Error(
+        `Codex app-server request write failed for ${label}. errorName=${error.name}`,
+      ));
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = (): void => {
+      stream.off("error", onError);
+      stream.off("drain", onDrain);
+    };
+    stream.once("error", onError);
+    const wrote = stream.write(`${JSON.stringify(value)}\n`, () => {
+      cleanup();
+      resolve();
+    });
+    if (!wrote) {
+      stream.once("drain", onDrain);
+    }
+  });
+}
+
+function killProcessGroup(pid: number | undefined): void {
+  if (typeof pid !== "number" || process.platform === "win32") {
+    return;
+  }
+
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
+interface CodexAppServerPendingRequest {
+  label: string;
+  reject: (error: Error) => void;
+  resolve: (value: Record<string, unknown>) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+interface CodexCommandExecResult {
   exitCode: number;
   stderr: string;
   stdout: string;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Codex app-server shell env probe result must be an object.");
-  }
+}
 
-  const record = value as Record<string, unknown>;
+function readCodexCommandExecResult(value: unknown): CodexCommandExecResult {
+  const record = readObject(value, "Codex app-server shell env probe result");
+
   if (typeof record.exitCode !== "number") {
     throw new TypeError("Codex app-server shell env probe result.exitCode must be a number.");
   }
@@ -816,85 +1488,12 @@ function readCodexCommandExecResult(value: unknown): {
   };
 }
 
-function assertCodexShellEnvironmentProbeResult(input: {
-  result: {
-    exitCode: number;
-    stderr: string;
-    stdout: string;
-  };
-  vaultRoot: string;
-}): {
-  murphPathBytes: number;
-  pythonVersion: string;
-  vaultCliLlmsBytes: number;
-} {
-  if (input.result.exitCode !== 0) {
-    const failedStep = readProbeFailureStep(input.result.stdout);
-    const failedStepSuffix = failedStep ? ` during ${failedStep}` : "";
-    throw new Error(
-      `Codex app-server shell env probe exited ${input.result.exitCode}${failedStepSuffix}. stdoutBytes=${Buffer.byteLength(input.result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(input.result.stderr, "utf8")}`,
-    );
-  }
-
-  const [
-    vaultCliPath,
-    murphPath,
-    pythonPath,
-    python3Path,
-    vaultCliLlmsBytesText,
-    murphPathBytesText,
-    pythonVersion,
-    vaultRoot,
-    providerCredential,
-    ...extra
-  ] =
-    input.result.stdout.split(/\r?\n/u);
-  if (
-    !vaultCliPath
-    || !murphPath
-    || !pythonPath
-    || !python3Path
-    || extra.some((line) => line.trim().length > 0)
-  ) {
-    throw new Error("Codex app-server shell env probe did not resolve expected commands cleanly.");
-  }
-
-  const vaultCliLlmsBytes = parsePositiveByteCount(
-    vaultCliLlmsBytesText,
-    "vault-cli --llms --format json",
-  );
-  const murphPathBytes = parsePositiveByteCount(murphPathBytesText, "murph path resolution");
-  if (!pythonVersion || !/^Python\s+3\./u.test(pythonVersion)) {
-    throw new Error("Codex app-server shell env probe did not execute python3 --version.");
-  }
-
-  if (vaultRoot !== input.vaultRoot) {
-    throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
-  }
-
-  if (providerCredential && providerCredential.trim().length > 0) {
-    throw new Error("Codex app-server shell env probe leaked the provider credential env.");
-  }
-
-  return {
-    murphPathBytes,
-    pythonVersion,
-    vaultCliLlmsBytes,
-  };
-}
-
 function parsePositiveByteCount(value: string | undefined, label: string): number {
   if (!value || !/^[1-9][0-9]*$/u.test(value)) {
     throw new Error(`Codex app-server shell env probe did not execute ${label}.`);
   }
 
   return Number(value);
-}
-
-function readProbeFailureStep(stdout: string): string | null {
-  const firstLine = stdout.split(/\r?\n/u).find((line) => line.trim().length > 0);
-  const match = firstLine?.match(/^probe_step_failed:([a-z0-9-]+)$/u);
-  return match?.[1] ?? null;
 }
 
 async function runHealthCommonsCliSmoke(): Promise<{

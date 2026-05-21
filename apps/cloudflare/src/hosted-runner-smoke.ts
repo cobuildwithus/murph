@@ -59,15 +59,16 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
         child.once("error", reject);
         child.once("close", resolve);
       });
+      const stdout = stdoutChunks.join("");
+      const stderr = stderrChunks.join("");
 
       if (code !== 0) {
         throw new Error(
-          stderrChunks.join("").trim()
-          || `Hosted runner smoke child exited with code ${code ?? "unknown"}.`,
+          `Hosted runner smoke child exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
         );
       }
 
-      return parseHostedRunnerSmokeResult(parseJsonValue(stdoutChunks.join("")));
+      return parseHostedRunnerSmokeResult(parseJsonValue(stdout, "Hosted runner smoke child stdout"));
     } finally {
       terminateChildProcess(child.pid);
     }
@@ -77,12 +78,20 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
 }
 
 async function main(): Promise<void> {
-  const result = await runHostedRunnerSmokeDetailed(parseJsonValue(await readStandardInput()));
+  const result = await runHostedRunnerSmokeDetailed(
+    parseJsonValue(await readStandardInput(), "Hosted runner smoke stdin"),
+  );
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
-function parseJsonValue(value: string): unknown {
-  return JSON.parse(value);
+function parseJsonValue(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new SyntaxError(
+      `${label} was not valid JSON. bytes=${Buffer.byteLength(value, "utf8")}`,
+    );
+  }
 }
 
 function resolveHostedRunnerSmokeChildEntry(): string {

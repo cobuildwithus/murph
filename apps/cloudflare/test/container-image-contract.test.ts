@@ -347,10 +347,6 @@ describe("hosted runner container image contract", () => {
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
     );
-    const smokeDockerfile = await readFile(
-      new URL("../../../Dockerfile.cloudflare-hosted-runner-smoke", import.meta.url),
-      "utf8",
-    );
     const baseDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
       "utf8",
@@ -440,9 +436,12 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
-      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
     );
     const finalRootUserIndex = finalDockerfile.indexOf("USER root");
+    const finalRunnerBundleDirArgIndex = finalDockerfile.indexOf(
+      "ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle",
+    );
     const finalChmodIndex = finalDockerfile.indexOf("RUN chmod -R a-w /app");
     const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
@@ -452,19 +451,21 @@ describe("hosted runner container image contract", () => {
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
     expect(finalRootUserIndex).toBeGreaterThan(-1);
+    expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(finalRootUserIndex);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(-1);
-    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalRootUserIndex);
+    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
     expect(finalChmodIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalRunnerUserIndex).toBeGreaterThan(finalChmodIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
+    expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
     expect(finalDockerfile).toContain(
-      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
@@ -477,19 +478,9 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("whisper.cpp");
     expect(finalDockerfile).not.toContain("huggingface.co");
     expect(finalDockerfile).not.toContain("worker-secrets.json");
-    expect(smokeDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
-    expect(smokeDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
-    expect(smokeDockerfile).toContain(
-      "COPY --chown=root:root .deploy/runner-smoke-bundle/ /app/",
-    );
-    expect(smokeDockerfile).toContain("RUN chmod -R a-w /app");
-    expect(smokeDockerfile).toContain("  && chmod -R a+rX /app");
-    expect(readDockerUsers(smokeDockerfile)).toEqual(["root", "runner"]);
-    expect(smokeDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
-    expect(smokeDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
-    expect(smokeDockerfile).not.toContain("apt-get install");
-    expect(smokeDockerfile).not.toContain("@openai/codex");
-    expect(smokeDockerfile).not.toContain("worker-secrets.json");
+    await expect(
+      access(new URL("../../../Dockerfile.cloudflare-hosted-runner-smoke", import.meta.url)),
+    ).rejects.toThrow();
   });
 
   it("keeps the shared app bundle immutable to the runtime user across warm container reuse", async () => {
@@ -503,7 +494,7 @@ describe("hosted runner container image contract", () => {
     );
 
     const appBundleIsOwnedByRoot = finalDockerfile.includes(
-      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
     );
     const appBundleIsMadeNonWritable =
       finalDockerfile.includes("RUN chmod -R a-w /app")
@@ -590,12 +581,15 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).not.toContain("runner:bundle:assemble-only");
     expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain(".deploy/runner-smoke-bundle");
     expect(packageJson.scripts?.["runner:docker:smoke:image"]).toBe(
-      "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-smoke -t murph-cloudflare-runner .",
+      "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner --build-arg HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-smoke-bundle -t murph-cloudflare-runner .",
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphPathBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedCliSchemaVaultOptionHidden=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedCliVaultCommandProofCount=");
+    expect(runnerDockerSmokeScript).toContain("codexHostedCliVaultWriteProofCount=");
     expect(runnerDockerSmokeScript).toContain("pythonVersion=");
     expect(runnerPythonPathScript).toContain('const IMAGE_TAG = "murph-cloudflare-runner"');
     expect(runnerPythonPathScript).toContain('"--detach"');
@@ -623,9 +617,14 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("python3")');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("python3", ["--version"])');
-    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:resolve-python");
-    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:resolve-python3");
-    expect(hostedRunnerSmokeChild).toContain("probe_step_failed:python-major");
+    expect(hostedRunnerSmokeChild).toContain("buildCodexEnvironmentProbeScript");
+    expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
+    expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
+    expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');
+    expect(hostedRunnerSmokeChild).toContain('"measurement-add"');
+    expect(hostedRunnerSmokeChild).toContain('"scheduled-log-save"');
+    expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultCommandProofCount");
+    expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultWriteProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedShellPythonVersion");
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("mutool")');
     expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdfinfo")');
@@ -636,10 +635,8 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("mutool", ["info", input.pdfPath])');
     expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
     expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
-    expect(hostedRunnerSmokeChild).toContain(
-      '"/bin/sh",\n          "-c",',
-    );
-    expect(hostedRunnerSmokeChild).not.toContain('"/bin/sh",\n          "-lc",');
+    expect(hostedRunnerSmokeChild).toContain('runTextCommand("/bin/sh", ["-c"');
+    expect(hostedRunnerSmokeChild).not.toContain('runTextCommand("/bin/sh", ["-lc"');
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(
       "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
     );

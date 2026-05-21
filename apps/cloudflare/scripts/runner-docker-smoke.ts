@@ -53,7 +53,10 @@ async function main(): Promise<void> {
       wavRelativePath: WAV_RELATIVE_PATH,
     }));
 
-    const result = parseHostedRunnerSmokeResult(JSON.parse(output));
+    const result = parseHostedRunnerSmokeResult(parseJsonValue(
+      output,
+      "Docker runner smoke stdout",
+    ));
 
     console.log(`Hosted runner smoke passed.`);
     console.log(`childCwdIsIsolated=${result.childCwdIsIsolated}`);
@@ -65,9 +68,12 @@ async function main(): Promise<void> {
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
     console.log(`codexHostedShellMurphPathBytes=${result.codexHostedShellMurphPathBytes}`);
     console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);
+    console.log(`codexHostedCliSchemaVaultOptionHidden=${result.codexHostedCliSchemaVaultOptionHidden}`);
+    console.log(`codexHostedCliVaultCommandProofCount=${result.codexHostedCliVaultCommandProofCount}`);
+    console.log(`codexHostedCliVaultWriteProofCount=${result.codexHostedCliVaultWriteProofCount}`);
     console.log(`operatorHomeRebound=${result.operatorHomeRebound}`);
     console.log(`vaultRootRebound=${result.vaultRootRebound}`);
-    console.log(`reportedVaultId=${result.reportedVaultId}`);
+    console.log(`reportedVaultIdMatchesExpected=${result.reportedVaultIdMatchesExpected}`);
     console.log(`vaultShowBytes=${result.vaultShowBytes}`);
     console.log(`healthCommonsCatalogHash=${result.healthCommonsCatalogHash}`);
     console.log(`healthCommonsFinnishDrySaunaTitle=${result.healthCommonsFinnishDrySaunaTitle}`);
@@ -110,7 +116,7 @@ async function runDockerCommand(args: string[], stdinText: string): Promise<stri
       if (code !== 0) {
         reject(
           new Error(
-            stderr.trim() || `docker ${args.join(" ")} exited with code ${code ?? "unknown"}.`,
+            `docker runner smoke exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
           ),
         );
         return;
@@ -123,3 +129,13 @@ async function runDockerCommand(args: string[], stdinText: string): Promise<stri
 }
 
 await main();
+
+function parseJsonValue(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new SyntaxError(
+      `${label} was not valid JSON. bytes=${Buffer.byteLength(value, "utf8")}`,
+    );
+  }
+}
