@@ -1,6 +1,6 @@
 # Verify acceptance 193s speedup
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -113,3 +113,8 @@ Updated: 2026-05-21
   `cli-incur-smoke` timed out on a schema-only projection-status assertion under
   package coverage contention. That assertion now uses the in-process schema
   helper, and the local app-verification delay is 45s for another full proof.
+- Final local proof passed. A full `pnpm verify:acceptance` run reported app
+  verification done at 130s since verifier command start and package coverage
+  suite done at 134s, meeting the <=144s target while retaining package
+  coverage, fixture smoke, built package-boundary checks, and both app verifiers.
+Completed: 2026-05-21
