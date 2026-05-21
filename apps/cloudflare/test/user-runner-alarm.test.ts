@@ -375,7 +375,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
-        kind: "retry-scheduled" as const,
+        kind: "wake-unconfirmed" as const,
         reason: "container-rpc-timeout" as const,
       }),
     );
