@@ -45,6 +45,7 @@ const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const scheduledChatId = `chat_local_scheduled_reminder_${Date.now()}`;
 const scheduledReminderLeadMs = 90_000;
+const scheduledReminderIdleCheckpointDelayMs = 1_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -117,13 +118,13 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(scheduledState.lastExecutionKind).toBe("runtime_processing_accepted");
     expect(scheduledState.lastDemandNextWakeAt).toBe(scheduledReminderTimes.dueAtIso);
 
-    await sleepUntil(scheduledReminderTimes.dueAtIso);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver sleep reminder",
         text: reminderText,
       }),
     ]);
+    await sleepUntil(scheduledReminderTimes.dueAtIso);
     const sendRequest = await requireLinqStub().waitForSend({
       expectedPath: `/chats/${encodeURIComponent(scheduledChatId)}/messages`,
       scenario: requireScenario(),
@@ -164,6 +165,7 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(scheduledReminderIdleCheckpointDelayMs),
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,

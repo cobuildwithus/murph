@@ -1,8 +1,8 @@
 # Hosted Local Reminder E2E
 
-Status: active
+Status: completed
 Created: 2026-05-15
-Updated: 2026-05-15
+Updated: 2026-05-21
 
 ## Goal
 
@@ -33,11 +33,11 @@ Add or tighten hosted-local end-to-end coverage for scheduled reminders so a rem
 
 ## Tasks
 
-1. Inspect existing scheduled reminder scenario and hosted-local test routes.
-2. Update the scenario to use the scheduled alarm wake path and assert notification lifecycle evidence.
-3. Wire the reminder scenario into hosted E2E CI/docs if missing.
-4. Run focused hosted-local and repo verification for touched files.
-5. Complete required review/audit/commit workflow or report blockers.
+1. Inspect existing scheduled reminder scenario and hosted-local test routes. Done.
+2. Update the scenario to use the scheduled alarm wake path and assert notification lifecycle evidence. Done.
+3. Wire the reminder scenario into hosted E2E CI/docs if missing. No CI wiring change needed.
+4. Run focused hosted-local and repo verification for touched files. Done.
+5. Complete required review/audit/commit workflow or report blockers. Done.
 
 ## Verification
 
@@ -45,3 +45,9 @@ Add or tighten hosted-local end-to-end coverage for scheduled reminders so a rem
   - `pnpm hosted-local e2e linq-scheduled-reminder`
   - `bash scripts/workspace-verify.sh test:diff <touched paths>`
   - Additional focused tests if CI/workflow generation or route behavior changes require them.
+- 2026-05-21: Full `pnpm hosted-local e2e` failed only the scheduled reminder case while waiting for Temporal to observe the reminder `nextWakeAt`.
+- 2026-05-21: `pnpm hosted-local e2e linq-scheduled-reminder --no-bundle` passed.
+- 2026-05-21: `pnpm hosted-local e2e` passed: 10 test files, 24 passed, 1 skipped.
+- 2026-05-21: `pnpm typecheck` passed.
+- 2026-05-21: `bash scripts/workspace-verify.sh test:diff apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts agent-docs/exec-plans/active/2026-05-15-hosted-local-reminder-e2e.md` was blocked by unrelated dirty hosted-runner smoke changes: `apps/cloudflare/test/container-image-contract.test.ts` expected `probe_step_failed:*` markers that were missing from the current `apps/cloudflare/src/hosted-runner-smoke-child.ts` worktree content.
+Completed: 2026-05-21
