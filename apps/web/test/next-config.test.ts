@@ -64,6 +64,21 @@ test("next.config transpiles hosted workspace source packages instead of pinning
   assert.deepEqual(productionNextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
+test("hosted web tsconfig resolves Temporal orchestration-control from source", () => {
+  const tsconfig = JSON.parse(
+    readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"),
+  ) as {
+    compilerOptions?: {
+      paths?: Record<string, readonly string[]>;
+    };
+  };
+
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/orchestration-control"],
+    ["packages/hosted-execution/src/orchestration-control.ts"],
+  );
+});
+
 test("hosted web dist-dir selection reserves a dedicated artifact directory for interactive dev", () => {
   assert.equal(resolveHostedWebDistDir(PHASE_DEVELOPMENT_SERVER), HOSTED_WEB_DEV_DIST_DIR);
   assert.equal(resolveHostedWebDistDir(PHASE_PRODUCTION_BUILD), HOSTED_WEB_BUILD_DIST_DIR);
