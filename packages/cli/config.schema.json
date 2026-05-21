@@ -3424,6 +3424,32 @@
                     }
                   }
                 },
+                "calculate-bundle": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Submitted Murph Age payload in @file.json form or - for stdin."
+                        },
+                        "includeResearchPreview": {
+                          "default": false,
+                          "description": "Include the internal research-only age/risk preview alongside the product-safe calculator view.",
+                          "type": "boolean"
+                        },
+                        "modelCardArtifactRoot": {
+                          "description": "Optional local/server model-card artifact root for explicit research mode. Output remains metadata-only and never echoes this path.",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                },
                 "inputs": {
                   "type": "object",
                   "additionalProperties": false,

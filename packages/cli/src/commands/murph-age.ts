@@ -17,6 +17,7 @@ import {
   buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt,
   buildMurphAgePublicCalculatorView,
   buildMurphAgeResearchCalculatorView,
+  buildMurphAgeSubmittedCalculatorViewBundle,
   calculateMurphAgePublicReportFromSubmittedInputs,
   isMurphAgePublicFeatureKey,
   isMurphAgePublicMetricKey,
@@ -34,6 +35,7 @@ import {
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
+  MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION,
@@ -45,6 +47,7 @@ import {
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   resolveMurphAgeSourceRoute,
   type MurphAgeSourceRouteId,
+  type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeWearableResidualParameterPack,
 } from '@murphai/health-metrics'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -984,6 +987,17 @@ export const murphAgeCalculatorViewResultSchema = z.union([
   murphAgePublicCalculatorViewResultSchema,
   murphAgeResearchCalculatorViewResultSchema,
 ])
+export const murphAgeSubmittedCalculatorViewBundleResultSchema = z.object({
+  product: z.object({
+    report: murphAgeReportResultSchema,
+    view: murphAgePublicCalculatorViewResultSchema,
+  }),
+  researchPreview: z.object({
+    report: murphAgeReportResultSchema,
+    view: murphAgeResearchCalculatorViewResultSchema,
+  }).nullable(),
+  schemaVersion: z.literal(MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION),
+})
 
 const murphAgeIncrementEvaluationLayerSchema = z.enum([
   'biomarker-increment',
@@ -1464,6 +1478,43 @@ export function registerMurphAgeCommands(
     },
   })
 
+  age.command('calculate-bundle', {
+    description:
+      'Return the product-safe Murph Age calculator bundle with an optional explicit research preview.',
+    args: emptyArgsSchema,
+    options: z.object({
+      input: inputFileOptionSchema.describe('Submitted Murph Age payload in @file.json form or - for stdin.'),
+      includeResearchPreview: z.boolean()
+        .default(false)
+        .describe('Include the internal research-only age/risk preview alongside the product-safe calculator view.'),
+      modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
+    }),
+    examples: [
+      {
+        description:
+          'Return the product-safe calculator bundle. Current research-only cards remain withheld from product display.',
+        options: {
+          input: '@murph-age-preview.json',
+        },
+      },
+      {
+        description:
+          'Return the product-safe view plus an explicit local research preview for model development.',
+        options: {
+          includeResearchPreview: true,
+          input: '@murph-age-preview.json',
+          modelCardArtifactRoot: './.runtime/operations/murph-age/model-cards',
+        },
+      },
+    ],
+    hint:
+      'Use this as the stable submitted-data integration boundary. The product view stays safe-by-default; researchPreview is explicit and not user-facing.',
+    output: murphAgeSubmittedCalculatorViewBundleResultSchema,
+    async run({ options }) {
+      return loadMurphAgeSubmittedCalculatorViewBundle(options)
+    },
+  })
+
   age.command('inputs', {
     description:
       'Return metadata-only Murph Age input readiness for labs, body metrics, blood pressure, and wearable context in the selected vault.',
@@ -1759,10 +1810,94 @@ async function loadMurphAgeSubmittedCalculatorReport(
   return {
     ...report,
     warnings: [
-      ...loaded.warnings.map((warning) => ({ ...warning })),
+      ...toMurphAgePublicWarnings(loaded.warnings),
       ...report.warnings,
     ],
   }
+}
+
+async function loadMurphAgeSubmittedCalculatorViewBundle(
+  options: MurphAgeSubmittedPreviewOptions & { includeResearchPreview: boolean },
+): Promise<MurphAgeSubmittedCalculatorViewBundle> {
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+    await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
+  )
+  const {
+    modelCardArtifactRoot: payloadModelCardArtifactRoot,
+    ...calculatorPayload
+  } = payload
+  const shouldLoadModelCards = options.includeResearchPreview || options.modelCardArtifactRoot !== undefined
+  const loaded = shouldLoadModelCards
+    ? await loadMurphAgeLocalModelCardArtifacts({
+        modelCardArtifactRoot: options.modelCardArtifactRoot ?? payloadModelCardArtifactRoot,
+      })
+    : { models: {}, warnings: [] }
+  const bundle = buildMurphAgeSubmittedCalculatorViewBundle({
+    ...calculatorPayload,
+    models: loaded.models,
+  }, {
+    includeResearchPreview: options.includeResearchPreview,
+  })
+  const loadWarnings = toMurphAgePublicWarnings(loaded.warnings)
+  if (loadWarnings.length === 0) return bundle
+  return {
+    ...bundle,
+    product: {
+      report: {
+        ...bundle.product.report,
+        warnings: [
+          ...loadWarnings,
+          ...bundle.product.report.warnings,
+        ],
+      },
+      view: {
+        ...bundle.product.view,
+        warnings: [
+          ...loadWarnings,
+          ...bundle.product.view.warnings,
+        ],
+      },
+    },
+    researchPreview: bundle.researchPreview === null
+      ? null
+      : {
+          report: {
+            ...bundle.researchPreview.report,
+            warnings: [
+              ...loadWarnings,
+              ...bundle.researchPreview.report.warnings,
+            ],
+          },
+          view: {
+            ...bundle.researchPreview.view,
+            warnings: [
+              ...loadWarnings,
+              ...bundle.researchPreview.view.warnings,
+            ],
+          },
+        },
+  }
+}
+
+function toMurphAgePublicWarnings(
+  warnings: ReadonlyArray<{
+    code: z.infer<typeof murphAgeWarningCodeSchema>
+    featureKey?: string
+    metricKey?: string
+  }>,
+): Array<z.infer<typeof murphAgePublicWarningSchema>> {
+  return warnings.map((warning) => {
+    const publicWarning: z.infer<typeof murphAgePublicWarningSchema> = {
+      code: warning.code,
+    }
+    if (warning.featureKey && isMurphAgePublicFeatureKey(warning.featureKey)) {
+      publicWarning.featureKey = warning.featureKey
+    }
+    if (warning.metricKey && isMurphAgePublicMetricKey(warning.metricKey)) {
+      publicWarning.metricKey = warning.metricKey
+    }
+    return publicWarning
+  })
 }
 
 async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promise<unknown[]> {
