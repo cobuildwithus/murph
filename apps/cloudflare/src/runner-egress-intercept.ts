@@ -115,7 +115,18 @@ const OPENAI_CACHE_DIAGNOSTIC_INPUT_SHAPE_MAX_NODES = 50_000;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT = 8;
 const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS = 96;
-const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/u;
+const OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND = "duplicate";
+const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_KINDS = new Set([
+  "apply_patch",
+  "exec_command",
+  "imagegen",
+  "local_shell",
+  "shell",
+  "tool_search",
+  "update_plan",
+  "view_image",
+  "write_stdin",
+]);
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_ITEM_TYPE_KINDS = [
   "computer_call",
   "computer_call_output",
@@ -818,13 +829,14 @@ async function appendOpenAiInputShapeDiagnostics(input: {
     return;
   }
 
+  const functionCallNamesById = readOpenAiInputFunctionCallNamesById(inputValue);
   const typeCounts = new Map<string, number>();
   const typeBytes = new Map<string, number>();
   const roleCounts = new Map<string, number>();
   const functionCallNameCounts = new Map<string, number>();
+  const functionCallBytes = new Map<string, number>();
   const functionOutputNameCounts = new Map<string, number>();
   const functionOutputBytes = new Map<string, number>();
-  const functionCallNamesById = new Map<string, string>();
   let largestItemBytes = 0;
   let largestItemIndex = -1;
   let largestItemKinds = ["type:missing", "role:missing"];
@@ -847,13 +859,9 @@ async function appendOpenAiInputShapeDiagnostics(input: {
     }
 
     if (typeKind === "function_call") {
-      const functionNameKind = readOpenAiInputFunctionNameKind(item);
+      const functionNameKind = readOpenAiInputFunctionCallNameKind(item, functionCallNamesById);
       incrementDiagnosticCount(functionCallNameCounts, functionNameKind);
-
-      const callId = readOpenAiInputFunctionCallLookupId(item);
-      if (callId) {
-        functionCallNamesById.set(callId, functionNameKind);
-      }
+      addDiagnosticBytes(functionCallBytes, functionNameKind, itemBytes);
     } else if (typeKind === "function_call_output") {
       const functionNameKind = readOpenAiInputFunctionOutputNameKind(
         item,
@@ -873,7 +881,10 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   const nestedShape = summarizeOpenAiInputNestedShape(inputValue);
   const typeSummary = summarizeOpenAiDiagnosticCountsAndBytes(typeCounts, typeBytes);
   const roleSummary = summarizeOpenAiDiagnosticCounts(roleCounts);
-  const functionCallNameSummary = summarizeOpenAiDiagnosticCounts(functionCallNameCounts);
+  const functionCallNameSummary = summarizeOpenAiDiagnosticCountsAndBytes(
+    functionCallNameCounts,
+    functionCallBytes,
+  );
   const functionOutputNameSummary = summarizeOpenAiDiagnosticCountsAndBytes(
     functionOutputNameCounts,
     functionOutputBytes,
@@ -906,6 +917,7 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   if (functionCallNameSummary.kinds.length > 0) {
     diagnostic.inputFunctionCallNameKinds = functionCallNameSummary.kinds;
     diagnostic.inputFunctionCallNameCounts = functionCallNameSummary.counts;
+    diagnostic.inputFunctionCallBytes = functionCallNameSummary.bytes;
   }
   if (functionOutputNameSummary.kinds.length > 0) {
     diagnostic.inputFunctionOutputNameKinds = functionOutputNameSummary.kinds;
@@ -967,7 +979,10 @@ async function appendOpenAiInputTailItemDiagnostics(input: {
     stringBytes.push(nestedShape.stringBytes);
     traversalTruncated = traversalTruncated || nestedShape.truncated;
     if (typeKind === "function_call") {
-      functionNameKinds.push(readOpenAiInputFunctionNameKind(item));
+      functionNameKinds.push(readOpenAiInputFunctionCallNameKind(
+        item,
+        input.functionCallNamesById,
+      ));
       functionNameDiagnosticsPresent = true;
     } else if (typeKind === "function_call_output") {
       functionNameKinds.push(readOpenAiInputFunctionOutputNameKind(
@@ -1053,6 +1068,41 @@ function readOpenAiInputFunctionNameKind(value: unknown): string {
   return normalizeOpenAiInputFunctionNameKind(readStringRecordProperty(value, "name"));
 }
 
+function readOpenAiInputFunctionCallNamesById(inputValue: readonly unknown[]): ReadonlyMap<string, string> {
+  const functionCallNamesById = new Map<string, string>();
+  for (const item of inputValue) {
+    if (readOpenAiInputItemTypeKind(item) !== "function_call") {
+      continue;
+    }
+
+    const callId = readOpenAiInputFunctionCallLookupId(item);
+    if (!callId) {
+      continue;
+    }
+
+    if (functionCallNamesById.has(callId)) {
+      functionCallNamesById.set(callId, OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND);
+    } else {
+      functionCallNamesById.set(callId, readOpenAiInputFunctionNameKind(item));
+    }
+  }
+  return functionCallNamesById;
+}
+
+function readOpenAiInputFunctionCallNameKind(
+  value: unknown,
+  functionCallNamesById: ReadonlyMap<string, string>,
+): string {
+  const callId = readOpenAiInputFunctionCallLookupId(value);
+  if (
+    callId
+    && functionCallNamesById.get(callId) === OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND
+  ) {
+    return OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND;
+  }
+  return readOpenAiInputFunctionNameKind(value);
+}
+
 function readOpenAiInputFunctionOutputNameKind(
   value: unknown,
   functionCallNamesById: ReadonlyMap<string, string>,
@@ -1065,10 +1115,25 @@ function normalizeOpenAiInputFunctionNameKind(value: string | null): string {
   if (!value) {
     return "unknown";
   }
-  if (
-    value.length > OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS
-    || !OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN.test(value)
-  ) {
+  if (value.length > OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS) {
+    return "other";
+  }
+  if (value.startsWith("mcp__")) {
+    return "mcp";
+  }
+  if (value.startsWith("browser.") || value.startsWith("browser_")) {
+    return "browser";
+  }
+  if (value.startsWith("computer.") || value.startsWith("computer_")) {
+    return "computer";
+  }
+  if (value.startsWith("image.") || value.startsWith("image_")) {
+    return "image";
+  }
+  if (value.startsWith("web.") || value.startsWith("web_")) {
+    return "web";
+  }
+  if (!OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_KINDS.has(value)) {
     return "other";
   }
   return value;
