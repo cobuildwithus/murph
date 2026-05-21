@@ -89,7 +89,7 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
     });
   }
 
-  const requiresAiUsageDecision = hostedRuntimeDemandRequiresAiUsageDecision(
+  const shouldGateAiUsage = hostedRuntimeDemandNeedsAiUsageGate(
     run.source,
     {
       mailboxLag: input.mailboxLag,
@@ -99,7 +99,7 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
     },
   );
 
-  if (requiresAiUsageDecision) {
+  if (shouldGateAiUsage) {
     const gate = await resolveHostedRuntimeAiUsageDemandGate({
       now,
       userId: input.userId,
@@ -130,7 +130,6 @@ export async function buildHostedRuntimeDemand(input: HostedRuntimeDemandRequest
     kind: "run",
     mailboxLag: input.mailboxLag,
     reason: run.reason,
-    requiresAiUsageDecision,
     source: run.source,
     workspace,
   });
@@ -150,7 +149,7 @@ export function buildHostedRuntimeWorkspaceWakeKey(
   ].join(":");
 }
 
-export function hostedRuntimeDemandRequiresAiUsageDecision(
+export function hostedRuntimeDemandNeedsAiUsageGate(
   source: HostedRuntimeDemandRunSource,
   input: {
     mailboxLag: readonly HostedMailboxLaneLag[];
@@ -179,7 +178,7 @@ export function hostedRuntimeDemandRequiresAiUsageDecision(
       return true;
     }
 
-    return hostedRuntimeResultWakeRequiresAiUsageDecision(
+    return hostedRuntimeResultWakeNeedsAiUsageGate(
       input.runtimeResultWakeReason,
     );
   }
@@ -307,7 +306,7 @@ function isHostedRuntimeModelCapableWorkspaceWakeReason(
   return reason === "assistant" || reason === "assistant_due";
 }
 
-function hostedRuntimeResultWakeRequiresAiUsageDecision(
+function hostedRuntimeResultWakeNeedsAiUsageGate(
   reason: string | null,
 ): boolean {
   if (reason === "device-sync.reconcile" || reason === "mailbox") {

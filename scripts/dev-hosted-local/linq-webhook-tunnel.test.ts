@@ -73,6 +73,13 @@ const config: HostedLocalDevConfig = {
   skipStripeListen: false,
   skipWeb: false,
   skipVercelPull: false,
+  temporal: {
+    host: "127.0.0.1",
+    mode: "disabled",
+    namespace: "default",
+    port: 7233,
+    taskQueue: "murph-hosted-runtime",
+  },
   useVercelDatabaseUrl: false,
   webHost: "localhost",
   webPort: 3000,

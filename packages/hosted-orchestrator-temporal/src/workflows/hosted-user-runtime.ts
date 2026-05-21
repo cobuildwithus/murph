@@ -27,6 +27,7 @@ import type {
 
 export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
+export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
@@ -184,16 +185,36 @@ export function createHostedUserRuntimeWorkflowMachine(
 
       completedIterations += 1;
       const versionBeforeDemand = state.signalVersion;
-      const demand = await runtime.readRuntimeDemand({
-        browserVaultRefreshRequested: state.browserVaultRefreshRequested,
-        deviceSyncRecoveryRequested: state.deviceSyncRecoveryRequested,
-        ignoredWorkspaceWakeKey: state.ignoredWorkspaceWakeKey,
-        lagRecoveryObserved: state.lagRecoveryObserved,
-        manualRunRequested: state.manualRunRequested,
-        runtimeResultWakeAt: state.runtimeResultWakeAt,
-        runtimeResultWakeReason: state.runtimeResultWakeReason,
-        userId: input.userId,
-      });
+      let demand: HostedRuntimeDemand;
+      try {
+        demand = await runtime.readRuntimeDemand({
+          browserVaultRefreshRequested: state.browserVaultRefreshRequested,
+          deviceSyncRecoveryRequested: state.deviceSyncRecoveryRequested,
+          ignoredWorkspaceWakeKey: state.ignoredWorkspaceWakeKey,
+          lagRecoveryObserved: state.lagRecoveryObserved,
+          manualRunRequested: state.manualRunRequested,
+          runtimeResultWakeAt: state.runtimeResultWakeAt,
+          runtimeResultWakeReason: state.runtimeResultWakeReason,
+          userId: input.userId,
+        });
+      } catch (error) {
+        state.lastDemandKind = null;
+        state.lastDemandNextWakeAt = null;
+        state.lastDemandSource = "demand_read_failed";
+        state.lastExecutionErrorCode = readExecutionErrorCode(error);
+        if (state.signalVersion !== versionBeforeDemand) {
+          continue;
+        }
+        await waitUntilTimestampOrSignal(
+          runtime,
+          new Date(
+            runtime.nowMs() + HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS,
+          ).toISOString(),
+          state.signalVersion,
+          state,
+        );
+        continue;
+      }
 
       if (state.signalVersion !== versionBeforeDemand) {
         continue;

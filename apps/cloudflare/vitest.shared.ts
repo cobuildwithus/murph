@@ -18,6 +18,10 @@ export const cloudflareVitestAliases = [
       "apps/cloudflare/test/stubs/cloudflare-containers.ts",
     ),
   },
+  {
+    find: "server-only",
+    replacement: path.resolve(repoRoot, "apps/cloudflare/test/stubs/server-only.ts"),
+  },
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
       "@murphai/assistant-engine": "packages/assistant-engine/src/index.ts",

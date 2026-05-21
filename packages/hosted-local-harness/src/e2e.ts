@@ -29,6 +29,7 @@ export type HostedLocalE2eScenarioName =
   | "runner-warm-reuse"
   | "snapshot-stress"
   | "stuck-invocation-recovery"
+  | "temporal-orchestration"
   | "telegram"
   | "telegram-first-contact"
   | "vault-persistence";
@@ -91,6 +92,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     name: "mailbox-platform-env",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
+    name: "temporal-orchestration",
   },
   {
     aliases: ["linq-delivery"],

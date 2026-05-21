@@ -10,7 +10,15 @@ import {
   DEFAULT_LINQ_WEBHOOK_TUNNEL_NAME,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
 } from "./constants.ts";
-import type { HostedLocalDevConfig } from "./types.ts";
+import type {
+  HostedLocalDevConfig,
+  HostedLocalTemporalMode,
+} from "./types.ts";
+
+const DEFAULT_TEMPORAL_HOST = "127.0.0.1";
+const DEFAULT_TEMPORAL_NAMESPACE = "default";
+const DEFAULT_TEMPORAL_PORT = 7233;
+const DEFAULT_TEMPORAL_TASK_QUEUE = "murph-hosted-runtime";
 
 export const DEPRECATED_HOSTED_LOCAL_CODEX_BRIDGE_ENV_NAMES = [
   "MURPH_DEV_CODEX_BRIDGE",
@@ -44,6 +52,7 @@ export function resolveHostedLocalDevConfig(
     skipStripeListen: env.MURPH_DEV_SKIP_STRIPE_LISTEN === "1",
     skipWeb: env.MURPH_DEV_SKIP_WEB === "1",
     skipVercelPull: env.MURPH_DEV_SKIP_VERCEL_PULL === "1",
+    temporal: resolveHostedLocalTemporalConfig(env),
     useVercelDatabaseUrl: env.MURPH_DEV_USE_VERCEL_DATABASE_URL === "1",
     webHost: env.MURPH_DEV_WEB_HOST?.trim() || DEFAULT_WEB_HOST,
     webPort: parsePort(env.MURPH_DEV_WEB_PORT, DEFAULT_WEB_PORT, "MURPH_DEV_WEB_PORT"),
@@ -52,6 +61,71 @@ export function resolveHostedLocalDevConfig(
     workerPort: parsePort(env.MURPH_DEV_WORKER_PORT, DEFAULT_WORKER_PORT, "MURPH_DEV_WORKER_PORT"),
     workerProtocol: parseWorkerProtocol(env.MURPH_DEV_WORKER_PROTOCOL),
   };
+}
+
+function resolveHostedLocalTemporalConfig(
+  env: NodeJS.ProcessEnv,
+): HostedLocalDevConfig["temporal"] {
+  return {
+    host: env.MURPH_DEV_TEMPORAL_HOST?.trim() || DEFAULT_TEMPORAL_HOST,
+    mode: parseTemporalMode(env.MURPH_DEV_TEMPORAL, defaultTemporalMode(env)),
+    namespace:
+      env.TEMPORAL_NAMESPACE?.trim()
+      || env.HOSTED_TEMPORAL_NAMESPACE?.trim()
+      || DEFAULT_TEMPORAL_NAMESPACE,
+    port: parsePort(env.MURPH_DEV_TEMPORAL_PORT, DEFAULT_TEMPORAL_PORT, "MURPH_DEV_TEMPORAL_PORT"),
+    taskQueue:
+      env.TEMPORAL_TASK_QUEUE?.trim()
+      || env.HOSTED_TEMPORAL_TASK_QUEUE?.trim()
+      || DEFAULT_TEMPORAL_TASK_QUEUE,
+  };
+}
+
+function defaultTemporalMode(env: NodeJS.ProcessEnv): HostedLocalTemporalMode {
+  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
+  if (
+    env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "e2e:stub"
+    || profile === "e2e:live"
+  ) {
+    return "managed";
+  }
+
+  if (profile === "worker-only" || env.MURPH_DEV_SKIP_WEB === "1") {
+    return "disabled";
+  }
+
+  if (env.HOSTED_TEMPORAL_ADDRESS?.trim() || env.TEMPORAL_ADDRESS?.trim()) {
+    return "external";
+  }
+
+  return "disabled";
+}
+
+export function parseTemporalMode(
+  value: string | undefined,
+  fallback: HostedLocalTemporalMode = "disabled",
+): HostedLocalTemporalMode {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) {
+    return "disabled";
+  }
+
+  if (["1", "true", "yes", "on", "managed"].includes(normalized)) {
+    return "managed";
+  }
+
+  if (normalized === "external") {
+    return "external";
+  }
+
+  throw new Error(
+    "MURPH_DEV_TEMPORAL must be managed, external, disabled, 1, or 0.",
+  );
 }
 
 export function assertNoDeprecatedHostedLocalCodexBridgeEnv(
@@ -150,6 +224,11 @@ export function printHelp(): void {
       "  MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...  Explicit public Linq webhook URL or HTTPS origin",
       "  HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...  Comma-separated sender phone allowlist for local Linq webhooks",
       "  MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 Skip Linq webhook subscription registration while still using the tunnel public URL",
+      "  MURPH_DEV_TEMPORAL=disabled        Temporal mode: managed starts local Temporal + worker, external uses caller-supplied Temporal, disabled skips orchestration",
+      "  MURPH_DEV_TEMPORAL_HOST=127.0.0.1  Local Temporal dev server bind host for managed mode",
+      "  MURPH_DEV_TEMPORAL_PORT=7233       Local Temporal frontend gRPC port",
+      "  TEMPORAL_NAMESPACE=default         Temporal namespace for web signals and worker polling",
+      "  TEMPORAL_TASK_QUEUE=murph-hosted-runtime Temporal task queue for hosted runtime workflows",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
       "  MURPH_DEV_WEB_HOST=localhost        Hosted web listen host",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",

@@ -84,6 +84,12 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("temporal-orchestration")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
+    );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
+      "temporal-orchestration",
+    );
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
@@ -154,6 +160,7 @@ describe("hosted-local harness", () => {
     expect(result.env.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS).toBe("250");
     expect(result.env.MURPH_DEV_CODEX_BRIDGE).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
+    expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
   });
 
   test("keeps E2E profile defaults away from live tunnels and listeners", () => {
@@ -167,6 +174,7 @@ describe("hosted-local harness", () => {
     expect(result.env.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_STRIPE_LISTEN).toBe("1");
     expect(result.env.MURPH_DEV_SKIP_VERCEL_PULL).toBe("1");
+    expect(result.env.MURPH_DEV_TEMPORAL).toBe("managed");
   });
 
   test("redacts identifiers, payload-like env values, and command secrets in state files", async () => {

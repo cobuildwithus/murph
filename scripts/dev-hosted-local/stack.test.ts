@@ -11,6 +11,7 @@ import type {
   HostedLocalDevConfig,
 } from "./types.ts";
 import type { HostedLocalWorkerPortMode } from "./runtime.ts";
+import type { HostedLocalTemporalRuntime } from "./temporal.ts";
 
 type HostedLocalLinqWebhookSetup = {
   phoneNumbers: readonly string[] | null;
@@ -53,6 +54,13 @@ const defaultConfig: HostedLocalDevConfig = {
   skipStripeListen: true,
   skipWeb: false,
   skipVercelPull: false,
+  temporal: {
+    host: "127.0.0.1",
+    mode: "disabled",
+    namespace: "default",
+    port: 7233,
+    taskQueue: "murph-hosted-runtime",
+  },
   useVercelDatabaseUrl: false,
   webHost: "localhost",
   webPort: 3000,
@@ -175,6 +183,28 @@ const maybeStartHostedLocalMinio = vi.fn<
   } | null>
 >(async () => null);
 const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
+const buildHostedLocalTemporalRuntimeEnv = vi.fn((input: {
+  config: HostedLocalDevConfig;
+  env: NodeJS.ProcessEnv;
+}) => {
+  if (input.config.temporal.mode === "disabled") {
+    return {};
+  }
+
+  const address = `${input.config.temporal.host}:${input.config.temporal.port}`;
+  return {
+    HOSTED_TEMPORAL_ADDRESS: address,
+    HOSTED_TEMPORAL_NAMESPACE: input.config.temporal.namespace,
+    HOSTED_TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
+    TEMPORAL_ADDRESS: address,
+    TEMPORAL_NAMESPACE: input.config.temporal.namespace,
+    TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
+    TEMPORAL_TLS_ENABLED: "false",
+  };
+});
+const startHostedLocalTemporalRuntime = vi.fn<
+  (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
+>(async () => null);
 
 vi.mock("node:fs/promises", () => ({
   access: vi.fn(async () => {
@@ -292,6 +322,11 @@ vi.mock("./linq-webhook-tunnel.ts", () => ({
 vi.mock("./minio.ts", () => ({
   cleanupHostedLocalMinioContainerBestEffort,
   maybeStartHostedLocalMinio,
+}));
+
+vi.mock("./temporal.ts", () => ({
+  buildHostedLocalTemporalRuntimeEnv,
+  startHostedLocalTemporalRuntime,
 }));
 
 vi.mock("./runtime.ts", () => ({
@@ -535,6 +570,72 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("starts managed Temporal as part of the hosted-local process model", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      temporal: {
+        host: "127.0.0.1",
+        mode: "managed",
+        namespace: "hosted-local-test",
+        port: 7243,
+        taskQueue: "hosted-local-test-queue",
+      },
+    });
+    const temporalServer = createBufferedChild({
+      exitCode: null,
+      name: "temporal-server",
+      pid: 201,
+    });
+    const temporalWorker = createBufferedChild({
+      exitCode: null,
+      name: "temporal-worker",
+      pid: 202,
+    });
+    startHostedLocalTemporalRuntime.mockResolvedValueOnce({
+      address: "127.0.0.1:7243",
+      namespace: "hosted-local-test",
+      serverProcess: temporalServer,
+      stop: vi.fn(async () => {}),
+      taskQueue: "hosted-local-test-queue",
+      workerProcess: temporalWorker,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 203 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 204 }));
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      cloudflareHostedControlBaseUrl: "http://127.0.0.1:8787",
+      config: expect.objectContaining({
+        temporal: expect.objectContaining({
+          mode: "managed",
+          port: 7243,
+        }),
+      }),
+      env: expect.objectContaining({
+        HOSTED_TEMPORAL_ADDRESS: "127.0.0.1:7243",
+        HOSTED_TEMPORAL_NAMESPACE: "hosted-local-test",
+        HOSTED_TEMPORAL_TASK_QUEUE: "hosted-local-test-queue",
+        TEMPORAL_ADDRESS: "127.0.0.1:7243",
+        TEMPORAL_NAMESPACE: "hosted-local-test",
+        TEMPORAL_TASK_QUEUE: "hosted-local-test-queue",
+      }),
+      hostedWebBaseUrl: "http://localhost:3000",
+    }));
+    expect(stack.processes.temporalServer).toBe(temporalServer);
+    expect(stack.processes.temporalWorker).toBe(temporalWorker);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(4);
   });
 
   it("rejects E2E isolation when a stack would overlap interactive dev defaults", async () => {

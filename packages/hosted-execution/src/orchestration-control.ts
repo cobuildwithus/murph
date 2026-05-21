@@ -144,7 +144,6 @@ export type HostedRuntimeDemand =
       kind: "run";
       mailboxLag: HostedMailboxLaneLag[];
       reason: HostedWorkspaceInvocationReason;
-      requiresAiUsageDecision: boolean;
       source: HostedRuntimeDemandRunSource;
       workspace: HostedRuntimeDemandWorkspaceProjection | null;
     }

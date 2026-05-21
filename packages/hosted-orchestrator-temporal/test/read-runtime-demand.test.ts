@@ -23,7 +23,6 @@ describe("readRuntimeDemand", () => {
       kind: "run",
       mailboxLag: [],
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace: {
         nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -106,7 +105,6 @@ describe("readRuntimeDemand", () => {
       kind: "run",
       mailboxLag: [],
       reason: "nudge",
-      requiresAiUsageDecision: true,
       source: "mailbox_backlog",
       workspace: {
         nextWakeAt: null,

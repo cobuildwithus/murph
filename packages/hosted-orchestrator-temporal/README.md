@@ -15,6 +15,19 @@ pnpm temporal:cli:setup
 pnpm temporal:cli:check
 ```
 
+Hosted-local E2E profiles start a managed local Temporal dev server and the
+hosted runtime worker through the canonical hosted-local stack:
+
+```bash
+pnpm hosted-local e2e temporal-orchestration --profile e2e:stub
+```
+
+That scenario signals through the web Temporal client, queries the workflow, and
+expects the worker Activities to reach the hosted web demand endpoint and the
+Cloudflare ensure-execution adapter.
+
+For manual standalone Temporal development, start the server directly:
+
 Start a local Temporal dev server:
 
 ```bash
@@ -67,6 +80,11 @@ execution still requires the local web and Cloudflare adapter endpoints above.
 
 Temporal connection:
 
+- `MURPH_DEV_TEMPORAL`: hosted-local mode, one of `managed`, `external`, or
+  `disabled`. E2E profiles default to `managed`; interactive dev defaults to
+  `disabled` unless Temporal env is explicit.
+- `MURPH_DEV_TEMPORAL_HOST` / `MURPH_DEV_TEMPORAL_PORT`: local dev server bind
+  address for managed hosted-local Temporal.
 - `TEMPORAL_ADDRESS`: Temporal frontend address, for example `localhost:7233`.
 - `TEMPORAL_NAMESPACE`: namespace, defaults to `default`.
 - `TEMPORAL_TASK_QUEUE`: task queue, defaults to `murph-hosted-runtime`.

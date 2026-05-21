@@ -245,7 +245,6 @@ export function parseHostedRuntimeDemand(value: unknown): HostedRuntimeDemand {
         "kind",
         "mailboxLag",
         "reason",
-        "requiresAiUsageDecision",
         "source",
         "workspace",
       ]);
@@ -259,10 +258,6 @@ export function parseHostedRuntimeDemand(value: unknown): HostedRuntimeDemand {
         reason: parseHostedWorkspaceInvocationReason(
           record.reason,
           "Hosted runtime run demand reason",
-        ),
-        requiresAiUsageDecision: requireBoolean(
-          record.requiresAiUsageDecision,
-          "Hosted runtime run demand requiresAiUsageDecision",
         ),
         source: parseAllowedString(
           record.source,

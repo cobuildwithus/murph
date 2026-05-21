@@ -11,7 +11,16 @@ namespace="${TEMPORAL_NAMESPACE:-default}"
 ip="${TEMPORAL_DEV_IP:-127.0.0.1}"
 port="${TEMPORAL_DEV_PORT:-7233}"
 
-exec temporal server start-dev \
-  --namespace "$namespace" \
-  --ip "$ip" \
+args=(
+  server
+  start-dev
+  --namespace "$namespace"
+  --ip "$ip"
   --port "$port"
+)
+
+if [[ "${TEMPORAL_DEV_HEADLESS:-0}" == "1" ]]; then
+  args+=(--headless)
+fi
+
+exec temporal "${args[@]}"
