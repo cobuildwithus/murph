@@ -1851,7 +1851,7 @@ describe("cloudflare worker routes", () => {
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { invoke, runner, sql } = createRuntimeControlRunnerHarness({
         ensureProcessing: vi.fn(async () => ({
-          kind: "retry-scheduled" as const,
+          kind: "wake-unconfirmed" as const,
           reason: "container-rpc-timeout" as const,
         })),
       });
