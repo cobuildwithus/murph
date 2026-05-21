@@ -1,5 +1,4 @@
 import {
-  parseHostedAiUsageAllowDecision,
   HOSTED_WORKSPACE_INVOCATION_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxLaneLag,
@@ -330,19 +329,11 @@ export function parseHostedRuntimeEnsureExecutionRequest(
 ): HostedRuntimeEnsureExecutionRequest {
   const record = requireObject(value, "Hosted runtime ensure-execution request");
   assertExactKeys(record, "Hosted runtime ensure-execution request", [
-    "aiUsageAllowDecision",
     "orchestrationAttemptId",
     "reason",
   ]);
 
   return {
-    ...(record.aiUsageAllowDecision === undefined
-      ? {}
-      : {
-          aiUsageAllowDecision: record.aiUsageAllowDecision === null
-            ? null
-            : parseHostedAiUsageAllowDecision(record.aiUsageAllowDecision),
-        }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-execution request orchestrationAttemptId",

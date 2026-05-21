@@ -1090,13 +1090,14 @@ describe("hosted runtime control contracts", () => {
     });
   });
 
-  it("treats malformed optional runner nudge allow decisions as absent", () => {
-    expect(parseHostedRunnerNudgeRequest({
+  it("rejects legacy runner nudge allow decisions", () => {
+    expect(parseHostedRunnerNudgeRequest({})).toEqual({});
+    expect(() => parseHostedRunnerNudgeRequest({
       aiUsageAllowDecision: {
         allowed: false,
         schema: "murph.hosted-ai-usage-allow-decision.v1",
       },
-    })).toEqual({});
+    })).toThrow("runner nudge request must not include legacy fields.");
   });
 
   it("publishes the runtime-control subpath without restoring removed client surfaces", async () => {

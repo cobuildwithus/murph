@@ -144,8 +144,9 @@ Murph decides what demand means.
 Workflow implementations must version-gate flag clearing around awaited demand
 and execution calls. If a signal arrives while an Activity is running, the loop
 must keep the existing flags and re-read demand instead of clearing state derived
-from a stale read. Workflow timers should use `sleep()` for timer-only waits and
-`condition()` only when waiting for a signal predicate with a timeout.
+from a stale read. Workflow timers that should be preempted by fresh signals,
+including active-runtime recheck waits, must use a signal-aware `condition()`
+timeout instead of a bare timer sleep.
 
 The workflow type constant must match the exported workflow function name
 exactly. Temporal TypeScript workflow type names are function names, so renaming
@@ -204,20 +205,21 @@ POST /internal/users/:userId/runtime/ensure-execution
 ```
 
 Temporal signs this request with the hosted internal callback key and includes
-the bound hosted user header in the signature input. Cloudflare accepts that
-signed form for Temporal while retaining Vercel OIDC for existing web-owned
-control clients during cutover. Do not introduce a static shared bearer token
-for this adapter.
+the bound hosted user header in the signature input. Cloudflare accepts only
+that signed form for the runtime execution adapter; Vercel OIDC remains for
+browser-vault, status, and deletion control clients. Do not introduce a static
+shared bearer token for this adapter.
 
 Request summary:
 
 - `reason`: the runtime invocation reason selected by web demand.
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
   idempotency at the orchestration boundary.
-- Optional Activity-local signed usage decision. The workflow never receives or
-  stores this decision. Web demand returns `requiresAiUsageDecision`; the
-  `ensureCloudflareExecution` Activity fetches a fresh signed web usage decision
-  inside the Activity when needed and passes it directly to Cloudflare.
+
+The request does not carry signed AI usage decisions. Web demand gates the
+sources that strongly imply foreground model work before Temporal calls
+Cloudflare, and the runtime/provider layer enforces spend before actual model
+calls.
 
 Response summary:
 
@@ -231,8 +233,9 @@ Response summary:
 
 The adapter must not return `caught-up`, `mailboxLag`, `nextAlarmAt`, or
 completion status. Those belong to web demand/status plus the Temporal loop.
-Transport failures are Activity exceptions, not workflow success unions. The
-workflow sees thrown Activity failures and relies on Temporal retry policy.
+Transport failures are Activity exceptions, not workflow success unions. After
+the Activity retry policy is exhausted, the per-user workflow records compact
+failure metadata, waits on a signal-aware retry timer, and keeps running.
 Business blocked states such as usage denial are demand responses from web.
 
 Cloudflare may:
@@ -338,8 +341,8 @@ The hard-cut architecture is accepted when:
   scheduling metadata only and should not force a workspace checkpoint.
 - Temporal stores no full `HostedWorkspaceState`, no full
   `HostedWorkspaceInvocationResult`, and no signed usage decision.
-- Demand returns `requiresAiUsageDecision`; the execution Activity fetches any
-  fresh signed decision Activity-locally.
+- Demand returns `requiresAiUsageDecision` as gating metadata only. The
+  execution Activity does not fetch or forward signed usage decisions.
 - Workflow flag clearing is version-gated across awaited demand/execution calls.
 - Active-wake rechecks use `recommendedRecheckAt` or an env-derived idle
   checkpoint delay, not a one-second loop.

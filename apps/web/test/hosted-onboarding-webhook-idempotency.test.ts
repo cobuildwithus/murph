@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
-    input: { aiUsageAllowDecision?: unknown; context?: string; timeoutMs?: number; userId: string },
+    input: { context?: string; timeoutMs?: number; userId: string },
   ) => {
     void input;
     return {

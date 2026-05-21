@@ -22,7 +22,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
       "deleteUserData",
-      "ensureRuntimeExecution",
       "getRunnerStatus",
     ]);
   });
@@ -81,12 +80,6 @@ describe("createCloudflareHostedControlClient", () => {
     expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
-    expect(() =>
-      client.ensureRuntimeExecution("", {
-        orchestrationAttemptId: "orchestration-attempt-test",
-        reason: "nudge",
-      })
-    ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
@@ -515,78 +508,6 @@ describe("createCloudflareHostedControlClient", () => {
     await expect(client.getRunnerStatus("user_123")).rejects.toThrow(
       "Hosted runner status workspace.userId must match the requested userId.",
     );
-  });
-
-  it("posts runtime ensure-execution requests with the bound user header", async () => {
-    let observedRequest: ObservedRequest | null = null;
-    const result = {
-      kind: "runtime_wake_sent",
-      recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
-    } as const;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async (url, init) => {
-        observedRequest = { init, url: String(url) };
-        return createJsonResponse(result);
-      }) as typeof fetch,
-      getBearerToken: async () => "test-token",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.ensureRuntimeExecution("test-user", {
-      orchestrationAttemptId: "orchestration-attempt-test",
-      reason: "nudge",
-    })).resolves.toEqual(result);
-
-    const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/test-user/runtime/ensure-execution");
-    expect(request.init?.method).toBe("POST");
-    expect(JSON.parse(String(request.init?.body))).toEqual({
-      orchestrationAttemptId: "orchestration-attempt-test",
-      reason: "nudge",
-    });
-    expect(new Headers(request.init?.headers).has("authorization")).toBe(true);
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("test-user");
-  });
-
-  it("parses completed runtime ensure-execution responses", async () => {
-    const result = {
-      action: "started",
-      kind: "runtime_completed",
-      runtimeAttemptId: "runtime-attempt-test",
-      runtimeResultNextWakeAt: null,
-      runtimeStatus: "idle",
-    } as const;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async () => createJsonResponse(result)) as typeof fetch,
-      getBearerToken: async () => "test-token",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.ensureRuntimeExecution("test-user", {
-      aiUsageAllowDecision: null,
-      orchestrationAttemptId: "orchestration-attempt-test",
-      reason: "manual",
-    })).resolves.toEqual(result);
-  });
-
-  it("rejects malformed runtime ensure-execution responses", async () => {
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async () => createJsonResponse({
-        kind: "caught_up",
-        runtimeAttemptId: "runtime-attempt-test",
-      })) as typeof fetch,
-      getBearerToken: async () => "test-token",
-      timeoutMs: 2_500,
-    });
-
-    await expect(client.ensureRuntimeExecution("test-user", {
-      orchestrationAttemptId: "orchestration-attempt-test",
-      reason: "nudge",
-    })).rejects.toThrow("Hosted runtime ensure-execution response kind is not supported.");
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {

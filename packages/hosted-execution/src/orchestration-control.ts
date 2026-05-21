@@ -1,5 +1,4 @@
 import type {
-  HostedAiUsageAllowDecision,
   HostedMailboxLane,
   HostedMailboxLaneLag,
   HostedWorkspaceInvocationReason,
@@ -163,7 +162,6 @@ export type HostedRuntimeDemand =
     };
 
 export interface HostedRuntimeEnsureExecutionRequest {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
 }

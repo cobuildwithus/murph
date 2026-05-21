@@ -132,7 +132,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
-      aiUsageAllowDecision: plan.aiUsageAllowDecision ?? null,
       eventId: event.event_id,
       mailboxItemId: plan.wakeMailboxItemId,
       response: plan.response,
@@ -264,7 +263,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   }
 
   await maybeHandoffHostedExecutionWebhookWake({
-    aiUsageAllowDecision: plan.aiUsageAllowDecision ?? null,
     eventId,
     mailboxItemId: plan.wakeMailboxItemId,
     response: plan.response,

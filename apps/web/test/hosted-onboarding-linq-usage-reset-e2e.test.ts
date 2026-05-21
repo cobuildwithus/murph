@@ -72,7 +72,6 @@ const mocks = vi.hoisted(() => {
     lookupHostedMemberRoutingByPendingLinqParticipantContactLookupKey: vi.fn(),
     nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
       input?: {
-        aiUsageAllowDecision?: unknown;
         context?: string;
         timeoutMs?: number;
         userId: string;

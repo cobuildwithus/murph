@@ -1,5 +1,4 @@
 import {
-  type HostedAiUsageAllowDecision,
   type HostedRunnerNudgeResult,
   type HostedRunnerNudgeRequest,
   type HostedRunnerStatusResponse,
@@ -127,7 +126,6 @@ interface RunnerUserStores {
 }
 
 interface LegacyRunnerExecutionInput {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   reason: HostedWorkspaceInvocationReason;
 }
 
@@ -284,7 +282,6 @@ export class HostedUserRunner {
   async nudgeHostedRunner(input: HostedRunnerNudgeRequest = {}): Promise<HostedRunnerNudgeResult> {
     const record = await this.stateStore.readState();
     const execution = await this.ensureRuntimeExecutionForUser({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("nudge"),
       reason: "nudge",
       userId: record.userId,
@@ -578,7 +575,6 @@ export class HostedUserRunner {
   async runUntilIdleOrBudget(input: LegacyRunnerExecutionInput): Promise<HostedWorkspaceInvocationResult> {
     const record = await this.stateStore.readState();
     const execution = await this.ensureRuntimeExecutionForUser({
-      aiUsageAllowDecision: input.aiUsageAllowDecision ?? null,
       orchestrationAttemptId: createLegacyCloudflareOrchestrationAttemptId("run-until-idle"),
       reason: input.reason,
       userId: record.userId,
@@ -676,6 +672,11 @@ export class HostedUserRunner {
     await this.syncWatchdogAlarm(await this.stateStore.readState());
 
     let workspaceVersion: string | null = null;
+    let result: HostedWorkspaceInvocationResult;
+    let completed: {
+      completed: boolean;
+      record: RunnerStateRecord;
+    };
     try {
       const workspaceRead = await this.readHostedWorkspaceFromWeb(input.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.userId);
@@ -685,18 +686,17 @@ export class HostedUserRunner {
         workspaceVersion,
       });
 
-      const result = await this.invokeWorkspaceRunner({
+      result = await this.invokeWorkspaceRunner({
         token,
         reason: input.reason,
         userId: input.userId,
         workspace: workspaceRead.workspace,
         workspaceVersion,
       });
-      const completed = await this.stateStore.clearWriteFenceAfterCompletion({
+      completed = await this.stateStore.clearWriteFenceAfterCompletion({
         finishedAt: new Date().toISOString(),
         token,
       });
-      await this.syncWatchdogAlarm(completed.record);
       if (!completed.completed) {
         throw new HostedRuntimeExecutionRetryableError(
           "Hosted runtime execution completed after its write fence changed.",
@@ -704,28 +704,6 @@ export class HostedUserRunner {
         );
       }
 
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          orchestrationAttemptId: input.orchestrationAttemptId,
-          runtimeExecutionDurationMs: Date.now() - runtimeWakeStartedAt,
-          runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
-          workspaceAttemptId: token.attemptId,
-          workspaceStatus: result.status,
-          workspaceVersion,
-        },
-        message: "Hosted runner runtime execution adapter completed.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-
-      return {
-        action,
-        kind: "runtime_completed",
-        runtimeAttemptId: token.attemptId,
-        runtimeResultNextWakeAt: result.nextWakeAt ?? null,
-        runtimeStatus: result.status,
-      };
     } catch (error) {
       const failed = await this.stateStore.clearWriteFenceAfterTransportFailure({
         error,
@@ -749,6 +727,62 @@ export class HostedUserRunner {
         userId: input.userId,
       });
       throw error;
+    }
+
+    await this.syncWatchdogAlarmAfterCompletion({
+      executionInput: input,
+      record: completed.record,
+      token,
+      workspaceVersion,
+    });
+
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        runtimeExecutionDurationMs: Date.now() - runtimeWakeStartedAt,
+        runtimeResultNextWakeAtPresent: result.nextWakeAt != null,
+        workspaceAttemptId: token.attemptId,
+        workspaceStatus: result.status,
+        workspaceVersion,
+      },
+      message: "Hosted runner runtime execution adapter completed.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+
+    return {
+      action,
+      kind: "runtime_completed",
+      runtimeAttemptId: token.attemptId,
+      runtimeResultNextWakeAt: result.nextWakeAt ?? null,
+      runtimeStatus: result.status,
+    };
+  }
+
+  private async syncWatchdogAlarmAfterCompletion(input: {
+    executionInput: RuntimeExecutionInput;
+    record: RunnerStateRecord;
+    token: RunnerWriteFenceToken;
+    workspaceVersion: string | null;
+  }): Promise<void> {
+    try {
+      await this.syncWatchdogAlarm(input.record);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
+          workspaceAttemptId: input.token.attemptId,
+          workspaceReason: input.executionInput.reason,
+          workspaceVersion: input.workspaceVersion,
+        },
+        level: "warn",
+        message: "Hosted runner runtime execution completed but watchdog alarm cleanup failed.",
+        phase: "checkpoint",
+        userId: input.executionInput.userId,
+      });
     }
   }
 

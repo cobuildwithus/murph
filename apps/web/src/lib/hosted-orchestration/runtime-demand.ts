@@ -28,12 +28,8 @@ import {
 } from "./runtime-usage-decision";
 
 const HOSTED_RUNTIME_AI_USAGE_SOURCES = new Set<HostedRuntimeDemandRunSource>([
-  "device_sync_recovery",
-  "lag_recovery",
   "mailbox_backlog",
   "manual",
-  "runtime_result_wake",
-  "workspace_wake",
 ]);
 
 export async function readHostedRuntimeDemand(

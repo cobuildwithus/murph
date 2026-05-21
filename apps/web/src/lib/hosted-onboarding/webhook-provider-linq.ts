@@ -51,7 +51,6 @@ import {
   claimHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
-import { createHostedAiUsageAllowDecision } from "../hosted-execution/usage-gate-allow-decision";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -422,9 +421,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildActiveMemberDirectPlan({
-        aiUsageAllowDecision: await createHostedAiUsageAllowDecision({
-          memberId: existingMember.id,
-        }),
         desiredSideEffects: [],
         response: {
           ok: true,

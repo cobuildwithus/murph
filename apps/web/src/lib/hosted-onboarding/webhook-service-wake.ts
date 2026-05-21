@@ -8,7 +8,6 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
-import type { HostedAiUsageAllowDecision } from "@murphai/hosted-execution/runtime-control";
 
 export type HostedWebhookWakeHandoffResult =
   | {
@@ -25,7 +24,6 @@ export type HostedWebhookWakeHandoffResult =
     };
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   eventId: string;
   mailboxItemId?: string;
   response: HostedWebhookServiceResponse;

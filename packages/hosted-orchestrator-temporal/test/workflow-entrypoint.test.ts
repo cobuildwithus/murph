@@ -12,7 +12,6 @@ const continueAsNew = vi.fn(async () => {
 const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
 const setHandler = vi.fn();
-const sleep = vi.fn(async () => undefined);
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
 const proxyActivities = vi.fn(() => ({
   ensureCloudflareExecution,
@@ -33,7 +32,6 @@ vi.mock("@temporalio/workflow", () => ({
   defineSignal,
   proxyActivities,
   setHandler,
-  sleep,
   uuid4,
 }));
 

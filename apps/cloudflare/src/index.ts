@@ -118,7 +118,6 @@ type RouteMatcher = (pathname: string) => RouteParams | null;
 type WorkerRouteAuthorization =
   | "vercel-oidc"
   | "web-callback-signature"
-  | "vercel-oidc-or-web-callback-signature"
   | null;
 type WrongMethodResponse = "method-not-allowed" | "not-found";
 
@@ -260,7 +259,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   },
   {
     authorizeBeforeMethod: true,
-    authorization: "vercel-oidc-or-web-callback-signature",
+    authorization: "web-callback-signature",
     beforeMethod(context, params) {
       return requireBoundInternalRouteUser(context, params, "runtime-ensure-execution");
     },
@@ -612,62 +611,6 @@ async function authorizeRoute(
         }, context.request),
         level: "warn",
         message: "Hosted worker route rejected an internal request after callback signature verification failed.",
-        phase: "failed",
-      });
-      return unauthorized();
-    }
-    case "vercel-oidc-or-web-callback-signature": {
-      const validation = context.environment?.vercelOidcValidation;
-      if (
-        validation
-        && await verifyHostedExecutionVercelOidcRequest({
-          request: context.request,
-          validation,
-        })
-      ) {
-        return null;
-      }
-
-      const callbackSigning = context.environment?.webCallbackSigning;
-      const url = context.url;
-      if (callbackSigning && url) {
-        let payload: string;
-        try {
-          payload = await readCachedRequestText(context, {
-            limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-          });
-        } catch (error) {
-          if (isRequestBodyTooLargeError(error)) {
-            return jsonError("Request body too large.", 413);
-          }
-
-          throw error;
-        }
-
-        const verified = await verifyHostedWebCallbackSignatureHeaders({
-          environment: callbackSigning,
-          method: context.request.method,
-          path: url.pathname,
-          payload,
-          request: context.request,
-          search: url.search,
-          userId: readOptionalHostedExecutionUserIdHeader(context.request),
-        });
-
-        if (verified) {
-          return null;
-        }
-      }
-
-      emitHostedExecutionStructuredLog({
-        component: "worker",
-        details: buildWorkerRouteLogDetails({
-          authScheme: "vercel-oidc-or-web-callback-signature",
-          reason: "authorization-verification-failed",
-          routeName,
-        }, context.request),
-        level: "warn",
-        message: "Hosted worker route rejected an internal request after all supported authorization checks failed.",
         phase: "failed",
       });
       return unauthorized();

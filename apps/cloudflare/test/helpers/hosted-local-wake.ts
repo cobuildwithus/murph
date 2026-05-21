@@ -1,13 +1,22 @@
-import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeEnsureExecutionResponse } from "@murphai/hosted-execution/orchestration-control";
+import {
+  parseHostedRuntimeEnsureExecutionRequest,
+  parseHostedRuntimeEnsureExecutionResponse,
+} from "@murphai/hosted-execution/parsers";
 import {
   appendHostedExecutionWakeForTest,
   type HostedMailboxAppendForTestResponse,
 } from "#hosted-web-testing";
 
-import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
-
 import type { HostedLocalDevHarness } from "./hosted-local-dev-harness.js";
+import {
+  createHostedWebCallbackSignatureHeaders,
+  readHostedWebCallbackSigningEnvironment,
+} from "../../src/web-callback-auth.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const HOSTED_LOCAL_WORKER_RESTART_BODY = "Your worker restarted mid-request.";
@@ -48,63 +57,43 @@ export async function appendHostedWake(input: {
   });
 }
 
-function createHostedLocalCloudflareControlClient(
-  harness: HostedLocalDevHarness,
-) {
-  return createCloudflareHostedControlClient({
-    allowHttpLocalhost: true,
-    baseUrl: harness.workerBaseUrl,
-    fetchImpl: async (input, init) => {
-      for (let attempt = 0; attempt <= HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES; attempt += 1) {
-        const response = await fetch(input, init);
-
-        if (response.ok) {
-          return response;
-        }
-
-        const body = await response.text();
-        if (
-          shouldRetryHostedLocalWorkerRestart({
-            attempt,
-            body,
-            status: response.status,
-          })
-        ) {
-          await sleep(250 * (attempt + 1));
-          continue;
-        }
-
-        throw new Error(formatHostedLocalWorkerControlFailure({
-          body,
-          harness,
-          method: init?.method ?? "GET",
-          status: response.status,
-          url: String(input),
-        }));
-      }
-
-      throw new Error(formatHostedLocalWorkerControlFailure({
-        body: "Exceeded local worker restart retries.",
-        harness,
-        method: init?.method ?? "GET",
-        status: 503,
-        url: String(input),
-      }));
-    },
-    getBearerToken: async () => harness.oidcToken,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-  });
-}
-
 export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   userId: string;
 }): Promise<HostedRuntimeEnsureExecutionResponse> {
-  return await createHostedLocalCloudflareControlClient(input.harness)
-    .ensureRuntimeExecution(input.userId, {
-      orchestrationAttemptId: `hosted-local-wake:${input.userId}`,
-      reason: "nudge",
-    });
+  const path = `/internal/users/${encodeURIComponent(input.userId)}/runtime/ensure-execution`;
+  const url = new URL(path, `${input.harness.workerBaseUrl}/`);
+  const requestBody = JSON.stringify(parseHostedRuntimeEnsureExecutionRequest({
+    orchestrationAttemptId: `hosted-local-wake:${input.userId}`,
+    reason: "nudge",
+  }));
+  const headers = new Headers({
+    "content-type": "application/json; charset=utf-8",
+    [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+  });
+  const callbackSigning = readHostedWebCallbackSigningEnvironment(
+    input.harness.workerRuntimeEnv ?? input.harness.runtimeEnv,
+  );
+  const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+    environment: callbackSigning,
+    method: "POST",
+    path: url.pathname,
+    payload: requestBody,
+    search: url.search,
+    userId: input.userId,
+  });
+  for (const [key, value] of Object.entries(signatureHeaders)) {
+    headers.set(key, value);
+  }
+
+  const response = await fetchHostedLocalWorkerControl(input.harness, url, {
+    body: requestBody,
+    headers,
+    method: "POST",
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+  });
+
+  return parseHostedRuntimeEnsureExecutionResponse(await response.json());
 }
 
 export async function wakeHostedWorkerForLatestPendingWake(input: {
@@ -142,6 +131,48 @@ function formatHostedLocalWorkerControlFailure(input: {
   }
 
   return details.join("\n\n");
+}
+
+async function fetchHostedLocalWorkerControl(
+  harness: HostedLocalDevHarness,
+  url: URL,
+  init: RequestInit,
+): Promise<Response> {
+  for (let attempt = 0; attempt <= HOSTED_LOCAL_WORKER_RESTART_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(url, init);
+
+    if (response.ok) {
+      return response;
+    }
+
+    const body = await response.text();
+    if (
+      shouldRetryHostedLocalWorkerRestart({
+        attempt,
+        body,
+        status: response.status,
+      })
+    ) {
+      await sleep(250 * (attempt + 1));
+      continue;
+    }
+
+    throw new Error(formatHostedLocalWorkerControlFailure({
+      body,
+      harness,
+      method: init.method ?? "GET",
+      status: response.status,
+      url: String(url),
+    }));
+  }
+
+  throw new Error(formatHostedLocalWorkerControlFailure({
+    body: "Exceeded local worker restart retries.",
+    harness,
+    method: init.method ?? "GET",
+    status: 503,
+    url: String(url),
+  }));
 }
 
 function shouldRetryHostedLocalWorkerRestart(input: {

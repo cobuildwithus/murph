@@ -13,22 +13,15 @@ import {
 import {
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
-  parseHostedRuntimeEnsureExecutionRequest,
-  parseHostedRuntimeEnsureExecutionResponse,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  HostedRuntimeEnsureExecutionRequest,
-  HostedRuntimeEnsureExecutionResponse,
-} from "@murphai/hosted-execution";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlRuntimeEnsureExecutionPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -70,12 +63,6 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
-export type CloudflareHostedControlRuntimeEnsureExecutionRequest =
-  HostedRuntimeEnsureExecutionRequest;
-
-export type CloudflareHostedControlRuntimeEnsureExecutionResponse =
-  HostedRuntimeEnsureExecutionResponse;
-
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -84,10 +71,6 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  ensureRuntimeExecution(
-    userId: string,
-    input: CloudflareHostedControlRuntimeEnsureExecutionRequest,
-  ): Promise<CloudflareHostedControlRuntimeEnsureExecutionResponse>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -176,29 +159,6 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlUserDataDeletionPath(expectedUserId),
         request: {
           body: "{}",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    ensureRuntimeExecution(userId, input) {
-      const expectedUserId = requireCloudflareHostedControlUserId(userId);
-      const request = parseHostedRuntimeEnsureExecutionRequest(input);
-      const body = JSON.stringify(request);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: expectedUserId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "runtime ensure execution",
-        parse: parseHostedRuntimeEnsureExecutionResponse,
-        path: buildCloudflareHostedControlRuntimeEnsureExecutionPath(expectedUserId),
-        request: {
-          body,
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
