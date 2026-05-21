@@ -52,7 +52,7 @@ describe("hosted local Temporal orchestration e2e", () => {
     scenario = null;
   }, 120_000);
 
-  it("signals through local Temporal and reaches Cloudflare ensure-execution", async () => {
+  it("signals through local Temporal and reaches Cloudflare ensure-processing", async () => {
     const activeScenario = requireScenario();
     expect(activeScenario.harness.runtimeEnv.HOSTED_TEMPORAL_ADDRESS).toBeTruthy();
     expect(activeScenario.harness.runtimeEnv.TEMPORAL_ADDRESS).toBeTruthy();

@@ -149,7 +149,7 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
-readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 55)"
+readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 50)"
 readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is
@@ -159,6 +159,8 @@ readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
 readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 6)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
+readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 3)"
+readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
 readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || local_concurrency_default 8 4)"
@@ -564,7 +566,7 @@ run_workspace_package_coverage() {
     run_timed_step \
       "$label" \
       env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" \
-        bash -c 'pnpm --dir packages/contracts test:coverage:vitest && pnpm --dir packages/contracts test:artifacts'
+        pnpm --dir packages/contracts test:coverage:prepared
     return $?
   fi
 
@@ -584,8 +586,9 @@ run_all_package_coverage() {
     "packages/assistant-cli"
     "packages/assistantd"
     "packages/cloudflare-hosted-control"
-    # Keep contracts out of the same outer batch as CLI: contracts artifact
-    # verification rebuilds shared dist outputs that the CLI built-runtime tests import.
+    # In non-prepared coverage, the launch guard below keeps contracts out of
+    # the active CLI window because contracts artifact verification rebuilds
+    # shared dist outputs that CLI built-runtime tests import.
     "packages/contracts"
     "packages/device-syncd"
     "packages/gateway-core"
@@ -633,7 +636,10 @@ run_all_package_coverage() {
   )
   local package_count="${#package_coverage_dirs[@]}"
   local package_coverage_concurrency="$package_coverage_concurrency_limit"
+  local package_coverage_cli_active_concurrency="$package_coverage_cli_active_concurrency_limit"
   local package_index=0
+  local cli_coverage_active=0
+  local cli_coverage_pid=""
   local failed_package_labels=()
   local saw_unreported_background_failure=0
   local failure_dir
@@ -671,6 +677,9 @@ run_all_package_coverage() {
   if [[ "$package_coverage_concurrency" -gt "$package_count" ]]; then
     package_coverage_concurrency="$package_count"
   fi
+  if [[ "$package_coverage_cli_active_concurrency" -gt "$package_coverage_concurrency" ]]; then
+    package_coverage_cli_active_concurrency="$package_coverage_concurrency"
+  fi
 
   if [[ "$package_coverage_concurrency" -le 1 ]]; then
     while [[ "$package_index" -lt "$package_count" ]]; do
@@ -694,21 +703,66 @@ run_all_package_coverage() {
     local active_failure_files=()
     local active_status_files=()
 
+    current_package_coverage_concurrency() {
+      if [[ "$cli_coverage_active" == "1" ]]; then
+        printf '%s\n' "$package_coverage_cli_active_concurrency"
+        return
+      fi
+
+      printf '%s\n' "$package_coverage_concurrency"
+    }
+
+    can_launch_next_package_coverage() {
+      if [[ "$package_index" -ge "$package_count" ]]; then
+        return 1
+      fi
+
+      # In standalone package coverage, contracts artifact verification still
+      # owns a rebuild. Do not let dynamic refill start it while CLI
+      # built-runtime coverage may be importing prepared dist outputs.
+      if [[
+        "$cli_coverage_active" == "1"
+        && "${package_coverage_dirs[$package_index]}" == "packages/contracts"
+        && "$contracts_artifacts_prepared" != "1"
+      ]]; then
+        return 1
+      fi
+
+      return 0
+    }
+
+    package_coverage_pid_finished_without_status() {
+      local active_pid="$1"
+      local process_status
+
+      if ! kill -0 "$active_pid" 2>/dev/null; then
+        return 0
+      fi
+
+      process_status="$(ps -p "$active_pid" -o stat= 2>/dev/null | tr -d '[:space:]' || true)"
+      [[ "$process_status" == Z* ]]
+    }
+
     launch_package_coverage() {
       local failure_file="$failure_labels_dir/$package_index"
       local status_file="$status_dir/$package_index"
+      local package_dir="${package_coverage_dirs[$package_index]}"
+      local package_label="${package_coverage_labels[$package_index]}"
       (
         local status=0
+        write_package_coverage_status() {
+          printf '%s\n' "$status" >"$status_file"
+        }
+        trap write_package_coverage_status EXIT
 
         if ! run_workspace_package_coverage \
-          "${package_coverage_dirs[$package_index]}" \
-          "${package_coverage_labels[$package_index]}" \
+          "$package_dir" \
+          "$package_label" \
           "$contracts_artifacts_prepared"; then
-          printf '%s\n' "${package_coverage_labels[$package_index]}" >"$failure_file"
+          printf '%s\n' "$package_label" >"$failure_file"
           status=1
         fi
 
-        printf '%s\n' "$status" >"$status_file"
         exit "$status"
       ) &
       local coverage_pid="$!"
@@ -716,6 +770,10 @@ run_all_package_coverage() {
       active_failure_files+=("$failure_file")
       active_status_files+=("$status_file")
       register_background_pid "$coverage_pid"
+      if [[ "$package_dir" == "packages/cli" ]]; then
+        cli_coverage_active=1
+        cli_coverage_pid="$coverage_pid"
+      fi
       package_index=$((package_index + 1))
     }
 
@@ -732,6 +790,16 @@ run_all_package_coverage() {
         local status_file="${active_status_files[$active_index]}"
 
         if [[ ! -f "$status_file" ]]; then
+          if package_coverage_pid_finished_without_status "$active_pid"; then
+            wait "$active_pid" 2>/dev/null || true
+            unregister_background_pid "$active_pid"
+            if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
+              cli_coverage_active=0
+            fi
+            saw_unreported_background_failure=1
+            reaped_any=1
+            continue
+          fi
           remaining_pids+=("$active_pid")
           remaining_failure_files+=("$failure_file")
           remaining_status_files+=("$status_file")
@@ -744,6 +812,9 @@ run_all_package_coverage() {
           fi
         fi
         unregister_background_pid "$active_pid"
+        if [[ "$active_pid" == "$cli_coverage_pid" ]]; then
+          cli_coverage_active=0
+        fi
         reaped_any=1
       done
 
@@ -761,7 +832,13 @@ run_all_package_coverage() {
     }
 
     while [[ "$package_index" -lt "$package_count" || "${#active_pids[@]}" -gt 0 ]]; do
-      while [[ "$package_index" -lt "$package_count" && "${#active_pids[@]}" -lt "$package_coverage_concurrency" ]]; do
+      while [[
+        "$package_index" -lt "$package_count"
+        && "${#active_pids[@]}" -lt "$(current_package_coverage_concurrency)"
+      ]]; do
+        if ! can_launch_next_package_coverage; then
+          break
+        fi
         launch_package_coverage
       done
 
@@ -795,6 +872,14 @@ run_all_package_coverage() {
 }
 
 run_package_boundary_verification() {
+  local artifacts_prepared="${1:-0}"
+
+  if [[ "$artifacts_prepared" == "1" ]]; then
+    run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary:prepared
+    run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary:prepared
+    return
+  fi
+
   run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary
   run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
 }
@@ -936,11 +1021,12 @@ run_test_packages_coverage_after_hygiene() {
 
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$health_commons_generated_prepared"
+    artifacts_prepared="1"
   else
     verify_log "skip Health Commons generated catalog; prepared runtime artifacts already covered it"
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared" || return $?
-  run_package_boundary_verification
+  run_package_boundary_verification "$artifacts_prepared"
 }
 
 run_test_packages_coverage() {

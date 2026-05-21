@@ -1672,6 +1672,49 @@ describe("cloudflare worker routes", () => {
       });
     });
 
+    it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
+      const stub = createUserRunnerStub({
+        ensureRuntimeProcessingForUser: vi.fn(async () => ({
+          action: "started" as const,
+          kind: "runtime_processing_accepted" as const,
+          recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
+          runtimeAttemptId: "runtime-attempt-test",
+        })),
+      });
+      const env = createWorkerEnv(stub);
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "orchestration-attempt-test",
+              reason: "nudge",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        action: "started",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      });
+      expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
+    });
+
     it("starts the container without an active fence and returns runtime_completed", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
@@ -1759,7 +1802,7 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("clears a no-active-child fence by identity and starts a replacement", async () => {
+    it("keeps a fresh no-active-child fence as already running instead of replacing it", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
@@ -1782,16 +1825,11 @@ describe("cloudflare worker routes", () => {
       });
 
       expect(response).toMatchObject({
-        action: "replaced",
-        kind: "runtime_completed",
-        runtimeResultNextWakeAt: null,
-        runtimeResultNextWakeReason: null,
-        runtimeStatus: "idle",
+        kind: "runtime_wake_sent",
+        runtimeAttemptId: oldToken?.attemptId,
       });
-      expect(response.kind === "runtime_completed" ? response.runtimeAttemptId : null)
-        .not.toBe(oldToken?.attemptId);
-      expect(ensureProcessing).toHaveBeenCalledTimes(2);
-      expect(ensureProcessing).toHaveBeenNthCalledWith(1, {
+      expect(ensureProcessing).toHaveBeenCalledOnce();
+      expect(ensureProcessing).toHaveBeenCalledWith({
         activeRuntime: {
           attemptId: oldToken?.attemptId,
           leaseGeneration: oldToken?.generation,
@@ -1800,14 +1838,9 @@ describe("cloudflare worker routes", () => {
         reason: "nudge",
         userId: "test-user",
       });
-      expect(ensureProcessing).toHaveBeenNthCalledWith(2, expect.objectContaining({
-        invoke: expect.any(Object),
-        reason: "nudge",
-        userId: "test-user",
-      }));
-      expect(invoke).toHaveBeenCalledOnce();
+      expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: null,
+        active_attempt_id: oldToken?.attemptId,
         backoff_until: null,
         wake_at: null,
       });
@@ -2844,6 +2877,12 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     ensureRuntimeExecutionForUser: vi.fn(async () => ({
       kind: "runtime_wake_sent" as const,
+      recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    })),
+    ensureRuntimeProcessingForUser: vi.fn(async () => ({
+      action: "woken" as const,
+      kind: "runtime_processing_accepted" as const,
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),

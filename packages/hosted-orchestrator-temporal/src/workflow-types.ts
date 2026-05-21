@@ -16,6 +16,8 @@ export type HostedUserRuntimeWorkflowCarryForwardState = Omit<
 export interface HostedUserRuntimeWorkflowOptions {
   activeWakeRecheckDelayMs?: number;
   continueAsNewAfterIterations?: number;
+  ensureRuntimeProcessingStartToCloseTimeoutMs?: number;
+  /** Legacy option accepted for in-flight workflow compatibility. */
   ensureCloudflareExecutionStartToCloseTimeoutMs?: number;
   readRuntimeDemandStartToCloseTimeoutMs?: number;
   runtimeCompletedFailureRecheckDelayMs?: number;

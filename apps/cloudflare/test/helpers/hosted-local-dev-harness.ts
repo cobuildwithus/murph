@@ -3,10 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { buildCloudflareHostedControlUserStatusPath } from "@murphai/cloudflare-hosted-control/routes";
+import {
+  buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlUserStatusPath,
+} from "@murphai/cloudflare-hosted-control/routes";
 import {
   parseHostedRunnerStatusResponse,
-  parseHostedRuntimeEnsureExecutionRequest,
+  parseHostedRuntimeEnsureProcessingRequest,
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
@@ -425,9 +428,9 @@ export async function startHostedLocalDevHarness(input: {
   }
 
   async function nudgeHostedUserBestEffort(userId: string): Promise<void> {
-    const pathname = `/internal/users/${encodeURIComponent(userId)}/runtime/ensure-execution`;
+    const pathname = buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId);
     const url = new URL(pathname, `${workerBaseUrl}/`);
-    const requestBody = JSON.stringify(parseHostedRuntimeEnsureExecutionRequest({
+    const requestBody = JSON.stringify(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: `hosted-local-nudge:${userId}`,
       reason: "nudge",
     }));

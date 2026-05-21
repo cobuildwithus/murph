@@ -21,9 +21,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("ensures workspace execution through the signed callback-only control route", async () => {
+it("ensures workspace processing through the signed callback-only control route", async () => {
   const fetchMock = vi.fn(async () => Response.json({
-    kind: "runtime_wake_sent",
+    action: "woken",
+    kind: "runtime_processing_accepted",
     recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
     runtimeAttemptId: "runtime-attempt-test",
   }));
@@ -41,7 +42,8 @@ it("ensures workspace execution through the signed callback-only control route",
     } as HostedLocalDevHarness,
     userId: "member_local_telegram_reply_123",
   })).resolves.toEqual({
-    kind: "runtime_wake_sent",
+    action: "woken",
+    kind: "runtime_processing_accepted",
     recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
     runtimeAttemptId: "runtime-attempt-test",
   });
@@ -49,7 +51,7 @@ it("ensures workspace execution through the signed callback-only control route",
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
   expect(String(url)).toBe(
-    "https://worker.example.test/internal/users/member_local_telegram_reply_123/runtime/ensure-execution",
+    "https://worker.example.test/internal/users/member_local_telegram_reply_123/runtime/ensure-processing",
   );
   expect(init.method).toBe("POST");
   expect(JSON.parse(String(init.body))).toEqual({

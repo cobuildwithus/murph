@@ -1,8 +1,9 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationReason,
+import {
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
+  type HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
@@ -19,8 +20,6 @@ import {
   type RunnerWriteFenceKind,
   type RunnerStateRecord,
 } from "./types.js";
-
-type RunnerMetaBundleRow = RunnerMetaRow;
 
 export interface RunnerWriteFenceToken {
   attemptId: string;
@@ -155,6 +154,7 @@ export class RunnerStateStore {
     meta.active_expires_at = expiresAt;
     meta.active_generation = nextGeneration;
     meta.active_kind = input.kind ?? "runtime";
+    meta.active_reason = input.reason;
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     if (meta.active_kind === "runtime") {
@@ -422,7 +422,7 @@ export class RunnerStateStore {
     };
   }
 
-  private clearExpiredActiveRunSync(meta: RunnerMetaBundleRow, nowMs: number): boolean {
+  private clearExpiredActiveRunSync(meta: RunnerMetaRow, nowMs: number): boolean {
     const writeFence = this.readWriteFenceTokenSync(meta);
     if (!writeFence) {
       return false;
@@ -447,14 +447,14 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
-  private readStateFromMetaSync(meta: RunnerMetaBundleRow): RunnerStateRecord {
+  private readStateFromMetaSync(meta: RunnerMetaRow): RunnerStateRecord {
     return projectRunnerStateRecord({
       bundleRef: null,
       meta,
     });
   }
 
-  private requireMetaRowSync(): RunnerMetaBundleRow {
+  private requireMetaRowSync(): RunnerMetaRow {
     const row = this.selectMetaRowSync();
     if (row) {
       return row;
@@ -484,14 +484,15 @@ export class RunnerStateStore {
     return row.user_id;
   }
 
-  private selectMetaRowSync(): RunnerMetaBundleRow | null {
-    const row = this.sql.exec<RunnerMetaBundleRow>(
+  private selectMetaRowSync(): RunnerMetaRow | null {
+    const row = this.sql.exec<RunnerMetaRow>(
       `SELECT
         user_id,
         wake_at,
         active_attempt_id,
         active_generation,
         active_kind,
+        active_reason,
         active_started_at,
         active_expires_at,
         active_workspace_version,
@@ -512,7 +513,7 @@ export class RunnerStateStore {
     return row;
   }
 
-  private insertMetaRowSync(meta: RunnerMetaBundleRow): void {
+  private insertMetaRowSync(meta: RunnerMetaRow): void {
     this.sql.exec(
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
@@ -521,6 +522,7 @@ export class RunnerStateStore {
         active_attempt_id,
         active_generation,
         active_kind,
+        active_reason,
         active_started_at,
         active_expires_at,
         active_workspace_version,
@@ -530,13 +532,14 @@ export class RunnerStateStore {
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.wake_at,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
+      readHostedWorkspaceInvocationReasonOrNull(meta.active_reason),
       meta.active_started_at,
       meta.active_expires_at,
       meta.active_workspace_version,
@@ -549,7 +552,7 @@ export class RunnerStateStore {
     );
   }
 
-  private writeMetaRowSync(meta: RunnerMetaBundleRow): void {
+  private writeMetaRowSync(meta: RunnerMetaRow): void {
     this.insertMetaRowSync(meta);
     this.userId = meta.user_id;
   }
@@ -570,6 +573,7 @@ export class RunnerStateStore {
     meta.active_attempt_id = null;
     meta.active_expires_at = null;
     meta.active_kind = null;
+    meta.active_reason = null;
     meta.active_started_at = null;
     meta.active_workspace_version = null;
   }
@@ -598,7 +602,7 @@ export class RunnerStateStore {
         ?? new Date(Date.parse(meta.active_started_at) + 30 * 60_000).toISOString(),
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
-      reason: "nudge",
+      reason: readHostedWorkspaceInvocationReasonOrDefault(meta.active_reason),
       startedAt: meta.active_started_at,
       userId: meta.user_id,
       workerVersionId: null,
@@ -614,6 +618,21 @@ export class RunnerStateStore {
 
     return sql;
   }
+}
+
+function readHostedWorkspaceInvocationReasonOrDefault(
+  value: unknown,
+): HostedWorkspaceInvocationReason {
+  return readHostedWorkspaceInvocationReasonOrNull(value) ?? "nudge";
+}
+
+function readHostedWorkspaceInvocationReasonOrNull(
+  value: unknown,
+): HostedWorkspaceInvocationReason | null {
+  return typeof value === "string"
+    && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
+    ? value as HostedWorkspaceInvocationReason
+    : null;
 }
 
 function requireWorkspaceVersion(value: string): string {

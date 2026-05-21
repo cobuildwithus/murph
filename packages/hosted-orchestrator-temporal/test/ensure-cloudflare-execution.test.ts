@@ -5,26 +5,27 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type {
-  HostedRuntimeEnsureExecutionResponse,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
 import {
-  ensureCloudflareExecution,
-} from "../src/activities/ensure-cloudflare-execution.js";
+  ensureRuntimeProcessing,
+} from "../src/activities/ensure-runtime-processing.js";
 
-describe("ensureCloudflareExecution", () => {
+describe("ensureRuntimeProcessing", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it("posts a parsed Cloudflare ensure-execution request without usage fields when not required", async () => {
+  it("posts a parsed Cloudflare ensure-processing request without usage fields when not required", async () => {
     await stubCloudflareEnvironment();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
-    const response: HostedRuntimeEnsureExecutionResponse = {
-      kind: "runtime_wake_sent",
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "woken",
+      kind: "runtime_processing_accepted",
       recommendedRecheckAt: "2026-05-20T12:00:30.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     };
@@ -34,7 +35,7 @@ describe("ensureCloudflareExecution", () => {
       return jsonResponse(response);
     }));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
@@ -46,7 +47,7 @@ describe("ensureCloudflareExecution", () => {
     const headers = new Headers(request.init?.headers);
 
     expect(url.toString()).toBe(
-      "https://runner.example.test/root/internal/users/member_test/runtime/ensure-execution",
+      "https://runner.example.test/root/internal/users/member_test/runtime/ensure-processing",
     );
     expect(request.init?.method).toBe("POST");
     expect(headers.has("authorization")).toBe(false);
@@ -58,19 +59,17 @@ describe("ensureCloudflareExecution", () => {
     });
     expect(String(request.init?.body)).not.toContain("requiresAiUsageDecision");
     expect(String(request.init?.body)).not.toContain("aiUsageAllowDecision");
-    expect(timeoutSpy).toHaveBeenCalledWith(125_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
   });
 
-  it("posts only the minimal Cloudflare ensure-execution request", async () => {
+  it("posts only the minimal Cloudflare ensure-processing request", async () => {
     await stubCloudflareEnvironment();
 
-    const response: HostedRuntimeEnsureExecutionResponse = {
+    const response: HostedRuntimeEnsureProcessingResponse = {
       action: "started",
-      kind: "runtime_completed",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: null,
       runtimeAttemptId: "runtime_attempt_test",
-      runtimeResultNextWakeAt: null,
-      runtimeResultNextWakeReason: null,
-      runtimeStatus: "idle",
     };
     const observedRequests: ObservedRequest[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url, init) => {
@@ -78,7 +77,7 @@ describe("ensureCloudflareExecution", () => {
       return jsonResponse(response);
     }));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "manual",
       userId: "member_test",
@@ -98,8 +97,9 @@ describe("ensureCloudflareExecution", () => {
   it("does not call the web usage-decision endpoint", async () => {
     await stubCloudflareEnvironment();
 
-    const response: HostedRuntimeEnsureExecutionResponse = {
-      kind: "runtime_wake_sent",
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "woken",
+      kind: "runtime_processing_accepted",
       recommendedRecheckAt: null,
       runtimeAttemptId: "runtime_attempt_test",
     };
@@ -109,30 +109,30 @@ describe("ensureCloudflareExecution", () => {
       return jsonResponse(response);
     }));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
     })).resolves.toEqual(response);
 
     expect(observedRequests.map((request) => new URL(request.url).pathname)).toEqual([
-      "/root/internal/users/member_test/runtime/ensure-execution",
+      "/root/internal/users/member_test/runtime/ensure-processing",
     ]);
   });
 
-  it("rejects invalid Cloudflare ensure-execution responses", async () => {
+  it("rejects invalid Cloudflare ensure-processing responses", async () => {
     await stubCloudflareEnvironment();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
       kind: "caught_up",
       runtimeAttemptId: "runtime_attempt_test",
     })));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
-      message: expect.stringContaining("Hosted runtime ensure-execution response kind"),
+      message: expect.stringContaining("Hosted runtime ensure-processing response kind"),
       nonRetryable: true,
       type: "hosted_orchestrator_invalid_protocol_response",
     });
@@ -144,7 +144,7 @@ describe("ensureCloudflareExecution", () => {
       throw new TypeError("network unavailable");
     }));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
@@ -159,12 +159,12 @@ describe("ensureCloudflareExecution", () => {
       code: "invalid_signature",
     }, 401)));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",
     })).rejects.toMatchObject({
-      message: "Hosted orchestrator runtime ensure execution failed with HTTP 401.",
+      message: "Hosted orchestrator runtime ensure processing failed with HTTP 401.",
       nonRetryable: true,
       type: "hosted_orchestrator_http_non_retryable",
     });
@@ -176,7 +176,7 @@ describe("ensureCloudflareExecution", () => {
       code: "internal_error",
     }, 500)));
 
-    await expect(ensureCloudflareExecution({
+    await expect(ensureRuntimeProcessing({
       orchestrationAttemptId: "orchestration_attempt_test",
       reason: "nudge",
       userId: "member_test",

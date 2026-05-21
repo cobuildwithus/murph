@@ -7,6 +7,7 @@ import {
   HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS,
   HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
   readHostedRuntimeEnsureCloudflareExecutionTimeouts,
+  readHostedRuntimeEnsureProcessingTimeouts,
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
 } from "../src/temporal-env.ts";
@@ -142,30 +143,35 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
 });
 
 describe("readHostedRuntimeTemporalWorkflowOptions", () => {
-  it("keeps ensure-execution Activity Start-To-Close above its internal HTTP timeout", () => {
-    const timeouts = readHostedRuntimeEnsureCloudflareExecutionTimeouts({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
-      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
+  it("keeps ensure-processing Activity Start-To-Close above its internal HTTP timeout", () => {
+    const timeouts = readHostedRuntimeEnsureProcessingTimeouts({
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
     });
 
     expect(timeouts).toEqual({
-      ensureCloudflareExecutionHttpTimeoutMs: 125_000,
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
+      ensureRuntimeProcessingHttpTimeoutMs: 12_000,
+      ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
     });
     expect(
-      timeouts.ensureCloudflareExecutionStartToCloseTimeoutMs
-      - timeouts.ensureCloudflareExecutionHttpTimeoutMs,
+      timeouts.ensureRuntimeProcessingStartToCloseTimeoutMs
+      - timeouts.ensureRuntimeProcessingHttpTimeoutMs,
     ).toBe(HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS);
+
+    expect(readHostedRuntimeEnsureCloudflareExecutionTimeouts({
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
+    })).toEqual({
+      ensureCloudflareExecutionHttpTimeoutMs: 12_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 17_000,
+    });
   });
 
   it("reads shared workflow timing options", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",
       HOSTED_RUNTIME_DEMAND_TIMEOUT_MS: "15000",
-      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
       HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
     })).toEqual({
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
+      ensureRuntimeProcessingStartToCloseTimeoutMs: 17_000,
       readRuntimeDemandStartToCloseTimeoutMs: 15_000,
       runtimeCompletedFailureRecheckDelayMs: 45_000,
     });
@@ -185,12 +191,11 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
     );
   });
 
-  it("rejects ensure-execution timeout budgets that cannot preserve reporting slack", () => {
-    expect(() => readHostedRuntimeEnsureCloudflareExecutionTimeouts({
-      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "3570001",
-      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "1",
+  it("bounds ensure-processing HTTP timeout budgets", () => {
+    expect(() => readHostedRuntimeEnsureProcessingTimeouts({
+      HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "30001",
     })).toThrow(
-      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS plus HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS plus Temporal reporting slack must be less than or equal to 3600000.",
+      "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS must be less than or equal to 30000.",
     );
   });
 });

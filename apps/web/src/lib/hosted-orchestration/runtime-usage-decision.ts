@@ -1,4 +1,5 @@
 import {
+  readHostedAiUsageGate,
   resolveHostedAiUsageGate,
 } from "../hosted-execution/usage-allowance";
 
@@ -10,13 +11,17 @@ export type HostedRuntimeUsageGateCheck =
   | { retryAt: string; status: "unavailable" };
 
 export async function resolveHostedRuntimeAiUsageDemandGate(input: {
+  mode?: "mutating" | "read_only";
   now?: Date | string;
   userId: string;
 }): Promise<HostedRuntimeUsageGateCheck> {
   const now = normalizeHostedRuntimeUsageDecisionDate(input.now);
 
   try {
-    const decision = await resolveHostedAiUsageGate({
+    const readGate = input.mode === "read_only"
+      ? readHostedAiUsageGate
+      : resolveHostedAiUsageGate;
+    const decision = await readGate({
       memberId: input.userId,
       now,
     });

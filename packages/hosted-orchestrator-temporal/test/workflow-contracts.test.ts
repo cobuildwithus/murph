@@ -62,7 +62,7 @@ describe("hosted runtime workflow contracts", () => {
       "utf8",
     );
 
-    expect(source).toContain("execution.kind === \"runtime_wake_sent\"");
+    expect(source).toContain("execution.kind === \"runtime_processing_accepted\"");
     expect(source).toContain("waitUntilTimestampOrSignal(");
     expect(source).not.toContain("condition(() => false");
   });

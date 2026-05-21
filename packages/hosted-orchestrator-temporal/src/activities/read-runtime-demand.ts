@@ -8,6 +8,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
+  observeHostedTemporalActivity,
   readHostedOrchestratorTemporalWebEnvironment,
   requestHostedOrchestratorJson,
 } from "./http-client.js";
@@ -22,17 +23,22 @@ export async function readRuntimeDemand(
   const parsedRequest = parseHostedRuntimeDemandRequest(request);
   const environment = readHostedOrchestratorTemporalWebEnvironment();
 
-  return requestHostedOrchestratorJson(environment.hostedWebBaseUrl, {
-    boundUserId: parsedRequest.userId,
-    fetchImpl: fetch,
-    label: "runtime demand",
-    method: "GET",
-    parse: parseHostedRuntimeDemand,
-    path: buildHostedRuntimeDemandPath(parsedRequest.userId),
-    search: buildHostedRuntimeDemandSearch(parsedRequest),
-    signing: environment.hostedWebCallbackSigning,
-    timeoutMs: environment.readRuntimeDemandTimeoutMs,
-  });
+  return observeHostedTemporalActivity({
+    activity: "readRuntimeDemand",
+    userId: parsedRequest.userId,
+  }, async () =>
+    requestHostedOrchestratorJson(environment.hostedWebBaseUrl, {
+      boundUserId: parsedRequest.userId,
+      fetchImpl: fetch,
+      label: "runtime demand",
+      method: "GET",
+      parse: parseHostedRuntimeDemand,
+      path: buildHostedRuntimeDemandPath(parsedRequest.userId),
+      search: buildHostedRuntimeDemandSearch(parsedRequest),
+      signing: environment.hostedWebCallbackSigning,
+      timeoutMs: environment.readRuntimeDemandTimeoutMs,
+    })
+  );
 }
 
 function buildHostedRuntimeDemandPath(userId: string): string {

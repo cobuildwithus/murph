@@ -366,56 +366,77 @@ export async function resolveHostedAiUsageGate(input: {
       tx,
     });
     if (period.kind === "denied") {
-      return {
-        allowed: false,
-        billingPlanCode: period.billingPlanCode,
-        limitUsdMicros: period.limitUsdMicros,
+      return buildHostedAiUsageGateDecision({
         memberId: input.memberId,
-        periodEnd: period.periodEnd,
-        periodStart: period.periodStart,
-        reason: period.reason,
-        remainingUsdMicros: 0n,
-        retryAfter: period.retryAfter,
-        spentUsdMicros: period.spentUsdMicros,
-        userNotice: period.userNotice,
-      };
-    }
-
-    const remainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
-      ? period.limitUsdMicros - period.spentUsdMicros
-      : 0n;
-
-    if (period.spentUsdMicros >= period.limitUsdMicros) {
-      const userNotice = buildHostedAiUsageGateLimitNotice({
-        billingPlanCode: period.billingPlanCode,
-        limitUsdMicros: period.limitUsdMicros,
+        period,
       });
-
-      return {
-        allowed: false,
-        billingPlanCode: period.billingPlanCode,
-        limitUsdMicros: period.limitUsdMicros,
-        memberId: input.memberId,
-        periodEnd: period.periodEnd,
-        periodStart: period.periodStart,
-        reason: "ai_usage_limit_exceeded",
-        remainingUsdMicros,
-        retryAfter: period.periodEnd,
-        spentUsdMicros: period.spentUsdMicros,
-        userNotice,
-      };
     }
 
-    return {
-      allowed: true,
-      billingPlanCode: period.billingPlanCode,
-      limitUsdMicros: period.limitUsdMicros,
+    return buildHostedAiUsageGateDecision({
       memberId: input.memberId,
-      periodEnd: period.periodEnd,
-      periodStart: period.periodStart,
-      remainingUsdMicros,
-      spentUsdMicros: period.spentUsdMicros,
-    };
+      period,
+    });
+  });
+}
+
+export async function readHostedAiUsageGate(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecision> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+
+  return runHostedAiUsageAllowanceTransaction(prisma, async (tx) => {
+    const memberState = await tx.hostedMember.findUnique({
+      where: {
+        id: input.memberId,
+      },
+      select: {
+        billingRef: {
+          select: {
+            currentBillingPhase: true,
+            currentBillingPlanCode: true,
+            currentCheckoutOffer: true,
+            currentPeriodEnd: true,
+            currentPeriodStart: true,
+            currentTrialEndsAt: true,
+            currentTrialStartedAt: true,
+            pulseTrialPolicyVersion: true,
+            pulseTrialRedeemedAt: true,
+          },
+        },
+        billingStatus: true,
+        suspendedAt: true,
+      },
+    });
+
+    if (!memberState) {
+      throw new TypeError("Hosted AI usage allowance member does not exist.");
+    }
+
+    if (
+      memberState.billingStatus !== HostedBillingStatus.active ||
+      memberState.suspendedAt !== null
+    ) {
+      return resolveHostedAiUsageInactiveGateDecision({
+        at: now,
+        billingRef: memberState.billingRef,
+        memberId: input.memberId,
+      });
+    }
+
+    const period = await readHostedAiUsageAllowancePeriodTx({
+      at: now,
+      billingRef: memberState.billingRef,
+      memberId: input.memberId,
+      tx,
+    });
+
+    return buildHostedAiUsageGateDecision({
+      memberId: input.memberId,
+      period,
+    });
   });
 }
 
@@ -476,6 +497,62 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
     retryAfter,
     spentUsdMicros: 0n,
     userNotice: null,
+  };
+}
+
+function buildHostedAiUsageGateDecision(input: {
+  memberId: string;
+  period: HostedAiUsageAllowancePeriodResult;
+}): HostedAiUsageGateDecision {
+  const period = input.period;
+  if (period.kind === "denied") {
+    return {
+      allowed: false,
+      billingPlanCode: period.billingPlanCode,
+      limitUsdMicros: period.limitUsdMicros,
+      memberId: input.memberId,
+      periodEnd: period.periodEnd,
+      periodStart: period.periodStart,
+      reason: period.reason,
+      remainingUsdMicros: 0n,
+      retryAfter: period.retryAfter,
+      spentUsdMicros: period.spentUsdMicros,
+      userNotice: period.userNotice,
+    };
+  }
+
+  const remainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
+    ? period.limitUsdMicros - period.spentUsdMicros
+    : 0n;
+
+  if (period.spentUsdMicros >= period.limitUsdMicros) {
+    return {
+      allowed: false,
+      billingPlanCode: period.billingPlanCode,
+      limitUsdMicros: period.limitUsdMicros,
+      memberId: input.memberId,
+      periodEnd: period.periodEnd,
+      periodStart: period.periodStart,
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros,
+      retryAfter: period.periodEnd,
+      spentUsdMicros: period.spentUsdMicros,
+      userNotice: buildHostedAiUsageGateLimitNotice({
+        billingPlanCode: period.billingPlanCode,
+        limitUsdMicros: period.limitUsdMicros,
+      }),
+    };
+  }
+
+  return {
+    allowed: true,
+    billingPlanCode: period.billingPlanCode,
+    limitUsdMicros: period.limitUsdMicros,
+    memberId: input.memberId,
+    periodEnd: period.periodEnd,
+    periodStart: period.periodStart,
+    remainingUsdMicros,
+    spentUsdMicros: period.spentUsdMicros,
   };
 }
 
@@ -631,6 +708,102 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     periodStart: upgraded.periodStart,
     spentUsdMicros: upgraded.spentUsdMicros,
   };
+}
+
+async function readHostedAiUsageAllowancePeriodTx(input: {
+  at: Date;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowancePeriodResult> {
+  const resolved = resolveHostedAiUsageAllowancePeriod({
+    at: input.at,
+    billingRef: input.billingRef,
+  });
+  if (resolved.kind === "denied") {
+    return {
+      kind: "denied",
+      billingPlanCode: resolved.billingPlanCode,
+      limitUsdMicros: resolved.limitUsdMicros,
+      periodEnd: resolved.periodEnd,
+      periodStart: resolved.periodStart,
+      reason: resolved.reason,
+      retryAfter: resolved.retryAfter,
+      spentUsdMicros: 0n,
+      userNotice: resolved.userNotice,
+    };
+  }
+
+  const current = await input.tx.hostedAiUsagePeriod.findUnique({
+    where: {
+      memberId_periodStart: {
+        memberId: input.memberId,
+        periodStart: resolved.periodStart,
+      },
+    },
+    select: {
+      billingPlanCode: true,
+      limitUsdMicros: true,
+      periodEnd: true,
+      periodStart: true,
+      spentUsdMicros: true,
+    },
+  });
+
+  if (current) {
+    const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
+      ?? resolved.billingPlanCode;
+    const periodMatches =
+      currentBillingPlanCode === resolved.billingPlanCode &&
+      current.limitUsdMicros === resolved.limitUsdMicros &&
+      current.periodEnd.getTime() === resolved.periodEnd.getTime();
+
+    return {
+      kind: "period",
+      billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
+      limitUsdMicros: periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros,
+      periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
+      periodStart: periodMatches ? current.periodStart : resolved.periodStart,
+      spentUsdMicros: current.spentUsdMicros,
+    };
+  }
+
+  const spentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
+    memberId: input.memberId,
+    periodStart: resolved.periodStart,
+    tx: input.tx,
+  });
+
+  return {
+    kind: "period",
+    billingPlanCode: resolved.billingPlanCode,
+    limitUsdMicros: resolved.limitUsdMicros,
+    periodEnd: resolved.periodEnd,
+    periodStart: resolved.periodStart,
+    spentUsdMicros,
+  };
+}
+
+async function readHostedAiUsageAllowancePeriodSpendTx(input: {
+  memberId: string;
+  periodStart: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<bigint> {
+  const aggregate = await input.tx.hostedAiUsage.aggregate({
+    _sum: {
+      allowanceCostUsdMicros: true,
+    },
+    where: {
+      allowanceAccountedAt: {
+        not: null,
+      },
+      allowanceCounted: true,
+      allowancePeriodStart: input.periodStart,
+      memberId: input.memberId,
+    },
+  });
+
+  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
 }
 
 function resolveHostedAiUsageAllowancePeriod(input: {

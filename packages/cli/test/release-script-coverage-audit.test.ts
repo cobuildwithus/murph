@@ -687,13 +687,22 @@ Updated: 2026-04-24
     )
     expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
     expect(workspaceVerify).toContain(
-      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 55)"',
+      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 50)"',
     )
     expect(workspaceVerify).toContain(
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
     )
     expect(workspaceVerify).toContain(
       'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
+    )
+    expect(workspaceVerify).toContain(
+      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 3)"',
+    )
+    expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
+    expect(workspaceVerify).toContain('current_package_coverage_concurrency()')
+    expect(workspaceVerify).toContain('can_launch_next_package_coverage()')
+    expect(webVerify.indexOf('run_timed_step "next build" run_next_build &')).toBeLessThan(
+      webVerify.indexOf('run_timed_step "dev smoke" run_dev_smoke &'),
     )
     expect(workspaceVerify).toContain(
       'run_acceptance_app_verification_after_delay "$acceptance_typechecked" 1',
@@ -778,8 +787,11 @@ Updated: 2026-04-24
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
     expect(cliCoverageBranch).toContain(
-      "pnpm --dir packages/contracts test:coverage:vitest && pnpm --dir packages/contracts test:artifacts",
+      'pnpm --dir packages/contracts test:coverage:prepared',
     )
+    expect(workspaceVerify).toContain('verify:package-boundary:prepared')
+    expect(workspaceVerify).toContain('trap write_package_coverage_status EXIT')
+    expect(workspaceVerify).toContain('package_coverage_pid_finished_without_status()')
     expect(workspaceVerify).toContain('failure_labels_dir="$failure_dir/failures"')
     expect(workspaceVerify).toContain('status_dir="$failure_dir/status"')
     expect(workspaceVerify).toContain('reap_finished_package_coverage()')

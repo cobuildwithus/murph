@@ -71,6 +71,17 @@ Updated: 2026-05-21
 - Added delayed local app-verification overlap for acceptance coverage runs.
 - Fixed package-coverage failure propagation after finding a masked hosted
   Temporal package failure in the captured full acceptance log.
+- Asked `review:gpt` for an external static review. It identified CLI coverage
+  contention, late web `next build` startup, prepared-artifact mutation risk,
+  and late package-boundary rebuilds as the highest-value follow-ups.
+- Added prepared contracts and package-boundary variants so acceptance can reuse
+  already-built artifacts without rebuilding shared `dist` outputs in the
+  package-coverage tail.
+- Made package coverage CLI-aware: local fanout drops to 3 while CLI coverage is
+  active, non-prepared contracts waits until CLI exits, and child coverage jobs
+  write status from an `EXIT` trap.
+- Started hosted-web `next build` immediately in the local parallel app verify
+  branch, with dev smoke/test/lint as sibling background jobs.
 - Focused checks passed: shell syntax, hosted Temporal package coverage, CLI
   release-script coverage audit, CLI export-pack runtime test, and standalone
   CLI coverage at 80s.
@@ -78,3 +89,23 @@ Updated: 2026-05-21
   not acceptable because it missed the 144s target and masked a package failure.
   A follow-up measurement was stopped to avoid competing with other local
   verification already running in the shared checkout.
+- Latest full acceptance run after the CLI-aware and web-build-overlap changes
+  reached 206s but failed before a valid timing proof: hosted-web `next build`
+  hit a workflow-status parser type error, and the CLI workout help assertion
+  timed out under the heavy overlap. Focused fixes now pass: direct hosted-web
+  `tsc`, the hosted-orchestration status route test, the workout coverage test,
+  and diff whitespace checks for the touched files.
+- A second full acceptance retry is blocked before timing by the separate active
+  hosted runtime processing/observability row: package typecheck currently fails
+  in `packages/hosted-orchestrator-temporal` and shared hosted-execution
+  contract changes. This is outside the speedup lane and overlaps an active
+  coordination-ledger row, so do not take over those files from this plan.
+- After the hosted runtime row advanced, full acceptance reached app verification
+  at 146s with app checks passing, missing the target by 2s, then failed on a
+  CLI inbox root-help smoke timeout under package coverage contention. Retuned
+  the local app-verification delay to 50s and moved that root-help assertion to
+  the in-process CLI helper. Focused CLI checks pass; full proof is pending.
+- A clean full acceptance retry then got app verification to the target window
+  but failed Cloudflare app verify on a stale helper test that still expected the
+  legacy ensure-execution response. The same run showed CLI coverage remained
+  the package tail at 148s, so the CLI-active fanout default is now 3.

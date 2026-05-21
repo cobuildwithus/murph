@@ -3,6 +3,9 @@ import type { SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   RunnerStateStore,
   type RunnerWriteFenceToken,
@@ -15,6 +18,12 @@ import type {
 
 const NOW = "2026-04-27T00:00:00.000Z";
 const LATER_WAKE = "2026-04-27T00:00:30.000Z";
+const RECONSTRUCTED_REASON_CASES: HostedWorkspaceInvocationReason[] = [
+  "manual",
+  "browser_vault_refresh",
+  "retry",
+  "nudge",
+];
 
 describe("RunnerStateStore execution lease authority", () => {
   afterEach(() => {
@@ -71,6 +80,52 @@ describe("RunnerStateStore execution lease authority", () => {
       wakeAt: null,
       writeFence: null,
     });
+  });
+
+  it.each(RECONSTRUCTED_REASON_CASES)(
+    "reconstructs the persisted %s write-fence reason",
+    async (reason) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(NOW));
+      const { db, store } = createHarness();
+      await store.bindUser("member_123");
+
+      const token = await store.beginWriteFence({
+        expiresAt: LATER_WAKE,
+        reason,
+        userId: "member_123",
+      });
+      const restartedStore = new RunnerStateStore(createDurableObjectState(db));
+
+      await expect(restartedStore.readWriteFenceToken()).resolves.toMatchObject({
+        attemptId: token.attemptId,
+        reason,
+        userId: "member_123",
+      } satisfies Partial<RunnerWriteFenceToken>);
+    },
+  );
+
+  it("clears the persisted active reason when the active write fence is cleared", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const { db, store } = createHarness();
+    await store.bindUser("member_123");
+    const token = await store.beginWriteFence({
+      expiresAt: LATER_WAKE,
+      reason: "browser_vault_refresh",
+      userId: "member_123",
+    });
+    expect(readActiveReason(db)).toBe("browser_vault_refresh");
+
+    const completed = await store.clearWriteFenceAfterCompletion({
+      finishedAt: NOW,
+      token,
+    });
+
+    expect(completed.completed).toBe(true);
+    expect(completed.record.writeFence).toBeNull();
+    expect(readActiveReason(db)).toBeNull();
+    await expect(store.readWriteFenceToken()).resolves.toBeNull();
   });
 
   it("clears replacement fences by identity without scheduling retry work", async () => {
@@ -160,12 +215,22 @@ describe("RunnerStateStore execution lease authority", () => {
   });
 });
 
-function createHarness(setup?: (db: DatabaseSync) => void): { store: RunnerStateStore } {
+function createHarness(setup?: (db: DatabaseSync) => void): {
+  db: DatabaseSync;
+  store: RunnerStateStore;
+} {
   const db = new DatabaseSync(":memory:");
   setup?.(db);
   return {
+    db,
     store: new RunnerStateStore(createDurableObjectState(db)),
   };
+}
+
+function readActiveReason(db: DatabaseSync): string | null {
+  const row = db.prepare("SELECT active_reason FROM runner_meta WHERE singleton = 1")
+    .get() as { active_reason: string | null };
+  return row.active_reason;
 }
 
 function createDurableObjectState(db: DatabaseSync): DurableObjectStateLike {

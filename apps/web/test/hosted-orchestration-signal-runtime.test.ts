@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const defaultWorkflowOptions = {
-  ensureCloudflareExecutionStartToCloseTimeoutMs: 660_000,
+  ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
   runtimeCompletedFailureRecheckDelayMs: 30_000,
 };

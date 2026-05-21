@@ -275,15 +275,16 @@ trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-run_timed_step "dev smoke" run_dev_smoke
-
 run_timed_step "next build" run_next_build &
 build_pid="$!"
 register_background_pid "$build_pid"
+run_timed_step "dev smoke" run_dev_smoke &
+smoke_pid="$!"
+register_background_pid "$smoke_pid"
 run_timed_step "test" run_web_tests &
 test_pid="$!"
 register_background_pid "$test_pid"
 run_timed_step "lint" pnpm lint &
 lint_pid="$!"
 register_background_pid "$lint_pid"
-wait_for_background_jobs "$build_pid" "$test_pid" "$lint_pid"
+wait_for_background_jobs "$build_pid" "$smoke_pid" "$test_pid" "$lint_pid"

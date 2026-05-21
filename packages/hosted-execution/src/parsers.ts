@@ -130,6 +130,8 @@ export {
   parseHostedRuntimeDemandRequest,
   parseHostedRuntimeEnsureExecutionRequest,
   parseHostedRuntimeEnsureExecutionResponse,
+  parseHostedRuntimeEnsureProcessingRequest,
+  parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 

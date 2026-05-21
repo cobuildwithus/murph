@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@murphai/hosted-execution": "workspace:*",
+    "@temporalio/activity": "1.16.2",
     "@temporalio/client": "1.16.2",
     "@temporalio/common": "1.16.2",
     "@temporalio/worker": "1.16.2",

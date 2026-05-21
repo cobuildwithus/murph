@@ -1,6 +1,10 @@
 import {
   summarizeHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
+  type HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
@@ -15,6 +19,7 @@ export interface RunnerMetaRow {
   active_expires_at: string | null;
   active_generation: number;
   active_kind: string | null;
+  active_reason: string | null;
   active_started_at: string | null;
   active_workspace_version: string | null;
   backoff_until: string | null;
@@ -33,6 +38,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     active_expires_at: null,
     active_generation: 0,
     active_kind: null,
+    active_reason: null,
     active_started_at: null,
     active_workspace_version: null,
     backoff_until: null,
@@ -63,7 +69,9 @@ export function projectRunnerStateRecord(input: {
         workspaceVersion: input.meta.active_workspace_version,
       }
     : null;
-  const activeReason = writeFence ? "runtime" : null;
+  const activeReason = writeFence
+    ? readHostedWorkspaceInvocationReasonOrNull(input.meta.active_reason)
+    : null;
   const failureCount = normalizeNonNegativeInteger(input.meta.failure_count);
   const lastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
 
@@ -121,6 +129,13 @@ export function projectRunnerStateRecord(input: {
         }
       : null,
   };
+}
+
+function readHostedWorkspaceInvocationReasonOrNull(value: unknown): string | null {
+  return typeof value === "string"
+    && HOSTED_WORKSPACE_INVOCATION_REASONS.includes(value as HostedWorkspaceInvocationReason)
+    ? value
+    : null;
 }
 
 export function normalizeNonNegativeInteger(value: number | null): number {

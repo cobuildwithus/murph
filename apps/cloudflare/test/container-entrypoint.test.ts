@@ -312,11 +312,15 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("accepts runtime wakes only after the active child reports readiness", async () => {
+    const childStarted = createDeferred();
+    const allowChildReady = createDeferred();
     const childReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
+        childStarted.resolve();
+        await allowChildReady.promise;
         options?.onChildReadyForRuntimeWake?.(() => {
           runtimeWakeCount += 1;
           return true;
@@ -355,6 +359,11 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
+    await childStarted.promise;
+    const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    allowChildReady.resolve();
     await childReady.promise;
 
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
@@ -366,11 +375,14 @@ describe("startHostedContainerEntrypoint", () => {
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 
+    expect(pendingWake.status).toBe(204);
+    expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(firstWake.status).toBe(204);
     expect(secondWake.status).toBe(204);
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
-    expect(runtimeWakeCount).toBe(2);
+    expect(runtimeWakeCount).toBe(3);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -379,6 +391,7 @@ describe("startHostedContainerEntrypoint", () => {
       details: {
         activeHostedRunnerJobCount: 1,
         activeRuntimeWakePresent: true,
+        pendingRuntimeWakeDelivered: true,
         workspaceAttemptId: "attempt_evt_runtime_wake_ready",
       },
       message: "Hosted container child reported runtime wake readiness.",
@@ -391,21 +404,39 @@ describe("startHostedContainerEntrypoint", () => {
       .map((input) => input.details)).toEqual([
         {
           activeHostedRunnerJobCount: 0,
+          activeRuntimeWakePending: false,
           activeRuntimeWakePresent: false,
           runtimeWakeAccepted: false,
+          runtimeWakePending: false,
           workspaceAttemptId: null,
+          workspacePendingAttemptId: null,
         },
         {
           activeHostedRunnerJobCount: 1,
-          activeRuntimeWakePresent: true,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
           runtimeWakeAccepted: true,
-          workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+          runtimeWakePending: true,
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
+          activeRuntimeWakePresent: true,
+          runtimeWakeAccepted: true,
+          runtimeWakePending: false,
+          workspaceAttemptId: "attempt_evt_runtime_wake_ready",
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
       ]);
   });
@@ -470,15 +501,21 @@ describe("startHostedContainerEntrypoint", () => {
       .map((input) => input.details)).toEqual([
         {
           activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: false,
+          runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
         {
           activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: false,
           activeRuntimeWakePresent: true,
           runtimeWakeAccepted: true,
+          runtimeWakePending: false,
           workspaceAttemptId: "attempt_evt_runtime_wake_disconnected",
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_disconnected",
         },
       ]);
   });
