@@ -621,6 +621,7 @@ export type MurphAgeSubmittedMetricSourceKind =
   | "wearable-summary";
 
 export type MurphAgeSubmittedCalculatorUserInputFamily =
+  | "demographics-age-sex"
   | "bloodwork-common-labs"
   | "vitals-body-composition"
   | "wearable-activity"
@@ -3449,6 +3450,7 @@ const MURPH_AGE_SUBMITTED_METRIC_SOURCE_KINDS = new Set<MurphAgeSubmittedMetricS
   "wearable-summary",
 ]);
 const MURPH_AGE_SUBMITTED_CALCULATOR_USER_INPUT_FAMILIES = [
+  "demographics-age-sex",
   "bloodwork-common-labs",
   "vitals-body-composition",
   "wearable-activity",
