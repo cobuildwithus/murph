@@ -4597,7 +4597,7 @@ test("runtime-state portability defaults operational paths to machine-local unle
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
     classification: "operational",
-    portability: "machine_local",
+    portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/indexes.json")).toMatchObject({
     classification: "operational",
@@ -4617,11 +4617,19 @@ test("runtime-state portability defaults operational paths to machine-local unle
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/diagnostics/snapshot.json")).toMatchObject({
     classification: "operational",
-    portability: "machine_local",
+    portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/cron/runs/cronrun_1.jsonl")).toMatchObject({
     classification: "operational",
-    portability: "machine_local",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/journals/runtime-events.jsonl")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/runtime-budgets.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding/first-contact/bootstrap.json")).toMatchObject({
     classification: "operational",
