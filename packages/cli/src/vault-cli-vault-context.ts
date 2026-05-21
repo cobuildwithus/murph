@@ -20,6 +20,7 @@ const DEFAULT_MISSING_VAULT_MESSAGE =
 const FETCH_VAULT_HEADER = 'x-murph-vault'
 
 const invocationStorage = new AsyncLocalStorage<VaultCliInvocationContext>()
+const installedClis = new WeakSet<Cli.Cli>()
 
 type CommandMap = ReadonlyMap<string, unknown>
 type CommandRun = (context: CommandRunContext) => unknown
@@ -62,6 +63,11 @@ export function installVaultCliVaultContext(
   cli: Cli.Cli,
   context: VaultCliVaultContext,
 ): void {
+  if (installedClis.has(cli)) {
+    return
+  }
+  installedClis.add(cli)
+
   const commands = Cli.toCommands.get(cli)
   if (commands !== undefined) {
     installVaultContextOnCommands(commands, context)
@@ -79,7 +85,15 @@ export function installVaultCliVaultContext(
   if (typeof cli.fetch === 'function') {
     const fetch = cli.fetch.bind(cli)
     cli.fetch = async (request) => {
-      const parsed = extractFetchVaultOverride(request)
+      let parsed: ReturnType<typeof extractFetchVaultOverride>
+      try {
+        parsed = extractFetchVaultOverride(request)
+      } catch (error) {
+        if (error instanceof VaultCliError) {
+          return createFetchVaultErrorResponse(error)
+        }
+        throw error
+      }
       return await invocationStorage.run(
         resolveInvocationContext(context, parsed.vault),
         () => fetch(parsed.request),
@@ -203,9 +217,12 @@ function resolveInvocationContext(
   context: VaultCliVaultContext,
   vaultOverride: string | null,
 ): VaultCliInvocationContext {
+  const currentInvocation = invocationStorage.getStore()
+
   return {
-    missingVaultMessage: context.missingVaultMessage,
-    vault: vaultOverride ?? context.current,
+    missingVaultMessage:
+      currentInvocation?.missingVaultMessage ?? context.missingVaultMessage,
+    vault: vaultOverride ?? currentInvocation?.vault ?? context.current,
   }
 }
 
@@ -246,6 +263,24 @@ function extractFetchVaultOverride(request: Request): {
     request: new Request(url, request),
     vault,
   }
+}
+
+function createFetchVaultErrorResponse(error: VaultCliError): Response {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error: {
+        code: error.code,
+        message: error.message,
+      },
+    }),
+    {
+      status: 400,
+      headers: {
+        'content-type': 'application/json',
+      },
+    },
+  )
 }
 
 function hasVaultOption(
