@@ -533,7 +533,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("commits Prisma deletion before terminating Temporal and running Cloudflare cleanup", async () => {
+  it("terminates Temporal before Prisma deletion and again after Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
       order.push("temporal");
@@ -558,7 +558,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "temporal", "cloudflare", "temporal"]);
+    expect(order).toEqual(["temporal", "prisma", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -674,7 +674,7 @@ describe("deleteHostedAccountData", () => {
     expect(result.cloudflare.deleted).toBe(false);
   });
 
-  it("skips Cloudflare cleanup when the Prisma transaction fails", async () => {
+  it("pre-terminates Temporal but skips Cloudflare cleanup when the Prisma transaction fails", async () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => {
         throw new Error("transaction failed");
@@ -687,7 +687,11 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toThrow("transaction failed");
 
-    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      userId: "member_123",
+    });
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 

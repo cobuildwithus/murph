@@ -718,6 +718,21 @@ Updated: 2026-04-24
     )
   })
 
+  it('keeps long CLI smoke groups in independent coverage buckets', () => {
+    const cliWorkspace = readFileSync(
+      path.join(repoRoot, 'packages', 'cli', 'vitest.workspace.ts'),
+      'utf8',
+    )
+
+    expect(cliWorkspace).toContain('name: "cli-device-smoke"')
+    expect(cliWorkspace).toContain('patterns: ["device-cli.test.ts"]')
+    expect(cliWorkspace).toContain('name: "cli-release-smoke"')
+    expect(cliWorkspace).toContain('patterns: ["release-*.test.ts"]')
+    expect(cliWorkspace.indexOf('name: "cli-device-smoke"')).toBeLessThan(
+      cliWorkspace.indexOf('name: "cli-schemas-smoke"'),
+    )
+  })
+
   it('runs release checks directly instead of through an env-overridable shell command', () => {
     const releaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
 
@@ -752,6 +767,9 @@ Updated: 2026-04-24
     expect(cliCoverageBranch).toContain(
       "pnpm --dir packages/contracts test:coverage:vitest && pnpm --dir packages/contracts test:artifacts",
     )
+    expect(workspaceVerify).toContain('failure_labels_dir="$failure_dir/failures"')
+    expect(workspaceVerify).toContain('status_dir="$failure_dir/status"')
+    expect(workspaceVerify).toContain('reap_finished_package_coverage()')
     expect(packageCoverageDirs!.indexOf('"packages/cli"')).toBeLessThan(
       packageCoverageDirs!.indexOf('"packages/contracts"'),
     )

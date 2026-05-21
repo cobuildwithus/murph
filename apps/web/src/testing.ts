@@ -353,6 +353,27 @@ export async function signalHostedManualRunRuntimeForTest(input: {
   });
 }
 
+export async function signalHostedMailboxAppendRuntimeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  expectedUserId?: string | null;
+  mailboxItemId: string;
+  source?: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  applyHostedMailboxAppendForTestEnvironment(input.environment);
+  const temporalClientModule = await import("./lib/hosted-orchestration/temporal-client");
+  temporalClientModule.resetHostedRuntimeTemporalSignalClientForTesting();
+  const signalModule = await import("./lib/hosted-orchestration/signal-runtime");
+
+  return await signalModule.signalHostedMailboxAppendRuntime({
+    expectedUserId: input.expectedUserId ?? null,
+    mailboxItemId: input.mailboxItemId,
+    source: input.source ?? "hosted-local-e2e",
+  });
+}
+
 function applyHostedMailboxAppendForTestEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {

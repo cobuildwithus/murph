@@ -25,6 +25,15 @@ describe("hosted runtime Temporal worker", () => {
     process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS;
   const originalShutdownForceMs =
     process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS;
+  const performanceEnvKeys = [
+    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS",
+    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
+    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS",
+    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
+  ] as const;
+  const originalPerformanceEnv = new Map(
+    performanceEnvKeys.map((key) => [key, process.env[key]]),
+  );
 
   beforeEach(() => {
     connect.mockClear();
@@ -33,6 +42,9 @@ describe("hosted runtime Temporal worker", () => {
     process.env.NODE_ENV = "test";
     delete process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS;
     delete process.env.HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS;
+    for (const key of performanceEnvKeys) {
+      delete process.env[key];
+    }
   });
 
   afterEach(() => {
@@ -45,6 +57,9 @@ describe("hosted runtime Temporal worker", () => {
       "HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS",
       originalShutdownForceMs,
     );
+    for (const key of performanceEnvKeys) {
+      restoreEnv(key, originalPerformanceEnv.get(key));
+    }
   });
 
   it("creates a worker with explicit local Temporal options", async () => {
@@ -78,6 +93,10 @@ describe("hosted runtime Temporal worker", () => {
     expect(workerOptions.workflowBundle).toBeUndefined();
     expect(workerOptions.shutdownGraceTime).toBeUndefined();
     expect(workerOptions.shutdownForceTime).toBeUndefined();
+    expect(workerOptions.maxConcurrentActivityTaskExecutions).toBeUndefined();
+    expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
+    expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBeUndefined();
+    expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBeUndefined();
   });
 
   it("uses the prebuilt workflow bundle and shutdown policy when NODE_ENV is production", async () => {
@@ -103,6 +122,10 @@ describe("hosted runtime Temporal worker", () => {
       expect(workerOptions.workflowsPath).toBeUndefined();
       expect(workerOptions.shutdownGraceTime).toBe(270_000);
       expect(workerOptions.shutdownForceTime).toBe(295_000);
+      expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(2);
+      expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
+      expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(20);
+      expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(5);
     } finally {
       await rm(bundleDir, { force: true, recursive: true });
     }
@@ -135,6 +158,41 @@ describe("hosted runtime Temporal worker", () => {
       HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS: "10000",
       HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS: "30000",
     })).toThrow(/greater than or equal/u);
+  });
+
+  it("uses worker concurrency env overrides when configured", async () => {
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = "3";
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = "2";
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS = "12";
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = "6";
+    const {
+      createHostedUserRuntimeWorker,
+      readHostedUserRuntimeWorkerPerformanceOptions,
+    } = await import("../src/worker.js");
+
+    await createHostedUserRuntimeWorker({
+      connection: { kind: "injected" } as never,
+      namespace: "hosted-local",
+    });
+
+    const workerOptions = readCreatedWorkerOptions();
+    expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(3);
+    expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
+    expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(12);
+    expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(6);
+    expect(readHostedUserRuntimeWorkerPerformanceOptions({
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "2",
+    })).toEqual({
+      maxConcurrentActivityTaskExecutions: 1,
+      maxConcurrentActivityTaskPolls: 1,
+      maxConcurrentWorkflowTaskExecutions: 2,
+      maxConcurrentWorkflowTaskPolls: 2,
+    });
+    expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
+      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS: "2",
+    })).toThrow(/less than or equal/u);
   });
 
   it("fails production startup when the workflow bundle is missing", async () => {
@@ -184,6 +242,10 @@ describe("hosted runtime Temporal worker", () => {
 });
 
 interface CreatedWorkerOptions {
+  maxConcurrentActivityTaskExecutions?: unknown;
+  maxConcurrentActivityTaskPolls?: unknown;
+  maxConcurrentWorkflowTaskExecutions?: unknown;
+  maxConcurrentWorkflowTaskPolls?: unknown;
   shutdownForceTime?: unknown;
   shutdownGraceTime?: unknown;
   workflowBundle?: unknown;

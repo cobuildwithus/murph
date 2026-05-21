@@ -110,8 +110,14 @@ async function createHostedRuntimeTemporalTerminationConnection(): Promise<
     return null;
   }
 
+  const connectionPromise = Connection.connect(buildConnectionOptions(environment));
   const connection = await withHostedRuntimeWorkflowTerminationTimeout(
-    Connection.connect(buildConnectionOptions(environment)),
+    connectionPromise,
+    {
+      onLateResolve: (lateConnection) => {
+        void lateConnection.close().catch(() => undefined);
+      },
+    },
   );
 
   return {
@@ -149,19 +155,31 @@ function safeHostedRuntimeWorkflowTerminationErrorCode(error: unknown): string {
 
 function withHostedRuntimeWorkflowTerminationTimeout<T>(
   operation: Promise<T>,
+  options: {
+    onLateResolve?: (value: T) => void;
+  } = {},
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    let timedOut = false;
     const timeout = setTimeout(() => {
+      timedOut = true;
       reject(new HostedRuntimeWorkflowTerminationTimeoutError());
     }, HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS);
 
     operation.then(
       (value) => {
         clearTimeout(timeout);
+        if (timedOut) {
+          options.onLateResolve?.(value);
+          return;
+        }
         resolve(value);
       },
       (error: unknown) => {
         clearTimeout(timeout);
+        if (timedOut) {
+          return;
+        }
         reject(error);
       },
     );

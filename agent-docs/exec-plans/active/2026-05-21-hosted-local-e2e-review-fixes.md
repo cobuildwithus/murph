@@ -26,6 +26,7 @@ Updated: 2026-05-21
   - Manual wake timeout handling and focused tests.
   - Root verification coverage wiring for
     `packages/hosted-orchestrator-temporal`.
+  - Temporal workflow bundle safety for runtime signal parsing.
 - Out of scope:
   - Cloudflare Durable Object execution-attempt idempotency.
   - Cloudflare signed callback nonce persistence.
@@ -48,18 +49,32 @@ Updated: 2026-05-21
 ## Verification
 
 - Passed:
-  - `pnpm hosted-local e2e`
+  - Earlier baseline before the later bundle fix: `pnpm hosted-local e2e`
   - `pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts test/hosted-orchestration-control.test.ts test/temporal-env.test.ts --no-coverage`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/hosted-orchestration-manual-wake.test.ts apps/web/test/hosted-orchestration-signal-runtime.test.ts --no-coverage`
   - `pnpm --dir packages/hosted-orchestrator-temporal test -- test/temporal-env.test.ts test/workflow-entrypoint.test.ts test/signal-hosted-user-runtime.test.ts`
   - `pnpm exec vitest run --config vitest.config.ts packages/hosted-orchestrator-temporal/test/temporal-env.test.ts packages/hosted-orchestrator-temporal/test/workflow-entrypoint.test.ts --no-coverage`
+  - `pnpm --dir packages/hosted-orchestrator-temporal build`
+  - `pnpm --dir packages/hosted-orchestrator-temporal exec vitest run --config vitest.config.ts --no-coverage test/hosted-user-runtime-workflow.test.ts test/workflow-entrypoint.test.ts test/signal-hosted-user-runtime.test.ts`
+  - `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/check-hosted-temporal-orchestration-guards.test.ts --pool=forks --maxWorkers=1`
+  - `pnpm hosted-temporal:guard`
+  - `git diff --check -- packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts scripts/check-hosted-temporal-orchestration-guards.ts scripts/check-hosted-temporal-orchestration-guards.test.ts`
   - `git diff --check`
-- In progress:
-  - `pnpm typecheck` rerun is waiting for another active verification command's
-    workspace-artifact lock.
+- Blocked/deferred:
+  - A post-fix `pnpm hosted-local e2e linq-webhook` focused rerun passed the
+    voice-note transcript case, then a later image activation hit a container
+    exit 137 after waiting behind another artifact-sensitive verifier. The
+    rerun was stopped to avoid contending with other active workers in the same
+    checkout.
+  - Full `pnpm hosted-local e2e` needs a quiet checkout because other agents are
+    currently running shared build/test lanes.
 
 ## Notes
 
 - `pnpm hosted-orchestration:smoke` now gets past signal parsing and fails only
   when no standalone Temporal endpoint is running; hosted-local E2E is the
   managed local Temporal proof.
+- The Temporal workflow bundle failure was caused by importing the broad
+  `@murphai/hosted-execution/parsers` barrel from workflow code. The workflow
+  now keeps signal parsing workflow-local and the hosted Temporal guard blocks
+  that import from workflow modules.

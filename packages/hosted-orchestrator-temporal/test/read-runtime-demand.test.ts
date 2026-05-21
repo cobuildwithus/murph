@@ -120,6 +120,17 @@ describe("readRuntimeDemand", () => {
       "Hosted runtime demand workspace projection must not include redactedStatus.",
     );
   });
+
+  it("rejects malformed demand timeout values with numeric suffixes", async () => {
+    await stubHostedWebEnvironment();
+    vi.stubEnv("HOSTED_RUNTIME_DEMAND_TIMEOUT_MS", "10000ms");
+
+    await expect(readRuntimeDemand({
+      userId: "member_test",
+    })).rejects.toThrow(
+      "HOSTED_RUNTIME_DEMAND_TIMEOUT_MS must be a positive integer.",
+    );
+  });
 });
 
 interface ObservedRequest {

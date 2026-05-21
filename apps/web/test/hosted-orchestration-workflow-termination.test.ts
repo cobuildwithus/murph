@@ -228,6 +228,44 @@ describe("hosted runtime workflow termination", () => {
     }
   });
 
+  it("closes a connection that resolves after the termination timeout wins", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "temporal.example.test:7233");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const connectResolver: {
+      current?: (connection: typeof mocks.connection) => void;
+    } = {};
+    mocks.connect.mockReturnValue(new Promise((resolve) => {
+      connectResolver.current = resolve;
+    }));
+
+    try {
+      const result = terminateHostedUserRuntimeWorkflowBestEffort({
+        reason: "account-deleted",
+        userId: "member_test",
+      });
+      await vi.advanceTimersByTimeAsync(HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS);
+
+      await expect(result).resolves.toEqual({
+        configured: true,
+        errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+        notFound: null,
+        terminated: false,
+      });
+      expect(mocks.close).not.toHaveBeenCalled();
+
+      if (!connectResolver.current) {
+        throw new Error("Connection resolver was not captured.");
+      }
+      connectResolver.current(mocks.connection);
+      await Promise.resolve();
+
+      expect(mocks.close).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("times out and closes the connection when Temporal terminate does not resolve", async () => {
     vi.useFakeTimers();
     vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "temporal.example.test:7233");

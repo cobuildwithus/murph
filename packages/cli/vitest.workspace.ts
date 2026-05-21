@@ -133,6 +133,16 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
   },
   {
     fileParallelism: false,
+    name: "cli-device-smoke",
+    patterns: ["device-cli.test.ts"],
+  },
+  {
+    fileParallelism: false,
+    name: "cli-release-smoke",
+    patterns: ["release-*.test.ts"],
+  },
+  {
+    fileParallelism: false,
     name: "cli-schemas-smoke",
     includeRemaining: true,
     patterns: [
@@ -140,13 +150,11 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
       "automation.test.ts",
       "cli-entry.test.ts",
       "cli-test-helpers.test.ts",
-      "device-cli.test.ts",
       "http-json-retry.test.ts",
       "inbox-incur-smoke.test.ts",
       "incur-smoke.test.ts",
       "knowledge-boundary.test.ts",
       "knowledge-documents.test.ts",
-      "release-*.test.ts",
       "wearables-schema.test.ts",
     ],
   },
