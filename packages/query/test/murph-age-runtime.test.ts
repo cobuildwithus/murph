@@ -394,6 +394,68 @@ test("calculateMurphAgeFromVaultInputBundle scores a research lab bundle without
   }
 });
 
+test("calculateMurphAgeFromVaultInputBundle can use L1 glycemia as the wearable shadow anchor", async () => {
+  const vaultRoot = await createProjectionVault();
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    insertMetricPoints(vaultRoot, [
+      labPoint("hba1c", "biomarker:hba1c", 5.3, "percent"),
+      ...wearableContextMetricPoints(),
+      wearablePoint("wearable-valid-day-count-28d", null, 25, "count"),
+      wearablePoint("wearable-coverage-index", null, 0.86, "ratio"),
+    ]);
+
+    const output = await calculateMurphAgeFromVaultInputBundle({
+      asOf: "2026-05-10T00:00:00.000Z",
+      chronologicalAgeYears: 45,
+      mode: "research",
+      models: { l1_tiny_glycemia_10y_acm_research: fixtureL1GlycemiaResearchModel() },
+      sex: "female",
+      vaultRoot,
+    });
+
+    assert.equal(output.status, "ready");
+    assert.equal(output.bundleAssessment.bundleId, "l1-glycemia");
+    assert.equal(output.result?.authorization.cardId, "l1_tiny_glycemia_10y_acm_research");
+    assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
+    assert.equal(output.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+
+    const activityShadow = output.wearableShadowIncrementAssessments.find((assessment) =>
+      assessment.family === "activity"
+    );
+    assert.equal(activityShadow?.anchorCardId, "l1_tiny_glycemia_10y_acm_research");
+    assert.equal(activityShadow?.anchorCompatible, true);
+    assert.equal(activityShadow?.status, "ready");
+    assert.equal(activityShadow?.scoreBearing, false);
+    assert.equal(activityShadow?.scoreContributionAuthorized, false);
+    assert.equal(activityShadow?.selectedMetricKeys.includes("steps"), true);
+
+    const readiness = await assessMurphAgeWearableShadowReadinessFromVault({
+      asOf: "2026-05-10T00:00:00.000Z",
+      vaultRoot,
+    });
+
+    assert.equal(readiness.anchor.anchorCardId, "l1_tiny_glycemia_10y_acm_research");
+    assert.equal(readiness.anchor.bundleId, "l1-glycemia");
+    assert.equal(readiness.readyFamilies.includes("activity"), true);
+    assert.equal(readiness.assessments.every((assessment) => assessment.productAuthorized === false), true);
+
+    const encoded = JSON.stringify(readiness);
+    for (const forbidden of [
+      "metric-point:",
+      "selectedPointIds",
+      "\"value\"",
+      "\"unit\"",
+      "\"message\"",
+      vaultRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("calculateMurphAgeFromVaultInputBundle carries a research-only wearable residual pack as shadow output", async () => {
   const vaultRoot = await createProjectionVault();
   try {
@@ -939,6 +1001,7 @@ test("assessMurphAgeInputReadinessFromVault reports input readiness without valu
     assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
       "lab9-bp-body",
       "lab5-bp-bmi",
+      "l1-glycemia",
       "r399-nhis-proxy-anchor",
       "wearable-context",
       "function-context",
@@ -2089,6 +2152,18 @@ function fixtureLab5ResearchModel(): MurphAgeRiskModel {
       labFeature("systolic-blood-pressure", "Systolic blood pressure", "systolic-blood-pressure", 0.1, 120, 15, "mmHg"),
     ],
     modelId: "fixture-lab5-research-model",
+  };
+}
+
+function fixtureL1GlycemiaResearchModel(): MurphAgeRiskModel {
+  return {
+    ...fixtureLab9ResearchModel(),
+    features: [
+      { coefficient: 0.055, key: "age", kind: "chronological-age", label: "Age" },
+      { coefficient: 0.12, key: "male", kind: "sex", label: "Male", sex: "male" },
+      labFeature("hba1c", "HbA1c", "hba1c", 0.12, 5.4, 0.5, "percent"),
+    ],
+    modelId: "fixture-l1-glycemia-research-model",
   };
 }
 
