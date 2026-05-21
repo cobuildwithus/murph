@@ -1,12 +1,16 @@
 import { Client, Connection, type ConnectionOptions } from "@temporalio/client";
 
-import { readHostedRuntimeTemporalEnvironment } from "../temporal-env.js";
+import {
+  readHostedRuntimeTemporalEnvironment,
+  type HostedRuntimeTemporalTls,
+} from "../temporal-env.js";
 
 export interface HostedRuntimeTemporalClientOptions {
   address?: string;
+  apiKey?: string;
   connection?: Connection;
   namespace?: string;
-  tls?: boolean;
+  tls?: HostedRuntimeTemporalTls;
 }
 
 export async function createHostedRuntimeTemporalClient(
@@ -28,6 +32,7 @@ export async function createHostedRuntimeTemporalClientFromEnv(
   const environment = readHostedRuntimeTemporalEnvironment(source);
   return createHostedRuntimeTemporalClient({
     address: environment.address,
+    apiKey: environment.apiKey,
     namespace: environment.namespace,
     tls: environment.tls,
   });
@@ -38,6 +43,7 @@ function buildConnectionOptions(
 ): ConnectionOptions {
   return {
     ...(options.address ? { address: options.address } : {}),
-    tls: options.tls === true,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    tls: options.tls ?? false,
   };
 }

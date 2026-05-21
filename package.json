@@ -11,6 +11,8 @@
   "scripts": {
     "hosted-local": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     "dev": "pnpm hosted-local up",
+    "temporal:cli:setup": "bash scripts/setup-temporal-cli.sh",
+    "temporal:cli:check": "bash scripts/setup-temporal-cli.sh --check",
     "temporal:dev": "bash scripts/temporal-dev-server.sh",
     "temporal:worker": "pnpm --dir packages/hosted-orchestrator-temporal temporal:worker",
     "hosted-orchestration:smoke": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-orchestration-smoke.ts",

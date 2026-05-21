@@ -8,6 +8,13 @@ execution adapter. The workflow state and signals must stay pointer-only.
 
 ## Local Development
 
+Install or check the Temporal CLI:
+
+```bash
+pnpm temporal:cli:setup
+pnpm temporal:cli:check
+```
+
 Start a local Temporal dev server:
 
 ```bash
@@ -31,6 +38,13 @@ export HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000
 export HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS=30000
 
 pnpm temporal:worker
+```
+
+For a built production-style local worker:
+
+```bash
+pnpm --dir packages/hosted-orchestrator-temporal build
+pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod
 ```
 
 Signal a local smoke workflow:
@@ -57,6 +71,17 @@ Temporal connection:
 - `TEMPORAL_NAMESPACE`: namespace, defaults to `default`.
 - `TEMPORAL_TASK_QUEUE`: task queue, defaults to `murph-hosted-runtime`.
 - `TEMPORAL_TLS_ENABLED`: `true` or `false`; local dev uses `false`.
+- `TEMPORAL_API_KEY`: optional Temporal Cloud API key. If set, TLS is enabled
+  unless `TEMPORAL_TLS_ENABLED=false`, which is rejected.
+- `TEMPORAL_CLIENT_CERT_PEM` / `TEMPORAL_CLIENT_CERT_BASE64`: optional mTLS
+  client certificate. Configure exactly one form and pair it with the matching
+  client key.
+- `TEMPORAL_CLIENT_KEY_PEM` / `TEMPORAL_CLIENT_KEY_BASE64`: optional mTLS
+  client private key. Configure exactly one form and pair it with the matching
+  client certificate.
+- `TEMPORAL_SERVER_ROOT_CA_CERT_PEM` /
+  `TEMPORAL_SERVER_ROOT_CA_CERT_BASE64`: optional server root CA certificate.
+- `TEMPORAL_TLS_SERVER_NAME_OVERRIDE`: optional TLS SNI/server-name override.
 
 Activity HTTP targets:
 
@@ -70,6 +95,28 @@ Activity HTTP targets:
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`: runner invocation timeout.
 - `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: Activity timeout margin.
+
+## Render Deployment
+
+The repo root `render.yaml` defines `murph-temporal-worker` as a Render
+Background Worker. It builds the Temporal package and starts
+`pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
+
+Use Render Blueprint sync from the dashboard or validate it with:
+
+```bash
+render blueprints validate render.yaml
+```
+
+Set Render secrets through the dashboard or Blueprint prompts. Use
+`TEMPORAL_API_KEY` for Temporal Cloud API-key auth. If the namespace still uses
+mTLS certificate auth, add the base64 mTLS vars manually in Render instead of
+putting certificate material in the Blueprint. The Blueprint intentionally does
+not hardcode account-specific Temporal, hosted web, Cloudflare, or
+signing-secret values.
+
+Render Workflows are unrelated to Temporal Workflows for this package; this
+worker must run as a continuously running Render Background Worker.
 
 Do not store real secrets in repo files. Use shell exports, local secret stores,
 or ignored local env files when exercising the worker.

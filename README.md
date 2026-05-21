@@ -21,6 +21,8 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - local wearable/device sync through the workspace-private `packages/device-syncd` runtime bundled into `@murphai/murph`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
+- a private hosted Temporal worker in `packages/hosted-orchestrator-temporal`,
+  with a root Render Background Worker Blueprint for production orchestration
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
 - workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`, plus the public contract package `@murphai/gateway-core`
 
@@ -121,6 +123,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
 | `packages/hosted-execution`  | Shared hosted mailbox, workspace checkpoint, runtime log/status, nudge, and auth contracts for the hosted `apps/web` control plane and Cloudflare worker. |
+| `packages/hosted-orchestrator-temporal` | Workspace-private Temporal worker package for pointer-only hosted runtime orchestration. |
 | `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
 | `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
 | `packages/importers`         | Workspace-private external adapters that normalize inputs and delegate writes to `core`.                                                   |
@@ -161,7 +164,8 @@ Murph now has three distinct runtime tiers:
 ### 3. Hosted execution plane
 
 - `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
-- it is intentionally separate from the public hosted web app
+- `packages/hosted-orchestrator-temporal` runs the per-user Temporal workflow worker that reads web-owned demand, calls Cloudflare ensure-execution, and stores only pointer-level orchestration state
+- the hosted execution plane is intentionally separate from the public hosted web app
 
 ## CLI surface
 
