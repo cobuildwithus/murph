@@ -9,6 +9,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
@@ -380,6 +381,20 @@ describe("hosted execution wake builders", () => {
       occurredAt,
       provider: null,
       reason: "connected",
+      userId: "user_123",
+    });
+
+    expect(
+      buildHostedExecutionRuntimeControlWake({
+        eventId: "runtime-control-1",
+        kind: "runtime.browser-vault-refresh-requested",
+        occurredAt,
+        userId: "user_123",
+      }),
+    ).toEqual({
+      eventId: "runtime-control-1",
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt,
       userId: "user_123",
     });
   });

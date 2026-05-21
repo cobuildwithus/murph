@@ -9,6 +9,7 @@ const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  readHostedMailboxFirstPendingSystemKind: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
@@ -22,6 +23,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxFirstPendingSystemKind:
+    mocks.readHostedMailboxFirstPendingSystemKind,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
 }));
 
@@ -66,6 +69,7 @@ describe("hosted orchestration demand", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
+    mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue(null);
     mocks.readHostedAiUsageGate.mockResolvedValue({ allowed: true });
     mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: true });
   });
@@ -177,6 +181,97 @@ describe("hosted orchestration demand", () => {
       /payload|body|prompt|message|transcript|redactedStatus/u,
     );
     expect(JSON.stringify(loggedMetadata)).not.toContain(MEMBER_ID);
+  });
+
+  it.each([
+    ["runtime.manual-requested", "manual", "manual", true],
+    [
+      "runtime.browser-vault-refresh-requested",
+      "browser_vault_refresh",
+      "browser_vault_refresh",
+      false,
+    ],
+    ["runtime.device-sync-recovery-requested", "device_sync_recovery", "nudge", false],
+    ["runtime.mailbox-lag-observed", "lag_recovery", "nudge", false],
+  ] as const)(
+    "derives %s demand from the first pending system mailbox control item",
+    async (kind, source, reason, gated) => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          conversationImportedSeq: "0",
+          systemImportedSeq: "0",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        {
+          lane: "conversation",
+          maxSeq: "0",
+        },
+        {
+          lane: "system",
+          maxSeq: "3",
+        },
+      ]);
+      mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue(kind);
+
+      const response = await demandRoute.GET(requestForDemand(), routeContext());
+      const demand = parseHostedRuntimeDemand(await response.json());
+
+      expect(response.status).toBe(200);
+      expect(demand).toMatchObject({
+        kind: "run",
+        reason,
+        source,
+      });
+      expect(mocks.readHostedMailboxFirstPendingSystemKind).toHaveBeenCalledWith({
+        afterSeq: "0",
+        prisma: { kind: "prisma" },
+        userId: MEMBER_ID,
+      });
+      if (gated) {
+        expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+          memberId: MEMBER_ID,
+          now: new Date(FIXED_NOW),
+        });
+      } else {
+        expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("keeps conversation mailbox backlog ahead of system control demand", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "1",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "2",
+      },
+      {
+        lane: "system",
+        maxSeq: "1",
+      },
+    ]);
+    mocks.readHostedMailboxFirstPendingSystemKind.mockResolvedValue(
+      "runtime.manual-requested",
+    );
+
+    const response = await demandRoute.GET(requestForDemand(), routeContext());
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toMatchObject({
+      kind: "run",
+      reason: "nudge",
+      source: "mailbox_backlog",
+    });
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+    });
   });
 
   it("does not log free-form wake reason strings", async () => {

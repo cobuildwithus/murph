@@ -16,6 +16,7 @@ import {
   HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
   HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
   HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+  normalizeHostedUserRuntimeWorkflowOptions,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -902,6 +903,19 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       userId: "member_test",
     });
   });
+
+  it.each([630_000, 660_000])(
+    "upgrades the legacy ensure-execution timeout %i before the first processing activity",
+    (legacyTimeoutMs) => {
+      expect(normalizeHostedUserRuntimeWorkflowOptions({
+        ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
+      })).toMatchObject({
+        ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
+        ensureRuntimeProcessingStartToCloseTimeoutMs:
+          HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      });
+    },
+  );
 
   it.each([630_000, 660_000])(
     "upgrades the legacy ensure-execution timeout %i when continuing as new",

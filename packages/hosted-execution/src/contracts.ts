@@ -23,11 +23,22 @@ export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
 export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
   "x-hosted-execution-signing-key-id";
 
+export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
+  "runtime.manual-requested",
+  "runtime.browser-vault-refresh-requested",
+  "runtime.device-sync-recovery-requested",
+  "runtime.mailbox-lag-observed",
+] as const;
+
+export type HostedExecutionRuntimeControlWakeKind =
+  (typeof HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS)[number];
+
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
 export type HostedExecutionEventKind =
@@ -39,6 +50,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
 export type HostedExecutionWakeKind =
@@ -165,11 +177,17 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
+export interface HostedExecutionRuntimeControlRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: HostedExecutionRuntimeControlWakeKind;
+}
+
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
-  | HostedExecutionDeviceSyncWakeEvent;
+  | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
   eventId: string;
@@ -347,6 +365,10 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
+export interface HostedExecutionRuntimeControlWake extends HostedExecutionBaseWake {
+  kind: HostedExecutionRuntimeControlWakeKind;
+}
+
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";
   triggerKind: HostedRuntimeTimerTriggerKind;
@@ -357,7 +379,8 @@ export type HostedExecutionWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
-  | HostedExecutionDeviceSyncWake;
+  | HostedExecutionDeviceSyncWake
+  | HostedExecutionRuntimeControlWake;
 
 export type HostedRuntimeEvent =
   | HostedExecutionWake

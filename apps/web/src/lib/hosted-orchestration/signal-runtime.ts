@@ -1,16 +1,21 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import {
+  buildHostedExecutionRuntimeControlWake,
   HOSTED_USER_RUNTIME_SIGNAL_NAME,
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
   type HostedRuntimeSignal,
+  type HostedExecutionRuntimeControlWakeKind,
 } from "@murphai/hosted-execution";
 import {
   parseHostedRuntimeSignal,
 } from "@murphai/hosted-execution/parsers";
 
 import {
+  appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemCheckpointById,
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
@@ -68,6 +73,11 @@ export interface SignalHostedManualRunInput {
   userId: string;
 }
 
+export interface SignalHostedMailboxLagObservedInput {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  userId: string;
+}
+
 export type HostedDeviceSyncRecoverySignalIntent =
   | "device-sync-dirty-recovery"
   | "device-sync-reconcile-recovery";
@@ -119,12 +129,10 @@ export async function signalHostedMailboxAppendRuntime(
 export async function signalHostedDeviceSyncRecoveryRuntime(
   input: SignalHostedDeviceSyncRecoveryInput,
 ): Promise<HostedRuntimeSignalResult> {
-  return signalHostedUserRuntimeWorkflow({
+  return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
-    ensureWorkspace: true,
-    signal: parseHostedRuntimeSignal({
-      kind: "device_sync_recovery_requested",
-    }),
+    kind: "runtime.device-sync-recovery-requested",
+    source: "device-sync-recovery",
     userId: input.userId,
   });
 }
@@ -132,12 +140,10 @@ export async function signalHostedDeviceSyncRecoveryRuntime(
 export async function signalHostedBrowserVaultRefreshRuntime(
   input: SignalHostedBrowserVaultRefreshInput,
 ): Promise<HostedRuntimeSignalResult> {
-  return signalHostedUserRuntimeWorkflow({
+  return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
-    ensureWorkspace: true,
-    signal: parseHostedRuntimeSignal({
-      kind: "browser_vault_refresh_requested",
-    }),
+    kind: "runtime.browser-vault-refresh-requested",
+    source: "browser-vault-refresh",
     userId: input.userId,
   });
 }
@@ -145,12 +151,21 @@ export async function signalHostedBrowserVaultRefreshRuntime(
 export async function signalHostedManualRunRuntime(
   input: SignalHostedManualRunInput,
 ): Promise<HostedRuntimeSignalResult> {
-  return signalHostedUserRuntimeWorkflow({
+  return signalHostedRuntimeControlMailboxRequest({
     client: input.client,
-    ensureWorkspace: true,
-    signal: parseHostedRuntimeSignal({
-      kind: "manual_run_requested",
-    }),
+    kind: "runtime.manual-requested",
+    source: "manual",
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedMailboxLagObservedRuntime(
+  input: SignalHostedMailboxLagObservedInput,
+): Promise<HostedRuntimeSignalResult> {
+  return signalHostedRuntimeControlMailboxRequest({
+    client: input.client,
+    kind: "runtime.mailbox-lag-observed",
+    source: "mailbox-lag",
     userId: input.userId,
   });
 }
@@ -187,6 +202,41 @@ export async function signalHostedDeviceSyncMailboxRuntime(
       source: "device-sync",
     }),
     userId: mailboxItem.userId,
+  });
+}
+
+async function signalHostedRuntimeControlMailboxRequest(input: {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  kind: HostedExecutionRuntimeControlWakeKind;
+  source: string;
+  userId: string;
+}): Promise<HostedRuntimeSignalResult> {
+  const prisma = getPrisma();
+  await ensureHostedRuntimeWorkspaceForActiveUser(input.userId, prisma);
+  const occurredAt = new Date().toISOString();
+  const mailboxAppend = await prisma.$transaction((tx) =>
+    appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedExecutionRuntimeControlWake({
+        eventId: `runtime-control:${input.kind}:${randomUUID()}`,
+        kind: input.kind,
+        occurredAt,
+        userId: input.userId,
+      }),
+      tx,
+    })
+  );
+
+  return signalHostedUserRuntimeWorkflow({
+    client: input.client,
+    ensureWorkspace: false,
+    signal: parseHostedRuntimeSignal({
+      kind: "mailbox_appended",
+      lane: mailboxAppend.item.lane,
+      laneSeq: mailboxAppend.item.laneSeq,
+      mailboxItemId: mailboxAppend.item.id,
+      source: sanitizeHostedRuntimeSignalSource(input.source),
+    }),
+    userId: input.userId,
   });
 }
 
@@ -229,8 +279,10 @@ export async function signalHostedUserRuntimeWorkflow(
   };
 }
 
-async function ensureHostedRuntimeWorkspaceForActiveUser(userId: string): Promise<void> {
-  const prisma = getPrisma();
+async function ensureHostedRuntimeWorkspaceForActiveUser(
+  userId: string,
+  prisma = getPrisma(),
+): Promise<void> {
   const member = await readHostedMemberCoreState({
     memberId: userId,
     prisma,

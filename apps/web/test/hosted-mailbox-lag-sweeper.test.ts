@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   hostedWorkspaceFindMany: vi.fn(),
   getPrisma: vi.fn(),
   mailboxFindFirst: vi.fn(),
-  signalHostedUserRuntimeWorkflow: vi.fn(),
+  signalHostedMailboxLagObservedRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -15,7 +15,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedUserRuntimeWorkflow: mocks.signalHostedUserRuntimeWorkflow,
+  signalHostedMailboxLagObservedRuntime: mocks.signalHostedMailboxLagObservedRuntime,
 }));
 
 type LagSweeperModule = typeof import("../src/lib/hosted-mailbox/lag-sweeper");
@@ -41,7 +41,7 @@ describe("hosted mailbox lag sweeper", () => {
     mocks.mailboxFindFirst.mockResolvedValue({
       updatedAt: new Date("2026-05-02T00:01:00.000Z"),
     });
-    mocks.signalHostedUserRuntimeWorkflow.mockResolvedValue({
+    mocks.signalHostedMailboxLagObservedRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_lag_1",
     });
@@ -107,11 +107,8 @@ describe("hosted mailbox lag sweeper", () => {
         },
       },
     });
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
-      signal: {
-        kind: "mailbox_lag_observed",
-      },
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledWith({
       userId: "member_lag_1",
     });
     expect(result).toEqual({
@@ -160,7 +157,7 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 5,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       highWaterRows: 2,
       laggedUsers: 1,
@@ -191,12 +188,9 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 1,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith(
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
-        signal: {
-          kind: "mailbox_lag_observed",
-        },
         userId: "member_lag_2",
       }),
     );
@@ -255,7 +249,7 @@ describe("hosted mailbox lag sweeper", () => {
         userId: "member_steady_inbound",
       },
     });
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
     expect(result.skippedLaggedUsers).toBe(0);
   });
 
@@ -287,10 +281,10 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 5,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxLagObservedRuntime).not.toHaveBeenCalled();
     expect(skipped.skippedLaggedUsers).toBe(1);
 
-    mocks.signalHostedUserRuntimeWorkflow.mockClear();
+    mocks.signalHostedMailboxLagObservedRuntime.mockClear();
     logger.warn.mockClear();
 
     const eligible = await lagSweeper.runHostedMailboxLagSweeper({
@@ -299,7 +293,7 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 5,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
     expect(eligible.skippedLaggedUsers).toBe(0);
   });
 
@@ -339,7 +333,7 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 5,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       laggedUsers: 1,
       signalAttempted: 1,
@@ -373,7 +367,7 @@ describe("hosted mailbox lag sweeper", () => {
       signalLimit: 5,
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxLagObservedRuntime).not.toHaveBeenCalled();
     expect(result).toEqual({
       highWaterRows: 1,
       laggedUsers: 1,
@@ -417,15 +411,9 @@ describe("hosted mailbox lag sweeper", () => {
       now: new Date("2026-05-02T00:21:00.000Z"),
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
-      signal: {
-        kind: "mailbox_lag_observed",
-      },
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledWith({
       userId: "member_capped_lag",
     });
-    const signal = mocks.signalHostedUserRuntimeWorkflow.mock.calls[0]?.[0]
-      ?.signal as Record<string, unknown>;
-    expect(Object.keys(signal).sort()).toEqual(["kind"]);
     expect(result).toMatchObject({
       signalAccepted: 1,
       signalAttempted: 1,
@@ -461,10 +449,7 @@ describe("hosted mailbox lag sweeper", () => {
       now: new Date("2026-05-02T00:21:00.000Z"),
     });
 
-    expect(mocks.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
-      signal: {
-        kind: "mailbox_lag_observed",
-      },
+    expect(mocks.signalHostedMailboxLagObservedRuntime).toHaveBeenCalledWith({
       userId: "member_capped_mixed_lag",
     });
     expect(result).toMatchObject({
@@ -492,7 +477,7 @@ describe("hosted mailbox lag sweeper", () => {
     ]);
     const error = new Error("network details are intentionally not logged");
     error.name = "TemporalUnavailable";
-    mocks.signalHostedUserRuntimeWorkflow.mockRejectedValueOnce(error);
+    mocks.signalHostedMailboxLagObservedRuntime.mockRejectedValueOnce(error);
     const logger = buildLogger();
 
     const result = await lagSweeper.runHostedMailboxLagSweeper({

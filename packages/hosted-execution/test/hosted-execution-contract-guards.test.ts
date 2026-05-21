@@ -4,6 +4,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionWhatsAppConversationMessageWake,
 } from "../src/builders.ts";
@@ -21,6 +22,7 @@ describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
     expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
+    expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
     expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
     expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
@@ -82,12 +84,19 @@ describe("hosted execution wake guards", () => {
       reason: "connected",
       userId: "user_guard",
     });
+    const controlWake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control-wake-1",
+      kind: "runtime.manual-requested",
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user_guard",
+    });
 
     expect(isHostedConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedConversationMessageWake(telegramWake)).toBe(true);
     expect(isHostedConversationMessageWake(emailWake)).toBe(true);
     expect(isHostedConversationMessageWake(whatsappWake)).toBe(true);
     expect(isHostedConversationMessageWake(systemWake)).toBe(false);
+    expect(isHostedConversationMessageWake(controlWake)).toBe(false);
 
     expect(isHostedLinqConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedLinqConversationMessageWake(telegramWake)).toBe(false);
@@ -106,6 +115,7 @@ describe("hosted execution wake guards", () => {
     expect(isHostedEmailConversationMessageWake(systemWake)).toBe(false);
 
     expect(isHostedSystemWake(systemWake)).toBe(true);
+    expect(isHostedSystemWake(controlWake)).toBe(true);
     expect(isHostedSystemWake(emailWake)).toBe(false);
   });
 });

@@ -63,7 +63,7 @@ export const runtimeWorkflowStatus =
 export async function hostedUserRuntimeWorkflow(
   input: HostedUserRuntimeWorkflowInput,
 ): Promise<void> {
-  const options = normalizeWorkflowOptions(input.options);
+  const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
   const demandActivities = proxyActivities<typeof activities>({
     retry: {
       initialInterval: "2 seconds",
@@ -177,7 +177,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   input: HostedUserRuntimeWorkflowInput,
   runtime: HostedUserRuntimeWorkflowRuntime,
 ): HostedUserRuntimeWorkflowMachine {
-  const options = normalizeWorkflowOptions(input.options);
+  const options = normalizeHostedUserRuntimeWorkflowOptions(input.options);
   const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
@@ -588,7 +588,7 @@ function readLegacyCarryForwardSafeInteger(
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
-function normalizeWorkflowOptions(
+export function normalizeHostedUserRuntimeWorkflowOptions(
   options: HostedUserRuntimeWorkflowOptions | undefined,
 ): NormalizedWorkflowOptions {
   return {
@@ -614,8 +614,10 @@ function normalizeWorkflowOptions(
       fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
       max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
       min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
-      value: options?.ensureRuntimeProcessingStartToCloseTimeoutMs
-        ?? options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
+      value: normalizeEnsureRuntimeProcessingTimeoutOption(
+        options?.ensureRuntimeProcessingStartToCloseTimeoutMs
+          ?? options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
+      ),
     }),
     readRuntimeDemandStartToCloseTimeoutMs: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS,
@@ -635,7 +637,7 @@ function normalizeWorkflowOptions(
 function normalizeContinueAsNewOptions(
   options: HostedUserRuntimeWorkflowOptions | undefined,
 ): HostedUserRuntimeWorkflowOptions {
-  const normalized = normalizeWorkflowOptions(options);
+  const normalized = normalizeHostedUserRuntimeWorkflowOptions(options);
   const ensureRuntimeProcessingStartToCloseTimeoutMs = normalizePositiveIntegerOption({
     fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
     max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,

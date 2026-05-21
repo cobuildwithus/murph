@@ -50,7 +50,8 @@ type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "dispatch-assistant-notification"
-  | "run-device-sync-wake";
+  | "run-device-sync-wake"
+  | "apply-runtime-control-request";
 
 export interface HostedSystemMailboxPendingItem {
   attemptCount: number;
@@ -519,6 +520,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "dispatch-assistant-notification"
     || item.route.action === "run-device-sync-wake"
+    || item.route.action === "apply-runtime-control-request"
   ) {
     return item.route.action;
   }
@@ -532,6 +534,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "apply-member-channels-update"
     || value === "dispatch-assistant-notification"
     || value === "run-device-sync-wake"
+    || value === "apply-runtime-control-request"
   ) {
     return value;
   }

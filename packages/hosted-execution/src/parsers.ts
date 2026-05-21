@@ -26,6 +26,7 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionWhatsAppConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
+  HostedExecutionRuntimeControlWakeKind,
 } from "./contracts.ts";
 import type {
   HostedExecutionLogLevel,
@@ -41,6 +42,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
 import {
@@ -208,6 +210,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
               ),
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
+        userId: wireUserId,
+      });
+    case "runtime.manual-requested":
+    case "runtime.browser-vault-refresh-requested":
+    case "runtime.device-sync-recovery-requested":
+    case "runtime.mailbox-lag-observed":
+      return buildHostedExecutionRuntimeControlWake({
+        eventId,
+        kind,
+        occurredAt,
         userId: wireUserId,
       });
     default:
@@ -677,6 +689,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
+    case "runtime.manual-requested":
+    case "runtime.browser-vault-refresh-requested":
+    case "runtime.device-sync-recovery-requested":
+    case "runtime.mailbox-lag-observed":
+      return {
+        kind: kind as HostedExecutionRuntimeControlWakeKind,
+        userId,
+      };
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
