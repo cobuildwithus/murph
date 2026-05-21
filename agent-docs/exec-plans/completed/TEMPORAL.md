@@ -156,16 +156,18 @@ export interface HostedUserRuntimeWakeState {
   deviceSyncRecoveryRequested: boolean;
   lagRecoveryObserved: boolean;
   runtimeResultWakeAt: string | null;
+  runtimeResultWakeReason: string | null;
   ignoredWorkspaceWakeKey: string | null;
 }
 ```
 
 Workflow carry-forward/debug state must stay slim. Do not store full
 `HostedRuntimeDemand`, full `HostedWorkspaceState`, full
-`HostedWorkspaceInvocationResult`, signed `aiUsageAllowDecision`, or redacted
-runtime status in workflow history. Carry forward only the coalesced flags,
-latest pointer, `runtimeResultWakeAt`, `ignoredWorkspaceWakeKey`, and bounded
-debug fields such as `lastDemandKind`, `lastDemandSource`,
+`HostedWorkspaceInvocationResult`, signed usage decisions, or redacted runtime
+status in workflow history. Carry forward only the coalesced flags, latest
+pointer, `runtimeResultWakeAt`, `runtimeResultWakeReason`,
+`ignoredWorkspaceWakeKey`, and bounded debug fields such as `lastDemandKind`,
+`lastDemandSource`,
 `lastDemandNextWakeAt`, `lastExecutionKind`, `lastExecutionAt`, and
 `lastExecutionErrorCode`.
 
@@ -195,7 +197,6 @@ apps/web
   src/lib/hosted-orchestration/signal-runtime.ts
   src/lib/hosted-orchestration/runtime-demand-control.ts
   app/api/internal/hosted-orchestration/users/[userId]/demand/route.ts
-  app/api/internal/hosted-orchestration/users/[userId]/usage-allow-decision/route.ts
   Replace Vercel workflow starts with Temporal signal-with-start.
 
 apps/cloudflare
@@ -349,7 +350,6 @@ export type HostedRuntimeDemand =
         | "lag_recovery";
       mailboxLag: HostedMailboxLaneLag[];
       workspace: HostedRuntimeDemandWorkspaceProjection | null;
-      requiresAiUsageDecision: boolean;
     }
   | {
       kind: "idle";
@@ -375,6 +375,7 @@ export interface HostedRuntimeDemandRequest {
   lagRecoveryObserved?: boolean;
   manualRunRequested?: boolean;
   runtimeResultWakeAt?: string | null;
+  runtimeResultWakeReason?: string | null;
   ignoredWorkspaceWakeKey?: string | null;
   userId: string;
 }
@@ -382,7 +383,6 @@ export interface HostedRuntimeDemandRequest {
 export interface HostedRuntimeEnsureExecutionRequest {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
 }
 
 export type HostedRuntimeEnsureExecutionResponse =
@@ -390,6 +390,7 @@ export type HostedRuntimeEnsureExecutionResponse =
       action: "started" | "replaced";
       kind: "runtime_completed";
       runtimeResultNextWakeAt: string | null;
+      runtimeResultNextWakeReason: string | null;
       runtimeStatus: HostedWorkspaceInvocationStatus;
       runtimeAttemptId: string;
     }
@@ -425,10 +426,10 @@ Acceptance criteria:
 - All signal payloads are pointer-only.
 - No signed usage decision is present in demand, workflow state, or Activity
   inputs recorded in workflow history.
-- `requiresAiUsageDecision` belongs to the Temporal Activity input, not the
-  Cloudflare shared request. The Activity fetches a fresh signed decision from
-  web when needed and then builds the Cloudflare request with optional
-  `aiUsageAllowDecision`.
+- Demand may return `blocked(ai_usage_denied)` or
+  `blocked(ai_usage_gate_unavailable)`, but it does not return signed usage
+  decisions or usage-gating metadata. Cloudflare ensure-execution receives only
+  `orchestrationAttemptId` and `reason`.
 ```
 
 # 4. Temporal workflow design
@@ -472,6 +473,7 @@ State:
 - deviceSyncRecoveryRequested
 - lagRecoveryObserved
 - runtimeResultWakeAt
+- runtimeResultWakeReason
 - ignoredWorkspaceWakeKey
 - lastDemandKind
 - lastDemandSource
@@ -499,6 +501,7 @@ Loop:
      deviceSyncRecoveryRequested,
      lagRecoveryObserved,
      runtimeResultWakeAt,
+     runtimeResultWakeReason,
      ignoredWorkspaceWakeKey,
    })
 3. If signalVersion changed while demand was awaited, keep all flags and loop.
@@ -515,13 +518,16 @@ Loop:
        userId,
        reason,
        orchestrationAttemptId: uuid4(),
-       requiresAiUsageDecision,
      })
    - if a signal arrived during execution, keep flags and loop.
-   - runtime_completed: set runtimeResultWakeAt from runtimeResultNextWakeAt;
-     if source was workspace_wake, set ignoredWorkspaceWakeKey from demand.
-   - runtime_wake_sent: sleep until recommendedRecheckAt, or an env-derived
-     active-wake recheck delay based on the idle checkpoint window.
+   - runtime_completed: set runtimeResultWakeAt/runtimeResultWakeReason from
+     runtimeResultNextWakeAt/runtimeResultNextWakeReason; if runtimeStatus is
+     failed and no next wake is supplied, record a bounded runtime.failed retry
+     wake; if source was workspace_wake, set ignoredWorkspaceWakeKey from
+     demand.
+   - runtime_wake_sent: wait signal-interruptibly until recommendedRecheckAt,
+     or an env-derived active-wake recheck delay based on the idle checkpoint
+     window.
    - clear consumed flags only when the signal version still matches.
 8. Continue-as-new when suggested or after a bounded loop count, carrying only
    the slim state above.
@@ -531,7 +537,8 @@ Timer rules:
 
 ```txt
 - Use condition(predicate, timeout) when waiting for a signal or a timeout.
-- Use sleep(ms) for timer-only waits such as runtime_wake_sent rechecks.
+- Use signal-aware condition timeouts when a fresh signal should interrupt the
+  timer, including runtime_wake_sent rechecks and failed-runtime retry waits.
 - Do not use condition(() => false, ms).
 - Do not use a fixed one-second active wake recheck.
 ```
@@ -568,6 +575,7 @@ Request query:
 &deviceSyncRecoveryRequested=1
 &lagRecoveryObserved=1
 &runtimeResultWakeAt=<iso or empty>
+&runtimeResultWakeReason=<reason or empty>
 &ignoredWorkspaceWakeKey=<opaque or empty>
 ```
 
@@ -621,16 +629,19 @@ Hard-cut recommendation:
 ```txt
 - Web remains usage/product owner.
 - Runtime/provider layer remains final spend enforcement before model calls.
-- Demand endpoint returns `requiresAiUsageDecision: true` for run demand that
-  needs a signed usage decision.
+- Demand may return blocked(ai_usage_denied) or
+  blocked(ai_usage_gate_unavailable) when web-owned usage/product policy denies
+  or cannot decide before execution.
+- Demand does not return signed usage decisions.
+- Temporal workflow and Activities do not store signed usage decisions.
+- Cloudflare ensure-execution does not receive aiUsageAllowDecision.
 - If usage gate denies, return blocked(ai_usage_denied) with retryAt null.
 - If usage gate unavailable, return blocked(ai_usage_gate_unavailable) with retryAt soon.
 ```
 
-Keep the usage logic inside apps/web. The Temporal workflow never stores the
-signed decision. The `ensureCloudflareExecution` Activity fetches a fresh signed
-decision from web inside the Activity when `requiresAiUsageDecision` is true,
-then passes it directly to Cloudflare.
+Keep usage logic inside apps/web. Web demand gates before execution for sources
+that strongly imply foreground model work, and runtime/provider spend
+enforcement remains separate from orchestration before actual model calls.
 
 # 6. Cloudflare execution adapter
 
@@ -646,8 +657,6 @@ POST /internal/users/:userId/runtime/ensure-execution
 type HostedRuntimeEnsureExecutionRequest = {
   reason: HostedWorkspaceInvocationReason;
   orchestrationAttemptId: string;
-  // Fetched by the Activity when needed; never stored in workflow history.
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
 };
 ```
 
@@ -661,6 +670,7 @@ type HostedRuntimeEnsureExecutionResponse =
       runtimeAttemptId: string;
       runtimeStatus: HostedWorkspaceInvocationStatus;
       runtimeResultNextWakeAt: string | null;
+      runtimeResultNextWakeReason: string | null;
     }
   | {
       kind: "runtime_wake_sent";
@@ -679,7 +689,6 @@ Add:
 
 ```ts
 async ensureRuntimeExecutionForUser(input: {
-  aiUsageAllowDecision?: HostedAiUsageAllowDecision | null;
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
   userId: string;
@@ -962,8 +971,9 @@ Required content:
   - `HostedRuntimeDemandWorkspaceProjection`
   - `runtimeResultWakeAt` / `runtimeResultNextWakeAt`
   - `ignoredWorkspaceWakeKey`
-  - `requiresAiUsageDecision`
   - `runtime_completed` / `runtime_wake_sent`
+  - blocked demand for `ai_usage_denied` /
+    `ai_usage_gate_unavailable` instead of signed usage payloads
 - Deletion list:
   - Vercel workflow nudge paths
   - Cloudflare semantic scheduling paths
@@ -1035,7 +1045,9 @@ Rules:
   HostedMailboxLaneLag, and HostedWorkspaceInvocationStatus types where useful.
 - Do not import or expose full HostedWorkspaceState or full
   HostedWorkspaceInvocationResult in orchestration contracts.
-- Demand returns `requiresAiUsageDecision`, never a signed allow-decision body.
+- Demand returns `blocked(ai_usage_denied)` or
+  `blocked(ai_usage_gate_unavailable)` for web-owned usage gate failures; it
+  never returns signed usage decisions or usage-gating metadata.
 - Ensure-execution response variants are only `runtime_completed` and
   `runtime_wake_sent`.
 - Do not add a workflow success union for transport failures; transport
@@ -1193,8 +1205,8 @@ Goal:
   - mailboxLag
   - slim workspace wake projection
   - workflow-provided runtimeResultWakeAt
+  - workflow-provided runtimeResultWakeReason
   - workflow-provided ignoredWorkspaceWakeKey
-  - requiresAiUsageDecision boolean
 - It must not duplicate assistant/runtime business logic.
 
 Files to inspect:
@@ -1204,7 +1216,6 @@ Files to inspect:
 - apps/web/src/lib/hosted-workspace/store.ts
 - apps/web/src/lib/hosted-runner/assistant-nudge.ts
 - apps/web/src/lib/hosted-execution/usage-allowance.ts
-- apps/web/src/lib/hosted-execution/usage-gate-allow-decision.ts
 
 Files to add/change:
 - apps/web/app/api/internal/hosted-orchestration/users/[userId]/demand/route.ts
@@ -1231,9 +1242,8 @@ Demand priority:
 
 Usage gating:
 - Keep usage logic in web.
-- For run demands that may use assistant/model work, return
-  requiresAiUsageDecision: true.
-- Do not return a signed aiUsageAllowDecision from demand.
+- Gate only sources that strongly imply foreground model work before execution.
+- Do not return signed usage decisions or usage-gating metadata from demand.
 - If usage denied, return blocked(ai_usage_denied).
 - If usage gate unavailable, return blocked(ai_usage_gate_unavailable) with a short retryAt.
 - Browser-vault refresh may not need model usage; keep policy explicit and tested.
@@ -1394,8 +1404,9 @@ Goal:
 - Implement ensureCloudflareExecution activity by calling Cloudflare ensure-execution endpoint.
 - Keep all network/config code in activities, not workflows.
 - Add strict parsing of all responses.
-- Fetch fresh signed web usage decision inside ensureCloudflareExecution when
-  requiresAiUsageDecision is true.
+- Keep usage decisions out of Activities and Cloudflare ensure-execution; web
+  demand returns `blocked` when usage is denied or unavailable, and
+  runtime/provider spend enforcement remains separate.
 - Use Activity exceptions for transport failures.
 
 Files to inspect:
@@ -1409,17 +1420,15 @@ Implement:
 - ensureCloudflareExecution(input: {
     orchestrationAttemptId: string;
     reason: HostedWorkspaceInvocationReason;
-    requiresAiUsageDecision: boolean;
     userId: string;
   }): Promise<HostedRuntimeEnsureExecutionResponse>
 - HTTP clients:
   - web demand client
-  - web usage allow-decision client
   - cloudflare ensure-execution client
 - env readers:
   - HOSTED_WEB_BASE_URL
   - HOSTED_WEB_CALLBACK_SIGNING_KEY_ID /
-    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK for signed web demand, usage, and
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK for signed web demand and
     Cloudflare ensure-execution requests
   - CLOUDFLARE_HOSTED_CONTROL_BASE_URL
 - tests with mocked fetch/client.
@@ -1428,9 +1437,6 @@ Implement:
   - ensureCloudflareExecution is Cloudflare runner timeout plus safety margin.
   - signal-with-start args include env-derived workflow timeout options so the
     workflow proxy timeouts match the HTTP Activity timeout budget.
-- When `requiresAiUsageDecision` is true, fetch the signed decision from web
-  inside the Activity and pass it in the Cloudflare
-  `HostedRuntimeEnsureExecutionRequest.aiUsageAllowDecision` field.
 
 Do not:
 - Import Prisma.
@@ -1439,8 +1445,8 @@ Do not:
 - Put fetch inside workflow code.
 - Return unparsed JSON.
 - Return transport failures as success unions.
-- Store or return signed usage decisions to the workflow.
-- Put `requiresAiUsageDecision` on the Cloudflare request body.
+- Store or return signed usage decisions to the workflow or Activity contract.
+- Put usage-decision fields on the Cloudflare request body.
 ```
 
 Acceptance:
@@ -1499,7 +1505,7 @@ Implement:
   - if signalVersion changed during demand read, keep flags and loop
   - if blocked: wait retryAt or signal
   - if idle: clear satisfied flags, wait nextWakeAt or signal
-  - if run: ensure execution, version-gate flag clearing, update runtimeResultWakeAt from runtimeResultNextWakeAt, set ignoredWorkspaceWakeKey after completed workspace_wake, if runtime_wake_sent sleep until recommendedRecheckAt or env-derived active-wake delay, loop
+  - if run: ensure execution, version-gate flag clearing, update runtimeResultWakeAt/runtimeResultWakeReason from runtimeResultNextWakeAt/runtimeResultNextWakeReason, synthesize a bounded runtime.failed retry wake when runtime_completed returns runtimeStatus failed with no next wake, set ignoredWorkspaceWakeKey after completed workspace_wake, if runtime_wake_sent wait signal-interruptibly until recommendedRecheckAt or env-derived active-wake delay, loop
 - Add continue-as-new carry-forward state.
 
 Do not:
@@ -1522,6 +1528,7 @@ Acceptance:
   - signal interrupts idle wait.
   - runtime_wake_sent waits using recommendedRecheckAt and re-reads demand.
   - runtime_completed preserves runtimeResultNextWakeAt as runtimeResultWakeAt.
+  - runtime_completed failed with no next wake waits before re-reading demand.
   - runtime_result_wake demand runs before workspace_wake.
   - stale workspace_wake is ignored by ignoredWorkspaceWakeKey.
   - signals arriving during awaited demand/execution are not lost.
@@ -2069,7 +2076,7 @@ No raw provider/mailbox/prompt data in Temporal signals or workflow state.
 ## Temporal contract shape
 
 ```bash
-rg "runtimeResultWakeAt|ignoredWorkspaceWakeKey|requiresAiUsageDecision|recommendedRecheckAt|HostedRuntimeDemandWorkspaceProjection" packages/hosted-execution packages/hosted-orchestrator-temporal apps/web apps/cloudflare
+rg "runtimeResultWakeAt|runtimeResultWakeReason|ignoredWorkspaceWakeKey|recommendedRecheckAt|HostedRuntimeDemandWorkspaceProjection" packages/hosted-execution packages/hosted-orchestrator-temporal apps/web apps/cloudflare
 ```
 
 Expected:
@@ -2165,8 +2172,9 @@ The migration is complete only when all of these are true:
 12. Existing runtime nextWakeAt remains the only source for assistant timers.
 13. Runtime-result nextWakeAt is preserved through runtimeResultWakeAt /
     runtimeResultNextWakeAt.
-14. Demand returns requiresAiUsageDecision and no signed usage decision enters
-    workflow history.
+14. Demand may return blocked usage-gate states, but no signed usage decision
+    enters demand, Activity input, Cloudflare ensure-execution, or workflow
+    history.
 15. Temporal workflow stores only slim projections/debug fields, not full
     workspace or runtime invocation objects.
 16. Workflow flag clearing is version-gated around awaited demand/execution.
@@ -2192,7 +2200,7 @@ Every time a subagent has a choice, choose the simpler ownership-preserving opti
 - Cloudflare ensure-execution endpoint
 - slim demand/result projections
 - runtimeResultWakeAt before workspace wake
-- requiresAiUsageDecision with Activity-local fresh signed decision fetch
+- blocked usage-gate demand without signed usage payloads
 - runtime computes nextWakeAt
 - Temporal loops and re-reads demand
 - version-gated flag clearing around awaited Activities
@@ -2238,9 +2246,9 @@ Do not let Cloudflare derive durable demand.
 Do not store raw payloads in Temporal.
 Do not store full workspace state, full runtime invocation results, redacted runtime status, or signed usage decisions in Temporal history.
 Preserve runtime-result nextWakeAt as runtimeResultWakeAt/runtimeResultNextWakeAt.
-Demand returns requiresAiUsageDecision; ensure-execution Activity fetches any signed usage decision fresh inside the Activity.
+Demand may return blocked usage-gate states; do not send signed usage decisions through demand, Activities, workflow state, or Cloudflare ensure-execution.
 Version-gate flag clearing around awaited demand/execution calls.
-Use sleep() for timer-only waits and recommendedRecheckAt/env-derived active-wake delays, not a one-second recheck loop.
+Use signal-aware waits for recommendedRecheckAt/env-derived active-wake delays, failed-runtime retry delays, and other waits that fresh signals should interrupt.
 Use ignoredWorkspaceWakeKey to avoid stale workspace wake hot loops.
 Do not keep Vercel Workflow or Cloudflare nudge fallback paths.
 This is a greenfield hard cut to the minimal long-term architecture.

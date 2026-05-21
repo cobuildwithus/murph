@@ -12,6 +12,7 @@ import {
   createHostedUserRuntimeWorkflowMachine,
   createWorkspaceWakeKey,
   HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
+  HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
   type HostedUserRuntimeWorkflowMachine,
   type HostedUserRuntimeWorkflowRuntime,
 } from "../src/workflows/hosted-user-runtime.js";
@@ -205,6 +206,80 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       runtimeResultNextWakeAt,
     );
     expect(runtime.demandRequests[1].runtimeResultWakeReason).toBe("assistant");
+  });
+
+  it("backs off after failed runtime completion with no runtime-provided next wake", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
+    runtime.executions.push(runtimeCompleted({
+      runtimeStatus: "failed",
+    }));
+    runtime.demands.push((request) => {
+      expect(request.runtimeResultWakeAt).toBe(isoAfter(
+        HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      ));
+      expect(request.runtimeResultWakeReason).toBe("runtime.failed");
+      return runDemand({
+        mailboxLag: [mailboxLag()],
+        source: "mailbox_backlog",
+      });
+    });
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([
+      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+    ]);
+    expect(runtime.executionRequests).toHaveLength(2);
+  });
+
+  it("lets a signal interrupt failed runtime completion backoff", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({
+      mailboxLag: [mailboxLag()],
+      source: "mailbox_backlog",
+    }));
+    runtime.executions.push(runtimeCompleted({
+      runtimeStatus: "failed",
+    }));
+    runtime.demands.push((request) => {
+      expect(request.manualRunRequested).toBe(true);
+      expect(request.runtimeResultWakeAt).toBe(isoAfter(
+        HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+      ));
+      expect(request.runtimeResultWakeReason).toBe("runtime.failed");
+      return runDemand({ source: "manual" });
+    });
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(manualSignal("manual-during-failed-backoff"));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([
+      HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
+    ]);
+    expect(runtime.now).toBe(BASE_TIME_MS);
+    expect(runtime.executionRequests).toHaveLength(2);
+    expect(runtime.executionRequests[1]?.reason).toBe("manual");
   });
 
   it("does not pass usage decisions into execution", async () => {
@@ -427,6 +502,38 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([30_000]);
+  });
+
+  it("lets a signal interrupt blocked demand retry wait", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push({
+      kind: "blocked",
+      mailboxLag: [],
+      reason: "ai_usage_gate_unavailable",
+      retryAt: isoAfter(30_000),
+      workspace: null,
+    });
+    runtime.demands.push((request) => {
+      expect(request.manualRunRequested).toBe(true);
+      return runDemand({ source: "manual" });
+    });
+    runtime.executions.push(runtimeCompleted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(manualSignal("manual-during-blocked-retry"));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([30_000]);
+    expect(runtime.now).toBe(BASE_TIME_MS);
+    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.executionRequests[0]?.reason).toBe("manual");
   });
 
   it("records execution errors and keeps the workflow alive for retry", async () => {
