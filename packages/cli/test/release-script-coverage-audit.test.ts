@@ -733,6 +733,19 @@ Updated: 2026-04-24
     )
   })
 
+  it('prepares the hosted web Prisma client before Cloudflare app verification typecheck', () => {
+    const cloudflareVerify = readFileSync(
+      path.join(repoRoot, 'apps', 'cloudflare', 'scripts', 'verify-fast.sh'),
+      'utf8',
+    )
+
+    expect(cloudflareVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
+    expect(cloudflareVerify).toContain('pnpm --dir "$repo_root/apps/web" prisma:generate')
+    expect(cloudflareVerify).toContain(
+      'prepare_hosted_web_prisma_client\n\nif [[ "$skip_typecheck" == "1" ]]',
+    )
+  })
+
   it('runs release checks directly instead of through an env-overridable shell command', () => {
     const releaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
 

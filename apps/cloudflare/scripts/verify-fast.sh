@@ -14,6 +14,15 @@ verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_defaul
 skip_typecheck="${MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK:-0}"
 tracked_background_pids=()
 
+prepare_hosted_web_prisma_client() {
+  if [[ "${MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED:-0}" == "1" ]]; then
+    echo "[apps/cloudflare verify] skipping hosted web Prisma client generation; already prepared." >&2
+    return 0
+  fi
+
+  pnpm --dir "$repo_root/apps/web" prisma:generate
+}
+
 register_background_pid() {
   tracked_background_pids+=("$1")
 }
@@ -108,6 +117,8 @@ if [[ "${MURPH_HEALTH_COMMONS_GENERATED_PREPARED:-0}" == "1" ]]; then
 else
   pnpm --dir "$repo_root" health-commons:generate
 fi
+
+prepare_hosted_web_prisma_client
 
 if [[ "$skip_typecheck" == "1" ]]; then
   echo "[apps/cloudflare verify] skipping typecheck; root acceptance typecheck already covered this app." >&2
