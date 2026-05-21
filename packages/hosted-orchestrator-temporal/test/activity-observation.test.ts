@@ -27,6 +27,7 @@ describe("observeHostedTemporalActivity", () => {
       reason: "nudge",
       userId: "member_test",
     }, async () => ({
+      action: "woken",
       kind: "runtime_processing_accepted",
       runtimeAttemptId: "runtime_attempt_test",
     }))).resolves.toMatchObject({
@@ -41,12 +42,73 @@ describe("observeHostedTemporalActivity", () => {
         durationMs: expect.any(Number),
         orchestrationAttemptId: "orchestration_attempt_test",
         reason: "nudge",
+        resultAction: "woken",
         resultKind: "runtime_processing_accepted",
+        retryReason: null,
         userId: "member_test",
       },
     );
     expect(JSON.stringify(activityLog.info.mock.calls)).not.toMatch(
       /payload|prompt|transcript|secret|mailbox_item/u,
+    );
+  });
+
+  it("logs retry-later observations with a bounded retry reason", async () => {
+    await expect(observeHostedTemporalActivity({
+      activity: "ensureRuntimeProcessing",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "retry",
+      userId: "member_test",
+    }, async () => ({
+      kind: "retry_later",
+      reason: "start_not_confirmed",
+      retryAt: "2026-05-21T12:00:00.000Z",
+    }))).resolves.toMatchObject({
+      kind: "retry_later",
+    });
+
+    expect(activityLog.info).toHaveBeenCalledWith(
+      "Hosted Temporal activity completed.",
+      {
+        activity: "ensureRuntimeProcessing",
+        component: "temporal.activity",
+        durationMs: expect.any(Number),
+        orchestrationAttemptId: "orchestration_attempt_test",
+        reason: "retry",
+        resultAction: null,
+        resultKind: "retry_later",
+        retryReason: "start_not_confirmed",
+        userId: "member_test",
+      },
+    );
+  });
+
+  it("does not log free-form result detail strings", async () => {
+    const unsafeResultDetail = "unsafe prompt payload transcript secret";
+
+    await expect(observeHostedTemporalActivity({
+      activity: "ensureRuntimeProcessing",
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      userId: "member_test",
+    }, async () => ({
+      action: unsafeResultDetail,
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: "runtime_attempt_test",
+    }))).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(activityLog.info).toHaveBeenCalledWith(
+      "Hosted Temporal activity completed.",
+      expect.objectContaining({
+        resultAction: null,
+        resultKind: "runtime_processing_accepted",
+        retryReason: null,
+      }),
+    );
+    expect(JSON.stringify(activityLog.info.mock.calls)).not.toContain(
+      unsafeResultDetail,
     );
   });
 
@@ -77,7 +139,9 @@ describe("observeHostedTemporalActivity", () => {
         nonRetryable: false,
         orchestrationAttemptId: "orchestration_attempt_test",
         reason: "nudge",
+        resultAction: null,
         resultKind: null,
+        retryReason: null,
         userId: "member_test",
       },
     );
@@ -107,7 +171,9 @@ describe("observeHostedTemporalActivity", () => {
         nonRetryable: true,
         orchestrationAttemptId: null,
         reason: null,
+        resultAction: null,
         resultKind: null,
+        retryReason: null,
         userId: "member_test",
       }),
     );

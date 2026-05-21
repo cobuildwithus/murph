@@ -15,6 +15,10 @@ import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
 import {
+  HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+  HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   readHostedRuntimeEnsureProcessingTimeouts,
 } from "@murphai/hosted-execution/temporal-env";
 import { log } from "@temporalio/activity";
@@ -259,13 +263,16 @@ export async function observeHostedTemporalActivity<TResponse>(
   const startedAt = Date.now();
   try {
     const result = await run();
+    const resultDetails = readHostedTemporalActivityResultDetails(result);
     logHostedTemporalActivity("info", "Hosted Temporal activity completed.", {
       activity: observation.activity,
       component: "temporal.activity",
       durationMs: Date.now() - startedAt,
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
       reason: observation.reason ?? null,
-      resultKind: readHostedTemporalActivityResultKind(result),
+      resultAction: resultDetails.resultAction,
+      resultKind: resultDetails.resultKind,
+      retryReason: resultDetails.retryReason,
       userId: observation.userId,
     });
     return result;
@@ -278,7 +285,9 @@ export async function observeHostedTemporalActivity<TResponse>(
       nonRetryable: readHostedTemporalActivityNonRetryable(error),
       orchestrationAttemptId: observation.orchestrationAttemptId ?? null,
       reason: observation.reason ?? null,
+      resultAction: null,
       resultKind: null,
+      retryReason: null,
       userId: observation.userId,
     });
     throw error;
@@ -341,12 +350,53 @@ export class HostedOrchestratorHttpResponseError extends Error {
   }
 }
 
-function readHostedTemporalActivityResultKind(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+interface HostedTemporalActivityResultDetails {
+  resultAction: string | null;
+  resultKind: string | null;
+  retryReason: string | null;
+}
+
+function readHostedTemporalActivityResultDetails(
+  value: unknown,
+): HostedTemporalActivityResultDetails {
+  if (!isHostedTemporalActivityResultRecord(value)) {
+    return {
+      resultAction: null,
+      resultKind: null,
+      retryReason: null,
+    };
+  }
+
+  const resultKind = typeof value.kind === "string" ? value.kind : null;
+  return {
+    resultAction: resultKind === "runtime_processing_accepted"
+      ? readKnownString(
+        value.action,
+        HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
+      )
+      : null,
+    resultKind,
+    retryReason: resultKind === "retry_later"
+      ? readKnownString(value.reason, HOSTED_RUNTIME_PROCESSING_RETRY_REASONS)
+      : null,
+  };
+}
+
+function isHostedTemporalActivityResultRecord(
+  value: unknown,
+): value is { action?: unknown; kind?: unknown; reason?: unknown } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readKnownString(
+  value: unknown,
+  choices: readonly string[],
+): string | null {
+  if (typeof value !== "string") {
     return null;
   }
-  const kind = (value as { kind?: unknown }).kind;
-  return typeof kind === "string" ? kind : null;
+
+  return choices.some((choice) => choice === value) ? value : null;
 }
 
 function readHostedTemporalActivityErrorCode(error: unknown): string {
