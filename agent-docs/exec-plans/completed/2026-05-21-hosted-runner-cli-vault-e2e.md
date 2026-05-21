@@ -1,6 +1,6 @@
 # Hosted runner CLI vault E2E
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -77,3 +77,4 @@ vault context, including the hard-cut vault option behavior.
 - ReviewGPT findings 2 and 3 were accepted: failed proof booleans now fail the
   result parser, and the parent logs only vault-id match status instead of the
   raw vault id.
+Completed: 2026-05-21
