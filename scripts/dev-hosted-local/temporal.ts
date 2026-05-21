@@ -113,7 +113,6 @@ export async function startHostedLocalTemporalRuntime(input: {
         ["scripts/temporal-dev-server.sh"],
         {
           ...buildHostedLocalTemporalServerEnv(input.env),
-          TEMPORAL_DEV_HEADLESS: "1",
           TEMPORAL_DEV_IP: temporal.host,
           TEMPORAL_DEV_PORT: String(temporal.port),
           TEMPORAL_NAMESPACE: temporal.namespace,
