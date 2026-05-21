@@ -58,11 +58,15 @@ Updated: 2026-05-21
 
 ## Verification
 
-- Commands to run:
-- `pnpm typecheck`
-- focused assistant-runtime and hosted-orchestrator-temporal tests
-- scoped `bash scripts/workspace-verify.sh test:diff ...`
-- Expected outcomes:
-- All pass, or any failure is proven unrelated and paired with focused passing
-  proof for this scope.
+- Passed `pnpm --dir packages/assistant-runtime exec vitest run
+  test/hosted-runtime-workspace-restore-codex-continuity.test.ts --config
+  vitest.config.ts --no-coverage`: 14 tests passed.
+- Passed `pnpm --dir packages/assistant-runtime exec vitest run
+  test/hosted-runtime-workspace-restore-codex-continuity.test.ts
+  test/hosted-runtime-workspace-entrypoint.test.ts --config vitest.config.ts
+  --no-coverage`: 80 tests passed.
+- Passed scoped `bash scripts/workspace-verify.sh test:diff ...` for the
+  null-bootstrap restore/test files and plan closeout: assistant-runtime 623
+  passed / 2 skipped; Cloudflare 1086 passed.
+- Passed `pnpm typecheck`.
 Completed: 2026-05-21
