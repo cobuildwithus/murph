@@ -208,8 +208,10 @@ describe("hosted execution observability", () => {
       phase: "runtime.starting",
       schema: "murph.hosted-execution.log.v1",
       time: "2026-04-08T00:01:00.000Z",
-      userId: "user_123",
+      userId: null,
+      userIdPresent: true,
     });
+    expect(JSON.stringify(record)).not.toContain("user_123");
     expect(record.details?.stackPreview).toEqual(expect.any(Array));
 
     const unsafeErrorRecord = buildHostedExecutionStructuredLogRecord({
@@ -221,6 +223,29 @@ describe("hosted execution observability", () => {
 
     expect(unsafeErrorRecord.errorName).toBeUndefined();
     expect(unsafeErrorRecord.level).toBe("error");
+  });
+
+  it("redacts user identifiers from structured log details", () => {
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "worker",
+      details: {
+        boundUserId: "user_123",
+        userId: "user_123",
+      },
+      message: "route failed",
+      phase: "failed",
+      userId: "user_123",
+    });
+
+    expect(record).toMatchObject({
+      details: {
+        boundUserIdPresent: true,
+        userIdPresent: true,
+      },
+      userId: null,
+      userIdPresent: true,
+    });
+    expect(JSON.stringify(record)).not.toContain("user_123");
   });
 
   it("keeps structured configuration diagnostics redacted even when the error name is safe", () => {

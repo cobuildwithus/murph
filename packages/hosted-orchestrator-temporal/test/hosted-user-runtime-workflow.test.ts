@@ -230,6 +230,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const continued = await runUntilContinueAsNew(machine);
 
     expect(runtime.waits).toEqual([11_000, null]);
+    expect(machine.readStatus()).toMatchObject({
+      runtimeFailedWithoutNextWakeCount: 0,
+      sameRuntimeWakeSentCount: 0,
+    });
     expect(continued.state).toMatchObject({
       lastExecutionKind: "runtime_processing_accepted",
       lastRuntimeAttemptId: "runtime_attempt_test",
@@ -353,6 +357,31 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.waits[0]).toBe(22_000);
     expect(runtime.now).toBe(BASE_TIME_MS + 22_000);
     expect(runtime.executionRequests).toHaveLength(2);
+  });
+
+  it("clears stale same-runtime wake counts after retry-later responses", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.demands.push(runDemand({ source: "manual" }));
+    runtime.executions.push(retryLater(isoAfter(22_000)));
+
+    const state = emptyCarryForwardState();
+    state.lastRuntimeAttemptId = "runtime_attempt_previous";
+    state.lastRuntimeStatus = "scheduled";
+    state.sameRuntimeWakeAcceptedCount = 2;
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      state,
+      userId: "member_test",
+    });
+    machine.applySignal(manualSignal("manual-before-retry"));
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.state).toMatchObject({
+      lastRuntimeAttemptId: null,
+      lastRuntimeStatus: "retry_later",
+      sameRuntimeWakeAcceptedCount: 0,
+    });
   });
 
   it("does not pass usage decisions into execution", async () => {
@@ -676,6 +705,12 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
+      state: {
+        ...emptyCarryForwardState(),
+        lastRuntimeAttemptId: "runtime_attempt_previous",
+        lastRuntimeStatus: "scheduled",
+        sameRuntimeWakeAcceptedCount: 2,
+      },
       userId: "member_test",
     });
     machine.applySignal(manualSignal());
@@ -684,11 +719,17 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(machine.readStatus()).toMatchObject({
       lastExecutionErrorCode: "retryable_transport",
       lastExecutionKind: "failed",
+      lastRuntimeAttemptId: null,
+      lastRuntimeStatus: null,
+      sameRuntimeWakeAcceptedCount: 0,
     });
     expect(runtime.waits).toEqual([30_000]);
     expect(continued.state).toMatchObject({
       lastExecutionErrorCode: "retryable_transport",
       lastExecutionKind: "failed",
+      lastRuntimeAttemptId: null,
+      lastRuntimeStatus: null,
+      sameRuntimeWakeAcceptedCount: 0,
     });
   });
 

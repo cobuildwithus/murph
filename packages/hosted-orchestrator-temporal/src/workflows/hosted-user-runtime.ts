@@ -149,9 +149,20 @@ type HostedRuntimeMailboxSignal = Extract<
 
 export interface HostedUserRuntimeWorkflowMachine {
   applySignal(signal: unknown): void;
-  readStatus(): HostedRuntimeWorkflowState;
+  readStatus(): HostedRuntimeWorkflowStatusQuery;
   run(): Promise<void>;
 }
+
+type HostedRuntimeWorkflowStatusQuery = HostedRuntimeWorkflowState & {
+  /**
+   * @deprecated Deploy-skew alias for older web status readers.
+   */
+  runtimeFailedWithoutNextWakeCount: number;
+  /**
+   * @deprecated Deploy-skew alias for older web status readers.
+   */
+  sameRuntimeWakeSentCount: number;
+};
 
 interface NormalizedWorkflowOptions {
   activeWakeRecheckDelayMs: number;
@@ -171,7 +182,12 @@ export function createHostedUserRuntimeWorkflowMachine(
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
 
-  const readStatus = (): HostedRuntimeWorkflowState => ({ ...state });
+  const readStatus = (): HostedRuntimeWorkflowStatusQuery => ({
+    ...state,
+    runtimeFailedWithoutNextWakeCount:
+      state.legacyRuntimeFailedWithoutNextWakeCount,
+    sameRuntimeWakeSentCount: state.sameRuntimeWakeAcceptedCount,
+  });
 
   const applySignal = (rawSignal: unknown): void => {
     let signal: HostedRuntimeSignal;
@@ -325,6 +341,9 @@ export function createHostedUserRuntimeWorkflowMachine(
         state.lastExecutionAt = isoNow(runtime);
         state.lastExecutionErrorCode = readExecutionErrorCode(error);
         state.lastExecutionKind = "failed";
+        state.lastRuntimeAttemptId = null;
+        state.lastRuntimeStatus = null;
+        state.sameRuntimeWakeAcceptedCount = 0;
         if (state.signalVersion !== versionBeforeExecution) {
           continue;
         }
@@ -372,6 +391,7 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (execution.kind === "retry_later") {
         state.lastRuntimeAttemptId = null;
         state.lastRuntimeStatus = "retry_later";
+        state.sameRuntimeWakeAcceptedCount = 0;
         if (signalArrivedDuringExecution) {
           continue;
         }
@@ -468,6 +488,7 @@ function recordLegacyRuntimeCompletionWake(
 ): string | null {
   state.lastRuntimeAttemptId = execution.runtimeAttemptId;
   state.lastRuntimeStatus = execution.runtimeStatus;
+  state.sameRuntimeWakeAcceptedCount = 0;
   if (
     execution.runtimeStatus === "failed"
     && execution.runtimeResultNextWakeAt === null
