@@ -58,11 +58,13 @@ const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
 const HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN =
   /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie|^(?:bundleRefKey|refKey)$/iu;
 const HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS = {
+  boundUserId: "boundUserIdPresent",
   codexThreadId: "codexThreadIdPresent",
   providerSessionId: "providerSessionIdPresent",
   recoveredCodexThreadId: "recoveredCodexThreadIdPresent",
   resumeCodexThreadId: "resumeCodexThreadIdPresent",
   resumeProviderSessionId: "resumeProviderSessionIdPresent",
+  userId: "userIdPresent",
 } as const satisfies Record<string, string>;
 const HOSTED_EXECUTION_ERROR_CODE_PROPERTY_KEYS = ["code", "errorCode"] as const;
 const HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS =
@@ -129,6 +131,7 @@ export interface HostedExecutionStructuredLogRecord {
   schema: "murph.hosted-execution.log.v1";
   time: string;
   userId: string | null;
+  userIdPresent: boolean;
 }
 
 interface HostedExecutionWakeLike {
@@ -489,7 +492,8 @@ export function buildHostedExecutionStructuredLogRecord(
     phase: input.phase,
     schema: "murph.hosted-execution.log.v1",
     time: input.time ?? new Date().toISOString(),
-    userId: input.userId ?? null,
+    userId: null,
+    userIdPresent: Boolean(input.userId),
   };
 }
 

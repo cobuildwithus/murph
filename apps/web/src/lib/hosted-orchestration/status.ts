@@ -17,6 +17,7 @@ import {
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   isHostedMailboxLane,
   type HostedRunnerStatusResponse,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -34,7 +35,7 @@ import {
 
 export interface HostedOrchestrationUserStatus {
   cloudflare: {
-    runnerStatus: HostedRunnerStatusResponse | null;
+    runnerStatus: HostedRunnerStatusProjection | null;
     unavailableReason: HostedCloudflareStatusUnavailableReason;
   };
   demand: {
@@ -65,6 +66,24 @@ export type HostedCloudflareStatusUnavailableReason =
 export type HostedRuntimeWorkflowStatusProjection =
   Omit<HostedRuntimeWorkflowState, "latestMailboxPointer"> & {
     latestMailboxPointerPresent: boolean;
+  };
+
+export type HostedRunnerStatusProjection =
+  Omit<HostedRunnerStatusResponse, "recentLogs" | "userId" | "workspace"> & {
+    recentLogCount: number | null;
+    userIdPresent: boolean;
+    workspace: HostedRunnerWorkspaceStatusProjection | null;
+  };
+
+export type HostedRunnerWorkspaceStatusProjection =
+  Omit<
+    HostedWorkspaceState,
+    "browserVaultReplicaRef" | "redactedStatus" | "snapshotRef" | "userId"
+  > & {
+    browserVaultReplicaRefPresent: boolean;
+    redactedStatusPresent: boolean;
+    snapshotRefPresent: boolean;
+    userIdPresent: boolean;
   };
 
 export async function readHostedOrchestrationUserStatus(input: {
@@ -100,7 +119,9 @@ export async function readHostedOrchestrationUserStatus(input: {
 
   return {
     cloudflare: {
-      runnerStatus: cloudflareStatusResult.runnerStatus,
+      runnerStatus: cloudflareStatusResult.runnerStatus
+        ? projectHostedRunnerStatusForEndpoint(cloudflareStatusResult.runnerStatus)
+        : null,
       unavailableReason: cloudflareStatusResult.unavailableReason,
     },
     demand: {
@@ -116,6 +137,46 @@ export async function readHostedOrchestrationUserStatus(input: {
       workflowId,
     },
     userId: input.userId,
+  };
+}
+
+function projectHostedRunnerStatusForEndpoint(
+  status: HostedRunnerStatusResponse,
+): HostedRunnerStatusProjection {
+  const {
+    recentLogs,
+    userId,
+    workspace,
+    ...scalarStatus
+  } = status;
+
+  return {
+    ...scalarStatus,
+    recentLogCount: recentLogs?.length ?? null,
+    userIdPresent: userId.length > 0,
+    workspace: workspace
+      ? projectHostedRunnerWorkspaceStatusForEndpoint(workspace)
+      : null,
+  };
+}
+
+function projectHostedRunnerWorkspaceStatusForEndpoint(
+  workspace: HostedWorkspaceState,
+): HostedRunnerWorkspaceStatusProjection {
+  const {
+    browserVaultReplicaRef,
+    redactedStatus,
+    snapshotRef,
+    userId,
+    ...scalarWorkspace
+  } = workspace;
+
+  return {
+    ...scalarWorkspace,
+    browserVaultReplicaRefPresent: browserVaultReplicaRef !== undefined,
+    redactedStatusPresent: redactedStatus !== undefined && redactedStatus !== null,
+    snapshotRefPresent: snapshotRef !== undefined && snapshotRef !== null,
+    userIdPresent: userId.length > 0,
   };
 }
 

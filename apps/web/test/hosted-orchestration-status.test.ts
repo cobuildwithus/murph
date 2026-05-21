@@ -101,7 +101,7 @@ describe("hosted orchestration status route", () => {
     expect(mocks.getRunnerStatus).toHaveBeenCalledWith(MEMBER_ID);
     expect(body).toEqual({
       cloudflare: {
-        runnerStatus: buildRunnerStatus(),
+        runnerStatus: buildRunnerStatusProjection(),
         unavailableReason: null,
       },
       demand: {
@@ -116,6 +116,8 @@ describe("hosted orchestration status route", () => {
     });
     expect(body.temporal.status.latestMailboxPointer).toBeUndefined();
     expect(body.temporal.status.latestMailboxPointerPresent).toBe(true);
+    expect(body.cloudflare.runnerStatus.userId).toBeUndefined();
+    expect(body.cloudflare.runnerStatus.recentLogs).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain("mailbox_status_1");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|body|prompt|transcript/u);
@@ -383,9 +385,56 @@ function buildRunnerStatus() {
     lastInvocationAt: "2026-05-21T11:59:30.000Z",
     mailboxLag: [],
     nextAlarmAt: "2026-05-21T12:04:00.000Z",
-    recentLogs: [],
+    recentLogs: [
+      {
+        at: "2026-05-21T11:59:30.000Z",
+        component: "runner",
+        eventCode: "runner.started",
+        level: "info",
+        phase: "invoke",
+      },
+    ],
     userId: MEMBER_ID,
-    workspace: null,
+    workspace: {
+      createdAt: "2026-05-21T11:00:00.000Z",
+      nextWakeAt: "2026-05-21T12:05:00.000Z",
+      nextWakeReason: "assistant_due",
+      redactedStatus: {
+        unsafeSentinel: UNSAFE_SENTINEL,
+      },
+      snapshotRef: {
+        key: `${UNSAFE_SENTINEL}/snapshot.enc`,
+        version: "snapshot_version",
+      },
+      updatedAt: "2026-05-21T11:59:00.000Z",
+      userId: MEMBER_ID,
+      version: "8",
+    },
+  };
+}
+
+function buildRunnerStatusProjection() {
+  return {
+    heartbeatAt: "2026-05-21T12:00:00.000Z",
+    inFlight: true,
+    lastErrorAt: null,
+    lastErrorCode: null,
+    lastInvocationAt: "2026-05-21T11:59:30.000Z",
+    mailboxLag: [],
+    nextAlarmAt: "2026-05-21T12:04:00.000Z",
+    recentLogCount: 1,
+    userIdPresent: true,
+    workspace: {
+      browserVaultReplicaRefPresent: false,
+      createdAt: "2026-05-21T11:00:00.000Z",
+      nextWakeAt: "2026-05-21T12:05:00.000Z",
+      nextWakeReason: "assistant_due",
+      redactedStatusPresent: true,
+      snapshotRefPresent: true,
+      updatedAt: "2026-05-21T11:59:00.000Z",
+      userIdPresent: true,
+      version: "8",
+    },
   };
 }
 
