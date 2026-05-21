@@ -3,6 +3,11 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+} from "../src/hosted-runner-smoke-contract.js";
+
 const spawnMock = vi.fn();
 
 vi.mock("node:child_process", () => ({
@@ -42,6 +47,11 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexAppServerHelpBytes: 2048,
             codexCommandDiscovered: true,
             codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
+            codexHostedCliSchemaVaultOptionHidden: true,
+            codexHostedCliVaultCommandProofCount:
+              HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+            codexHostedCliVaultWriteProofCount:
+              HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
             codexHostedShellMurphPathBytes: 1536,
             codexHostedShellPythonVersion: "Python 3.11.2",
             codexHostedShellVaultCliLlmsBytes: 4096,
@@ -59,19 +69,19 @@ describe("runHostedRunnerSmokeDetailed", () => {
             murphCommandDiscovered: true,
             normalizedTranscriptMatchesExpectedSnippet: true,
             normalizedTranscriptProviderId: "whisper.cpp",
-            normalizedTranscriptSha256: "normalized-hash",
+            normalizedTranscriptSha256: "c".repeat(64),
             operatorHomeRebound: true,
             pdfParserProviderId: "poppler.pdf",
-            pdfTextSha256: "pdf-hash",
+            pdfTextSha256: "b".repeat(64),
             pythonVersion: "Python 3.11.2",
-            reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+            reportedVaultIdMatchesExpected: true,
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
             wavTranscriptMatchesExpectedSnippet: true,
             wavTranscriptProviderId: "whisper.cpp",
-            wavTranscriptSha256: "wav-hash",
+            wavTranscriptSha256: "a".repeat(64),
           }),
         );
         child.emit("close", 0);
@@ -91,13 +101,20 @@ describe("runHostedRunnerSmokeDetailed", () => {
     expect(result.codexAppServerHelpBytes).toBe(2048);
     expect(result.codexCommandDiscovered).toBe(true);
     expect(result.codexHostedConfigShellEnvironmentPolicyAllowlisted).toBe(true);
+    expect(result.codexHostedCliSchemaVaultOptionHidden).toBe(true);
+    expect(result.codexHostedCliVaultCommandProofCount).toBe(
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+    );
+    expect(result.codexHostedCliVaultWriteProofCount).toBe(
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+    );
     expect(result.codexHostedShellMurphPathBytes).toBe(1536);
     expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
     expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
     expect(result.codexVersion).toBe("codex-cli 0.125.0");
     expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
     expect(result.murphCommandDiscovered).toBe(true);
-    expect(result.normalizedTranscriptSha256).toBe("normalized-hash");
+    expect(result.normalizedTranscriptSha256).toBe("c".repeat(64));
     expect(result.pdfParserProviderId).toBe("poppler.pdf");
     expect(result.pythonVersion).toBe("Python 3.11.2");
     expect(result.wavTranscriptProviderId).toBe("whisper.cpp");

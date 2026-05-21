@@ -4,7 +4,9 @@ FROM ${HOSTED_RUNNER_BASE_IMAGE}
 
 USER root
 
-COPY --chown=root:root .deploy/runner-bundle/ /app/
+ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
+
+COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
 
 RUN chmod -R a-w /app \
   && chmod -R a+rX /app

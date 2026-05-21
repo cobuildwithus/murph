@@ -1,4 +1,6 @@
 export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v1";
+export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 11;
+export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
 
 export interface HostedRunnerSmokeInput {
   bundle: string;
@@ -12,6 +14,9 @@ export interface HostedRunnerSmokeResult {
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
+  codexHostedCliSchemaVaultOptionHidden: boolean;
+  codexHostedCliVaultCommandProofCount: number;
+  codexHostedCliVaultWriteProofCount: number;
   codexHostedShellMurphPathBytes: number;
   codexHostedShellPythonVersion: string;
   codexHostedShellVaultCliLlmsBytes: number;
@@ -30,7 +35,7 @@ export interface HostedRunnerSmokeResult {
   pdfParserProviderId: string;
   pdfTextSha256: string;
   pythonVersion: string;
-  reportedVaultId: string;
+  reportedVaultIdMatchesExpected: boolean;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliCommandDiscovered: boolean;
   vaultRootRebound: boolean;
@@ -39,6 +44,42 @@ export interface HostedRunnerSmokeResult {
   wavTranscriptProviderId: string;
   wavTranscriptSha256: string;
 }
+
+const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
+  "childCwdIsIsolated",
+  "codexAppServerHelpBytes",
+  "codexCommandDiscovered",
+  "codexHostedConfigShellEnvironmentPolicyAllowlisted",
+  "codexHostedCliSchemaVaultOptionHidden",
+  "codexHostedCliVaultCommandProofCount",
+  "codexHostedCliVaultWriteProofCount",
+  "codexHostedShellMurphPathBytes",
+  "codexHostedShellPythonVersion",
+  "codexHostedShellVaultCliLlmsBytes",
+  "codexVersion",
+  "healthCommonsCatalogHash",
+  "healthCommonsCliProtocolListBytes",
+  "healthCommonsCliSearchBytes",
+  "healthCommonsFinnishDrySaunaTitle",
+  "healthCommonsRuntimeProtocolHitKeys",
+  "healthCommonsRuntimeSearchHitKeys",
+  "murphCommandDiscovered",
+  "normalizedTranscriptMatchesExpectedSnippet",
+  "normalizedTranscriptProviderId",
+  "normalizedTranscriptSha256",
+  "operatorHomeRebound",
+  "pdfParserProviderId",
+  "pdfTextSha256",
+  "pythonVersion",
+  "reportedVaultIdMatchesExpected",
+  "schema",
+  "vaultCliCommandDiscovered",
+  "vaultRootRebound",
+  "vaultShowBytes",
+  "wavTranscriptMatchesExpectedSnippet",
+  "wavTranscriptProviderId",
+  "wavTranscriptSha256",
+]);
 
 export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeInput {
   const record = readObjectRecord(value, "Hosted runner smoke input");
@@ -62,6 +103,7 @@ export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeIn
 
 export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeResult {
   const record = readObjectRecord(value, "Hosted runner smoke result");
+  assertOnlyKnownKeys(record, "Hosted runner smoke result", HOSTED_RUNNER_SMOKE_RESULT_KEYS);
 
   if (record.schema !== HOSTED_RUNNER_SMOKE_RESULT_SCHEMA) {
     throw new TypeError(
@@ -70,7 +112,7 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
   }
 
   return {
-    childCwdIsIsolated: readBoolean(
+    childCwdIsIsolated: readTrue(
       record.childCwdIsIsolated,
       "Hosted runner smoke result.childCwdIsIsolated",
     ),
@@ -78,13 +120,27 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexAppServerHelpBytes,
       "Hosted runner smoke result.codexAppServerHelpBytes",
     ),
-    codexCommandDiscovered: readBoolean(
+    codexCommandDiscovered: readTrue(
       record.codexCommandDiscovered,
       "Hosted runner smoke result.codexCommandDiscovered",
     ),
-    codexHostedConfigShellEnvironmentPolicyAllowlisted: readBoolean(
+    codexHostedConfigShellEnvironmentPolicyAllowlisted: readTrue(
       record.codexHostedConfigShellEnvironmentPolicyAllowlisted,
       "Hosted runner smoke result.codexHostedConfigShellEnvironmentPolicyAllowlisted",
+    ),
+    codexHostedCliSchemaVaultOptionHidden: readTrue(
+      record.codexHostedCliSchemaVaultOptionHidden,
+      "Hosted runner smoke result.codexHostedCliSchemaVaultOptionHidden",
+    ),
+    codexHostedCliVaultCommandProofCount: readMinimumFiniteNumber(
+      record.codexHostedCliVaultCommandProofCount,
+      "Hosted runner smoke result.codexHostedCliVaultCommandProofCount",
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
+    ),
+    codexHostedCliVaultWriteProofCount: readMinimumFiniteNumber(
+      record.codexHostedCliVaultWriteProofCount,
+      "Hosted runner smoke result.codexHostedCliVaultWriteProofCount",
+      HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
     ),
     codexHostedShellMurphPathBytes: readPositiveFiniteNumber(
       record.codexHostedShellMurphPathBytes,
@@ -126,11 +182,11 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.healthCommonsRuntimeSearchHitKeys,
       "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys",
     ),
-    murphCommandDiscovered: readBoolean(
+    murphCommandDiscovered: readTrue(
       record.murphCommandDiscovered,
       "Hosted runner smoke result.murphCommandDiscovered",
     ),
-    normalizedTranscriptMatchesExpectedSnippet: readBoolean(
+    normalizedTranscriptMatchesExpectedSnippet: readTrue(
       record.normalizedTranscriptMatchesExpectedSnippet,
       "Hosted runner smoke result.normalizedTranscriptMatchesExpectedSnippet",
     ),
@@ -138,11 +194,11 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.normalizedTranscriptProviderId,
       "Hosted runner smoke result.normalizedTranscriptProviderId",
     ),
-    normalizedTranscriptSha256: readNonEmptyString(
+    normalizedTranscriptSha256: readSha256HexString(
       record.normalizedTranscriptSha256,
       "Hosted runner smoke result.normalizedTranscriptSha256",
     ),
-    operatorHomeRebound: readBoolean(
+    operatorHomeRebound: readTrue(
       record.operatorHomeRebound,
       "Hosted runner smoke result.operatorHomeRebound",
     ),
@@ -150,7 +206,7 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.pdfParserProviderId,
       "Hosted runner smoke result.pdfParserProviderId",
     ),
-    pdfTextSha256: readNonEmptyString(
+    pdfTextSha256: readSha256HexString(
       record.pdfTextSha256,
       "Hosted runner smoke result.pdfTextSha256",
     ),
@@ -158,16 +214,16 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.pythonVersion,
       "Hosted runner smoke result.pythonVersion",
     ),
-    reportedVaultId: readNonEmptyString(
-      record.reportedVaultId,
-      "Hosted runner smoke result.reportedVaultId",
+    reportedVaultIdMatchesExpected: readTrue(
+      record.reportedVaultIdMatchesExpected,
+      "Hosted runner smoke result.reportedVaultIdMatchesExpected",
     ),
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
-    vaultCliCommandDiscovered: readBoolean(
+    vaultCliCommandDiscovered: readTrue(
       record.vaultCliCommandDiscovered,
       "Hosted runner smoke result.vaultCliCommandDiscovered",
     ),
-    vaultRootRebound: readBoolean(
+    vaultRootRebound: readTrue(
       record.vaultRootRebound,
       "Hosted runner smoke result.vaultRootRebound",
     ),
@@ -175,7 +231,7 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.vaultShowBytes,
       "Hosted runner smoke result.vaultShowBytes",
     ),
-    wavTranscriptMatchesExpectedSnippet: readBoolean(
+    wavTranscriptMatchesExpectedSnippet: readTrue(
       record.wavTranscriptMatchesExpectedSnippet,
       "Hosted runner smoke result.wavTranscriptMatchesExpectedSnippet",
     ),
@@ -183,7 +239,7 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.wavTranscriptProviderId,
       "Hosted runner smoke result.wavTranscriptProviderId",
     ),
-    wavTranscriptSha256: readNonEmptyString(
+    wavTranscriptSha256: readSha256HexString(
       record.wavTranscriptSha256,
       "Hosted runner smoke result.wavTranscriptSha256",
     ),
@@ -196,6 +252,16 @@ function readObjectRecord(value: unknown, label: string): Record<string, unknown
   }
 
   return value as Record<string, unknown>;
+}
+
+function assertOnlyKnownKeys(
+  record: Record<string, unknown>,
+  label: string,
+  knownKeys: ReadonlySet<string>,
+): void {
+  if (Object.keys(record).some((key) => !knownKeys.has(key))) {
+    throw new TypeError(`${label} must not include unexpected fields.`);
+  }
 }
 
 function readFiniteNumber(value: unknown, label: string): number {
@@ -215,12 +281,30 @@ function readPositiveFiniteNumber(value: unknown, label: string): number {
   return parsed;
 }
 
+function readMinimumFiniteNumber(value: unknown, label: string, minimum: number): number {
+  const parsed = readFiniteNumber(value, label);
+  if (parsed < minimum) {
+    throw new TypeError(`${label} must be at least ${minimum}.`);
+  }
+
+  return parsed;
+}
+
 function readBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${label} must be a boolean.`);
   }
 
   return value;
+}
+
+function readTrue(value: unknown, label: string): true {
+  const parsed = readBoolean(value, label);
+  if (!parsed) {
+    throw new TypeError(`${label} must be true.`);
+  }
+
+  return true;
 }
 
 function readNonEmptyStringArray(value: unknown, label: string): string[] {
@@ -254,6 +338,15 @@ function readPython3VersionString(value: unknown, label: string): string {
   const normalized = readNonEmptyString(value, label);
   if (!/^Python\s+3\./u.test(normalized)) {
     throw new TypeError(`${label} must be a Python 3 version string.`);
+  }
+
+  return normalized;
+}
+
+function readSha256HexString(value: unknown, label: string): string {
+  const normalized = readNonEmptyString(value, label);
+  if (!/^[a-f0-9]{64}$/u.test(normalized)) {
+    throw new TypeError(`${label} must be a SHA-256 hex string.`);
   }
 
   return normalized;
