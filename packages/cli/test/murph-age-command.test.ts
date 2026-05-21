@@ -980,8 +980,8 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(view.mode, 'research')
     assert.equal(view.displayStatus, 'research-only')
     assert.equal(view.selectedCardId, 'lab5_bp_bmi_transport_research')
-    assert.equal(view.arbiter.strategy, 'r399-anchor-lab9-primary-lab5-transport-function-sidecar-wearables-context')
-    assert.equal(view.arbiter.labConflictPolicy, 'lab9-primary-lab5-transport-guard-r399-anchor-fallback')
+    assert.equal(view.arbiter.strategy, 'r399-anchor-lab9-primary-lab5-transport-l1-glycemia-function-sidecar-wearables-context')
+    assert.equal(view.arbiter.labConflictPolicy, 'lab9-primary-lab5-transport-l1-glycemia-guard-r399-anchor-fallback')
     assert.equal(view.arbiter.wearableScorePolicy, 'context-only-not-score-bearing')
     assert.equal(view.arbiter.selectedCardRole, 'transport-fallback-and-discordance-guard')
     assert.equal(view.arbiter.selectionReason, 'transport-fallback-selected')
@@ -1543,6 +1543,7 @@ test('age inputs reports feature readiness without metric values or point ids', 
     assert.deepEqual(readiness.inputBundleSpecs.map((spec) => spec.bundleId), [
       'lab9-bp-body',
       'lab5-bp-bmi',
+      'l1-glycemia',
       'r399-nhis-proxy-anchor',
       'wearable-context',
       'function-context',
@@ -1780,7 +1781,7 @@ test('age report returns a product-mode public abstention instead of research-on
     assert.equal(report.inputReadiness.bundle.selectedMetricKeys.includes('hba1c'), true)
     assert.equal(report.inputReadiness.contextBundles[0]?.bundleId, 'wearable-context')
     assert.equal(report.inputReadiness.contextBundles[0]?.selectedMetricKeys.includes('steps'), true)
-    assert.equal(report.researchCandidateCards.length, 3)
+    assert.equal(report.researchCandidateCards.length, 4)
     const lab9Candidate = report.researchCandidateCards.find((candidate) =>
       candidate.cardId === 'lab9_bp_body_10y_acm_research'
     )
