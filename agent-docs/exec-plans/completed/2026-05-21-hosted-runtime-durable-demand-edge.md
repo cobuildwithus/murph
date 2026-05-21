@@ -1,6 +1,6 @@
 # Hosted runtime durable demand edge
 
-Status: active
+Status: completed
 Created: 2026-05-21
 Updated: 2026-05-21
 
@@ -84,3 +84,4 @@ Updated: 2026-05-21
   - Focused tests pass.
   - Typecheck passes or any unrelated pre-existing failure is reported with a
     clear boundary.
+Completed: 2026-05-21
