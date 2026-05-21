@@ -106,8 +106,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     const signal = await signalHostedManualRunRuntimeForTest({
       environment: requireScenario().runtimeEnv,
-      eventSource: "hosted-local-linq-scheduled-reminder",
-      source: "test",
       userId,
     });
     const scheduledState = await waitForWorkflowNextWakeAt({

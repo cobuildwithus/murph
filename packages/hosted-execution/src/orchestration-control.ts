@@ -28,35 +28,6 @@ export type HostedRuntimeSignalKind = (typeof HOSTED_RUNTIME_SIGNAL_KINDS)[numbe
 
 export type HostedRuntimeMailboxSignalSource = string;
 
-// Known built-in labels for callers that want stable defaults. These are not
-// exhaustive; parsers accept any bounded safe source string.
-export const HOSTED_RUNTIME_MANUAL_SIGNAL_SOURCES = [
-  "user",
-  "admin",
-  "test",
-] as const;
-
-export type HostedRuntimeManualSignalSource = string;
-
-export const HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS = [
-  "dirty",
-  "reconcile",
-  "wake",
-] as const;
-
-export type HostedRuntimeDeviceSyncRecoveryReason =
-  (typeof HOSTED_RUNTIME_DEVICE_SYNC_RECOVERY_REASONS)[number];
-
-// Known built-in labels for callers that want stable defaults. These are not
-// exhaustive; parsers accept any bounded safe source string.
-export const HOSTED_RUNTIME_LAG_SIGNAL_SOURCES = [
-  "lag-sweeper",
-  "admin",
-  "test",
-] as const;
-
-export type HostedRuntimeLagSignalSource = string;
-
 export type HostedRuntimeSignal =
   | {
       kind: "mailbox_appended";
@@ -66,24 +37,16 @@ export type HostedRuntimeSignal =
       source: HostedRuntimeMailboxSignalSource;
     }
   | {
-      eventId: string;
       kind: "manual_run_requested";
-      source: HostedRuntimeManualSignalSource;
     }
   | {
-      eventId: string;
       kind: "browser_vault_refresh_requested";
     }
   | {
-      connectionId?: string | null;
-      eventId: string;
       kind: "device_sync_recovery_requested";
-      reason: HostedRuntimeDeviceSyncRecoveryReason;
     }
   | {
-      eventId: string;
       kind: "mailbox_lag_observed";
-      source: HostedRuntimeLagSignalSource;
     };
 
 export interface HostedRuntimeMailboxPointer {

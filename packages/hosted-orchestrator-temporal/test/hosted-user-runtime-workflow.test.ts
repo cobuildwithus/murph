@@ -12,6 +12,7 @@ import {
   createHostedUserRuntimeWorkflowMachine,
   createWorkspaceWakeKey,
   HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
+  HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
   HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS,
   HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
   type HostedUserRuntimeWorkflowMachine,
@@ -527,15 +528,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       userId: "member_test",
     });
     machine.applySignal({
-      connectionId: "connection_test",
-      eventId: "device_event_test",
       kind: "device_sync_recovery_requested",
-      reason: "dirty",
     });
     machine.applySignal({
-      eventId: "lag_event_test",
       kind: "mailbox_lag_observed",
-      source: "test",
     });
 
     await runUntilContinueAsNew(machine);
@@ -686,7 +682,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const continued = await runUntilContinueAsNew(machine);
 
     expect(continued).toEqual({
-      options: { continueAsNewAfterIterations: 1 },
+      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 1 }),
       state: expect.objectContaining({
         lastDemandKind: "idle",
         mailboxSignalCount: 0,
@@ -700,7 +696,70 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(continued.state).not.toHaveProperty("redactedStatus");
     expect(continued.state).not.toHaveProperty("aiUsageAllowDecision");
   });
+
+  it("continues as new when Temporal suggests it before the iteration threshold", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.suggestContinueAsNew = true;
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 100 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(runtime.demandRequests).toHaveLength(0);
+    expect(runtime.executionRequests).toHaveLength(0);
+    expect(continued).toEqual({
+      options: normalizedContinuedOptions({ continueAsNewAfterIterations: 100 }),
+      state: expect.objectContaining({
+        mailboxSignalCount: 1,
+        latestMailboxPointer: expect.objectContaining({
+          mailboxItemId: "mailbox_item_test",
+        }),
+        signalVersion: 1,
+      }),
+      userId: "member_test",
+    });
+  });
+
+  it("upgrades the legacy ensure-execution timeout when continuing as new", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.suggestContinueAsNew = true;
+
+    const machine = createMachine(runtime, {
+      options: {
+        continueAsNewAfterIterations: 100,
+        ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+      },
+      userId: "member_test",
+    });
+
+    const continued = await runUntilContinueAsNew(machine);
+
+    expect(continued.options).toMatchObject({
+      continueAsNewAfterIterations: 100,
+      ensureCloudflareExecutionStartToCloseTimeoutMs:
+        HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+    });
+  });
 });
+
+function normalizedContinuedOptions(
+  overrides: Partial<NonNullable<HostedUserRuntimeWorkflowInput["options"]>>,
+): NonNullable<HostedUserRuntimeWorkflowInput["options"]> {
+  return {
+    activeWakeRecheckDelayMs: HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS,
+    continueAsNewAfterIterations: 500,
+    ensureCloudflareExecutionStartToCloseTimeoutMs:
+      HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+    readRuntimeDemandStartToCloseTimeoutMs: 10_000,
+    runtimeCompletedFailureRecheckDelayMs:
+      HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
+    ...overrides,
+  };
+}
 
 class ContinueAsNewSignal extends Error {
   constructor(readonly input: HostedUserRuntimeWorkflowInput) {
@@ -727,12 +786,17 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureExecutionResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
+  suggestContinueAsNew = false;
   readonly waits: Array<number | null> = [];
   private uuidCounter = 0;
 
   async continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never> {
     this.continuedInput = input;
     throw new ContinueAsNewSignal(input);
+  }
+
+  continueAsNewSuggested(): boolean {
+    return this.suggestContinueAsNew;
   }
 
   async ensureCloudflareExecution(
@@ -832,17 +896,14 @@ function mailboxSignal(): HostedRuntimeSignal {
   };
 }
 
-function manualSignal(eventId = "manual_event_test"): HostedRuntimeSignal {
+function manualSignal(_label = "manual_signal_test"): HostedRuntimeSignal {
   return {
-    eventId,
     kind: "manual_run_requested",
-    source: "test",
   };
 }
 
 function browserVaultSignal(): HostedRuntimeSignal {
   return {
-    eventId: "browser_vault_event_test",
     kind: "browser_vault_refresh_requested",
   };
 }

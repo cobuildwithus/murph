@@ -146,8 +146,11 @@ local_concurrency_default() {
 
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
-# Package coverage uses prepared workspace artifacts that app verification can rebuild.
-# Keep early Cloudflare verification opt-in so local acceptance does not race on dist/.
+readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
+# Package coverage and app verification share generated setup. Keep the legacy
+# Cloudflare-only overlap as an explicit escape hatch when full app overlap is
+# disabled.
 readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
@@ -850,15 +853,18 @@ run_test_packages() {
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
 }
 
-run_test_packages_coverage() {
-  local artifacts_prepared="${1:-0}"
-  local contracts_artifacts_prepared="${2:-0}"
-  local health_commons_generated_prepared="${3:-0}"
-
+run_package_coverage_cleanup_and_hygiene() {
   run_timed_step \
     "Coverage cleanup" \
     node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
   run_timed_step "Tracked artifact hygiene" pnpm no-js
+}
+
+run_test_packages_coverage_after_hygiene() {
+  local artifacts_prepared="${1:-0}"
+  local contracts_artifacts_prepared="${2:-0}"
+  local health_commons_generated_prepared="${3:-0}"
+
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$health_commons_generated_prepared"
   else
@@ -866,6 +872,11 @@ run_test_packages_coverage() {
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
   run_package_boundary_verification
+}
+
+run_test_packages_coverage() {
+  run_package_coverage_cleanup_and_hygiene
+  run_test_packages_coverage_after_hygiene "$@"
 }
 
 run_test_coverage() {
@@ -883,27 +894,43 @@ run_test_coverage() {
     local smoke_pid
 
     # Coverage and app verify both depend on the prepared runtime artifacts.
-    # Keep package coverage and fixture smoke parallel, but wait to start app
-    # verify until the package-coverage suite has released shared app-test
-    # resources such as Prisma/client generation.
+    # After the cleanup/hygiene pass, local acceptance can overlap the long
+    # package and app verification branches without mutating their shared setup.
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked"
-    run_timed_step "Package coverage suite" run_test_packages_coverage 1 "$acceptance_typechecked" &
-    coverage_pid="$!"
-    register_background_pid "$coverage_pid"
-    run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
-    smoke_pid="$!"
-    register_background_pid "$smoke_pid"
 
-    if [[ "$acceptance_early_cloudflare_verify" == "1" ]]; then
-      run_app_verify_command_with_retry "apps/cloudflare" "$acceptance_typechecked" 1 &
-      local cloudflare_verify_pid="$!"
-      register_background_pid "$cloudflare_verify_pid"
+    if [[ "$acceptance_app_verify_with_coverage" == "1" ]]; then
+      run_timed_step "Package coverage hygiene" run_package_coverage_cleanup_and_hygiene
 
-      wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$cloudflare_verify_pid"
-      run_app_verify_command_with_retry "apps/web" "$acceptance_typechecked" 1
+      run_timed_step "Package coverage suite" run_test_packages_coverage_after_hygiene 1 "$acceptance_typechecked" &
+      coverage_pid="$!"
+      register_background_pid "$coverage_pid"
+      run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
+      smoke_pid="$!"
+      register_background_pid "$smoke_pid"
+      run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1 &
+      local app_verify_pid="$!"
+      register_background_pid "$app_verify_pid"
+
+      wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$app_verify_pid"
     else
-      wait_for_background_jobs "$coverage_pid" "$smoke_pid"
-      run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
+      run_timed_step "Package coverage suite" run_test_packages_coverage 1 "$acceptance_typechecked" &
+      coverage_pid="$!"
+      register_background_pid "$coverage_pid"
+      run_timed_step "Fixture smoke coverage" run_fixture_smoke_verification --coverage &
+      smoke_pid="$!"
+      register_background_pid "$smoke_pid"
+
+      if [[ "$acceptance_early_cloudflare_verify" == "1" ]]; then
+        run_app_verify_command_with_retry "apps/cloudflare" "$acceptance_typechecked" 1 &
+        local cloudflare_verify_pid="$!"
+        register_background_pid "$cloudflare_verify_pid"
+
+        wait_for_background_jobs "$coverage_pid" "$smoke_pid" "$cloudflare_verify_pid"
+        run_app_verify_command_with_retry "apps/web" "$acceptance_typechecked" 1
+      else
+        wait_for_background_jobs "$coverage_pid" "$smoke_pid"
+        run_timed_step "App verification" run_test_apps "$acceptance_typechecked" 1
+      fi
     fi
   else
     run_timed_step "Package coverage suite" run_test_packages_coverage 0 "$acceptance_typechecked" "$acceptance_typechecked"

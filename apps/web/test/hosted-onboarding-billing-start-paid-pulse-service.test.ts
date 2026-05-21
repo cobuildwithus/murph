@@ -256,8 +256,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       subscription,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
-      eventSource: "billing.start-paid-pulse",
-      source: "user",
       userId: "member_123",
     });
   });

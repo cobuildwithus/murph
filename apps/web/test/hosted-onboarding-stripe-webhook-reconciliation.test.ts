@@ -200,8 +200,6 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       },
     });
     expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
-      eventSource: "stripe.webhook:workflow",
-      source: "admin",
       timeoutMs: 5_000,
       userId: "member_123",
     });
@@ -220,8 +218,6 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
 
     expect(mocks.signalHostedRuntimeManualWakeBestEffortResult).toHaveBeenCalledWith({
-      eventSource: "stripe.webhook:workflow",
-      source: "admin",
       timeoutMs: 5_000,
       userId: "member_123",
     });

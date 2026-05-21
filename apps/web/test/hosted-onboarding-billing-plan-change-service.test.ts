@@ -182,8 +182,6 @@ describe("upgradeHostedBillingPlan", () => {
       prisma: mocks.prismaClient,
     });
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
-      eventSource: "billing.plan-upgrade",
-      source: "user",
       userId: "member_123",
     });
   });
@@ -292,8 +290,6 @@ describe("upgradeHostedBillingPlan", () => {
       mocks.prismaClient,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
-      eventSource: "billing.plan-upgrade",
-      source: "user",
       userId: "member_123",
     });
   });
@@ -419,8 +415,6 @@ describe("upgradeHostedBillingPlan", () => {
       mocks.prismaClient,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
-      eventSource: "billing.plan-upgrade",
-      source: "user",
       userId: "member_123",
     });
   });

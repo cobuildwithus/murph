@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const defaultWorkflowOptions = {
-  ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
+  ensureCloudflareExecutionStartToCloseTimeoutMs: 660_000,
   readRuntimeDemandStartToCloseTimeoutMs: 10_000,
   runtimeCompletedFailureRecheckDelayMs: 30_000,
 };
@@ -33,7 +33,6 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
 }));
 
 import {
-  buildHostedRuntimeSignalEventId,
   sanitizeHostedRuntimeSignalSource,
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
@@ -144,9 +143,7 @@ describe("hosted runtime Temporal signaling", () => {
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          eventId: "device-sync-recovery:dirty:mailbox_123",
           kind: "device_sync_recovery_requested",
-          reason: "dirty",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -156,10 +153,9 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("signals browser-vault refresh with a deterministic pointer-only event id", async () => {
+  it("signals browser-vault refresh as a pointer-only wake hint", async () => {
     await signalHostedBrowserVaultRefreshRuntime({
       client: buildClient(),
-      source: "browser-vault/session",
       userId: "member_123",
     });
 
@@ -167,7 +163,6 @@ describe("hosted runtime Temporal signaling", () => {
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          eventId: "browser-vault-refresh:browser-vault-session:member_123",
           kind: "browser_vault_refresh_requested",
         }],
         workflowId: "hosted-user-runtime:member_123",
@@ -181,11 +176,9 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals manual runs with bounded source and event id", async () => {
+  it("signals manual runs as pointer-only wake hints", async () => {
     await signalHostedManualRunRuntime({
       client: buildClient(),
-      eventSource: "settings.email.sync",
-      source: "user",
       userId: "member_123",
     });
 
@@ -193,9 +186,7 @@ describe("hosted runtime Temporal signaling", () => {
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
         signalArgs: [{
-          eventId: "manual-run:user:settings.email.sync:member_123",
           kind: "manual_run_requested",
-          source: "user",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),
@@ -203,18 +194,6 @@ describe("hosted runtime Temporal signaling", () => {
     expect(mocks.ensureHostedWorkspace).toHaveBeenCalledWith({
       userId: "member_123",
     });
-  });
-
-  it("bounds generated runtime signal event ids", () => {
-    const eventId = buildHostedRuntimeSignalEventId(
-      "manual run",
-      "admin",
-      "A".repeat(240),
-      "member_123",
-    );
-
-    expect(eventId).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-    expect(eventId.length).toBeLessThanOrEqual(192);
   });
 });
 

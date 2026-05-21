@@ -206,8 +206,6 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
     });
     expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      eventSource: "settings.email.sync",
-      source: "user",
       userId: "member_123",
     });
     await expect(response.json()).resolves.toEqual({
@@ -306,8 +304,6 @@ describe("settings email sync route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
-      eventSource: "settings.email.sync",
-      source: "user",
       userId: "member_123",
     });
     expect(warnSpy).toHaveBeenCalledWith(

@@ -6,6 +6,23 @@ Temporal owns only scheduling, sleeps, signal coalescing, and Activity retries.
 Web remains the demand and product-status owner. Cloudflare remains the runtime
 execution adapter. The workflow state and signals must stay pointer-only.
 
+## Workflow Replay Discipline
+
+The per-user workflow in `src/workflows/hosted-user-runtime.ts` is replay
+sensitive. Changes that add, remove, or reorder awaited command-producing
+Temporal APIs, including Activities, timers or signal-aware timeouts,
+`continueAsNew`, or future child Workflow commands, need one of:
+
+- Worker Versioning or deployment pinning for existing histories.
+- `patched()` / `deprecatePatch()` around the changed command order.
+- A replay test against captured old histories for the affected path.
+
+Pure state-machine tests do not prove old Temporal histories replay after a
+deployment. Keep captured histories redacted or synthetic, and do not commit raw
+payloads, prompts, transcripts, provider responses, secrets, local paths, or
+direct user identifiers. The durable rule lives in
+`agent-docs/references/hosted-temporal-orchestration.md`.
+
 ## Local Development
 
 Install or check the Temporal CLI:
@@ -69,6 +86,12 @@ For a built production-style local worker:
 pnpm --dir packages/hosted-orchestrator-temporal build
 pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod
 ```
+
+The package build compiles the worker and pre-bundles Workflow code into
+`dist/workflow-bundle.js` with Temporal's `bundleWorkflowCode`. The production
+worker start path sets `NODE_ENV=production` and fails closed if that bundle is
+missing. Local development uses `workflowsPath` so source edits keep the normal
+runtime-bundling feedback loop.
 
 Signal a local smoke workflow:
 
@@ -134,12 +157,32 @@ Activity HTTP targets:
   callback key.
 - `HOSTED_RUNTIME_DEMAND_TIMEOUT_MS`: optional demand timeout, max 30000.
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS`: runner invocation timeout.
-- `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: Activity timeout margin.
+- `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: margin added to the
+  runner timeout for the ensure-execution internal HTTP request timeout. The
+  workflow Activity Start-To-Close timeout then adds a fixed 30 second
+  reporting slack over that HTTP timeout so the Activity can parse and return
+  the Cloudflare response before Temporal reaches the boundary.
+
+Worker shutdown:
+
+- `HOSTED_TEMPORAL_WORKER_SHUTDOWN_GRACE_MS` /
+  `TEMPORAL_WORKER_SHUTDOWN_GRACE_MS`: production Worker shutdown grace in
+  milliseconds, default `270000`. During this window the Worker stops polling
+  for new work and lets in-flight tasks drain.
+- `HOSTED_TEMPORAL_WORKER_SHUTDOWN_FORCE_MS` /
+  `TEMPORAL_WORKER_SHUTDOWN_FORCE_MS`: production force-shutdown cap in
+  milliseconds, default `295000`. This must be greater than or equal to the
+  grace value.
+- The checked-in defaults intentionally leave a small process-exit margin under
+  the Render Blueprint's `maxShutdownDelaySeconds: 300` platform cap.
+  Ensure-execution calls that run longer than the platform window can still be
+  retried by Temporal after the current attempt is interrupted.
 
 ## Render Deployment
 
 The repo root `render.yaml` defines `murph-temporal-worker` as a Render
-Background Worker. It builds the Temporal package and starts
+Background Worker. It builds the Temporal package, including the production
+Workflow bundle, and starts
 `pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
 
 Use Render Blueprint sync from the dashboard or validate it with:

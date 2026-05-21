@@ -13,6 +13,9 @@ const defineQuery = vi.fn((name: string) => ({ name, type: "query" }));
 const defineSignal = vi.fn((name: string) => ({ name, type: "signal" }));
 const setHandler = vi.fn();
 const uuid4 = vi.fn(() => "orchestration-attempt-test");
+const workflowInfo = vi.fn(() => ({
+  continueAsNewSuggested: false,
+}));
 const proxyActivities = vi.fn(() => ({
   ensureCloudflareExecution,
   readRuntimeDemand,
@@ -33,6 +36,7 @@ vi.mock("@temporalio/workflow", () => ({
   proxyActivities,
   setHandler,
   uuid4,
+  workflowInfo,
 }));
 
 describe("hostedUserRuntimeWorkflow entrypoint", () => {
@@ -62,7 +66,7 @@ describe("hostedUserRuntimeWorkflow entrypoint", () => {
       startToCloseTimeout: 10_000,
     }));
     expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
-      startToCloseTimeout: 630_000,
+      startToCloseTimeout: 660_000,
     }));
   });
 });

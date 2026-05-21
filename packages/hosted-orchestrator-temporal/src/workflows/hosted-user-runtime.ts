@@ -6,6 +6,7 @@ import {
   proxyActivities,
   setHandler,
   uuid4,
+  workflowInfo,
 } from "@temporalio/workflow";
 
 import type * as activities from "../activities/index.js";
@@ -29,7 +30,8 @@ export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
-export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
+const HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
+export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 660_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 10_000;
@@ -74,6 +76,7 @@ export async function hostedUserRuntimeWorkflow(
     continueAsNew: async (nextInput) => continueAsNew<typeof hostedUserRuntimeWorkflow>(
       nextInput,
     ),
+    continueAsNewSuggested: () => workflowInfo().continueAsNewSuggested,
     ensureCloudflareExecution: executionActivities.ensureCloudflareExecution,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
@@ -95,6 +98,7 @@ export async function hostedUserRuntimeWorkflow(
 
 export interface HostedUserRuntimeWorkflowRuntime {
   continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never>;
+  continueAsNewSuggested(): boolean;
   ensureCloudflareExecution(input: {
     orchestrationAttemptId: string;
     reason: HostedRuntimeRunDemand["reason"];
@@ -130,6 +134,7 @@ export function createHostedUserRuntimeWorkflowMachine(
   runtime: HostedUserRuntimeWorkflowRuntime,
 ): HostedUserRuntimeWorkflowMachine {
   const options = normalizeWorkflowOptions(input.options);
+  const continueAsNewOptions = normalizeContinueAsNewOptions(input.options);
   const state = createInitialWorkflowState(input.userId, input.state);
   let completedIterations = 0;
 
@@ -179,9 +184,12 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const run = async (): Promise<void> => {
     for (;;) {
-      if (completedIterations >= options.continueAsNewAfterIterations) {
+      if (
+        runtime.continueAsNewSuggested()
+        || completedIterations >= options.continueAsNewAfterIterations
+      ) {
         await runtime.continueAsNew({
-          options: input.options,
+          options: continueAsNewOptions,
           state: readCarryForwardState(state),
           userId: input.userId,
         });
@@ -434,6 +442,20 @@ function normalizeWorkflowOptions(
       min: HOSTED_USER_RUNTIME_MIN_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS,
       value: options?.runtimeCompletedFailureRecheckDelayMs,
     }),
+  };
+}
+
+function normalizeContinueAsNewOptions(
+  options: HostedUserRuntimeWorkflowOptions | undefined,
+): NormalizedWorkflowOptions {
+  const normalized = normalizeWorkflowOptions(options);
+  return {
+    ...normalized,
+    ensureCloudflareExecutionStartToCloseTimeoutMs:
+      normalized.ensureCloudflareExecutionStartToCloseTimeoutMs
+        === HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
+        ? HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
+        : normalized.ensureCloudflareExecutionStartToCloseTimeoutMs,
   };
 }
 

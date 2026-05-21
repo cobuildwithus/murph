@@ -414,8 +414,6 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   await signalHostedRuntimeManualWakeBestEffort({
-    eventSource: "billing.start-paid-pulse",
-    source: "user",
     userId: input.memberId,
   });
 }

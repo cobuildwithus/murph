@@ -178,10 +178,6 @@ export async function runHostedMailboxLagSweeper(input: {
     async ([userId, lagged]) => {
       signalAttempted += 1;
       const userFingerprint = fingerprintHostedMailboxLagUser(userId);
-      const eventId = buildHostedMailboxLagObservedEventId({
-        now,
-        userId,
-      });
       logger.warn("Hosted mailbox lag sweeper signaling Temporal for mailbox lag.", {
         lanes: lagged.lanes.map(formatHostedMailboxLaggedLaneForLog),
         latestMailboxUpdatedAt: lagged.latestMailboxUpdatedAt?.toISOString() ?? null,
@@ -194,9 +190,7 @@ export async function runHostedMailboxLagSweeper(input: {
       try {
         await signalHostedUserRuntimeWorkflow({
           signal: {
-            eventId,
             kind: "mailbox_lag_observed",
-            source: "lag-sweeper",
           },
           userId,
         });
@@ -312,19 +306,6 @@ function fingerprintHostedMailboxLagUser(userId: string): string {
     .update(userId)
     .digest("hex")
     .slice(0, 12);
-}
-
-function buildHostedMailboxLagObservedEventId(input: {
-  now: Date;
-  userId: string;
-}): string {
-  const minute = Math.floor(input.now.getTime() / 60_000);
-  const fingerprint = createHash("sha256")
-    .update(`mailbox-lag:${input.userId}:${minute}`)
-    .digest("hex")
-    .slice(0, 24);
-
-  return `mailbox-lag:${minute}:${fingerprint}`;
 }
 
 function classifyHostedMailboxLagSignalError(error: unknown): string {

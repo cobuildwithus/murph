@@ -74,7 +74,6 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (channelSyncDispatch) {
     await signalHostedManualRunBestEffort({
-      eventSource: "settings.telegram.sync",
       userId: auth.member.id,
     });
   }
@@ -98,13 +97,10 @@ function normalizeComparableTelegramUserId(value: string | null | undefined): st
 }
 
 async function signalHostedManualRunBestEffort(input: {
-  eventSource: string;
   userId: string;
 }): Promise<void> {
   try {
     await signalHostedManualRunRuntime({
-      eventSource: input.eventSource,
-      source: "user",
       userId: input.userId,
     });
   } catch {

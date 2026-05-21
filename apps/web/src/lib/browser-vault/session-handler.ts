@@ -177,7 +177,6 @@ async function scheduleBrowserVaultRefreshBestEffort(input: {
 }): Promise<void> {
   try {
     await signalHostedBrowserVaultRefreshRuntime({
-      source: "browser-vault-session",
       userId: input.userId,
     });
   } catch {

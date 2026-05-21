@@ -4,7 +4,9 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
 } from "../src/orchestration-control.ts";
 import {
+  HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS,
   HOSTED_RUNTIME_TEMPORAL_DEFAULT_ADDRESS,
+  readHostedRuntimeEnsureCloudflareExecutionTimeouts,
   readHostedRuntimeTemporalEnvironment,
   readHostedRuntimeTemporalWorkflowOptions,
 } from "../src/temporal-env.ts";
@@ -79,6 +81,29 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
     });
   });
 
+  it("lets hosted-prefixed mTLS material outrank legacy fallback material", () => {
+    expect(readHostedRuntimeTemporalEnvironment({
+      HOSTED_TEMPORAL_CLIENT_CERT_PEM: "hosted-cert-pem",
+      HOSTED_TEMPORAL_CLIENT_KEY_PEM: "hosted-key-pem",
+      HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM: "hosted-ca-pem",
+      HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE: "hosted-temporal.example.test",
+      TEMPORAL_CLIENT_CERT_BASE64:
+        Buffer.from("legacy-cert-pem").toString("base64"),
+      TEMPORAL_CLIENT_KEY_BASE64:
+        Buffer.from("legacy-key-pem").toString("base64"),
+      TEMPORAL_SERVER_ROOT_CA_CERT_BASE64:
+        Buffer.from("legacy-ca-pem").toString("base64"),
+      TEMPORAL_TLS_SERVER_NAME_OVERRIDE: "legacy-temporal.example.test",
+    }).tls).toEqual({
+      clientCertPair: {
+        crt: Buffer.from("hosted-cert-pem"),
+        key: Buffer.from("hosted-key-pem"),
+      },
+      serverNameOverride: "hosted-temporal.example.test",
+      serverRootCACertificate: Buffer.from("hosted-ca-pem"),
+    });
+  });
+
   it("rejects invalid TLS combinations", () => {
     expect(() => readHostedRuntimeTemporalEnvironment({
       HOSTED_TEMPORAL_API_KEY: "hosted_temporal_test_api_key",
@@ -97,9 +122,42 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
       TEMPORAL_TLS_ENABLED: "sometimes",
     })).toThrow("TEMPORAL_TLS_ENABLED must be true or false.");
   });
+
+  it("rejects explicitly disabled TLS when TLS material is configured", () => {
+    expect(() => readHostedRuntimeTemporalEnvironment({
+      TEMPORAL_CLIENT_CERT_PEM: "cert-pem",
+      TEMPORAL_CLIENT_KEY_PEM: "key-pem",
+      TEMPORAL_TLS_ENABLED: "false",
+    })).toThrow(
+      "TEMPORAL_TLS_ENABLED cannot be false when Temporal credentials or TLS material are configured.",
+    );
+
+    expect(() => readHostedRuntimeTemporalEnvironment({
+      HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM: "ca-pem",
+      HOSTED_TEMPORAL_TLS_ENABLED: "false",
+    })).toThrow(
+      "HOSTED_TEMPORAL_TLS_ENABLED cannot be false when Temporal credentials or TLS material are configured.",
+    );
+  });
 });
 
 describe("readHostedRuntimeTemporalWorkflowOptions", () => {
+  it("keeps ensure-execution Activity Start-To-Close above its internal HTTP timeout", () => {
+    const timeouts = readHostedRuntimeEnsureCloudflareExecutionTimeouts({
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
+      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
+    });
+
+    expect(timeouts).toEqual({
+      ensureCloudflareExecutionHttpTimeoutMs: 125_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
+    });
+    expect(
+      timeouts.ensureCloudflareExecutionStartToCloseTimeoutMs
+      - timeouts.ensureCloudflareExecutionHttpTimeoutMs,
+    ).toBe(HOSTED_TEMPORAL_ENSURE_EXECUTION_REPORTING_SLACK_MS);
+  });
+
   it("reads shared workflow timing options", () => {
     expect(readHostedRuntimeTemporalWorkflowOptions({
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "120000",
@@ -107,7 +165,7 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
       HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "5000",
       HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "45000",
     })).toEqual({
-      ensureCloudflareExecutionStartToCloseTimeoutMs: 125_000,
+      ensureCloudflareExecutionStartToCloseTimeoutMs: 155_000,
       readRuntimeDemandStartToCloseTimeoutMs: 15_000,
       runtimeCompletedFailureRecheckDelayMs: 45_000,
     });
@@ -124,6 +182,15 @@ describe("readHostedRuntimeTemporalWorkflowOptions", () => {
       HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS: "3600001",
     })).toThrow(
       "HOSTED_TEMPORAL_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS must be less than or equal to 3600000.",
+    );
+  });
+
+  it("rejects ensure-execution timeout budgets that cannot preserve reporting slack", () => {
+    expect(() => readHostedRuntimeEnsureCloudflareExecutionTimeouts({
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "3570001",
+      HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS: "1",
+    })).toThrow(
+      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS plus HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS plus Temporal reporting slack must be less than or equal to 3600000.",
     );
   });
 });
