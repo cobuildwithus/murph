@@ -1,8 +1,8 @@
 # Verify acceptance full command
 
-Status: active
+Status: completed
 Created: 2026-05-11
-Updated: 2026-05-11
+Updated: 2026-05-21
 
 ## Goal
 
@@ -35,6 +35,7 @@ Updated: 2026-05-11
 - A fresh full `pnpm verify:acceptance` run is currently blocked before app verification by unrelated dirty Murph Age CLI work: `packages/cli` shape verification reports `config.schema.json` is stale.
 - Full `pnpm verify:acceptance` now passes after aligning the unrelated dirty Cloudflare idle-checkpoint tests with the active no-destroy behavior. The verifier reported app verification complete at 191s since command start on the first passing run and 189s since command start on the second passing run.
 - Both passing shell measurements included pre-verifier workspace-lock waits from other active processes, so the shell `time` totals were not clean no-lock proof. The verifier's own timer is the comparable acceptance-runtime signal for this task.
+- Fresh no-lock completion audit on 2026-05-21 ran `pnpm verify:acceptance` from a clean worktree. The command reached final app verification successfully, and the verifier reported `App verification` done at 193s since command start. This is a 49.5% reduction from the 382s baseline, exceeding the >25% objective while retaining typecheck, package coverage, fixture smoke coverage, package-boundary checks, and app verification.
 
 ## Decisions
 
@@ -49,3 +50,4 @@ Updated: 2026-05-11
 - Focused package coverage checks for affected packages.
 - Full `pnpm verify:acceptance` wall-clock run.
 - Required completion audits before commit/handoff.
+Completed: 2026-05-21
