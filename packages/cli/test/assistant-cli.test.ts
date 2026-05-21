@@ -7,9 +7,7 @@ import { Cli } from 'incur'
 import { initializeVault } from '@murphai/core'
 import { afterEach, test, vi } from 'vitest'
 import {
-  TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
-  applyDefaultVaultToArgs,
   buildAssistantProviderDefaultsPatch,
   readOperatorConfig,
   resolveAssistantOperatorDefaults,
@@ -686,126 +684,6 @@ test.sequential(
   ASSISTANT_CLI_TIMEOUT_MS,
 )
 
-test('root chat alias participates in default-vault injection', () => {
-  assert.deepEqual(applyDefaultVaultToArgs(['chat'], '/tmp/default-vault'), [
-    'chat',
-    '--vault',
-    '/tmp/default-vault',
-  ])
-  assert.deepEqual(applyDefaultVaultToArgs(['status'], '/tmp/default-vault'), [
-    'status',
-    '--vault',
-    '/tmp/default-vault',
-  ])
-  assert.deepEqual(applyDefaultVaultToArgs(['doctor'], '/tmp/default-vault'), [
-    'doctor',
-    '--vault',
-    '/tmp/default-vault',
-  ])
-  assert.deepEqual(applyDefaultVaultToArgs(['stop'], '/tmp/default-vault'), [
-    'stop',
-    '--vault',
-    '/tmp/default-vault',
-  ])
-  assert.deepEqual(applyDefaultVaultToArgs(['run'], '/tmp/default-vault'), [
-    'run',
-    '--vault',
-    '/tmp/default-vault',
-  ])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['device', 'connect', 'oura'], '/tmp/default-vault'),
-    ['device', 'connect', 'oura', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['workout', 'add', 'Ran 5k'], '/tmp/default-vault'),
-    ['workout', 'add', 'Ran 5k', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
-    ['chat', '--vault', '/tmp/explicit-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['status', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
-    ['status', '--vault', '/tmp/explicit-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['doctor', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
-    ['doctor', '--vault', '/tmp/explicit-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['stop', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
-    ['stop', '--vault', '/tmp/explicit-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['run', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
-    ['run', '--vault', '/tmp/explicit-vault'],
-  )
-})
-
-test('default-vault injection skips non-executing builtin flags', () => {
-  assert.deepEqual(applyDefaultVaultToArgs(['chat', '--help'], '/tmp/default-vault'), [
-    'chat',
-    '--help',
-  ])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'session', '--schema'], '/tmp/default-vault'),
-    ['assistant', 'session', '--schema'],
-  )
-})
-
-test('default-vault injection skips incomplete command groups', () => {
-  assert.deepEqual(applyDefaultVaultToArgs(['assistant'], '/tmp/default-vault'), [
-    'assistant',
-  ])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'session'], '/tmp/default-vault'),
-    ['assistant', 'session'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['memory'], '/tmp/default-vault'),
-    ['memory'],
-  )
-  assert.deepEqual(applyDefaultVaultToArgs(['device'], '/tmp/default-vault'), ['device'])
-  assert.deepEqual(applyDefaultVaultToArgs(['wearables'], '/tmp/default-vault'), ['wearables'])
-  assert.deepEqual(applyDefaultVaultToArgs(['workout'], '/tmp/default-vault'), ['workout'])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['wearables', 'sleep'], '/tmp/default-vault'),
-    ['wearables', 'sleep'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['workout', 'format'], '/tmp/default-vault'),
-    ['workout', 'format'],
-  )
-  assert.deepEqual(applyDefaultVaultToArgs(['goal'], '/tmp/default-vault'), ['goal'])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'session', 'list'], '/tmp/default-vault'),
-    ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['memory', 'show'], '/tmp/default-vault'),
-    ['memory', 'show', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['workout', 'format', 'list'], '/tmp/default-vault'),
-    ['workout', 'format', 'list', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['wearables', 'sleep', 'list'], '/tmp/default-vault'),
-    ['wearables', 'sleep', 'list', '--vault', '/tmp/default-vault'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default-vault'),
-    ['assistant', 'self-target', 'list'],
-  )
-  assert.deepEqual(
-    applyDefaultVaultToArgs(
-      ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
-      '/tmp/default-vault',
-    ),
-    ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
-  )
-})
-
 test('manifest marks query as vault-backed while model and route are exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
@@ -816,14 +694,6 @@ test('manifest marks query as vault-backed while model and route are exempt', ()
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('commons'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)
-})
-
-test('applyDefaultVaultToArgs keeps model outside default-vault injection', () => {
-  assert.deepEqual(applyDefaultVaultToArgs(['model'], '/tmp/default-vault'), ['model'])
-  assert.deepEqual(
-    applyDefaultVaultToArgs(['model', '--show'], '/tmp/default-vault'),
-    ['model', '--show'],
-  )
 })
 
 test('model --show returns the saved assistant backend', async () => {

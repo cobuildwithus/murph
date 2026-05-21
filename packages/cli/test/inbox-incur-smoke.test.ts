@@ -49,7 +49,7 @@ test('inbox source add schema exposes the local runtime config options', async (
   assert.equal('linqWebhookPath' in schema.options.properties, false)
   assert.equal('linqWebhookPort' in schema.options.properties, false)
   assert.equal('enableAutoReply' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'id', 'backfillLimit'])
+  assert.deepEqual(schema.options.required, ['id', 'backfillLimit'])
 })
 
 test('inbox bootstrap schema exposes init and setup option families together', async () => {
@@ -66,7 +66,7 @@ test('inbox bootstrap schema exposes init and setup option families together', a
   assert.equal('strict' in schema.options.properties, true)
   assert.equal('whisperCommand' in schema.options.properties, true)
   assert.equal('whisperModelPath' in schema.options.properties, true)
-  assert.equal(schema.options.required?.includes('vault') ?? false, true)
+  assert.equal(schema.options.required?.includes('vault') ?? false, false)
 })
 
 test('inbox backfill schema exposes optional parser draining', async () => {

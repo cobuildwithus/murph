@@ -3867,15 +3867,19 @@ describe("hosted workspace runtime entrypoint", () => {
         artifactGetCalls,
         artifactGetCalls.length === 0 ? [] : [baseHash, baseHash, deltaHash],
       );
-      assert.deepEqual(imported, ["4"]);
+      assert.deepEqual(imported, ["4", "4"]);
       assert.equal(fetchRequests.length, 2);
-      assert.equal(readConversationImportedSeq(fetchRequests[1]), "4");
+      assert.equal(readConversationImportedSeq(fetchRequests[1]), "3");
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
+        "import:4",
         "assistant",
+        "snapshot:idle_shutdown:4",
+        "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
         "idle_shutdown",
       ]);
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
@@ -4350,7 +4354,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps the hot restore cache warm after no-progress alarms", async () => {
+  test("cold-restores legacy snapshots after no-progress alarms", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceBaseVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
     const sourceHotVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-hot-"));
@@ -4497,12 +4501,14 @@ describe("hosted workspace runtime entrypoint", () => {
       artifactGetCalls.length = 0;
 
       await runOnce();
-      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(artifactGetCalls.length, 2);
+      assert.equal(artifactGetCalls[0], baseHash);
       assert.equal(checkpointRequests.length, 1);
       artifactGetCalls.length = 0;
 
       await runOnce();
-      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(artifactGetCalls.length, 2);
+      assert.equal(artifactGetCalls[0], baseHash);
       assert.equal(checkpointRequests.length, 1);
     } finally {
       await removeTempRoot(vaultRoot);
@@ -4652,7 +4658,8 @@ describe("hosted workspace runtime entrypoint", () => {
       await runOnce(2);
       assert.deepEqual(importedSeqs, ["1"]);
       assert.equal(checkpointRequests.length, 1);
-      assert.deepEqual(artifactGetCalls, []);
+      assert.equal(artifactGetCalls.length, 2);
+      assert.equal(artifactGetCalls[0], baseHash);
       const secondFetch = fetchRequests.at(-1);
       assert.ok(secondFetch);
       assert.equal(

@@ -448,7 +448,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     );
   });
 
-  it("carries ignoredWorkspaceWakeKey after a completed workspace wake", async () => {
+  it("does not suppress workspace wakes after processing is merely accepted", async () => {
     const runtime = new FakeWorkflowRuntime();
     const workspace = workspaceProjection({
       nextWakeAt: isoAfter(-1),
@@ -469,9 +469,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     await runUntilContinueAsNew(machine);
 
-    expect(runtime.demandRequests[1].ignoredWorkspaceWakeKey).toBe(
-      createWorkspaceWakeKey(workspace),
-    );
+    expect(runtime.demandRequests[1].ignoredWorkspaceWakeKey).toBeNull();
   });
 
   it("does not clear a signal that arrives while demand is awaited", async () => {

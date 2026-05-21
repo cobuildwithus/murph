@@ -260,10 +260,15 @@ test('root config file can provide command option defaults', async () => {
       JSON.stringify({
         commands: {
           vault: {
+            options: {
+              requestId: 'config-smoke',
+            },
+          },
+          search: {
             commands: {
-              show: {
+              query: {
                 options: {
-                  vault: vaultRoot,
+                  limit: 1,
                 },
               },
             },
@@ -273,33 +278,41 @@ test('root config file can provide command option defaults', async () => {
     )
 
     const showResult = requireData(
-      await runSourceEntrypointJsonCliFromCwd<{ vault: string }>(
-        ['--config', configPath, 'vault', 'show'],
+      await runSourceEntrypointJsonCliFromCwd<{
+        filters: {
+          limit: number
+        }
+      }>(
+        ['--config', configPath, 'search', 'query', '--vault', vaultRoot, '--text', 'no-match'],
         {
           cwd: tempRoot,
           env: isolatedEnv,
         },
       ),
     )
-    assert.equal(showResult.vault, vaultRoot)
+    assert.equal(showResult.filters.limit, 1)
 
-    const withoutConfig = await runSourceEntrypointJsonCliFromCwd([
+    const withoutConfig = await runSourceEntrypointJsonCliFromCwd<{
+      filters: {
+        limit: number
+      }
+    }>([
       '--config',
       configPath,
       '--no-config',
-      'vault',
-      'show',
+      'search',
+      'query',
+      '--vault',
+      vaultRoot,
+      '--text',
+      'no-match',
     ], {
       cwd: tempRoot,
       env: isolatedEnv,
     })
-    assert.equal(withoutConfig.ok, false)
-
-    if (!withoutConfig.ok) {
-      assert.match(
-        withoutConfig.error.message ?? withoutConfig.error.code ?? '',
-        /vault/u,
-      )
+    assert.equal(withoutConfig.ok, true)
+    if (withoutConfig.ok) {
+      assert.equal(withoutConfig.data.filters.limit, 20)
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -319,11 +332,11 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
       path.join(configDir, 'config.json'),
       JSON.stringify({
         commands: {
-          vault: {
+          search: {
             commands: {
-              show: {
+              query: {
                 options: {
-                  vault: homeVaultRoot,
+                  limit: 1,
                 },
               },
             },
@@ -333,7 +346,18 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
     )
 
     const output = await runSourceEntrypointRawFromCwd(
-      ['vault', 'show', '--format', 'json', '--filter-output', 'vault'],
+      [
+        'search',
+        'query',
+        '--vault',
+        homeVaultRoot,
+        '--text',
+        'no-match',
+        '--format',
+        'json',
+        '--filter-output',
+        'filters.limit',
+      ],
       {
         cwd: tempRoot,
         env: {
@@ -342,7 +366,11 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
         },
       },
     )
-    assert.equal(JSON.parse(output), homeVaultRoot)
+    assert.deepEqual(JSON.parse(output), {
+      filters: {
+        limit: 1,
+      },
+    })
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -360,13 +388,18 @@ test('published config schema artifact stays on the native incur shape', async (
         properties?: {
           vault?: {
             properties?: {
+              options?: {
+                properties?: {
+                  requestId?: unknown
+                }
+              }
               commands?: {
                 properties?: {
                   show?: {
                     properties?: {
                       options?: {
                         properties?: {
-                          vault?: unknown
+                          requestId?: unknown
                         }
                       }
                     }
@@ -399,7 +432,7 @@ test('published config schema artifact stays on the native incur shape', async (
 
   assert.equal(schema.type, 'object')
   assert.ok(
-    schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.vault,
+    schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.requestId,
   )
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
@@ -806,7 +839,7 @@ test('search query schema exposes retrieval-specific filters', async () => {
     String(schema.options.properties.recordType?.description ?? ''),
     /history/u,
   )
-  assert.deepEqual(schema.options.required, ['vault', 'limit'])
+  assert.deepEqual(schema.options.required, ['limit'])
 })
 
 test('audit list schema describes its filters and sort controls', async () => {
@@ -833,7 +866,7 @@ test('audit list schema describes its filters and sort controls', async () => {
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum number of audit records/u,
   )
-  assert.deepEqual(schema.options.required, ['vault', 'sort', 'limit'])
+  assert.deepEqual(schema.options.required, ['sort', 'limit'])
 })
 
 test('route estimate schema exposes the Mapbox-backed routing inputs', async () => {
@@ -937,7 +970,7 @@ test('blood-test list schema stays scoped to shared date-range and status filter
   assert.equal('from' in schema.options.properties, true)
   assert.equal('to' in schema.options.properties, true)
   assert.equal('kind' in schema.options.properties, false)
-  assert.deepEqual(schema.options.required, ['vault', 'limit'])
+  assert.deepEqual(schema.options.required, ['limit'])
 })
 
 test('query projection status schema stays scoped to projection-management options', async () => {
@@ -959,8 +992,8 @@ test('query projection status schema stays scoped to projection-management optio
 
   assert.equal('text' in schema.options.properties, false)
   assert.equal('backend' in schema.options.properties, false)
-  assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId'])
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(Object.keys(schema.options.properties), ['requestId'])
+  assert.deepEqual(schema.options.required ?? [], [])
 })
 
 test('knowledge commands expose the expected schema at the built CLI boundary', async () => {
@@ -1024,7 +1057,7 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('librarySlug' in upsertSchema.options.properties, true)
   assert.equal('clearLibraryLinks' in upsertSchema.options.properties, true)
   assert.equal('mode' in upsertSchema.options.properties, false)
-  assert.deepEqual(upsertSchema.options.required, ['vault', 'body'])
+  assert.deepEqual(upsertSchema.options.required, ['body'])
   assert.match(
     String((upsertSchema.options.properties.sourcePath as { description?: unknown }).description),
     /vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault/u,
@@ -1033,15 +1066,15 @@ test('knowledge commands expose the expected schema at the built CLI boundary', 
   assert.equal('query' in searchSchema.args.properties, true)
   assert.deepEqual(searchSchema.args.required, ['query'])
   assert.equal('limit' in searchSchema.options.properties, true)
-  assert.deepEqual(searchSchema.options.required, ['vault'])
+  assert.deepEqual(searchSchema.options.required ?? [], [])
 
   assert.equal('slug' in showSchema.args.properties, true)
   assert.deepEqual(showSchema.args.required, ['slug'])
-  assert.deepEqual(showSchema.options.required, ['vault'])
+  assert.deepEqual(showSchema.options.required ?? [], [])
 
   assert.deepEqual(logTailSchema.args.required ?? [], [])
   assert.equal('limit' in logTailSchema.options.properties, true)
-  assert.deepEqual(logTailSchema.options.required, ['vault', 'limit'])
+  assert.deepEqual(logTailSchema.options.required, ['limit'])
 })
 
 test('knowledge upsert persists assistant-authored pages through the built CLI boundary', async () => {
@@ -1409,7 +1442,7 @@ test('automation save schema exposes typed automation fields and a separate JSON
   }
 
   assert.equal('input' in importJsonSchema.options.properties, true)
-  assert.deepEqual(importJsonSchema.options.required, ['vault', 'input'])
+  assert.deepEqual(importJsonSchema.options.required, ['input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation show schema accepts an id-or-slug lookup', async () => {
@@ -1428,7 +1461,7 @@ test('automation show schema accepts an id-or-slug lookup', async () => {
 
   assert.equal('lookup' in schema.args.properties, true)
   assert.deepEqual(schema.args.required, ['lookup'])
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('memory upsert schema exposes create-only canonical memory fields', async () => {
@@ -1454,7 +1487,7 @@ test('memory upsert schema exposes create-only canonical memory fields', async (
   )
   assert.deepEqual(schema.args.required, ['text'])
   assert.equal('section' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'section'])
+  assert.deepEqual(schema.options.required, ['section'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
@@ -1481,7 +1514,7 @@ test('memory update schema requires a memory id and text, with an optional repla
   )
   assert.deepEqual(schema.args.required, ['memoryId', 'text'])
   assert.equal('section' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('memory show schema accepts an optional memory id', async () => {
@@ -1506,7 +1539,7 @@ test('memory show schema accepts an optional memory id', async () => {
     /omit to return the whole memory document/u,
   )
   assert.deepEqual(schema.args.required ?? [], [])
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant session list schema emits the normalized session output shape', async () => {
@@ -1599,7 +1632,7 @@ test('food schedule schema exposes the recurring food options', async () => {
   assert.equal('time' in schema.options.properties, true)
   assert.equal('note' in schema.options.properties, true)
   assert.equal('slug' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'time'])
+  assert.deepEqual(schema.options.required, ['time'])
 })
 
 test('food unschedule schema exposes the recurring food lookup', async () => {
@@ -1618,7 +1651,7 @@ test('food unschedule schema exposes the recurring food lookup', async () => {
 
   assert.equal('id' in schema.args.properties, true)
   assert.deepEqual(schema.args.required, ['id'])
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
   assert.equal('input' in schema.options.properties, false)
   assert.equal('set' in schema.options.properties, false)
   assert.equal('clear' in schema.options.properties, false)
@@ -1670,7 +1703,7 @@ test('inbox source list schema exposes the list limit option', async () => {
   }
 
   assert.equal('limit' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
 })
 
 test('inbox attachment list schema exposes the list limit option', async () => {
@@ -1690,7 +1723,7 @@ test('inbox attachment list schema exposes the list limit option', async () => {
   assert.equal('captureId' in schema.args.properties, true)
   assert.deepEqual(schema.args.required, ['captureId'])
   assert.equal('limit' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(schema.options.required ?? [], [])
 })
 
 test('goal show help exposes only the global format flag', async () => {
@@ -1720,7 +1753,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
 
   assert.match(
     goalImportJsonHelp,
-    /vault-cli goal import-json --input @goal\.json --vault \.\/vault/u,
+    /vault-cli goal import-json --input @goal\.json/u,
   )
   assert.match(
     goalImportJsonHelp,
@@ -1829,8 +1862,8 @@ test('command schema reflects only domain-specific options', async () => {
     }
   }
 
-  assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId', 'timezone'])
-  assert.deepEqual(schema.options.required, ['vault'])
+  assert.deepEqual(Object.keys(schema.options.properties), ['requestId', 'timezone'])
+  assert.deepEqual(schema.options.required ?? [], [])
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('health command schema remains JSON-Schema-safe', async () => {
@@ -1844,7 +1877,7 @@ test('health command schema remains JSON-Schema-safe', async () => {
   }
 
   assert.equal('input' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'input'])
+  assert.deepEqual(schema.options.required, ['input'])
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('full-output json exposes the native Incur success envelope', async () => {
@@ -2010,7 +2043,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
 
   assert.match(
     help,
-    /vault-cli goal scaffold --vault \.\/vault  # Print a template goal payload\./u,
+    /vault-cli goal scaffold  # Print a template goal payload\./u,
   )
   assert.match(
     help,

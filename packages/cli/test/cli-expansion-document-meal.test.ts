@@ -10,6 +10,10 @@ import { registerMealCommands } from '../src/commands/meal.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
+  createVaultCliVaultContext,
+  installVaultCliVaultContext,
+} from '../src/vault-cli-vault-context.js'
+import {
   repoRoot,
   requireData,
   runCli,
@@ -206,6 +210,7 @@ function createDocumentMealSchemaCli(): Cli.Cli {
   registerVaultCommands(cli, services)
   registerDocumentCommands(cli, services)
   registerMealCommands(cli, services)
+  installVaultCliVaultContext(cli, createVaultCliVaultContext())
 
   return cli
 }
@@ -264,12 +269,12 @@ test(
     assert.equal('occurredAt' in documentImportSchema.options.properties, true)
     assert.equal('note' in documentImportSchema.options.properties, true)
     assert.equal('source' in documentImportSchema.options.properties, true)
-    assert.deepEqual(documentImportSchema.options.required, ['vault'])
+    assert.deepEqual(documentImportSchema.options.required ?? [], [])
 
     assert.equal('from' in documentListSchema.options.properties, true)
     assert.equal('to' in documentListSchema.options.properties, true)
     assert.equal('kind' in documentListSchema.options.properties, false)
-    assert.deepEqual(documentListSchema.options.required, ['vault'])
+    assert.deepEqual(documentListSchema.options.required ?? [], [])
 
     assert.equal('input' in documentEditSchema.options.properties, false)
     assert.equal('set' in documentEditSchema.options.properties, false)
@@ -277,12 +282,12 @@ test(
     assert.equal('title' in documentEditSchema.options.properties, true)
     assert.equal('note' in documentEditSchema.options.properties, true)
     assert.equal('dayKeyPolicy' in documentEditSchema.options.properties, true)
-    assert.deepEqual(documentEditSchema.options.required, ['vault'])
-    assert.deepEqual(documentDeleteSchema.options.required, ['vault'])
+    assert.deepEqual(documentEditSchema.options.required ?? [], [])
+    assert.deepEqual(documentDeleteSchema.options.required ?? [], [])
 
     assert.equal('input' in mealAddSchema.options.properties, false)
     assert.equal('source' in mealAddSchema.options.properties, true)
-    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
+    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), [])
 
     assert.equal('input' in mealImportJsonSchema.options.properties, true)
     assert.equal('source' in mealImportJsonSchema.options.properties, true)
@@ -302,24 +307,23 @@ test(
     )
     assert.deepEqual([...(mealImportJsonSchema.options.required ?? [])].sort(), [
       'input',
-      'vault',
     ])
 
     assert.equal('input' in mealEditSchema.options.properties, false)
     assert.equal('set' in mealEditSchema.options.properties, false)
     assert.equal('clear' in mealEditSchema.options.properties, false)
     assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
-    assert.deepEqual(mealEditSchema.options.required, ['vault'])
-    assert.deepEqual(mealDeleteSchema.options.required, ['vault'])
+    assert.deepEqual(mealEditSchema.options.required ?? [], [])
+    assert.deepEqual(mealDeleteSchema.options.required ?? [], [])
 
     assert.equal('from' in mealListSchema.options.properties, true)
     assert.equal('limit' in mealListSchema.options.properties, true)
     assert.equal('to' in mealListSchema.options.properties, true)
     assert.equal('kind' in mealListSchema.options.properties, false)
-    assert.deepEqual(mealListSchema.options.required, ['vault', 'limit'])
+    assert.deepEqual(mealListSchema.options.required, ['limit'])
     assert.equal('from' in mealTotalsSchema.options.properties, true)
     assert.equal('to' in mealTotalsSchema.options.properties, true)
-    assert.deepEqual(mealTotalsSchema.options.required, ['vault'])
+    assert.deepEqual(mealTotalsSchema.options.required ?? [], [])
   },
   DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
 )

@@ -124,8 +124,10 @@ Allowed Temporal state is tiny and pointer-only:
 - Legacy `runtimeResultWakeAt` and `runtimeResultWakeReason` replay state from
   old `ensure-execution` completion responses. Normal `ensure-processing`
   orchestration observes runtime wake projections through web-owned demand/status.
-- `ignoredWorkspaceWakeKey`, used to prevent hot loops on the same stale
-  workspace wake projection.
+- `ignoredWorkspaceWakeKey`, used by legacy completion/wake compatibility paths
+  to prevent hot loops on a stale workspace wake projection. Normal
+  `runtime_processing_accepted` does not set this key because acceptance is not
+  durable proof that the workspace wake was consumed.
 - Durable timers derived from web-owned runtime/workspace wake projection or
   retry timestamps.
 
@@ -256,9 +258,11 @@ Temporal treats `recommendedRecheckAt` on accepted processing as an ownership
 watchdog horizon, not as a short durable-lag polling interval. Newer signals may
 interrupt that wait and cause one wake/ensure command for the active runner.
 Without a new signal, the workflow waits until the watchdog horizon before
-returning to durable demand recovery. Runtime wake and retry facts that matter
-to product behavior must be reflected in durable web/runtime state, not returned
-as the command result. Legacy `runtime_completed` and `runtime_wake_sent`
+returning to durable demand recovery; if the original workspace wake remains due
+because the accepted runner failed before checkpointing, demand may select it
+again. Runtime wake and retry facts that matter to product behavior must be
+reflected in durable web/runtime state, not returned as the command result.
+Legacy `runtime_completed` and `runtime_wake_sent`
 responses remain replay/deploy-skew compatibility only. Target removal is
 2026-06-04, after Temporal visibility confirms no open hosted user runtime
 histories still depend on the legacy `ensure-execution` branch.
@@ -421,7 +425,8 @@ The hard-cut architecture is accepted when:
 - Workflow flag clearing is version-gated across awaited demand/execution calls.
 - Accepted-processing waits use Cloudflare's required owner-watchdog
   `recommendedRecheckAt`, not a short durable-lag polling loop.
-- Stale workspace wakes are guarded by `ignoredWorkspaceWakeKey`.
+- Stale workspace wakes are guarded by `ignoredWorkspaceWakeKey` only after
+  durable legacy completion/wake evidence, not after accepted processing alone.
 - Workflow setup uses an ESM-compatible explicit `workflowsPath`.
 - Vercel Workflow nudge files and Cloudflare nudge fallback paths are deleted
   or hard-disabled for production.

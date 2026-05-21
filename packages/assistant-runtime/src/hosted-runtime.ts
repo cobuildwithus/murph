@@ -58,7 +58,6 @@ import {
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
-  writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
   refreshHostedBrowserVaultReplicaFromRuntime,
@@ -312,26 +311,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   };
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
-  let hotRestoreCacheVaultRoot: string | null = null;
-  const recordHotRestoreCache = async (
-    response: Awaited<ReturnType<NonNullable<typeof workspacePort>["checkpoint"]>>,
-  ) => {
-    if (response.checkpointed && hotRestoreCacheVaultRoot) {
-      await recordHotRestoreCacheForSnapshotRef(response.workspace.snapshotRef);
-    }
-  };
-  const recordHotRestoreCacheForSnapshotRef = async (
-    snapshotRef: HostedWorkspaceState["snapshotRef"],
-  ) => {
-    if (!hotRestoreCacheVaultRoot) {
-      return;
-    }
-
-    await writeHostedWorkspaceHotRestoreCacheForSnapshotRefBestEffort({
-      snapshotRef,
-      vaultRoot: hotRestoreCacheVaultRoot,
-    });
-  };
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput) => {
       assertRuntimeNotAborted();
@@ -448,7 +427,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "workspace.restore",
       status: "done",
     });
-    hotRestoreCacheVaultRoot = restored.vaultRoot;
     assertRuntimeNotAborted();
 
     const runnerMailboxPort = guardedMailboxPort ?? mailboxPort;
@@ -882,7 +860,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           expectedUserId: input.request.userId,
           nextWakeAt: accumulatedProjection.nextWakeAt,
           nextWakeReason: accumulatedProjection.nextWakeReason,
-          onCheckpointValidated: recordHotRestoreCache,
           redactedStatus: accumulatedProjection.redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           workspacePort: foregroundWorkspacePort,
@@ -985,11 +962,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       result,
       workspace: workspaceRead.workspace,
     });
-    if (shouldRefreshHotRestoreCacheAfterNoProgressRun(result)) {
-      await recordHotRestoreCacheForSnapshotRef(
-        projection.committedWorkspace?.snapshotRef ?? null,
-      );
-    }
     const noProgressBrowserVaultRefresh =
       input.request.reason === "browser_vault_refresh"
         ? await runBrowserVaultRefreshMaintenance({
@@ -1580,21 +1552,6 @@ function assertIdleShutdownCheckpointAccepted(
   if (!checkpoint.checkpointed) {
     throw new HostedMailboxImportCheckpointConflictError(checkpoint);
   }
-}
-
-function shouldRefreshHotRestoreCacheAfterNoProgressRun(
-  result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>,
-): boolean {
-  const initialImport = result.initialMailboxImport;
-  return (
-    initialImport.checkpoint === null
-    && !initialImport.checkpointDeferred
-    && !initialImport.stateChanged
-    && initialImport.importResult.importedCount === 0
-    && initialImport.importResult.blocked.length === 0
-    && !initialImport.importResult.nextRetryAt
-    && result.assistantPhaseResult?.progressed !== true
-  );
 }
 
 function raceHostedRuntimeCancellation<T>(

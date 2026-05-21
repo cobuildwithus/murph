@@ -373,9 +373,6 @@ export function createHostedUserRuntimeWorkflowMachine(
         if (signalArrivedDuringExecution) {
           continue;
         }
-        if (demand.source === "workspace_wake") {
-          state.ignoredWorkspaceWakeKey = createWorkspaceWakeKey(demand.workspace);
-        }
         clearConsumedFlagsAfterRun(state, demand.source);
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(

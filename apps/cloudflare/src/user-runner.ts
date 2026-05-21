@@ -221,7 +221,7 @@ export class HostedUserRunner {
         phase: "failed",
         userId: await this.tryReadBoundUserId(),
       });
-      await this.state.storage.deleteAlarm?.();
+      throw error;
     }
   }
 
@@ -300,7 +300,7 @@ export class HostedUserRunner {
     input: RuntimeExecutionInput,
   ): Promise<HostedRuntimeEnsureExecutionResponse> {
     await this.stateStore.bindUser(input.userId);
-    const record = await this.stateStore.readState();
+    const record = await this.readRunnerStateAfterClearingExpiredWriteFence();
     if (record.writeFence) {
       return await this.ensureExistingRuntimeExecution(input, record);
     }
@@ -311,7 +311,7 @@ export class HostedUserRunner {
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
     await this.stateStore.bindUser(input.userId);
-    const record = await this.stateStore.readState();
+    const record = await this.readRunnerStateAfterClearingExpiredWriteFence();
     if (record.writeFence) {
       return await this.ensureExistingRuntimeProcessing(input, record);
     }
@@ -1255,6 +1255,26 @@ export class HostedUserRunner {
 
   private async syncWatchdogAlarm(record: RunnerStateRecord): Promise<void> {
     await this.syncAlarmAt(record.writeFence?.expiresAt ?? null);
+  }
+
+  private async readRunnerStateAfterClearingExpiredWriteFence(): Promise<RunnerStateRecord> {
+    const record = await this.stateStore.readState();
+    if (!record.writeFence || !isRunnerWriteFenceExpired(record.writeFence)) {
+      return record;
+    }
+
+    const expired = await this.stateStore.clearExpiredWriteFence(Date.now());
+    await this.syncWatchdogAlarm(expired.record);
+    if (expired.cleared) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: buildRunnerRecordTimingLogDetails(expired.record),
+        message: "Hosted runner cleared an expired write fence before accepting processing.",
+        phase: "runtime.starting",
+        userId: expired.record.userId,
+      });
+    }
+    return expired.record;
   }
 
   private async syncAlarmAt(nextAlarmAt: string | null): Promise<void> {
