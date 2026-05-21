@@ -1011,6 +1011,13 @@ export const murphAgeCalculatorViewResultSchema = z.union([
 const murphAgeSubmittedCalculatorCapabilitySchema = z.object({
   acceptedMetricKeys: z.array(z.string().min(1)),
   acceptedSourceKinds: z.array(murphAgeSubmittedMetricSourceKindSchema),
+  acceptedUserInputFamilies: z.array(z.enum([
+    'bloodwork-common-labs',
+    'vitals-body-composition',
+    'wearable-activity',
+    'wearable-recovery-autonomic',
+    'wearable-sleep',
+  ])),
   bundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
   contextBundleIds: z.array(murphAgeSubmittedCalculatorInputBundleSpecIdSchema),
   outputBoundary: z.object({

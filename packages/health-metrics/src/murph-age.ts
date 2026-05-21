@@ -31,9 +31,9 @@ export const MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION =
 export const MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION =
   "murph.age.research-calculator-view.v10" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION =
-  "murph.age.submitted-calculator-view-bundle.v2" as const;
+  "murph.age.submitted-calculator-view-bundle.v3" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION =
-  "murph.age.submitted-calculator-capability.v1" as const;
+  "murph.age.submitted-calculator-capability.v2" as const;
 export const MURPH_AGE_SUBMITTED_CALCULATOR_INPUT_BUNDLE_SPEC_SCHEMA_VERSION =
   "murph.age.submitted-calculator-input-bundle-spec.v1" as const;
 export const MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION =
@@ -620,6 +620,13 @@ export type MurphAgeSubmittedMetricSourceKind =
   | "test-result"
   | "wearable-summary";
 
+export type MurphAgeSubmittedCalculatorUserInputFamily =
+  | "bloodwork-common-labs"
+  | "vitals-body-composition"
+  | "wearable-activity"
+  | "wearable-recovery-autonomic"
+  | "wearable-sleep";
+
 export interface MurphAgeSubmittedMetricInput {
   confidence?: MetricConfidence;
   context?: MetricPointContext;
@@ -715,6 +722,7 @@ export interface MurphAgeSubmittedCalculatorOutputBoundary {
 export interface MurphAgeSubmittedCalculatorCapabilitySummary {
   acceptedMetricKeys: string[];
   acceptedSourceKinds: MurphAgeSubmittedMetricSourceKind[];
+  acceptedUserInputFamilies: MurphAgeSubmittedCalculatorUserInputFamily[];
   bundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
   contextBundleIds: MurphAgeSubmittedCalculatorInputBundleSpecId[];
   outputBoundary: MurphAgeSubmittedCalculatorOutputBoundary;
@@ -3390,6 +3398,13 @@ const MURPH_AGE_SUBMITTED_METRIC_SOURCE_KINDS = new Set<MurphAgeSubmittedMetricS
   "test-result",
   "wearable-summary",
 ]);
+const MURPH_AGE_SUBMITTED_CALCULATOR_USER_INPUT_FAMILIES = [
+  "bloodwork-common-labs",
+  "vitals-body-composition",
+  "wearable-activity",
+  "wearable-recovery-autonomic",
+  "wearable-sleep",
+] as const satisfies readonly MurphAgeSubmittedCalculatorUserInputFamily[];
 
 const MURPH_AGE_PUBLIC_FEATURE_KEYS = new Set([
   ...MURPH_AGE_LAB9_FEATURES.map((feature) => feature.featureKey),
@@ -4199,6 +4214,7 @@ export function summarizeMurphAgeSubmittedCalculatorCapabilities():
   return {
     acceptedMetricKeys: sortCapabilityStringValues(acceptedMetricKeys),
     acceptedSourceKinds: sortSubmittedMetricSourceKinds([...acceptedSourceKinds]),
+    acceptedUserInputFamilies: [...MURPH_AGE_SUBMITTED_CALCULATOR_USER_INPUT_FAMILIES],
     bundleIds,
     contextBundleIds,
     outputBoundary: {
