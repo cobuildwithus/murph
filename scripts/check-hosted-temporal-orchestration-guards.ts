@@ -193,7 +193,8 @@ function isPackageSourcePath(relativePath: string): boolean {
 
 function isTemporalWorkflowHistorySurface(relativePath: string): boolean {
   return relativePath.startsWith("packages/hosted-orchestrator-temporal/src/workflows/")
-    || relativePath === "packages/hosted-orchestrator-temporal/src/workflow-types.ts";
+    || relativePath === "packages/hosted-orchestrator-temporal/src/workflow-types.ts"
+    || relativePath === "packages/hosted-execution/src/orchestration-control.ts";
 }
 
 function findFirstPatternMatch(
