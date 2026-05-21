@@ -7,6 +7,7 @@ import { QUERY_DB_RELATIVE_PATH, openSqliteRuntimeDatabase } from "@murphai/runt
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   listMurphAgeInputBundleMetricKeys,
@@ -16,6 +17,7 @@ import {
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
   type MetricPoint,
+  type MurphAgeFunctionResidualParameterPack,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
   type MurphAgeWearableResidualParameterPack,
@@ -868,10 +870,15 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
         { metricKey: "creatinine", unit: "mg/dL", value: 0.85 },
         { metricKey: "SBP", sourceKind: "measurement", unit: "mmHg", value: 118 },
         { metricKey: "diastolic_bp", sourceKind: "measurement", unit: "mmHg", value: 72 },
+        { metricKey: "iadl-limitation-count", sourceKind: "measurement", unit: "count", value: 1 },
+        { metricKey: "mobility-limitation-count", sourceKind: "measurement", unit: "count", value: 1 },
         { metricKey: "steps", sourceKind: "wearable-summary", unit: "count", value: 10_000 },
         { metricKey: "wearable_valid_day_count_28d", sourceKind: "wearable-summary", unit: "count", value: 22 },
         { metricKey: "wearable_coverage_index", sourceKind: "wearable-summary", unit: "score", value: 0.8 },
       ],
+      functionResidualParameterPack: fixtureFunctionResidualParameterPack(
+        "lab5_bp_bmi_transport_research",
+      ),
       wearableResidualParameterPack: fixtureActivityWearableResidualParameterPack(
         "lab5_bp_bmi_transport_research",
       ),
@@ -883,6 +890,20 @@ test("getMurphAgeResearchPreviewForSubmittedInputs scores sanitized submitted la
     assert.equal(publicReport.result?.authorization.cardId, "lab5_bp_bmi_transport_research");
     assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "hba1c"), true);
     assert.equal(publicReport.result?.featureAttributions.some((feature) => feature.metricKey === "steps"), false);
+    assert.equal(publicReport.functionResidualLayer?.status, "research-parameterized-shadow-delta");
+    assert.equal(publicReport.functionResidualLayer?.parameterizationAvailable, true);
+    assert.equal(
+      publicReport.functionResidualLayer?.parameterPackHash,
+      "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    );
+    assert.equal(publicReport.functionResidualLayer?.residualDeltaLogit, 0.1);
+    assert.equal(publicReport.functionResidualLayer?.scoreBearing, false);
+    assert.equal(publicReport.functionResidualLayer?.scoreContributionAuthorized, false);
+    assert.equal(publicReport.functionResidualLayer?.selectedMetricKeys.includes("mobility-limitation-count"), true);
+    const encodedFunctionResidualLayer = JSON.stringify(publicReport.functionResidualLayer);
+    assert.equal(encodedFunctionResidualLayer.includes("finalRiskProbability"), false);
+    assert.equal(encodedFunctionResidualLayer.includes("finalRiskAgeEquivalentYears"), false);
+    assert.equal(encodedFunctionResidualLayer.includes("anchorRiskAgeEquivalentYears"), false);
     assert.equal(publicReport.wearableResidualLayer?.status, "research-parameterized-shadow-delta");
     assert.equal(publicReport.wearableResidualLayer?.parameterizationAvailable, true);
     assert.equal(publicReport.wearableResidualLayer?.parameterPackHash, "research-pack-activity-v1");
@@ -2037,6 +2058,39 @@ function fixtureActivityWearableResidualParameterPack(
     packHash: "research-pack-activity-v1",
     schemaVersion: MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
     sourceRouteId: "all-of-us-fitbit-labs-ehr",
+  };
+}
+
+function fixtureFunctionResidualParameterPack(
+  anchorCardId: MurphAgeScoreBearingCardId,
+): MurphAgeFunctionResidualParameterPack {
+  return {
+    anchorCardId,
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "same-family-sanity",
+    featureWeights: [{
+      center: 0,
+      coefficient: 0.04,
+      metricKey: "iadl-limitation-count",
+      scale: 1,
+      transform: "center-scale",
+    }, {
+      center: 0,
+      coefficient: 0.06,
+      metricKey: "mobility-limitation-count",
+      scale: 1,
+      transform: "center-scale",
+    }],
+    globalFunctionCapLogit: 0.2,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "function-mobility-residual-v1",
+    packHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    schemaVersion: MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "mhas-harmonized-aging",
   };
 }
 

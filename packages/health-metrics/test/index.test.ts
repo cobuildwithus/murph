@@ -6,6 +6,8 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   MURPH_AGE_ARCHITECTURE_SUMMARY_SCHEMA_VERSION,
   MURPH_AGE_DISPLAY_SUMMARY_SCHEMA_VERSION,
+  MURPH_AGE_FUNCTION_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
+  MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_ORDINARY_LAB_WEARABLE_AUTORESEARCH_SOURCE_PRIORITY_SCHEMA_VERSION,
@@ -32,6 +34,7 @@ import {
   MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION,
+  applyMurphAgeFunctionResidualLayer,
   applyMurphAgeWearableResidualLayer,
   assessMurphAgeInputBundle,
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
@@ -109,6 +112,7 @@ import {
   validateMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   validateMurphAgeRiskModel,
   validateMurphAgeSourceRouteRegistry,
+  validateMurphAgeFunctionResidualParameterPack,
   validateMurphAgeWearableLabAggregateReceipt,
   validateMurphAgeWearableResidualParameterPack,
   validateMurphAgeWearableShadowIncrementResultCard,
@@ -121,6 +125,7 @@ import {
   type MurphAgeSourceRoute,
   type MurphAgeValidationEvidenceTier,
   type MurphAgeIncrementEvaluationCard,
+  type MurphAgeFunctionResidualParameterPack,
   type MurphAgeWearableLabAggregateReceipt,
   type MurphAgeWearableResidualParameterPack,
   type MurphAgeWearableShadowIncrementResultCard,
@@ -4583,14 +4588,210 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
     points: lab9WithAllContextPoints,
     sex: "female",
   });
+  const functionResidualParameterPack = {
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    calibrationIntercept: 0,
+    calibrationSlope: 1,
+    deploymentRights: "research-only",
+    endpoint: "10-year all-cause mortality",
+    evidenceTier: "same-family-sanity",
+    featureWeights: [{
+      center: 0,
+      coefficient: 0.04,
+      metricKey: "iadl-limitation-count",
+      scale: 1,
+      transform: "center-scale",
+    }, {
+      center: 0,
+      coefficient: 0.06,
+      metricKey: "mobility-limitation-count",
+      scale: 1,
+      transform: "center-scale",
+    }],
+    globalFunctionCapLogit: 0.2,
+    horizonYears: 10,
+    intercept: 0,
+    layerId: "function-mobility-residual-v1",
+    packHash: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    schemaVersion: MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
+    sourceRouteId: "mhas-harmonized-aging",
+  } satisfies MurphAgeFunctionResidualParameterPack;
+  const researchWithFunctionPack = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    functionResidualParameterPack,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithAllContextPoints,
+    sex: "female",
+  });
+  const productWithFunctionPack = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    functionResidualParameterPack,
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithAllContextPoints,
+    sex: "female",
+  });
 
   assert.equal(research.status, "ready");
   assert.equal(research.result?.status, "ready");
   assert.equal(research.result?.biologicalAgeYears, labOnlyResearch.result?.biologicalAgeYears);
   assert.equal(research.result?.ageDeltaYears, labOnlyResearch.result?.ageDeltaYears);
   assert.equal(research.result?.risk?.probability, labOnlyResearch.result?.risk?.probability);
+  assert.equal(productDefault.functionResidualLayerApplication, null);
   assert.equal(productDefault.wearableResidualLayerApplication, null);
+  assert.equal(productWithFunctionPack.status, "abstain");
+  assert.equal(productWithFunctionPack.functionResidualLayerApplication, null);
   assert.equal(labOnlyResearch.wearableResidualLayerApplication?.status, "ineligible-insufficient-coverage");
+  assert.equal(research.functionResidualLayerApplication?.status, "ineligible-insufficient-function-context");
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.schemaVersion, MURPH_AGE_FUNCTION_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION);
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.status, "mechanics-ready-zero-delta");
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.eligibleForResidualResearch, true);
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.parameterizationAvailable, false);
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.residualDeltaLogit, 0);
+  assert.equal(researchWithFunctionContext.functionResidualLayerApplication?.selectedMetricKeys.includes("mobility-limitation-count"), true);
+  assert.deepEqual(validateMurphAgeFunctionResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: functionResidualParameterPack,
+  }), { status: "valid", warnings: [] });
+  const invalidFunctionResidualParameterPack = {
+    ...functionResidualParameterPack,
+    deploymentRights: "not-authorized",
+    packHash: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  } satisfies MurphAgeFunctionResidualParameterPack;
+  assert.equal(validateMurphAgeFunctionResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: invalidFunctionResidualParameterPack,
+  }).status, "invalid");
+  const nonDigestFunctionResidualParameterPack = {
+    ...functionResidualParameterPack,
+    packHash: "research-pack-function-v1",
+  } satisfies MurphAgeFunctionResidualParameterPack;
+  const nonDigestFunctionPackValidation = validateMurphAgeFunctionResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: nonDigestFunctionResidualParameterPack,
+  });
+  assert.equal(nonDigestFunctionPackValidation.status, "invalid");
+  assert.equal(
+    nonDigestFunctionPackValidation.warnings.some((warning) =>
+      warning.message === "Function residual parameter pack hash must be a stable sha256 artifact digest."
+    ),
+    true,
+  );
+  const malformedFunctionResidualParameterPack = structuredClone(functionResidualParameterPack);
+  Object.defineProperty(malformedFunctionResidualParameterPack, "deploymentRights", {
+    configurable: true,
+    enumerable: true,
+    value: "bogus-rights",
+    writable: true,
+  });
+  const malformedFunctionPackValidation = validateMurphAgeFunctionResidualParameterPack({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    parameterPack: malformedFunctionResidualParameterPack,
+  });
+  assert.equal(malformedFunctionPackValidation.status, "invalid");
+  assert.equal(
+    malformedFunctionPackValidation.warnings.some((warning) =>
+      warning.message === "Function residual parameter pack deployment rights are not recognized."
+    ),
+    true,
+  );
+  const directFunctionResidualApplication = applyMurphAgeFunctionResidualLayer({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorRiskProbability: researchWithFunctionContext.result?.risk?.probability ?? null,
+    asOf,
+    parameterPack: functionResidualParameterPack,
+    points: lab9WithAllContextPoints,
+    referenceRiskCurve: researchModel.referenceRiskCurve,
+  });
+  assert.equal(directFunctionResidualApplication.status, "research-parameterized-shadow-delta");
+  assert.equal(directFunctionResidualApplication.residualDeltaLogit, 0.1);
+  const invalidFunctionResidualApplication = applyMurphAgeFunctionResidualLayer({
+    anchorCardId: "lab9_bp_body_10y_acm_research",
+    anchorRiskProbability: researchWithFunctionContext.result?.risk?.probability ?? null,
+    asOf,
+    parameterPack: invalidFunctionResidualParameterPack,
+    points: lab9WithAllContextPoints,
+    referenceRiskCurve: researchModel.referenceRiskCurve,
+  });
+  assert.equal(invalidFunctionResidualApplication.status, "mechanics-ready-zero-delta");
+  assert.equal(invalidFunctionResidualApplication.parameterizationAvailable, false);
+  assert.equal(invalidFunctionResidualApplication.residualDeltaLogit, 0);
+  assert.equal(
+    invalidFunctionResidualApplication.warnings.some((warning) =>
+      warning.message === "Function residual parameter pack is not authorized for residual scoring."
+    ),
+    true,
+  );
+  assert.equal(researchWithFunctionPack.result?.risk?.probability, researchWithFunctionContext.result?.risk?.probability);
+  assert.equal(researchWithFunctionPack.functionResidualLayerApplication?.status, "research-parameterized-shadow-delta");
+  assert.equal(researchWithFunctionPack.functionResidualLayerApplication?.parameterizationAvailable, true);
+  assert.equal(
+    researchWithFunctionPack.functionResidualLayerApplication?.parameterPackHash,
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  );
+  assert.equal(researchWithFunctionPack.functionResidualLayerApplication?.residualDeltaLogit, 0.1);
+  assert.equal(researchWithFunctionPack.functionResidualLayerApplication?.scoreBearing, false);
+  assert.equal(researchWithFunctionPack.functionResidualLayerApplication?.scoreContributionAuthorized, false);
+  const functionShadowRiskProbability = researchWithFunctionPack.functionResidualLayerApplication?.finalRiskProbability;
+  assert.equal(
+    functionShadowRiskProbability !== null
+      && functionShadowRiskProbability !== undefined
+      && researchWithFunctionPack.result?.risk?.probability !== undefined
+      && functionShadowRiskProbability > researchWithFunctionPack.result.risk.probability,
+    true,
+  );
+  const baseFunctionPackRiskProbability = researchWithFunctionPack.result?.risk?.probability;
+  if (typeof baseFunctionPackRiskProbability !== "number" || typeof functionShadowRiskProbability !== "number") {
+    assert.fail("Expected function residual test to have base and function-shadow risk probabilities.");
+  }
+  assert.equal(
+    functionShadowRiskProbability,
+    expectedResidualRiskProbability(baseFunctionPackRiskProbability, 0.1),
+  );
+  const publicResearchWithFunctionPackReport = toPublicMurphAgeCalculatorReport(researchWithFunctionPack);
+  const researchWithFunctionPackView = buildMurphAgeResearchCalculatorView(publicResearchWithFunctionPackReport);
+  assert.equal(publicResearchWithFunctionPackReport.functionResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(
+    publicResearchWithFunctionPackReport.functionResidualLayer?.parameterPackHash,
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  );
+  assert.equal(publicResearchWithFunctionPackReport.functionResidualLayer?.residualDeltaLogit, 0.1);
+  assert.equal(publicResearchWithFunctionPackReport.functionResidualLayer?.scoreBearing, false);
+  assert.equal(publicResearchWithFunctionPackReport.functionResidualLayer?.scoreContributionAuthorized, false);
+  const encodedPublicFunctionResidualLayer = JSON.stringify(publicResearchWithFunctionPackReport.functionResidualLayer);
+  assert.equal(encodedPublicFunctionResidualLayer.includes("coefficient"), false);
+  assert.equal(encodedPublicFunctionResidualLayer.includes("metric-point:"), false);
+  assert.equal(encodedPublicFunctionResidualLayer.includes("finalRiskProbability"), false);
+  assert.equal(encodedPublicFunctionResidualLayer.includes("finalRiskAgeEquivalentYears"), false);
+  assert.equal(encodedPublicFunctionResidualLayer.includes("anchorRiskAgeEquivalentYears"), false);
+  assert.equal(researchWithFunctionPackView.functionResidualLayer?.status, "research-parameterized-shadow-delta");
+  assert.equal(researchWithFunctionPackView.layeredAgeEstimate?.status, "selected-card-only");
+  assert.equal(researchWithFunctionPackView.layeredAgeEstimate?.basis, "selected-card-risk-age");
+  assert.equal(researchWithFunctionPackView.layeredAgeEstimate?.riskProbability, baseFunctionPackRiskProbability);
+  assert.deepEqual(researchWithFunctionPackView.layeredAgeEstimate?.appliedLayerIds, [
+    "selected-lab-body-card",
+  ]);
+  assert.equal(
+    researchWithFunctionPackView.layeredAgeEstimate?.biologicalAgeYears,
+    researchWithFunctionPack.result?.biologicalAgeYears,
+  );
+  const parameterizedFunctionLayer = researchWithFunctionPackView.model.layeredResearchPath.layers.find((layer) =>
+    layer.layerId === "function-disability-sidecar"
+  );
+  assert.ok(parameterizedFunctionLayer);
+  assert.equal(parameterizedFunctionLayer.status, "parameter-pack-available-shadow-only");
+  assert.equal(parameterizedFunctionLayer.parameterPackAvailable, true);
+  assert.equal(parameterizedFunctionLayer.scoreBearingNow, false);
+  assert.equal(parameterizedFunctionLayer.scoreContributionAuthorized, false);
+  assert.deepEqual(researchWithFunctionPackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+    "wearable-activity-residual",
+  ]);
+  assert.equal(
+    researchWithFunctionPackView.model.composition.nextArchitectureStep,
+    "validate-function-sidecar-and-wearable-residuals-before-product-use",
+  );
   assert.equal(research.wearableResidualLayerApplication?.schemaVersion, MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION);
   assert.equal(research.wearableResidualLayerApplication?.layerId, "activity-residual-v1");
   assert.equal(research.wearableResidualLayerApplication?.status, "mechanics-ready-zero-delta");
@@ -4657,6 +4858,44 @@ test("dispatches Murph Age cards while keeping research and wearable boundaries 
   assert.deepEqual(researchWithWearablePackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
     "function-disability-sidecar",
   ]);
+  const researchWithBothResidualPacks = calculateMurphAgeFromInputBundle({
+    asOf,
+    chronologicalAgeYears: 45,
+    functionResidualParameterPack,
+    mode: "research",
+    models: { lab9_bp_body_10y_acm_research: researchModel },
+    points: lab9WithAllContextPoints,
+    sex: "female",
+    wearableResidualParameterPack,
+  });
+  const publicResearchWithBothResidualPacksReport = toPublicMurphAgeCalculatorReport(researchWithBothResidualPacks);
+  const researchWithBothResidualPacksView = buildMurphAgeResearchCalculatorView(
+    publicResearchWithBothResidualPacksReport,
+  );
+  assert.equal(
+    publicResearchWithBothResidualPacksReport.functionResidualLayer?.status,
+    "research-parameterized-shadow-delta",
+  );
+  assert.equal(
+    publicResearchWithBothResidualPacksReport.wearableResidualLayer?.status,
+    "research-parameterized-shadow-delta",
+  );
+  assert.equal(researchWithBothResidualPacksView.layeredAgeEstimate?.status, "multi-residual-shadow-applied");
+  assert.equal(researchWithBothResidualPacksView.layeredAgeEstimate?.basis, "residual-shadow-risk-age");
+  assert.deepEqual(researchWithBothResidualPacksView.layeredAgeEstimate?.appliedLayerIds, [
+    "selected-lab-body-card",
+    "function-disability-sidecar",
+    "wearable-activity-residual",
+  ]);
+  assert.equal(
+    researchWithBothResidualPacksView.layeredAgeEstimate?.riskProbability,
+    researchWithBothResidualPacksView.wearableResidualLayer?.finalRiskProbability,
+  );
+  assert.equal(
+    researchWithBothResidualPacksView.wearableResidualLayer?.finalRiskProbability,
+    expectedResidualRiskProbability(functionShadowRiskProbability, -0.08),
+  );
+  assert.deepEqual(researchWithBothResidualPacksView.model.layeredResearchPath.parameterPackBlockedLayerIds, []);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("metric-point:"), false);
   assert.equal(JSON.stringify(publicResearchWithWearablePackReport.wearableResidualLayer).includes("10000"), false);
   assert.deepEqual(
@@ -8152,6 +8391,12 @@ function surveyMetricPoint(metricKey: string, unit: string, value: number): Metr
     unit,
     value,
   });
+}
+
+function expectedResidualRiskProbability(baseRiskProbability: number, residualDeltaLogit: number): number {
+  const baseLogit = Math.log(baseRiskProbability / (1 - baseRiskProbability));
+  const finalLogit = baseLogit + residualDeltaLogit;
+  return Math.round((1 / (1 + Math.exp(-finalLogit))) * 1_000_000) / 1_000_000;
 }
 
 function assessedR399ProxyAnchorMetricKeys(): Set<string> {

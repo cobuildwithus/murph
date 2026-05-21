@@ -117,7 +117,9 @@ describe("hosted-local MinIO sidecar", () => {
     );
     const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
     const publishArg = dockerArgs[dockerArgs.indexOf("-p") + 1];
+    const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
     expect(publishArg).toEqual(expect.stringMatching(/^127\.0\.0\.1:\d+:9000$/u));
+    expect(volumeArg).toBe(".tmp/hosted-local-minio-test/minio-r2:/data");
     expect(dockerArgs).toContain("murph.hosted-local.role=r2-minio");
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
@@ -181,6 +183,40 @@ describe("hosted-local MinIO sidecar", () => {
         MINIO_ROOT_USER: "hosted-local-r2-access-key",
       }),
       expect.any(Object),
+    );
+    const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
+    const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
+    expect(volumeArg).toEqual(
+      expect.stringMatching(/[\\/]\.tmp[\\/]hosted-local-minio-r2:\/data$/u),
+    );
+  });
+
+  it("allows overriding the interactive dev MinIO data directory", async () => {
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    const { maybeStartHostedLocalMinio } = await import("./minio.ts");
+
+    await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_DEV_MINIO_DATA_DIR: ".tmp/custom-hosted-local-minio",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+
+    const dockerArgs = runtimeMocks.spawnChildProcess.mock.calls[0]?.[2] as string[];
+    const volumeArg = dockerArgs[dockerArgs.indexOf("-v") + 1];
+    expect(volumeArg).toEqual(
+      expect.stringMatching(/[\\/]\.tmp[\\/]custom-hosted-local-minio:\/data$/u),
     );
   });
 

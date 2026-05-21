@@ -292,6 +292,7 @@ export async function calculateMurphAgeFromVaultInputBundle(
     asOf,
     cardId: input.cardId,
     chronologicalAgeYears: input.chronologicalAgeYears,
+    functionResidualParameterPack: input.functionResidualParameterPack,
     mode,
     models: { ...localModelCards.models, ...input.models },
     points,
@@ -338,6 +339,7 @@ export async function getMurphAgeResearchPreviewForSubmittedInputs(
     models: { ...localModelCards.models, ...input.models },
     sex: input.sex,
     submittedMetrics: input.submittedMetrics,
+    functionResidualParameterPack: input.functionResidualParameterPack,
     wearableResidualParameterPack: input.wearableResidualParameterPack,
   });
   return toPublicMurphAgeCalculatorReport(withPrependedWarnings(output, localModelCards.warnings));
@@ -1026,6 +1028,7 @@ function invalidCalculatorOutput(input: {
     },
     cardPolicy: null,
     contextAssessments: [],
+    functionResidualLayerApplication: null,
     mode: input.mode,
     researchCandidateCards: [],
     result: null,

@@ -82,6 +82,10 @@
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"
     },
+    "./temporal-env": {
+      "types": "./dist/temporal-env.d.ts",
+      "default": "./dist/temporal-env.js"
+    },
     "./workspace-snapshot-v2": {
       "types": "./dist/workspace-snapshot-v2.d.ts",
       "default": "./dist/workspace-snapshot-v2.js"

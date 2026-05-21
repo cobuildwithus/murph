@@ -88,6 +88,9 @@
       "@murphai/hosted-execution/side-effects": [
         "packages/hosted-execution/src/side-effects.ts"
       ],
+      "@murphai/hosted-execution/temporal-env": [
+        "packages/hosted-execution/src/temporal-env.ts"
+      ],
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],

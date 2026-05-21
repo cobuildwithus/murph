@@ -9,6 +9,7 @@ import {
   HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME,
   HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID,
   HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
+  repoRoot,
 } from "./constants.ts";
 import {
   spawnChildProcess,
@@ -20,6 +21,8 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_HOSTED_LOCAL_MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
+const DEFAULT_HOSTED_LOCAL_MINIO_DATA_DIR = path.join(".tmp", "hosted-local-minio-r2");
+const HOSTED_LOCAL_MINIO_DATA_DIR_ENV = "MURPH_DEV_MINIO_DATA_DIR";
 const HOSTED_LOCAL_MINIO_PORT_ENV = "MURPH_DEV_MINIO_PORT";
 const HOSTED_LOCAL_MINIO_IMAGE_ENV = "MURPH_DEV_MINIO_IMAGE";
 const HOSTED_LOCAL_MINIO_SKIP_ENV = "MURPH_DEV_SKIP_MINIO";
@@ -67,7 +70,10 @@ export async function maybeStartHostedLocalMinio(input: {
   const publishTarget = await resolveHostedLocalMinioPublishTarget(input.containerHost, input.env);
   const controlHost = publishTarget.publishHost;
   await assertHostedLocalMinioPortAvailable(port, publishTarget.publishHost);
-  const dataDir = path.join(input.tempDir, "minio-r2");
+  const dataDir = resolveHostedLocalMinioDataDir({
+    env: input.env,
+    tempDir: input.tempDir,
+  });
   await mkdir(path.join(dataDir, HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME), {
     mode: 0o700,
     recursive: true,
@@ -170,6 +176,23 @@ function buildHostedLocalR2MarkerEnv(env: NodeJS.ProcessEnv): Record<string, str
       ? { [HOSTED_LOCAL_E2E_ISOLATION_ENV]: "1" }
       : {}),
   };
+}
+
+function resolveHostedLocalMinioDataDir(input: {
+  env: NodeJS.ProcessEnv;
+  tempDir: string;
+}): string {
+  const configuredDataDir = input.env[HOSTED_LOCAL_MINIO_DATA_DIR_ENV]?.trim();
+  if (configuredDataDir) {
+    return path.resolve(repoRoot, configuredDataDir);
+  }
+
+  const profile = input.env[HOSTED_LOCAL_PROFILE_ENV]?.trim();
+  if (profile === "dev") {
+    return path.resolve(repoRoot, DEFAULT_HOSTED_LOCAL_MINIO_DATA_DIR);
+  }
+
+  return path.join(input.tempDir, "minio-r2");
 }
 
 function isHostedLocalE2eProfileOrMarker(

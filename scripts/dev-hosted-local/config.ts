@@ -214,6 +214,7 @@ export function printHelp(): void {
       "  MURPH_DEV_SKIP_PRISMA_MIGRATE=1     Skip prisma migrate deploy before startup",
       "  MURPH_DEV_SKIP_RUNNER_SMOKE=1       Skip the runner container deploy-smoke readiness proof",
       "  MURPH_DEV_SKIP_MINIO=1              Skip local MinIO; requires explicit local S3-compatible HOSTED_R2_PRESIGN_* env",
+      "  MURPH_DEV_MINIO_DATA_DIR=.tmp/hosted-local-minio-r2 Persist local MinIO R2 data for interactive dev",
       "  MURPH_DEV_MINIO_PORT=9000           Pin the local MinIO R2-compatible S3 port",
       "  MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1  Skip the Health Commons markdown watcher after startup generation",
       "  MURPH_DEV_SKIP_STRIPE_LISTEN=1      Skip the auto-launched `stripe listen` forwarder for hosted onboarding webhooks",

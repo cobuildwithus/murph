@@ -31,6 +31,8 @@ import {
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeWearableActivityBenchmarkCards,
   listMurphAgeWearableLabAggregateReceiptTemplates,
+  MURPH_AGE_FUNCTION_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
+  MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_REPORT_SCHEMA_VERSION,
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_CALCULATOR_VIEW_SCHEMA_VERSION,
@@ -47,6 +49,7 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
   resolveMurphAgeSourceRoute,
+  type MurphAgeFunctionResidualParameterPack,
   type MurphAgeSourceRouteId,
   type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeWearableResidualParameterPack,
@@ -565,6 +568,28 @@ const murphAgeWearableResidualParameterPackSchema: z.ZodType<MurphAgeWearableRes
   schemaVersion: z.literal(MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
   sourceRouteId: murphAgeSourceRouteIdSchema,
 })
+const murphAgeFunctionResidualParameterPackSchema: z.ZodType<MurphAgeFunctionResidualParameterPack> = z.object({
+  anchorCardId: murphAgeScoreBearingModelCardIdSchema,
+  calibrationIntercept: z.number().finite(),
+  calibrationSlope: z.number().finite().positive(),
+  deploymentRights: z.enum(['not-authorized', 'research-only', 'product-authorized']),
+  endpoint: z.literal('10-year all-cause mortality'),
+  evidenceTier: murphAgeValidationEvidenceTierSchema,
+  featureWeights: z.array(z.object({
+    center: z.number().finite(),
+    coefficient: z.number().finite(),
+    metricKey: z.string().min(1).max(128),
+    scale: z.number().finite().positive(),
+    transform: z.literal('center-scale'),
+  })).min(1),
+  globalFunctionCapLogit: z.number().finite().positive().max(1),
+  horizonYears: z.literal(10),
+  intercept: z.number().finite(),
+  layerId: z.literal('function-mobility-residual-v1'),
+  packHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  schemaVersion: z.literal(MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION),
+  sourceRouteId: murphAgeSourceRouteIdSchema,
+})
 const murphAgeWearableResidualFeatureSetContractSchema = z.object({
   activityVolumeCandidateMetricKeys: z.array(z.string().min(1)),
   coverageControlMetricKeys: z.array(z.string().min(1)),
@@ -713,6 +738,28 @@ const murphAgeWearableResidualLayerViewSchema = z.object({
   warnings: z.array(murphAgePublicWarningSchema),
 })
 
+const murphAgeFunctionResidualLayerViewSchema = z.object({
+  anchorCardId: murphAgePublicAuthorizationSchema.shape.cardId,
+  eligibleForResidualResearch: z.boolean(),
+  layerId: z.literal('function-mobility-residual-v1'),
+  parameterPackHash: z.string().min(1).nullable(),
+  parameterizationAvailable: z.boolean(),
+  productAuthorized: z.literal(false),
+  residualDeltaYears: z.number().nullable(),
+  residualDeltaLogit: z.number(),
+  schemaVersion: z.literal(MURPH_AGE_FUNCTION_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION),
+  scoreBearing: z.literal(false),
+  scoreContributionAuthorized: z.literal(false),
+  selectedMetricKeys: z.array(z.string().min(1)),
+  status: z.enum([
+    'blocked-incompatible-anchor',
+    'ineligible-insufficient-function-context',
+    'mechanics-ready-zero-delta',
+    'research-parameterized-shadow-delta',
+  ]),
+  warnings: z.array(murphAgePublicWarningSchema),
+})
+
 export const murphAgeInputReadinessResultSchema = z.object({
   bundle: murphAgeInputBundleReadinessSchema,
   contextBundles: z.array(murphAgeInputBundleReadinessSchema),
@@ -763,6 +810,7 @@ const murphAgePublicDisplaySummarySchema = z.object({
 export const murphAgeReportResultSchema = z.object({
   authorization: murphAgePublicAuthorizationSchema,
   displaySummary: murphAgePublicDisplaySummarySchema,
+  functionResidualLayer: murphAgeFunctionResidualLayerViewSchema.nullable(),
   inputReadiness: murphAgePublicInputReadinessSummarySchema,
   mode: murphAgeModeSchema,
   researchCandidateCards: z.array(murphAgePublicResearchCandidateCardAssessmentSchema),
@@ -977,7 +1025,10 @@ const murphAgeResearchModelStatusViewSchema = z.object({
     anchorLayerStatus: z.literal('available-as-research-anchor-and-fallback-not-layered'),
     currentScoringMode: z.literal('single-selected-research-card'),
     labBodyStatus: z.literal('selected-card-score-not-additive-increment'),
-    nextArchitectureStep: z.literal('parameterize-function-sidecar-for-layered-scoring'),
+    nextArchitectureStep: z.enum([
+      'parameterize-function-sidecar-for-layered-scoring',
+      'validate-function-sidecar-and-wearable-residuals-before-product-use',
+    ]),
     wearableStatus: z.literal('context-only-zero-product-multiplier'),
   }),
   functionDisability: z.object({
@@ -1020,7 +1071,11 @@ const murphAgeResearchModelStatusViewSchema = z.object({
 const murphAgeResearchLayeredAgeEstimateSchema = z.object({
   ageDeltaYears: z.number().nullable(),
   appliedLayerIds: z.array(murphAgeResearchLayerIdSchema),
-  basis: z.enum(['selected-card-risk-age', 'wearable-shadow-risk-age']),
+  basis: z.enum([
+    'residual-shadow-risk-age',
+    'selected-card-risk-age',
+    'wearable-shadow-risk-age',
+  ]),
   biologicalAgeYears: z.number().nullable(),
   chronologicalAgeYears: z.number(),
   intervalYears: z.object({
@@ -1031,7 +1086,11 @@ const murphAgeResearchLayeredAgeEstimateSchema = z.object({
   residualDeltaYears: z.number().nullable(),
   residualScoreContributionAuthorized: z.literal(false),
   riskProbability: z.number().nullable(),
-  status: z.enum(['selected-card-only', 'wearable-shadow-applied']),
+  status: z.enum([
+    'multi-residual-shadow-applied',
+    'selected-card-only',
+    'wearable-shadow-applied',
+  ]),
   uncertaintyStatus: z.enum(['not-reestimated-for-shadow', 'selected-card-interval']),
 })
 export const murphAgeResearchCalculatorViewResultSchema = z.object({
@@ -1043,6 +1102,7 @@ export const murphAgeResearchCalculatorViewResultSchema = z.object({
   domainContributions: z.array(murphAgePublicDomainContributionViewSchema),
   featureContributions: z.array(murphAgePublicFeatureContributionViewSchema),
   featureDrivers: murphAgePublicDriverSummaryViewSchema,
+  functionResidualLayer: murphAgeFunctionResidualLayerViewSchema.nullable(),
   missingFeatureKeys: z.array(z.string().min(1)),
   mode: murphAgeModeSchema,
   model: murphAgeResearchModelStatusViewSchema,
@@ -1407,6 +1467,7 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   modelCardArtifactRoot: murphAgeModelCardArtifactRootSchema.optional(),
   sex: murphAgeSexSchema,
   submittedMetrics: z.array(murphAgeSubmittedMetricInputSchema).min(1),
+  functionResidualParameterPack: murphAgeFunctionResidualParameterPackSchema.optional(),
   wearableResidualParameterPack: murphAgeWearableResidualParameterPackSchema.optional(),
 })
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
