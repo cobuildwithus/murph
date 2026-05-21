@@ -18,6 +18,7 @@ import {
   type MurphAgePublicDisplaySummary,
   type MurphAgeResearchCalculatorView,
   type MurphAgeRiskModel,
+  type MurphAgeSubmittedCalculatorViewBundle,
 } from '@murphai/health-metrics'
 import {
   defaultMurphAgeModelCardArtifactRoot,
@@ -38,6 +39,7 @@ import {
   murphAgeCalculatorViewResultSchema,
   murphAgePublicCalculatorViewResultSchema,
   murphAgeResearchCalculatorViewResultSchema,
+  murphAgeSubmittedCalculatorViewBundleResultSchema,
   murphAgeSubmittedPreviewPayloadSchema,
   registerMurphAgeCommands,
 } from '../src/commands/murph-age.js'
@@ -1247,6 +1249,128 @@ test('age preview scores submitted labs and wearable context without a vault', a
       } else {
         process.env.MURPH_AGE_MODEL_CARD_ARTIFACT_ROOT = previousModelCardArtifactRootEnv
       }
+    }
+
+    const productOnlyCalculatorBundle = requireData(await runSliceCli<MurphAgeSubmittedCalculatorViewBundle>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${productPayloadPath}`,
+    ]))
+
+    assert.equal(
+      murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(productOnlyCalculatorBundle).success,
+      true,
+    )
+    assert.equal(productOnlyCalculatorBundle.schemaVersion, 'murph.age.submitted-calculator-view-bundle.v1')
+    assert.equal(productOnlyCalculatorBundle.researchPreview, null)
+    assert.equal(productOnlyCalculatorBundle.product.view.mode, 'product')
+    assert.equal(productOnlyCalculatorBundle.product.view.status, 'abstain')
+    assert.equal(productOnlyCalculatorBundle.product.view.ageEstimate, null)
+    assert.equal(productOnlyCalculatorBundle.product.view.risk.probability, null)
+    assert.equal(productOnlyCalculatorBundle.product.view.selectedCardId, null)
+    assert.equal(
+      productOnlyCalculatorBundle.product.view.warnings.some((warning) => warning.code === 'INVALID_INPUT'),
+      false,
+    )
+    assert.equal(JSON.stringify(productOnlyCalculatorBundle).includes(payloadControlledArtifactRoot), false)
+
+    const productCalculatorBundleWithBadRoot = requireData(await runSliceCli<MurphAgeSubmittedCalculatorViewBundle>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${productPayloadPath}`,
+      '--model-card-artifact-root',
+      payloadControlledArtifactRoot,
+    ]))
+
+    assert.equal(
+      murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(productCalculatorBundleWithBadRoot).success,
+      true,
+    )
+    assert.equal(productCalculatorBundleWithBadRoot.product.view.mode, 'product')
+    assert.equal(productCalculatorBundleWithBadRoot.product.view.status, 'abstain')
+    assert.equal(productCalculatorBundleWithBadRoot.researchPreview, null)
+    assert.equal(
+      productCalculatorBundleWithBadRoot.product.view.warnings.some((warning) => warning.code === 'INVALID_INPUT'),
+      true,
+    )
+    assert.equal(JSON.stringify(productCalculatorBundleWithBadRoot).includes(payloadControlledArtifactRoot), false)
+    assert.equal(JSON.stringify(productCalculatorBundleWithBadRoot).includes('"message"'), false)
+
+    const calculatorBundle = requireData(await runSliceCli<MurphAgeSubmittedCalculatorViewBundle>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${payloadPath}`,
+      '--include-research-preview',
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+
+    assert.equal(
+      murphAgeSubmittedCalculatorViewBundleResultSchema.safeParse(calculatorBundle).success,
+      true,
+    )
+    assert.equal(calculatorBundle.schemaVersion, 'murph.age.submitted-calculator-view-bundle.v1')
+    assert.equal(calculatorBundle.product.view.mode, 'product')
+    assert.equal(calculatorBundle.product.view.status, 'abstain')
+    assert.equal(calculatorBundle.product.view.displayBlockedReason, 'product-not-authorized')
+    assert.equal(calculatorBundle.product.view.ageEstimate, null)
+    assert.equal(calculatorBundle.product.view.risk.probability, null)
+    assert.equal(calculatorBundle.product.view.selectedCardId, null)
+    assert.equal(calculatorBundle.product.view.scoreReadiness.riskAvailable, false)
+    assert.equal(calculatorBundle.product.view.scoreReadiness.biologicalAgeAvailable, false)
+    assert.equal(
+      calculatorBundle.product.view.scoreReadiness.unlockRequirements.includes('external-outcome-validation'),
+      true,
+    )
+    assert.equal(
+      calculatorBundle.product.view.scoreReadiness.unlockRequirements.includes('validated-wearable-parameter-pack'),
+      true,
+    )
+    assert.equal(calculatorBundle.product.view.wearable.scoreBearing, false)
+    assert.equal(calculatorBundle.product.view.wearable.readyFeatureKeys.includes('activity-volume'), true)
+    assert.ok(calculatorBundle.researchPreview)
+    assert.equal(calculatorBundle.researchPreview.view.mode, 'research')
+    assert.equal(calculatorBundle.researchPreview.view.status, 'ready')
+    assert.equal(calculatorBundle.researchPreview.view.selectedCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(typeof calculatorBundle.researchPreview.view.ageEstimate?.biologicalAgeYears, 'number')
+    assert.equal(typeof calculatorBundle.researchPreview.view.risk.probability, 'number')
+    assert.equal(calculatorBundle.researchPreview.view.wearable.scoreBearing, false)
+    assert.equal(
+      calculatorBundle.researchPreview.view.featureContributions.some((feature) => feature.metricKey === 'hba1c'),
+      true,
+    )
+    assert.equal(
+      calculatorBundle.researchPreview.view.featureContributions.some((feature) => feature.metricKey === 'steps'),
+      false,
+    )
+    assert.equal(
+      calculatorBundle.researchPreview.view.wearableResidualLayer?.parameterPackHash,
+      'research-pack-activity-v1',
+    )
+
+    const encodedCalculatorBundle = JSON.stringify(calculatorBundle)
+    for (const forbidden of [
+      artifactRoot,
+      payloadPath,
+      'private metric',
+      'fixture-lab5-research-model',
+      'fasting',
+      'manual-cuff',
+      'metric-point:',
+      '"value"',
+      '"unit"',
+      '"label"',
+      '"message"',
+      '"path"',
+      'selectedPointIds',
+      'coefficient',
+      'contributionLogit',
+      'prediction',
+    ]) {
+      assert.equal(encodedCalculatorBundle.includes(forbidden), false, forbidden)
     }
 
     const researchCalculatorView = requireData(await runSliceCli<MurphAgeResearchCalculatorView>([

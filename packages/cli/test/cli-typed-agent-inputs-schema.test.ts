@@ -485,6 +485,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
     'age calculate',
+    'age calculate-bundle',
     'age evidence',
     'age preview',
     'age preview-view',
@@ -538,6 +539,11 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
     commandNames: ['age calculate'],
     fieldHints: ['input', 'mode', 'modelCardArtifactRoot'],
   })
+  const calculateBundleCommand = requireManifestCommand(commands, {
+    label: 'age calculate-bundle',
+    commandNames: ['age calculate-bundle'],
+    fieldHints: ['input', 'includeResearchPreview', 'modelCardArtifactRoot'],
+  })
   const scaffoldCommand = requireManifestCommand(commands, {
     label: 'age scaffold',
     commandNames: ['age scaffold'],
@@ -547,15 +553,24 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
   assert.equal(schemaIncludesProperty(calculateCommand.schema, 'input'), true)
   assert.equal(schemaIncludesProperty(calculateCommand.schema, 'mode'), true)
   assert.equal(schemaIncludesProperty(calculateCommand.schema, 'modelCardArtifactRoot'), true)
+  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'input'), true)
+  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'includeResearchPreview'), true)
+  assert.equal(schemaIncludesProperty(calculateBundleCommand.schema, 'modelCardArtifactRoot'), true)
   assert.equal(schemaIncludesProperty(previewCommand.schema, 'input'), true)
   assert.equal(schemaIncludesProperty(previewCommand.schema, 'modelCardArtifactRoot'), true)
   assert.equal(schemaIncludesProperty(scaffoldCommand.schema, 'input'), false)
   assert.match(generatedTypes, /'age calculate': \{ args: \{\}; options: \{ input: string; mode: "product" \| "research"; modelCardArtifactRoot\?: string \} \}/u)
+  assert.match(generatedTypes, /'age calculate-bundle': \{ args: \{\}; options: \{ input: string; includeResearchPreview: boolean; modelCardArtifactRoot\?: string \} \}/u)
   assert.match(generatedTypes, /'age preview': \{ args: \{\}; options: \{ input: string; modelCardArtifactRoot\?: string \} \}/u)
   assert.match(generatedTypes, /'age scaffold': \{ args: \{\}; options: \{\} \}/u)
   assert.deepEqual(commandConfigOptionNames(configSchema, 'age calculate').sort(), [
     'input',
     'mode',
+    'modelCardArtifactRoot',
+  ])
+  assert.deepEqual(commandConfigOptionNames(configSchema, 'age calculate-bundle').sort(), [
+    'includeResearchPreview',
+    'input',
     'modelCardArtifactRoot',
   ])
   assert.deepEqual(commandConfigOptionNames(configSchema, 'age preview').sort(), [
