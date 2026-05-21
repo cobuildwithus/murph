@@ -263,6 +263,7 @@ function createStorage() {
         async setAlarm(): Promise<void> {},
         sql,
       },
+      waitUntil() {},
     },
   };
 }

@@ -62,7 +62,15 @@ export interface HostedRuntimeDemandRequest {
   ignoredWorkspaceWakeKey?: string | null;
   lagRecoveryObserved?: boolean;
   manualRunRequested?: boolean;
+  /**
+   * Legacy `ensure-execution` runtime-completion projection. Normal
+   * `ensure-processing` orchestration observes durable web demand/status instead.
+   */
   runtimeResultWakeAt?: string | null;
+  /**
+   * Legacy `ensure-execution` runtime-completion projection. Normal
+   * `ensure-processing` orchestration observes durable web demand/status instead.
+   */
   runtimeResultWakeReason?: string | null;
   userId: string;
 }
@@ -126,6 +134,10 @@ export type HostedRuntimeDemand =
       workspace: HostedRuntimeDemandWorkspaceProjection | null;
     };
 
+/**
+ * @deprecated Legacy replay/deploy-skew command. New orchestration uses
+ * `HostedRuntimeEnsureProcessingRequest`.
+ */
 export interface HostedRuntimeEnsureExecutionRequest {
   orchestrationAttemptId: string;
   reason: HostedWorkspaceInvocationReason;
@@ -142,6 +154,10 @@ export const HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS = [
 export type HostedRuntimeEnsureExecutionResponseKind =
   (typeof HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS)[number];
 
+/**
+ * @deprecated Legacy replay/deploy-skew response. Normal `ensure-processing`
+ * returns `HostedRuntimeEnsureProcessingResponse`.
+ */
 export type HostedRuntimeEnsureExecutionResponse =
   | {
       action: "started" | "replaced";
@@ -175,28 +191,15 @@ export const HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS = [
 export type HostedRuntimeProcessingAcceptedAction =
   (typeof HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS)[number];
 
-export const HOSTED_RUNTIME_PROCESSING_RETRY_REASONS = [
-  "active_child_rejected",
-  "container_rpc_error",
-  "container_rpc_timeout",
-  "missing_container_binding",
-  "stale_fence_replacement_race",
-  "start_not_confirmed",
-] as const;
-
-export type HostedRuntimeProcessingRetryReason =
-  (typeof HOSTED_RUNTIME_PROCESSING_RETRY_REASONS)[number];
-
 export type HostedRuntimeEnsureProcessingResponse =
   | {
       action: HostedRuntimeProcessingAcceptedAction;
       kind: "runtime_processing_accepted";
-      recommendedRecheckAt: string | null;
+      recommendedRecheckAt: string;
       runtimeAttemptId: string;
     }
   | {
       kind: "retry_later";
-      reason: HostedRuntimeProcessingRetryReason;
       retryAt: string;
     };
 
@@ -205,6 +208,7 @@ export const HOSTED_RUNTIME_CURRENT_WAIT_REASONS = [
   "blocked_retry",
   "demand_failure_retry",
   "execution_failure_retry",
+  "processing_retry_later",
   "runtime_wake_recheck",
   "runtime_failed_recheck",
   "non_retryable_signal_only",
@@ -218,6 +222,12 @@ export type HostedRuntimeLastExecutionKind =
   | HostedRuntimeEnsureExecutionResponseKind
   | HostedRuntimeEnsureProcessingResponseKind
   | "failed"
+  | null;
+
+export type HostedRuntimeLastRuntimeStatus =
+  | HostedWorkspaceInvocationStatus
+  | "retry_later"
+  | "scheduled"
   | null;
 
 export interface HostedRuntimeWorkflowState {
@@ -238,14 +248,22 @@ export interface HostedRuntimeWorkflowState {
   lastExecutionKind: HostedRuntimeLastExecutionKind;
   lastMailboxLagLaneCount: number;
   lastRuntimeAttemptId: string | null;
-  lastRuntimeStatus: string | null;
+  lastRuntimeStatus: HostedRuntimeLastRuntimeStatus;
   latestMailboxPointer: HostedRuntimeMailboxPointer | null;
   mailboxSignalCount: number;
   manualRunRequested: boolean;
-  runtimeFailedWithoutNextWakeCount: number;
+  legacyRuntimeFailedWithoutNextWakeCount: number;
+  /**
+   * Legacy `ensure-execution` runtime-completion projection. Normal
+   * `ensure-processing` orchestration observes durable web demand/status instead.
+   */
   runtimeResultWakeAt: string | null;
+  /**
+   * Legacy `ensure-execution` runtime-completion projection. Normal
+   * `ensure-processing` orchestration observes durable web demand/status instead.
+   */
   runtimeResultWakeReason: string | null;
-  sameRuntimeWakeSentCount: number;
+  sameRuntimeWakeAcceptedCount: number;
   signalVersion: number;
   userId: string;
 }

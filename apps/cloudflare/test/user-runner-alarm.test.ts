@@ -155,7 +155,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { invoke, runner, sql } = createRunnerHarness({
+    const { invoke, runner, sql, waitUntilPromises } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
       workspace: createWorkspaceState({
         nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
@@ -172,11 +172,18 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:03:05.000Z",
+      recommendedRecheckAt: "2026-04-27T00:00:05.000Z",
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
 
+    expect(waitUntilPromises).toHaveLength(1);
+    let waitUntilSettled = false;
+    waitUntilPromises[0]?.then(() => {
+      waitUntilSettled = true;
+    });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(waitUntilSettled).toBe(false);
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.stringMatching(/^runtime-write-/u),
       active_workspace_version: "5",
@@ -194,6 +201,8 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
+    await waitUntilPromises[0];
+    expect(waitUntilSettled).toBe(true);
   });
 
   it("returns retry_later when processing cannot start without a container binding", async () => {
@@ -211,8 +220,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      reason: "missing_container_binding",
-      retryAt: "2026-04-27T00:03:05.000Z",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -294,6 +302,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "already_running",
       kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:00:05.000Z",
       runtimeAttemptId: token?.attemptId,
     });
 
@@ -305,6 +314,60 @@ describe("HostedUserRunner execution coordination", () => {
       backoff_until: null,
       wake_at: null,
     });
+  });
+
+  it("replaces a non-wakeable write fence after startup grace elapses", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = await runner.beginRuntimeWriteFenceForSmoke({
+      userId: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-replace",
+      reason: "nudge",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:00:36.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token?.attemptId ?? ""),
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token?.attemptId ?? ""),
+      active_expires_at: "2026-04-27T00:01:31.000Z",
+      backoff_until: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
   });
 
   it("returns retry_later when active child wake cannot be confirmed", async () => {
@@ -332,8 +395,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      reason: "container_rpc_timeout",
-      retryAt: "2026-04-27T00:03:05.000Z",
+      retryAt: "2026-04-27T00:00:05.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -865,6 +927,7 @@ function createRunnerHarness(input: {
     invoke,
     runner,
     sql: durable.sql,
+    waitUntilPromises: durable.waitUntilPromises,
   };
 }
 

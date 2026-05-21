@@ -7,8 +7,14 @@ This package exists so `@murphai/hosted-execution` can stay limited to shared
 runtime contracts while Cloudflare-owned control routes remain private and
 owner-scoped.
 
-The greenfield control concept is runner nudge/status, not hosted run
-acquire/commit/finalize. The package surface is limited to browser-vault
-session creation plus runner nudge/status, and the runner contracts
-intentionally do not expose `runId`, committed sequence, target sequence, or
-web-owned turn adoption state.
+The greenfield control concept is signed Temporal processing/status, not hosted
+run acquire/commit/finalize or web-to-Cloudflare runner nudges. The package
+surface is limited to browser-vault session creation plus processing/status, and
+the runner contracts intentionally do not expose `runId`, committed sequence,
+target sequence, or web-owned turn adoption state.
+
+Normal webhook and app paths commit durable demand in web-owned storage and
+signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
+returns `runtime_processing_accepted` or `retry_later` and owns runner start,
+wake, watchdog, and cleanup. Legacy `ensure-execution`/`runtime_completed`
+behavior is compatibility only.

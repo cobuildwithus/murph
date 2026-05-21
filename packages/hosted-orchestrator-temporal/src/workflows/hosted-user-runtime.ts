@@ -33,7 +33,8 @@ export const HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS = 65_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_CONTINUE_AS_NEW_ITERATION_THRESHOLD = 500;
 export const HOSTED_USER_RUNTIME_DEFAULT_DEMAND_FAILURE_RETRY_DELAY_MS = 30_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_EXECUTION_FAILURE_RETRY_DELAY_MS = 30_000;
-const HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 630_000;
+const HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUTS_MS =
+  [630_000, 660_000] as const;
 export const HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS = 15_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_READ_DEMAND_START_TO_CLOSE_TIMEOUT_MS = 10_000;
 export const HOSTED_USER_RUNTIME_DEFAULT_RUNTIME_COMPLETED_FAILURE_RECHECK_DELAY_MS = 30_000;
@@ -71,7 +72,15 @@ export async function hostedUserRuntimeWorkflow(
     },
     startToCloseTimeout: options.readRuntimeDemandStartToCloseTimeoutMs,
   });
-  const executionActivities = proxyActivities<typeof activities>({
+  const legacyExecutionActivities = proxyActivities<typeof activities>({
+    retry: {
+      initialInterval: "2 seconds",
+      maximumAttempts: 6,
+      maximumInterval: "1 minute",
+    },
+    startToCloseTimeout: options.ensureCloudflareExecutionStartToCloseTimeoutMs,
+  });
+  const processingActivities = proxyActivities<typeof activities>({
     retry: {
       initialInterval: "2 seconds",
       maximumAttempts: 6,
@@ -84,8 +93,8 @@ export async function hostedUserRuntimeWorkflow(
       nextInput,
     ),
     continueAsNewSuggested: () => workflowInfo().continueAsNewSuggested,
-    ensureCloudflareExecution: executionActivities.ensureCloudflareExecution,
-    ensureRuntimeProcessing: executionActivities.ensureRuntimeProcessing,
+    ensureCloudflareExecution: legacyExecutionActivities.ensureCloudflareExecution,
+    ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
     readRuntimeDemand: demandActivities.readRuntimeDemand,
     useEnsureRuntimeProcessing: () =>
@@ -147,6 +156,7 @@ export interface HostedUserRuntimeWorkflowMachine {
 interface NormalizedWorkflowOptions {
   activeWakeRecheckDelayMs: number;
   continueAsNewAfterIterations: number;
+  ensureCloudflareExecutionStartToCloseTimeoutMs: number;
   ensureRuntimeProcessingStartToCloseTimeoutMs: number;
   readRuntimeDemandStartToCloseTimeoutMs: number;
   runtimeCompletedFailureRecheckDelayMs: number;
@@ -351,10 +361,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         const versionBeforeWakeWait = state.signalVersion;
         await waitUntilTimestampOrSignal(
           runtime,
-          execution.recommendedRecheckAt
-            ?? new Date(
-              runtime.nowMs() + options.activeWakeRecheckDelayMs,
-            ).toISOString(),
+          execution.recommendedRecheckAt,
           versionBeforeWakeWait,
           state,
           "runtime_wake_recheck",
@@ -373,7 +380,7 @@ export function createHostedUserRuntimeWorkflowMachine(
           execution.retryAt,
           state.signalVersion,
           state,
-          "execution_failure_retry",
+          "processing_retry_later",
         );
         continue;
       }
@@ -468,7 +475,7 @@ function recordLegacyRuntimeCompletionWake(
     const retryAt = new Date(
       runtime.nowMs() + runtimeCompletedFailureRecheckDelayMs,
     ).toISOString();
-    state.runtimeFailedWithoutNextWakeCount += 1;
+    state.legacyRuntimeFailedWithoutNextWakeCount += 1;
     state.runtimeResultWakeAt = retryAt;
     state.runtimeResultWakeReason = "runtime.failed";
     return retryAt;
@@ -494,8 +501,8 @@ function recordRuntimeProcessingAccepted(
 
   state.lastRuntimeAttemptId = execution.runtimeAttemptId;
   state.lastRuntimeStatus = "scheduled";
-  state.sameRuntimeWakeSentCount = sameRuntimeWake
-    ? state.sameRuntimeWakeSentCount + 1
+  state.sameRuntimeWakeAcceptedCount = sameRuntimeWake
+    ? state.sameRuntimeWakeAcceptedCount + 1
     : 0;
 }
 
@@ -527,14 +534,37 @@ function createInitialWorkflowState(
     latestMailboxPointer: carryForward?.latestMailboxPointer ?? null,
     mailboxSignalCount: carryForward?.mailboxSignalCount ?? 0,
     manualRunRequested: carryForward?.manualRunRequested ?? false,
-    runtimeFailedWithoutNextWakeCount:
-      carryForward?.runtimeFailedWithoutNextWakeCount ?? 0,
+    legacyRuntimeFailedWithoutNextWakeCount:
+      carryForward?.legacyRuntimeFailedWithoutNextWakeCount
+        ?? readLegacyCarryForwardSafeInteger(
+          carryForward,
+          "runtimeFailedWithoutNextWakeCount",
+        )
+        ?? 0,
     runtimeResultWakeAt: carryForward?.runtimeResultWakeAt ?? null,
     runtimeResultWakeReason: carryForward?.runtimeResultWakeReason ?? null,
-    sameRuntimeWakeSentCount: carryForward?.sameRuntimeWakeSentCount ?? 0,
+    sameRuntimeWakeAcceptedCount:
+      carryForward?.sameRuntimeWakeAcceptedCount
+        ?? readLegacyCarryForwardSafeInteger(
+          carryForward,
+          "sameRuntimeWakeSentCount",
+        )
+        ?? 0,
     signalVersion: carryForward?.signalVersion ?? 0,
     userId,
   };
+}
+
+function readLegacyCarryForwardSafeInteger(
+  carryForward: HostedUserRuntimeWorkflowCarryForwardState | undefined,
+  key: string,
+): number | null {
+  if (!carryForward) {
+    return null;
+  }
+
+  const value = Reflect.get(carryForward, key);
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
 function normalizeWorkflowOptions(
@@ -552,6 +582,12 @@ function normalizeWorkflowOptions(
       max: HOSTED_USER_RUNTIME_MAX_CONTINUE_AS_NEW_ITERATION_THRESHOLD,
       min: 1,
       value: options?.continueAsNewAfterIterations,
+    }),
+    ensureCloudflareExecutionStartToCloseTimeoutMs: normalizePositiveIntegerOption({
+      fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+      value: options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
     }),
     ensureRuntimeProcessingStartToCloseTimeoutMs: normalizePositiveIntegerOption({
       fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
@@ -577,16 +613,39 @@ function normalizeWorkflowOptions(
 
 function normalizeContinueAsNewOptions(
   options: HostedUserRuntimeWorkflowOptions | undefined,
-): NormalizedWorkflowOptions {
+): HostedUserRuntimeWorkflowOptions {
   const normalized = normalizeWorkflowOptions(options);
+  const ensureRuntimeProcessingStartToCloseTimeoutMs = normalizePositiveIntegerOption({
+    fallback: HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+    max: HOSTED_USER_RUNTIME_MAX_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+    min: HOSTED_USER_RUNTIME_MIN_ACTIVITY_START_TO_CLOSE_TIMEOUT_MS,
+    value: normalizeEnsureRuntimeProcessingTimeoutOption(
+      options?.ensureRuntimeProcessingStartToCloseTimeoutMs
+        ?? options?.ensureCloudflareExecutionStartToCloseTimeoutMs,
+    ),
+  });
   return {
-    ...normalized,
-    ensureRuntimeProcessingStartToCloseTimeoutMs:
-      normalized.ensureRuntimeProcessingStartToCloseTimeoutMs
-        === HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
-        ? HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS
-        : normalized.ensureRuntimeProcessingStartToCloseTimeoutMs,
+    activeWakeRecheckDelayMs: normalized.activeWakeRecheckDelayMs,
+    continueAsNewAfterIterations: normalized.continueAsNewAfterIterations,
+    ensureRuntimeProcessingStartToCloseTimeoutMs,
+    readRuntimeDemandStartToCloseTimeoutMs:
+      normalized.readRuntimeDemandStartToCloseTimeoutMs,
+    runtimeCompletedFailureRecheckDelayMs:
+      normalized.runtimeCompletedFailureRecheckDelayMs,
   };
+}
+
+function normalizeEnsureRuntimeProcessingTimeoutOption(
+  value: number | undefined,
+): number | undefined {
+  if (
+    value !== undefined
+    && HOSTED_USER_RUNTIME_LEGACY_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUTS_MS
+      .includes(value as 630_000 | 660_000)
+  ) {
+    return HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS;
+  }
+  return value;
 }
 
 function normalizePositiveIntegerOption(input: {

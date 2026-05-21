@@ -162,7 +162,7 @@ describe("hosted Stripe webhook service", () => {
     });
   });
 
-  it("starts duplicate completed receipts so activation runner nudges can be retried", async () => {
+  it("starts duplicate completed receipts so activation runtime wakes can be retried", async () => {
     const prisma = createPrisma({
       status: HostedStripeEventStatus.completed,
     });

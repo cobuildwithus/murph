@@ -27,6 +27,12 @@ describe('GitHub Actions cache trust-boundary guards', () => {
 
       for (const [description, pattern] of forbiddenPatterns) {
         if (pattern.test(workflow)) {
+          if (
+            description === 'workflow_run handoff trigger' &&
+            isAllowedWorkflowRunHandoff(file, workflow)
+          ) {
+            continue
+          }
           findings.push(`${file}: ${description}`)
         }
       }
@@ -35,3 +41,16 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(findings).toEqual([])
   })
 })
+
+function isAllowedWorkflowRunHandoff(file: string, workflow: string): boolean {
+  if (file !== 'deploy-render-temporal-worker.yml') {
+    return false
+  }
+
+  return [
+    /branches:\s*\n\s*-\s+main/u,
+    /github\.event\.workflow_run\.event\s*==\s*'push'/u,
+    /github\.event\.workflow_run\.head_branch\s*==\s*'main'/u,
+    /github\.event\.workflow_run\.conclusion\s*==\s*'success'/u,
+  ].every((pattern) => pattern.test(workflow))
+}

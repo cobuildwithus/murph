@@ -149,8 +149,9 @@ describe("hosted orchestration demand", () => {
       {
         blockedReason: null,
         browserVaultRefreshRequested: false,
-        component: "hosted.runtime.demand",
+        component: "hosted.orchestration.demand",
         conversationLagPresent: false,
+        decisionSource: "workflow",
         demandKind: "run",
         demandReason: "manual",
         demandSource: "manual",
@@ -162,9 +163,10 @@ describe("hosted orchestration demand", () => {
         retryAtPresent: false,
         runtimeResultWakeAtPresent: false,
         runtimeResultWakeReason: null,
+        schema: "murph.hosted-runtime.demand-decision.v1",
         usageGateRequired: true,
         usageGateStatus: "allowed",
-        userId: MEMBER_ID,
+        userIdPresent: true,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: true,
@@ -174,6 +176,7 @@ describe("hosted orchestration demand", () => {
     expect(JSON.stringify(loggedMetadata)).not.toMatch(
       /payload|body|prompt|message|transcript|redactedStatus/u,
     );
+    expect(JSON.stringify(loggedMetadata)).not.toContain(MEMBER_ID);
   });
 
   it("does not log free-form wake reason strings", async () => {
@@ -214,6 +217,7 @@ describe("hosted orchestration demand", () => {
     const demand = await readHostedRuntimeDemand({
       manualRunRequested: true,
       now: FIXED_NOW,
+      decisionSource: "status",
       usageGateMode: "read_only",
       userId: MEMBER_ID,
     });
@@ -227,6 +231,14 @@ describe("hosted orchestration demand", () => {
       now: new Date(FIXED_NOW),
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted runtime demand decision.",
+      expect.objectContaining({
+        component: "hosted.orchestration.demand",
+        decisionSource: "status",
+        schema: "murph.hosted-runtime.demand-decision.v1",
+      }),
+    );
   });
 
   it("blocks demand for missing hosted users before reading runtime state", async () => {
@@ -256,8 +268,9 @@ describe("hosted orchestration demand", () => {
       {
         blockedReason: "user_not_active",
         browserVaultRefreshRequested: false,
-        component: "hosted.runtime.demand",
+        component: "hosted.orchestration.demand",
         conversationLagPresent: false,
+        decisionSource: "workflow",
         demandKind: "blocked",
         demandReason: null,
         demandSource: null,
@@ -269,13 +282,17 @@ describe("hosted orchestration demand", () => {
         retryAtPresent: false,
         runtimeResultWakeAtPresent: true,
         runtimeResultWakeReason: null,
+        schema: "murph.hosted-runtime.demand-decision.v1",
         usageGateRequired: false,
         usageGateStatus: "not_required",
-        userId: MEMBER_ID,
+        userIdPresent: true,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: false,
       },
+    );
+    expect(JSON.stringify(consoleInfoSpy.mock.calls[0]?.[1])).not.toContain(
+      MEMBER_ID,
     );
   });
 

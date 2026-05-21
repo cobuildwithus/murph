@@ -6,8 +6,8 @@ Cloudflare execution worker.
 ## Scope
 
 - own shared hosted execution contract types for the greenfield mailbox,
-  workspace checkpoint, redacted runtime log, hosted usage record, and runner
-  nudge/status seams
+  workspace checkpoint, redacted runtime log, hosted usage record, and Temporal
+  processing/status seams
 - define the shared hosted `conversation.message` payload shapes for supported
   hosted conversation channels: Linq, Telegram, email, and WhatsApp
 - define hosted execution auth header names and request-canonicalization helpers
@@ -20,8 +20,9 @@ Cloudflare execution worker.
 ## Active public path
 
 New hosted runtime code should import mailbox, workspace checkpoint, runtime log,
-runner nudge/status, and workspace invocation contracts from
-`@murphai/hosted-execution/runtime-control`. Use
+and workspace invocation contracts from
+`@murphai/hosted-execution/runtime-control`. Temporal processing/status
+contracts live in `@murphai/hosted-execution/orchestration-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
@@ -42,6 +43,12 @@ as deleted state.
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here
 - Cloudflare operational control routes are private owner APIs, not part of this public package
+- normal webhook and app paths commit durable demand and signal Temporal only;
+  they do not send user-level runner nudges directly to Cloudflare
+- Temporal calls Cloudflare `ensure-processing`; Cloudflare returns
+  `runtime_processing_accepted` or `retry_later` and owns runner start, wake,
+  watchdog, and cleanup. Legacy `ensure-execution`/`runtime_completed` contracts
+  are compatibility only.
 - device-sync runtime snapshot/apply/token contracts stay on
   `@murphai/device-syncd/hosted-runtime`; this package only carries the outer
   hosted runtime control seam plus the shared device-sync wake-hint shape needed

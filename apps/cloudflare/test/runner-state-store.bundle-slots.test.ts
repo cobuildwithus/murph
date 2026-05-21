@@ -121,6 +121,7 @@ function createDurableObjectState(
       setAlarm: async () => {},
       sql: new SqliteDurableObjectSqlStorage(db),
     },
+    waitUntil() {},
   };
 }
 

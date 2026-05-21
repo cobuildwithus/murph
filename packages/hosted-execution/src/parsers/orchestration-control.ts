@@ -12,7 +12,6 @@ import {
   HOSTED_RUNTIME_ENSURE_EXECUTION_RESPONSE_KINDS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
-  HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
   type HostedRuntimeDemand,
   type HostedRuntimeDemandRequest,
@@ -33,6 +32,15 @@ import {
 import {
   parseHostedMailboxLane,
 } from "./runtime-control.ts";
+
+const HOSTED_RUNTIME_LEGACY_PROCESSING_RETRY_REASONS = [
+  "missing_container_binding",
+  "container_rpc_error",
+  "container_rpc_timeout",
+  "active_child_rejected",
+  "start_not_confirmed",
+  "stale_fence_replacement_race",
+] as const;
 
 export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
   const record = requireObject(value, "Hosted runtime signal");
@@ -427,7 +435,7 @@ export function parseHostedRuntimeEnsureProcessingResponse(
           HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
         ),
         kind,
-        recommendedRecheckAt: readRequiredNullableIsoTimestamp(
+        recommendedRecheckAt: readRequiredIsoTimestamp(
           record.recommendedRecheckAt,
           "Hosted runtime processing-accepted response recommendedRecheckAt",
         ),
@@ -443,14 +451,18 @@ export function parseHostedRuntimeEnsureProcessingResponse(
         "reason",
         "retryAt",
       ]);
+      if (Object.prototype.hasOwnProperty.call(record, "reason")) {
+        // Deploy-skew compatibility only: old Cloudflare workers included a
+        // retry cause here. The shared Temporal contract drops it.
+        parseAllowedString(
+          record.reason,
+          "Hosted runtime processing retry-later legacy response reason",
+          HOSTED_RUNTIME_LEGACY_PROCESSING_RETRY_REASONS,
+        );
+      }
 
       return {
         kind,
-        reason: parseAllowedString(
-          record.reason,
-          "Hosted runtime processing retry-later response reason",
-          HOSTED_RUNTIME_PROCESSING_RETRY_REASONS,
-        ),
         retryAt: readRequiredIsoTimestamp(
           record.retryAt,
           "Hosted runtime processing retry-later response retryAt",

@@ -31,9 +31,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  nudgeHostedStripeWebhookActivationRunner,
   processRecordedHostedStripeWebhookEvent,
   reconcileRecordedHostedStripeWebhookEvent,
+  signalHostedStripeWebhookActivationRuntimeWake,
 } from "@/src/lib/hosted-onboarding/stripe-webhook-reconciliation";
 
 describe("hosted Stripe webhook reconciliation helpers", () => {
@@ -153,7 +153,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
-  it("rederives completed activation pointers from the mailbox for nudge retries", async () => {
+  it("rederives completed activation pointers from the mailbox for Temporal runtime wake retries", async () => {
     const prisma = createPrisma({
       hostedMailboxItem: {
         findFirst: vi.fn().mockResolvedValue({
@@ -205,8 +205,8 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
-  it("nudges activated members without requiring member ids in workflow input", async () => {
-    await expect(nudgeHostedStripeWebhookActivationRunner({
+  it("signals activated members without requiring member ids in workflow input", async () => {
+    await expect(signalHostedStripeWebhookActivationRuntimeWake({
       activatedMemberId: "member_123",
       eventId: "evt_123",
       eventType: "invoice.paid",
@@ -223,8 +223,8 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
-  it("does not nudge when reconciliation did not activate a member", async () => {
-    await expect(nudgeHostedStripeWebhookActivationRunner({
+  it("does not signal the runtime when reconciliation did not activate a member", async () => {
+    await expect(signalHostedStripeWebhookActivationRuntimeWake({
       activatedMemberId: null,
       eventId: "evt_123",
       eventType: "customer.subscription.updated",

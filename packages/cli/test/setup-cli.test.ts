@@ -889,6 +889,59 @@ async function runSetupAliasRaw(
   }
 }
 
+async function runSetupCliRawWithEnv(
+  commandName: string,
+  args: string[],
+  options?: {
+    cwd?: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<string> {
+  const cli = createSetupCli({ commandName })
+  const output: string[] = []
+  const previousCwd = process.cwd()
+  const previousEnv = { ...process.env }
+
+  try {
+    replaceProcessEnvForSetupCliTest({
+      ...process.env,
+      ...options?.env,
+    })
+    if (options?.cwd !== undefined) {
+      process.chdir(options.cwd)
+    }
+
+    await cli.serve(args, {
+      env: process.env,
+      exit: () => {},
+      stdout(chunk) {
+        output.push(chunk)
+      },
+    })
+  } finally {
+    process.chdir(previousCwd)
+    replaceProcessEnvForSetupCliTest(previousEnv)
+  }
+
+  return output.join('').trim()
+}
+
+function replaceProcessEnvForSetupCliTest(env: NodeJS.ProcessEnv): void {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in env)) {
+      delete process.env[key]
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
+}
+
 async function runSetupWrapper(
   args: string[],
   envOverrides: NodeJS.ProcessEnv,
@@ -3409,7 +3462,7 @@ test.sequential('murph use saves an existing vault as the active default vault',
   try {
     await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
 
-    const output = await runSetupAliasRaw('murph', ['use', vaultRoot, '--format', 'json'], {
+    const output = await runSetupCliRawWithEnv('murph', ['use', vaultRoot, '--format', 'json'], {
       env: {
         HOME: homeRoot,
       },
@@ -3425,7 +3478,7 @@ test.sequential('murph use saves an existing vault as the active default vault',
     const savedConfig = await readOperatorConfig(homeRoot)
     assert.equal(savedConfig?.defaultVault, vaultRoot)
 
-    const secondOutput = await runSetupAliasRaw(
+    const secondOutput = await runSetupCliRawWithEnv(
       'murph',
       ['use', vaultRoot, '--format', 'json'],
       {

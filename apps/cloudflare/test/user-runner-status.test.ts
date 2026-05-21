@@ -174,7 +174,7 @@ function createRunnerStatusHarness() {
     sql,
   };
   const runner = new HostedUserRunner(
-    { storage },
+    { storage, waitUntil() {} },
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     })),

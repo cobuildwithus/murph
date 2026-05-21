@@ -44,16 +44,18 @@ describe("observeHostedTemporalActivity", () => {
         reason: "nudge",
         resultAction: "woken",
         resultKind: "runtime_processing_accepted",
-        retryReason: null,
-        userId: "member_test",
+        userIdPresent: true,
       },
     );
     expect(JSON.stringify(activityLog.info.mock.calls)).not.toMatch(
       /payload|prompt|transcript|secret|mailbox_item/u,
     );
+    expect(JSON.stringify(activityLog.info.mock.calls)).not.toContain(
+      "member_test",
+    );
   });
 
-  it("logs retry-later observations with a bounded retry reason", async () => {
+  it("logs retry-later observations without Cloudflare-local causes", async () => {
     await expect(observeHostedTemporalActivity({
       activity: "ensureRuntimeProcessing",
       orchestrationAttemptId: "orchestration_attempt_test",
@@ -61,7 +63,6 @@ describe("observeHostedTemporalActivity", () => {
       userId: "member_test",
     }, async () => ({
       kind: "retry_later",
-      reason: "start_not_confirmed",
       retryAt: "2026-05-21T12:00:00.000Z",
     }))).resolves.toMatchObject({
       kind: "retry_later",
@@ -77,9 +78,38 @@ describe("observeHostedTemporalActivity", () => {
         reason: "retry",
         resultAction: null,
         resultKind: "retry_later",
-        retryReason: "start_not_confirmed",
-        userId: "member_test",
+        userIdPresent: true,
       },
+    );
+  });
+
+  it("logs legacy ensure-execution observations while the fallback remains", async () => {
+    await expect(observeHostedTemporalActivity({
+      activity: "ensureCloudflareExecution",
+      orchestrationAttemptId: "orchestration_attempt_legacy",
+      reason: "retry",
+      userId: "member_test",
+    }, async () => ({
+      action: "started",
+      kind: "runtime_completed",
+      runtimeAttemptId: "runtime_attempt_legacy",
+      runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
+      runtimeStatus: "idle",
+    }))).resolves.toMatchObject({
+      kind: "runtime_completed",
+    });
+
+    expect(activityLog.info).toHaveBeenCalledWith(
+      "Hosted Temporal activity completed.",
+      expect.objectContaining({
+        activity: "ensureCloudflareExecution",
+        orchestrationAttemptId: "orchestration_attempt_legacy",
+        reason: "retry",
+        resultAction: null,
+        resultKind: "runtime_completed",
+        userIdPresent: true,
+      }),
     );
   });
 
@@ -104,7 +134,6 @@ describe("observeHostedTemporalActivity", () => {
       expect.objectContaining({
         resultAction: null,
         resultKind: "runtime_processing_accepted",
-        retryReason: null,
       }),
     );
     expect(JSON.stringify(activityLog.info.mock.calls)).not.toContain(
@@ -141,12 +170,14 @@ describe("observeHostedTemporalActivity", () => {
         reason: "nudge",
         resultAction: null,
         resultKind: null,
-        retryReason: null,
-        userId: "member_test",
+        userIdPresent: true,
       },
     );
     expect(JSON.stringify(activityLog.warn.mock.calls)).not.toContain(
       unsafeUpstreamCode,
+    );
+    expect(JSON.stringify(activityLog.warn.mock.calls)).not.toContain(
+      "member_test",
     );
   });
 
@@ -173,8 +204,7 @@ describe("observeHostedTemporalActivity", () => {
         reason: null,
         resultAction: null,
         resultKind: null,
-        retryReason: null,
-        userId: "member_test",
+        userIdPresent: true,
       }),
     );
   });

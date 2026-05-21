@@ -5,9 +5,13 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedRuntimeEnsureExecutionResponse,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 
+import {
+  ensureCloudflareExecution,
+} from "../src/activities/ensure-cloudflare-execution.js";
 import {
   ensureRuntimeProcessing,
 } from "../src/activities/ensure-runtime-processing.js";
@@ -62,13 +66,33 @@ describe("ensureRuntimeProcessing", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(10_000);
   });
 
+  it("keeps the legacy ensure-execution HTTP budget separate from ensure-processing", async () => {
+    await stubCloudflareEnvironment();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    const response: HostedRuntimeEnsureExecutionResponse = {
+      kind: "runtime_wake_sent",
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
+      runtimeAttemptId: "runtime_attempt_test",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(response)));
+
+    await expect(ensureCloudflareExecution({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      reason: "nudge",
+      userId: "member_test",
+    })).resolves.toEqual(response);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(125_000);
+  });
+
   it("posts only the minimal Cloudflare ensure-processing request", async () => {
     await stubCloudflareEnvironment();
 
     const response: HostedRuntimeEnsureProcessingResponse = {
       action: "started",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: null,
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     };
     const observedRequests: ObservedRequest[] = [];
@@ -100,7 +124,7 @@ describe("ensureRuntimeProcessing", () => {
     const response: HostedRuntimeEnsureProcessingResponse = {
       action: "woken",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: null,
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
       runtimeAttemptId: "runtime_attempt_test",
     };
     const observedRequests: ObservedRequest[] = [];

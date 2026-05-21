@@ -4,7 +4,9 @@ import {
   type RetryableErrorOptions,
 } from "workflow";
 
-import { HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS } from "./webhook-nudge-policy";
+import {
+  HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS as HOSTED_WEBHOOK_RUNTIME_WAKE_TIMEOUT_MS,
+} from "./webhook-nudge-policy";
 import {
   type HostedOnboardingError,
   isHostedOnboardingError,
@@ -32,7 +34,7 @@ export async function processHostedStripeWebhookEventStep(
   try {
     result = await processRecordedHostedStripeWebhookEvent({
       eventId: input.eventId,
-      timeoutMs: HOSTED_WEBHOOK_RUNNER_NUDGE_TIMEOUT_MS,
+      timeoutMs: HOSTED_WEBHOOK_RUNTIME_WAKE_TIMEOUT_MS,
     });
   } catch (error) {
     throw mapHostedStripeWorkflowStepError(error);
@@ -40,7 +42,7 @@ export async function processHostedStripeWebhookEventStep(
 
   if (!result.accepted) {
     throw new RetryableError(
-      "Hosted Stripe webhook runner nudge is temporarily unavailable.",
+      "Hosted Stripe webhook Temporal runtime wake is temporarily unavailable.",
       {
         retryAfter: HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_RETRY_AFTER,
       },

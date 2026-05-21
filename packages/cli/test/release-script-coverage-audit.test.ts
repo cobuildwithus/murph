@@ -687,7 +687,7 @@ Updated: 2026-04-24
     )
     expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
     expect(workspaceVerify).toContain(
-      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 50)"',
+      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 45)"',
     )
     expect(workspaceVerify).toContain(
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',

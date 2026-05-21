@@ -29,7 +29,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       mailboxLag: [mailboxLag()],
       source: "mailbox_backlog",
     }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
@@ -68,7 +68,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(idleDemand(isoAfter(60_000)));
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -87,10 +87,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
-  it("uses runtime_wake_sent recommendedRecheckAt before re-reading demand", async () => {
+  it("uses processing accepted recommendedRecheckAt before re-reading demand", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeWakeSent(isoAfter(45_000)));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
     runtime.demands.push(idleDemand(isoAfter(120_000)));
 
     const machine = createMachine(runtime, {
@@ -113,7 +113,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       expect(request.runtimeResultWakeAt).toBe(runtimeResultWakeAt);
       return runDemand({ source: "runtime_result_wake" });
     });
-    runtime.executions.push(runtimeWakeSent(isoAfter(45_000)));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
     runtime.demands.push((request) => {
       expect(request.runtimeResultWakeAt).toBeNull();
       return idleDemand(null);
@@ -140,12 +140,12 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it("lets a signal interrupt runtime_wake_sent recheck wait", async () => {
+  it("lets a signal interrupt processing accepted recheck wait", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeWakeSent(isoAfter(45_000)));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(45_000)));
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -163,16 +163,16 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(2);
   });
 
-  it("re-reads demand immediately when a signal arrives before runtime_wake_sent returns", async () => {
+  it("re-reads demand immediately when a signal arrives before processing accepted returns", async () => {
     const runtime = new FakeWorkflowRuntime();
     let machine: HostedUserRuntimeWorkflowMachine | null = null;
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(() => {
       machine?.applySignal(browserVaultSignal());
-      return runtimeWakeSent(isoAfter(45_000));
+      return processingAcceptedWithRecheck(isoAfter(45_000));
     });
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -188,26 +188,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       manualRunRequested: true,
     });
     expect(runtime.executionRequests).toHaveLength(2);
-  });
-
-  it("falls back to the configured active-wake delay when no recommended recheck is returned", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeWakeSent(null));
-
-    const machine = createMachine(runtime, {
-      options: {
-        activeWakeRecheckDelayMs: 7_000,
-        continueAsNewAfterIterations: 1,
-      },
-      userId: "member_test",
-    });
-    machine.applySignal(manualSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(HOSTED_USER_RUNTIME_DEFAULT_ACTIVE_WAKE_RECHECK_DELAY_MS).toBeGreaterThan(1_000);
-    expect(runtime.waits).toEqual([7_000]);
   });
 
   it("passes carried runtime result wake time and reason into demand reads", async () => {
@@ -238,7 +218,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       mailboxLag: [mailboxLag()],
       source: "mailbox_backlog",
     }));
-    runtime.executions.push(runtimeWakeSent(isoAfter(11_000)));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(11_000)));
     runtime.demands.push(idleDemand(null));
 
     const machine = createMachine(runtime, {
@@ -263,12 +243,12 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       mailboxLag: [mailboxLag()],
       source: "mailbox_backlog",
     }));
-    runtime.executions.push(runtimeWakeSent(isoAfter(30_000)));
+    runtime.executions.push(processingAcceptedWithRecheck(isoAfter(30_000)));
     runtime.demands.push((request) => {
       expect(request.manualRunRequested).toBe(true);
       return runDemand({ source: "manual" });
     });
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -296,7 +276,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       expect(request.manualRunRequested).toBe(true);
       return runDemand({ source: "manual" });
     });
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -320,7 +300,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(retryLater(isoAfter(22_000)));
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -338,7 +318,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
   it("does not pass usage decisions into execution", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
@@ -378,7 +358,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
         workspace,
       });
     });
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
@@ -409,7 +389,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       source: "workspace_wake",
       workspace,
     }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
     runtime.demands.push(idleDemand(isoAfter(60_000)));
 
     const machine = createMachine(runtime, {
@@ -432,7 +412,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       return idleDemand(isoAfter(60_000));
     });
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -451,7 +431,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     runtime.demands.push(runDemand({ source: "manual" }));
     runtime.executions.push(() => {
       machine?.applySignal(browserVaultSignal());
-      return runtimeCompleted();
+      return processingAccepted();
     });
     runtime.demands.push(idleDemand(isoAfter(60_000)));
 
@@ -483,10 +463,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     }));
     runtime.executions.push(() => {
       machine?.applySignal(manualSignal("manual-during-workspace-wake"));
-      return runtimeCompleted();
+      return processingAccepted();
     });
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -626,7 +606,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
       expect(request.manualRunRequested).toBe(true);
       return runDemand({ source: "manual" });
     });
-    runtime.executions.push(runtimeCompleted());
+    runtime.executions.push(processingAccepted());
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 2 },
@@ -766,10 +746,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it("does not sleep when runtime_wake_sent recheck is already due or malformed", async () => {
+  it("does not sleep when processing accepted recheck is already due or malformed", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.demands.push(runDemand({ source: "manual" }));
-    runtime.executions.push(runtimeWakeSent("not-an-iso-timestamp"));
+    runtime.executions.push(processingAcceptedWithRecheck("not-an-iso-timestamp"));
 
     const machine = createMachine(runtime, {
       options: { continueAsNewAfterIterations: 1 },
@@ -842,26 +822,33 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     });
   });
 
-  it("upgrades the legacy ensure-execution timeout when continuing as new", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.suggestContinueAsNew = true;
+  it.each([630_000, 660_000])(
+    "upgrades the legacy ensure-execution timeout %i when continuing as new",
+    async (legacyTimeoutMs) => {
+      const runtime = new FakeWorkflowRuntime();
+      runtime.suggestContinueAsNew = true;
 
-    const machine = createMachine(runtime, {
-      options: {
+      const machine = createMachine(runtime, {
+        options: {
+          continueAsNewAfterIterations: 100,
+          ensureCloudflareExecutionStartToCloseTimeoutMs: legacyTimeoutMs,
+        },
+        userId: "member_test",
+      });
+
+      const continued = await runUntilContinueAsNew(machine);
+
+      expect(continued.options).toMatchObject({
         continueAsNewAfterIterations: 100,
-        ensureCloudflareExecutionStartToCloseTimeoutMs: 630_000,
-      },
-      userId: "member_test",
-    });
+        ensureRuntimeProcessingStartToCloseTimeoutMs:
+          HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
+      });
+      expect(continued.options).not.toHaveProperty(
+        "ensureCloudflareExecutionStartToCloseTimeoutMs",
+      );
+    },
+  );
 
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(continued.options).toMatchObject({
-      continueAsNewAfterIterations: 100,
-      ensureRuntimeProcessingStartToCloseTimeoutMs:
-        HOSTED_USER_RUNTIME_DEFAULT_ENSURE_EXECUTION_START_TO_CLOSE_TIMEOUT_MS,
-    });
-  });
 });
 
 function normalizedContinuedOptions(
@@ -1018,10 +1005,10 @@ function emptyCarryForwardState(): NonNullable<HostedUserRuntimeWorkflowInput["s
     latestMailboxPointer: null,
     mailboxSignalCount: 0,
     manualRunRequested: false,
-    runtimeFailedWithoutNextWakeCount: 0,
+    legacyRuntimeFailedWithoutNextWakeCount: 0,
     runtimeResultWakeAt: null,
     runtimeResultWakeReason: null,
-    sameRuntimeWakeSentCount: 0,
+    sameRuntimeWakeAcceptedCount: 0,
     signalVersion: 0,
   };
 }
@@ -1085,7 +1072,7 @@ function idleDemand(nextWakeAt: string | null): HostedRuntimeDemand {
   };
 }
 
-function runtimeCompleted(
+function processingAccepted(
   input: Partial<
     Extract<
       HostedRuntimeEnsureProcessingResponse,
@@ -1101,8 +1088,8 @@ function runtimeCompleted(
   };
 }
 
-function runtimeWakeSent(
-  recommendedRecheckAt: string | null,
+function processingAcceptedWithRecheck(
+  recommendedRecheckAt: string,
 ): HostedRuntimeEnsureProcessingResponse {
   return {
     action: "woken",
@@ -1115,7 +1102,6 @@ function runtimeWakeSent(
 function retryLater(retryAt: string): HostedRuntimeEnsureProcessingResponse {
   return {
     kind: "retry_later",
-    reason: "container_rpc_timeout",
     retryAt,
   };
 }

@@ -159,6 +159,11 @@ Activity HTTP targets:
   ensure-processing command, max 30000. The Workflow Activity
   Start-To-Close timeout adds a small reporting slack over this value because
   Cloudflare returns after start/wake acceptance, not after runtime idle.
+- `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` and
+  `HOSTED_TEMPORAL_ENSURE_EXECUTION_TIMEOUT_MARGIN_MS`: legacy
+  ensure-execution timeout inputs retained only for replay/deploy-skew
+  compatibility. Normal hosted runtime processing uses
+  `HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS`.
 
 Worker shutdown:
 
