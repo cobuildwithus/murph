@@ -257,6 +257,44 @@ describe("hosted orchestration status route", () => {
     });
   });
 
+  it("keeps core workflow flags visible when observability enums are newer than web", async () => {
+    mocks.queryWorkflowStatus.mockResolvedValue({
+      ...buildWorkflowStatus(),
+      currentWaitReason: "future_wait_reason",
+      lastDemandKind: "future_demand",
+      lastExecutionKind: "future_execution",
+      lastRuntimeStatus: "future_runtime_status",
+      latestMailboxPointer: {
+        lane: "future_lane",
+      },
+    });
+
+    const response = await statusRoute.GET(
+      requestForStatus(),
+      routeContext(),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.temporal.unavailableReason).toBeNull();
+    expect(body.temporal.status).toMatchObject({
+      currentWaitReason: null,
+      lastDemandKind: null,
+      lastExecutionKind: null,
+      lastRuntimeStatus: null,
+      latestMailboxPointerPresent: false,
+      manualRunRequested: true,
+      signalVersion: 4,
+    });
+    expect(mocks.readHostedRuntimeDemand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionSource: "status",
+        manualRunRequested: true,
+        userId: MEMBER_ID,
+      }),
+    );
+  });
+
   it("reports invalid status payloads without collapsing them into absent state", async () => {
     mocks.queryWorkflowStatus.mockResolvedValue({
       ...buildWorkflowStatus(),

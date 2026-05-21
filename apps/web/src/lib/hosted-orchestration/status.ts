@@ -345,7 +345,7 @@ function parseHostedRuntimeWorkflowStatusForWeb(
       record.lastRuntimeStatus ?? null,
     ),
     latestMailboxPointer:
-      readNullableMailboxPointer(record.latestMailboxPointer),
+      readNullableObservabilityMailboxPointer(record.latestMailboxPointer),
     mailboxSignalCount: requireSafeInteger(record.mailboxSignalCount),
     manualRunRequested: requireBoolean(record.manualRunRequested),
     legacyRuntimeFailedWithoutNextWakeCount: readOptionalSafeInteger(
@@ -385,6 +385,16 @@ function readNullableMailboxPointer(
   };
 }
 
+function readNullableObservabilityMailboxPointer(
+  value: unknown,
+): HostedRuntimeWorkflowState["latestMailboxPointer"] {
+  try {
+    return readNullableMailboxPointer(value);
+  } catch {
+    return null;
+  }
+}
+
 function readNullableDemandKind(value: unknown): HostedRuntimeDemandKind | null {
   if (value === null) {
     return null;
@@ -395,7 +405,7 @@ function readNullableDemandKind(value: unknown): HostedRuntimeDemandKind | null 
     return kind as HostedRuntimeDemandKind;
   }
 
-  throw new TypeError("Hosted runtime workflow demand kind is invalid.");
+  return null;
 }
 
 function readNullableCurrentWaitReason(
@@ -414,7 +424,7 @@ function readNullableCurrentWaitReason(
     return reason as HostedRuntimeWorkflowState["currentWaitReason"];
   }
 
-  throw new TypeError("Hosted runtime workflow wait reason is invalid.");
+  return null;
 }
 
 function readNullableExecutionKind(
@@ -445,7 +455,7 @@ function readNullableExecutionKind(
     return kind as HostedRuntimeEnsureProcessingResponseKind;
   }
 
-  throw new TypeError("Hosted runtime workflow execution kind is invalid.");
+  return null;
 }
 
 function readNullableLastRuntimeStatus(
@@ -468,7 +478,7 @@ function readNullableLastRuntimeStatus(
     return status as HostedRuntimeLastRuntimeStatus;
   }
 
-  throw new TypeError("Hosted runtime workflow runtime status is invalid.");
+  return null;
 }
 
 function readNullableString(value: unknown): string | null {
