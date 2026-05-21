@@ -79,6 +79,9 @@
       "@murphai/hosted-execution/hosted-email": [
         "packages/hosted-execution/src/hosted-email.ts"
       ],
+      "@murphai/hosted-execution/orchestration-control": [
+        "packages/hosted-execution/src/orchestration-control.ts"
+      ],
       "@murphai/hosted-execution/parsers": [
         "packages/hosted-execution/src/parsers.ts"
       ],
