@@ -10,6 +10,8 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/hosted-execution/parsers": "../hosted-execution/src/parsers.ts",
   "@murphai/hosted-execution/runtime-control":
     "../hosted-execution/src/runtime-control.ts",
+  "@murphai/hosted-execution/temporal-env":
+    "../hosted-execution/src/temporal-env.ts",
 } as const;
 
 export default createMurphPackageVitestConfig({

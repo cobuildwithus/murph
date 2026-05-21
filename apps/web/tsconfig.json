@@ -88,6 +88,9 @@
       "@murphai/hosted-execution/runtime-control": [
         "packages/hosted-execution/src/runtime-control.ts"
       ],
+      "@murphai/hosted-execution/temporal-env": [
+        "packages/hosted-execution/src/temporal-env.ts"
+      ],
       "@murphai/messaging-ingress/linq-webhook": [
         "packages/messaging-ingress/src/linq-webhook.ts"
       ],

@@ -842,7 +842,9 @@ test('age preview scores submitted labs and wearable context without a vault', a
   const payloadControlledArtifactRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-payload-model-cards-'))
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-preview-'))
   const payloadPath = path.join(payloadRoot, 'payload.json')
+  const functionPayloadPath = path.join(payloadRoot, 'function-payload.json')
   const productPayloadPath = path.join(payloadRoot, 'product-payload.json')
+  const functionPackHash = 'sha256:3333333333333333333333333333333333333333333333333333333333333333'
   try {
     await writeLocalModelCardArtifact(payloadRoot, 'lab5.json', {
       cardId: 'lab5_bp_bmi_transport_research',
@@ -896,6 +898,50 @@ test('age preview scores submitted labs and wearable context without a vault', a
         schemaVersion: 'murph.age.wearable-residual-parameter-pack.v1',
         sourceRouteId: 'nhanes-activity-shadow-lmf',
       },
+    }))
+    await writeFile(functionPayloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      functionResidualParameterPack: {
+        anchorCardId: 'lab5_bp_bmi_transport_research',
+        calibrationIntercept: 0,
+        calibrationSlope: 1,
+        deploymentRights: 'research-only',
+        endpoint: '10-year all-cause mortality',
+        evidenceTier: 'same-family-sanity',
+        featureWeights: [{
+          center: 0,
+          coefficient: 0.04,
+          metricKey: 'iadl-limitation-count',
+          scale: 1,
+          transform: 'center-scale',
+        }, {
+          center: 0,
+          coefficient: 0.06,
+          metricKey: 'mobility-limitation-count',
+          scale: 1,
+          transform: 'center-scale',
+        }],
+        globalFunctionCapLogit: 0.2,
+        horizonYears: 10,
+        intercept: 0,
+        layerId: 'function-mobility-residual-v1',
+        packHash: functionPackHash,
+        schemaVersion: 'murph.age.function-residual-parameter-pack.v1',
+        sourceRouteId: 'mhas-harmonized-aging',
+      },
+      sex: 'female',
+      submittedMetrics: [
+        { metricKey: 'HbA1c', unit: '%', value: 5.3 },
+        { metricKey: 'HDL_C', unit: 'mg/dL', value: 60 },
+        { metricKey: 'Triglycerides', unit: 'mg/dL', value: 90 },
+        { metricKey: 'creatinine', unit: 'mg/dL', value: 0.85 },
+        { metricKey: 'SBP', sourceKind: 'measurement', unit: 'mmHg', value: 118 },
+        { metricKey: 'diastolic_bp', sourceKind: 'measurement', unit: 'mmHg', value: 72 },
+        { metricKey: 'body_mass_index', sourceKind: 'measurement', unit: 'kg/m2', value: 23.2 },
+        { metricKey: 'iadl-limitation-count', sourceKind: 'measurement', unit: 'count', value: 1 },
+        { metricKey: 'mobility-limitation-count', sourceKind: 'measurement', unit: 'count', value: 1 },
+      ],
     }))
     await writeFile(productPayloadPath, JSON.stringify({
       asOf: '2026-05-10T00:00:00.000Z',
@@ -983,7 +1029,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
     ]))
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(view).success, true)
-    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v12')
+    assert.equal(view.schemaVersion, 'murph.age.research-calculator-view.v13')
     assert.equal(view.researchOnly, true)
     assert.equal(view.product.productUseAuthorized, false)
     assert.equal(view.status, 'ready')
@@ -1075,6 +1121,35 @@ test('age preview scores submitted labs and wearable context without a vault', a
     assert.equal(functionLayer.parameterPackAvailable, false)
     assert.equal(functionLayer.metricKeys.join('|'), 'adl-limitation-count|iadl-limitation-count|mobility-limitation-count|frailty-symptom-count')
     assert.equal(functionLayer.sourceEvidenceIds.join('|'), 'mhas-function-mobility-sidecar-local-run')
+    const functionPackView = requireData(await runSliceCli<MurphAgeResearchCalculatorView>([
+      'age',
+      'preview-view',
+      '--input',
+      `@${functionPayloadPath}`,
+      '--model-card-artifact-root',
+      artifactRoot,
+    ]))
+    assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(functionPackView).success, true)
+    assert.equal(functionPackView.selectedCardId, 'lab5_bp_bmi_transport_research')
+    assert.equal(functionPackView.functionResidualLayer?.status, 'research-parameterized-shadow-delta')
+    assert.equal(functionPackView.functionResidualLayer?.parameterPackHash, functionPackHash)
+    assert.equal(functionPackView.functionResidualLayer?.residualDeltaLogit, 0.1)
+    assert.equal(functionPackView.functionResidualLayer?.scoreBearing, false)
+    assert.equal(functionPackView.functionResidualLayer?.scoreContributionAuthorized, false)
+    assert.equal(functionPackView.layeredAgeEstimate?.status, 'selected-card-only')
+    assert.deepEqual(functionPackView.model.layeredResearchPath.parameterPackBlockedLayerIds, [
+      'wearable-activity-residual',
+    ])
+    const encodedFunctionLayer = JSON.stringify(functionPackView.functionResidualLayer)
+    for (const forbidden of [
+      'coefficient',
+      'metric-point:',
+      'finalRiskProbability',
+      'finalRiskAgeEquivalentYears',
+      'anchorRiskAgeEquivalentYears',
+    ]) {
+      assert.equal(encodedFunctionLayer.includes(forbidden), false, forbidden)
+    }
     const wearableActivityLayer = view.model.layeredResearchPath.layers.find((layer) =>
       layer.layerId === 'wearable-activity-residual'
     )
@@ -1501,7 +1576,7 @@ test('age preview scores submitted labs and wearable context without a vault', a
 
     assert.equal(murphAgeResearchCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
     assert.equal(murphAgeCalculatorViewResultSchema.safeParse(researchCalculatorView).success, true)
-    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v12')
+    assert.equal(researchCalculatorView.schemaVersion, 'murph.age.research-calculator-view.v13')
     assert.equal(researchCalculatorView.researchOnly, true)
     assert.equal(researchCalculatorView.mode, 'research')
     assert.equal(researchCalculatorView.status, 'ready')
@@ -1997,7 +2072,7 @@ test('age report returns a product-mode public abstention instead of research-on
     ]))
 
     assert.equal(report.mode, 'product')
-    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v5')
+    assert.equal(report.schemaVersion, 'murph.age.public-calculator-report.v6')
     assert.equal(report.status, 'abstain')
     assert.equal(report.result, null)
     assert.equal(report.wearableResidualLayer, null)
