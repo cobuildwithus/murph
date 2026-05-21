@@ -1,10 +1,6 @@
 import {
   parseHostedRuntimeDemand,
 } from "@murphai/hosted-execution/parsers";
-import {
-  parseHostedAiUsageAllowDecision,
-  type HostedAiUsageAllowDecision,
-} from "@murphai/hosted-execution/runtime-control";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const FIXED_NOW = "2026-05-20T12:00:00.000Z";
@@ -12,7 +8,6 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
-  createHostedAiUsageAllowDecision: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -35,27 +30,16 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-gate-allow-decision", () => ({
-  createHostedAiUsageAllowDecision: mocks.createHostedAiUsageAllowDecision,
-}));
-
 type DemandRoute = typeof import(
   "../app/api/internal/hosted-orchestration/users/[userId]/demand/route"
 );
-type UsageDecisionRoute = typeof import(
-  "../app/api/internal/hosted-orchestration/users/[userId]/usage-allow-decision/route"
-);
 
 let demandRoute: DemandRoute;
-let usageDecisionRoute: UsageDecisionRoute;
 
 describe("hosted orchestration demand", () => {
   beforeAll(async () => {
     demandRoute = await import(
       "../app/api/internal/hosted-orchestration/users/[userId]/demand/route"
-    );
-    usageDecisionRoute = await import(
-      "../app/api/internal/hosted-orchestration/users/[userId]/usage-allow-decision/route"
     );
   });
 
@@ -67,7 +51,6 @@ describe("hosted orchestration demand", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: true });
-    mocks.createHostedAiUsageAllowDecision.mockResolvedValue(buildAiUsageAllowDecision());
   });
 
   afterEach(() => {
@@ -136,7 +119,8 @@ describe("hosted orchestration demand", () => {
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript/u);
   });
 
-  it("runs due runtime-result wake before due workspace wake", async () => {
+  it("gates maintenance runtime-result wakes that mask model-capable workspace wakes", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:30.000Z",
       nextWakeReason: "assistant_due",
@@ -145,22 +129,25 @@ describe("hosted orchestration demand", () => {
 
     const response = await demandRoute.GET(
       requestForDemand(
-        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
+        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=device-sync.reconcile",
       ),
       routeContext(),
     );
     const demand = parseHostedRuntimeDemand(await response.json());
 
     expect(demand).toMatchObject({
-      kind: "run",
-      reason: "retry",
-      requiresAiUsageDecision: false,
-      source: "runtime_result_wake",
+      kind: "blocked",
+      reason: "ai_usage_denied",
+      retryAt: null,
       workspace: {
         nextWakeAt: "2026-05-20T11:59:30.000Z",
         nextWakeReason: "assistant_due",
         version: "8",
       },
+    });
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
     });
   });
 
@@ -226,7 +213,7 @@ describe("hosted orchestration demand", () => {
     const nextWakeAt = "2026-05-20T11:58:00.000Z";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt,
-      nextWakeReason: "assistant_due",
+      nextWakeReason: "device-sync.reconcile",
     }));
 
     const response = await demandRoute.GET(
@@ -242,7 +229,7 @@ describe("hosted orchestration demand", () => {
       source: "workspace_wake",
       workspace: {
         nextWakeAt,
-        nextWakeReason: "assistant_due",
+        nextWakeReason: "device-sync.reconcile",
         version: "4",
       },
     });
@@ -332,7 +319,28 @@ describe("hosted orchestration demand", () => {
 
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:58:00.000Z",
-      nextWakeReason: "assistant_due",
+      nextWakeReason: "device-sync.reconcile",
+    }));
+    const runtimeResultResponse = await demandRoute.GET(
+      requestForDemand(
+        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z&runtimeResultWakeReason=device-sync.reconcile",
+      ),
+      routeContext(),
+    );
+    const runtimeResultDemand = parseHostedRuntimeDemand(
+      await runtimeResultResponse.json(),
+    );
+
+    expect(runtimeResultDemand).toMatchObject({
+      kind: "run",
+      requiresAiUsageDecision: false,
+      source: "runtime_result_wake",
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:58:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
     }));
     const workspaceResponse = await demandRoute.GET(
       requestForDemand(),
@@ -346,6 +354,128 @@ describe("hosted orchestration demand", () => {
       source: "workspace_wake",
     });
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("gates reasonless runtime-result wakes by default", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+
+    const response = await demandRoute.GET(
+      requestForDemand(
+        "?runtimeResultWakeAt=2026-05-20T11%3A59%3A00.000Z",
+      ),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toMatchObject({
+      kind: "blocked",
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+    });
+  });
+
+  it("gates model-capable workspace wakes", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:58:00.000Z",
+      nextWakeReason: "assistant",
+    }));
+
+    const response = await demandRoute.GET(
+      requestForDemand(),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toMatchObject({
+      kind: "blocked",
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+    });
+  });
+
+  it("does not gate system-only mailbox backlog", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "system",
+        maxSeq: "2",
+      },
+      {
+        lane: "conversation",
+        maxSeq: "0",
+      },
+    ]);
+
+    const response = await demandRoute.GET(
+      requestForDemand(),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toMatchObject({
+      kind: "run",
+      reason: "nudge",
+      requiresAiUsageDecision: false,
+      source: "mailbox_backlog",
+    });
+    expect(demand.mailboxLag).toContainEqual({
+      importedSeq: "0",
+      lag: "2",
+      lane: "system",
+      maxSeq: "2",
+    });
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("does not let system-only mailbox backlog mask explicit manual demand gating", async () => {
+    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "system",
+        maxSeq: "2",
+      },
+      {
+        lane: "conversation",
+        maxSeq: "0",
+      },
+    ]);
+
+    const response = await demandRoute.GET(
+      requestForDemand("?manualRunRequested=1"),
+      routeContext(),
+    );
+    const demand = parseHostedRuntimeDemand(await response.json());
+
+    expect(demand).toMatchObject({
+      kind: "blocked",
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+    });
   });
 
   it("returns the earliest future runtime or workspace wake while idle", async () => {
@@ -368,59 +498,6 @@ describe("hosted orchestration demand", () => {
     });
   });
 
-  it("returns a fresh signed usage decision through the Activity-local endpoint", async () => {
-    const response = await usageDecisionRoute.GET(
-      requestForUsageDecision(),
-      routeContext(),
-    );
-    const decision = parseHostedAiUsageAllowDecision(await response.json());
-
-    expect(decision).toEqual(buildAiUsageAllowDecision());
-    expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-    });
-    expect(mocks.createHostedAiUsageAllowDecision).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      now: new Date(FIXED_NOW),
-    });
-  });
-
-  it("returns a blocked usage decision state without usage ledger details", async () => {
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({
-      allowed: false,
-      reason: "ai_usage_limit_exceeded",
-    });
-
-    const response = await usageDecisionRoute.GET(
-      requestForUsageDecision(),
-      routeContext(),
-    );
-    const body = await response.json();
-
-    expect(body).toEqual({
-      kind: "blocked",
-      reason: "ai_usage_denied",
-      retryAt: null,
-    });
-    expect(JSON.stringify(body)).not.toMatch(/spent|remaining|limit|billing|ledger/u);
-    expect(mocks.createHostedAiUsageAllowDecision).not.toHaveBeenCalled();
-  });
-
-  it("returns a retryable blocked usage state when a signed decision cannot be issued", async () => {
-    mocks.createHostedAiUsageAllowDecision.mockResolvedValue(null);
-
-    const response = await usageDecisionRoute.GET(
-      requestForUsageDecision(),
-      routeContext(),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      kind: "blocked",
-      reason: "ai_usage_gate_unavailable",
-      retryAt: "2026-05-20T12:00:30.000Z",
-    });
-  });
 });
 
 function requestForDemand(search = ""): Request {
@@ -428,15 +505,6 @@ function requestForDemand(search = ""): Request {
     `https://join.example.test/api/internal/hosted-orchestration/users/${
       encodeURIComponent(MEMBER_ID)
     }/demand${search}`,
-    { method: "GET" },
-  );
-}
-
-function requestForUsageDecision(): Request {
-  return new Request(
-    `https://join.example.test/api/internal/hosted-orchestration/users/${
-      encodeURIComponent(MEMBER_ID)
-    }/usage-allow-decision`,
     { method: "GET" },
   );
 }
@@ -494,21 +562,5 @@ function buildWorkspaceRecord(overrides: Partial<{
     userId: MEMBER_ID,
     version: "4",
     ...overrides,
-  };
-}
-
-function buildAiUsageAllowDecision(): HostedAiUsageAllowDecision {
-  return {
-    allowed: true,
-    expiresAt: "2026-05-20T12:00:30.000Z",
-    issuedAt: FIXED_NOW,
-    nonce: "nonce_orch_1",
-    schema: "murph.hosted-ai-usage-allow-decision.v1",
-    signature: {
-      alg: "HMAC-SHA256",
-      keyId: "v1",
-      signature: "signature_orch_1",
-    },
-    userId: MEMBER_ID,
   };
 }

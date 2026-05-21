@@ -98,6 +98,7 @@ export interface HostedRuntimeDemandRequest {
   lagRecoveryObserved?: boolean;
   manualRunRequested?: boolean;
   runtimeResultWakeAt?: string | null;
+  runtimeResultWakeReason?: string | null;
   userId: string;
 }
 
@@ -180,6 +181,7 @@ export type HostedRuntimeEnsureExecutionResponse =
       kind: "runtime_completed";
       runtimeAttemptId: string;
       runtimeResultNextWakeAt: string | null;
+      runtimeResultNextWakeReason: string | null;
       runtimeStatus: HostedWorkspaceInvocationStatus;
     }
   | {
@@ -204,6 +206,7 @@ export interface HostedRuntimeWorkflowState {
   mailboxSignalCount: number;
   manualRunRequested: boolean;
   runtimeResultWakeAt: string | null;
+  runtimeResultWakeReason: string | null;
   signalVersion: number;
   userId: string;
 }

@@ -206,12 +206,10 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the child runtime env.
-- `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET` and optional
-  `HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID` for legacy signed allow-decision
-  compatibility metadata. Current Cloudflare runner start authority does not
-  depend on these values and does not fall back to a live web usage-gate call;
-  web must gate before append/nudge, and runtime/provider spend enforcement
-  still happens before model calls.
+- Cloudflare runner start authority does not accept signed usage-allowance
+  decisions and does not fall back to a live web usage-gate call. Web gates
+  model-capable demand before signaling Temporal, and runtime/provider spend
+  enforcement still happens before model calls.
 
 Opt-in execution integrations:
 

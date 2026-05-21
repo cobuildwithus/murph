@@ -6,8 +6,6 @@ import {
 
 export interface HostedExecutionWorkerEnvironment {
   allowedRunnerSecretKeys: string | null;
-  hostedAiUsageGateAllowSigningKeyId: string | null;
-  hostedAiUsageGateAllowSigningSecret: string | null;
   hostedCryptoAuthoritySignKeyVersion: string;
   hostedCryptoAuthoritySignPublicKeyPem: string;
   hostedCryptoAuthorityVerifyKeyringJson: string | null;
@@ -59,12 +57,6 @@ export function readHostedExecutionWorkerEnvironment(
 
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),
-    hostedAiUsageGateAllowSigningKeyId: normalizeHostedExecutionString(
-      source.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID,
-    ),
-    hostedAiUsageGateAllowSigningSecret: normalizeHostedExecutionString(
-      source.HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET,
-    ),
     hostedCryptoAuthoritySignKeyVersion: requireHostedExecutionString(
       source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
       "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",

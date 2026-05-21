@@ -284,8 +284,6 @@ describe("hosted Linq usage reset e2e", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
-    vi.stubEnv("HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET", "<REDACTED_SECRET>");
-    vi.stubEnv("HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID", "usage-reset-test-key");
     vi.clearAllMocks();
 
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);

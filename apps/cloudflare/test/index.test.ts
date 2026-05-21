@@ -1569,6 +1569,7 @@ describe("cloudflare worker routes", () => {
           kind: "runtime_completed" as const,
           runtimeAttemptId: "runtime-attempt-test",
           runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
+          runtimeResultNextWakeReason: "assistant",
           runtimeStatus: "idle" as const,
         })),
       });
@@ -1597,6 +1598,7 @@ describe("cloudflare worker routes", () => {
         kind: "runtime_completed",
         runtimeAttemptId: "runtime-attempt-test",
         runtimeResultNextWakeAt: "2026-04-27T00:03:00.000Z",
+        runtimeResultNextWakeReason: "assistant",
         runtimeStatus: "idle",
       });
       expect(stub.ensureRuntimeExecutionForUser).toHaveBeenCalledWith({
@@ -1628,7 +1630,7 @@ describe("cloudflare worker routes", () => {
 
       expect(response.status).toBe(401);
       await expect(response.json()).resolves.toEqual({
-        error: "Unauthorized.",
+        error: "Unauthorized",
       });
       expect(stub.ensureRuntimeExecutionForUser).not.toHaveBeenCalled();
     });
@@ -1640,6 +1642,7 @@ describe("cloudflare worker routes", () => {
           kind: "runtime_completed" as const,
           runtimeAttemptId: "runtime-attempt-test",
           runtimeResultNextWakeAt: null,
+          runtimeResultNextWakeReason: null,
           runtimeStatus: "idle" as const,
         })),
       });
@@ -1679,7 +1682,11 @@ describe("cloudflare worker routes", () => {
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
       const { alarms, invoke, runner, sql, waitUntil } = createRuntimeControlRunnerHarness({
-        invocationResults: [{ nextWakeAt: runtimeNextWakeAt, status: "idle" }],
+        invocationResults: [{
+          nextWakeAt: runtimeNextWakeAt,
+          nextWakeReason: "assistant",
+          status: "idle",
+        }],
       });
 
       const response = await runner.ensureRuntimeExecutionForUser({
@@ -1693,6 +1700,7 @@ describe("cloudflare worker routes", () => {
         kind: "runtime_completed",
         runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
         runtimeResultNextWakeAt: runtimeNextWakeAt,
+        runtimeResultNextWakeReason: "assistant",
         runtimeStatus: "idle",
       });
       expect(invoke).toHaveBeenCalledOnce();
@@ -1782,6 +1790,7 @@ describe("cloudflare worker routes", () => {
         action: "replaced",
         kind: "runtime_completed",
         runtimeResultNextWakeAt: null,
+        runtimeResultNextWakeReason: null,
         runtimeStatus: "idle",
       });
       expect(response.kind === "runtime_completed" ? response.runtimeAttemptId : null)
@@ -1872,7 +1881,11 @@ describe("cloudflare worker routes", () => {
       const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
       const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
         deleteAlarmError: new Error("alarm cleanup failed"),
-        invocationResults: [{ nextWakeAt: runtimeNextWakeAt, status: "idle" }],
+        invocationResults: [{
+          nextWakeAt: runtimeNextWakeAt,
+          nextWakeReason: "assistant",
+          status: "idle",
+        }],
       });
 
       await expect(runner.ensureRuntimeExecutionForUser({
@@ -1884,6 +1897,7 @@ describe("cloudflare worker routes", () => {
         kind: "runtime_completed",
         runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
         runtimeResultNextWakeAt: runtimeNextWakeAt,
+        runtimeResultNextWakeReason: "assistant",
         runtimeStatus: "idle",
       });
 
@@ -1894,6 +1908,56 @@ describe("cloudflare worker routes", () => {
         wake_at: null,
       });
       expect(alarms).toEqual(["2026-04-27T00:01:00.000Z"]);
+    });
+
+    it("does not turn stale post-invoke completion recording into transport failure", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
+      const { alarms, runner, sql } = createRuntimeControlRunnerHarness({
+        afterInvocationResult: ({ sql: testSql }) => {
+          testSql.exec(
+            `UPDATE runner_meta
+             SET active_attempt_id = ?,
+                 active_generation = ?,
+                 active_kind = ?,
+                 active_started_at = ?,
+                 active_expires_at = ?
+             WHERE singleton = 1`,
+            "runtime-write-replacement",
+            99,
+            "runtime",
+            "2026-04-27T00:00:30.000Z",
+            "2026-04-27T00:02:00.000Z",
+          );
+        },
+        invocationResults: [{
+          nextWakeAt: runtimeNextWakeAt,
+          nextWakeReason: "assistant",
+          status: "idle",
+        }],
+      });
+
+      await expect(runner.ensureRuntimeExecutionForUser({
+        orchestrationAttemptId: "orchestration-attempt-test",
+        reason: "nudge",
+        userId: "test-user",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "runtime_completed",
+        runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
+        runtimeResultNextWakeAt: runtimeNextWakeAt,
+        runtimeResultNextWakeReason: "assistant",
+        runtimeStatus: "idle",
+      });
+
+      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+        active_attempt_id: "runtime-write-replacement",
+        backoff_until: null,
+        failure_count: 0,
+        wake_at: null,
+      });
+      expect(alarms).toContain("2026-04-27T00:02:00.000Z");
     });
   });
 
@@ -2397,6 +2461,10 @@ type RuntimeControlMetaRow = {
 };
 
 function createRuntimeControlRunnerHarness(input: {
+  afterInvocationResult?: (input: {
+    result: HostedWorkspaceInvocationResult;
+    sql: ReturnType<typeof createTestSqlStorage>;
+  }) => void;
   deleteAlarmError?: Error;
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
@@ -2456,6 +2524,10 @@ function createRuntimeControlRunnerHarness(input: {
     if (next instanceof Error) {
       throw next;
     }
+    input.afterInvocationResult?.({
+      result: next,
+      sql,
+    });
     return next;
   });
   const stub: HostedExecutionContainerStubLike = {

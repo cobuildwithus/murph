@@ -139,6 +139,7 @@ describe("hosted orchestration control contracts", () => {
       lagRecoveryObserved: false,
       manualRunRequested: true,
       runtimeResultWakeAt: "2026-05-20T12:00:30.000Z",
+      runtimeResultWakeReason: "assistant",
       userId: "user_test",
     };
     const mailboxLag = createMailboxLag();
@@ -273,12 +274,14 @@ describe("hosted orchestration control contracts", () => {
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_test",
       runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
+      runtimeResultNextWakeReason: "assistant",
       runtimeStatus: "idle",
     })).toEqual({
       action: "started",
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_test",
       runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
+      runtimeResultNextWakeReason: "assistant",
       runtimeStatus: "idle",
     });
     expect(parseHostedRuntimeEnsureExecutionResponse({
@@ -295,13 +298,29 @@ describe("hosted orchestration control contracts", () => {
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_replacement_test",
       runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
       runtimeStatus: "scheduled",
     })).toEqual({
       action: "replaced",
       kind: "runtime_completed",
       runtimeAttemptId: "runtime_attempt_replacement_test",
       runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
       runtimeStatus: "scheduled",
+    });
+    expect(parseHostedRuntimeEnsureExecutionResponse({
+      action: "started",
+      kind: "runtime_completed",
+      runtimeAttemptId: "runtime_attempt_missing_reason_test",
+      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
+      runtimeStatus: "idle",
+    })).toEqual({
+      action: "started",
+      kind: "runtime_completed",
+      runtimeAttemptId: "runtime_attempt_missing_reason_test",
+      runtimeResultNextWakeAt: "2026-05-20T12:03:00.000Z",
+      runtimeResultNextWakeReason: null,
+      runtimeStatus: "idle",
     });
   });
 
@@ -338,6 +357,7 @@ describe("hosted orchestration control contracts", () => {
       payload: true,
       runtimeAttemptId: "runtime_attempt_test",
       runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
       runtimeStatus: "idle",
     })).toThrow("Hosted runtime completed response must not include payload.");
 
@@ -347,6 +367,7 @@ describe("hosted orchestration control contracts", () => {
       redactedStatus: {},
       runtimeAttemptId: "runtime_attempt_test",
       runtimeResultNextWakeAt: null,
+      runtimeResultNextWakeReason: null,
       runtimeStatus: "idle",
     })).toThrow("Hosted runtime completed response must not include redactedStatus.");
   });

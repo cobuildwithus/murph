@@ -55,6 +55,10 @@ export const GET = withJsonError(async (
       request,
       "runtimeResultWakeAt",
     ),
+    runtimeResultWakeReason: readHostedOrchestrationNullableQueryString(
+      request,
+      "runtimeResultWakeReason",
+    ),
     userId: routeUserId,
   });
 
