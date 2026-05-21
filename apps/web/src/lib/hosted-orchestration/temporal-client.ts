@@ -54,7 +54,10 @@ export function readHostedRuntimeTemporalWorkflowOptions(
 export async function readHostedRuntimeTemporalSignalClientIfConfigured(): Promise<
   HostedRuntimeTemporalSignalClient | null
 > {
-  cachedClient ??= createHostedRuntimeTemporalSignalClient();
+  cachedClient ??= createHostedRuntimeTemporalSignalClient().catch((error) => {
+    cachedClient = null;
+    throw error;
+  });
   return cachedClient;
 }
 
