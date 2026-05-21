@@ -14,6 +14,7 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
+import { ApplicationFailure } from "@temporalio/common";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const DEFAULT_HOSTED_RUNTIME_DEMAND_TIMEOUT_MS = 10_000;
@@ -173,14 +174,25 @@ export async function requestHostedOrchestratorJson<TResponse>(
   }
 
   if (request.signing) {
-    const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
-      environment: request.signing,
-      method: request.method,
-      path: url.pathname,
-      payload: body ?? "",
-      search: url.search,
-      userId: request.boundUserId ?? null,
-    });
+    let signatureHeaders: Record<string, string>;
+    try {
+      signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+        environment: request.signing,
+        method: request.method,
+        path: url.pathname,
+        payload: body ?? "",
+        search: url.search,
+        userId: request.boundUserId ?? null,
+      });
+    } catch (error) {
+      throw nonRetryableActivityError(
+        "hosted_orchestrator_request_signing_configuration",
+        `Hosted orchestrator ${request.label} request signing configuration failed: ${
+          readErrorMessage(error)
+        }`,
+        error,
+      );
+    }
 
     for (const [key, value] of Object.entries(signatureHeaders)) {
       headers.set(key, value);
@@ -204,24 +216,60 @@ export async function requestHostedOrchestratorJson<TResponse>(
   }
 
   if (!response.ok) {
-    throw new HostedOrchestratorHttpResponseError({
+    const error = new HostedOrchestratorHttpResponseError({
       code: await readStructuredErrorCode(response),
       label: request.label,
       status: response.status,
     });
+
+    if (isNonRetryableHostedOrchestratorHttpStatus(response.status)) {
+      throw nonRetryableActivityError(
+        "hosted_orchestrator_http_non_retryable",
+        error.message,
+        error,
+      );
+    }
+
+    throw error;
   }
 
   let value: unknown;
   try {
     value = await response.json();
   } catch (error) {
-    throw new HostedOrchestratorTransportError({
-      cause: error,
-      label: `${request.label} response JSON`,
-    });
+    throw nonRetryableActivityError(
+      "hosted_orchestrator_invalid_json_response",
+      `Hosted orchestrator ${request.label} response JSON was invalid: ${
+        readErrorMessage(error)
+      }`,
+      error,
+    );
   }
 
-  return request.parse(value);
+  try {
+    return request.parse(value);
+  } catch (error) {
+    throw nonRetryableActivityError(
+      "hosted_orchestrator_invalid_protocol_response",
+      `Hosted orchestrator ${request.label} response was invalid: ${
+        readErrorMessage(error)
+      }`,
+      error,
+    );
+  }
+}
+
+export function nonRetryableActivityError(
+  type: string,
+  message: string,
+  cause?: unknown,
+): ApplicationFailure {
+  return ApplicationFailure.create({
+    ...(cause instanceof Error ? { cause } : {}),
+    message,
+    nonRetryable: true,
+    type,
+  });
 }
 
 export class HostedOrchestratorTransportError extends Error {
@@ -247,6 +295,14 @@ export class HostedOrchestratorHttpResponseError extends Error {
     this.code = input.code;
     this.status = input.status;
   }
+}
+
+function isNonRetryableHostedOrchestratorHttpStatus(status: number): boolean {
+  if (status < 400 || status >= 500) {
+    return false;
+  }
+
+  return status !== 408 && status !== 409 && status !== 425 && status !== 429;
 }
 
 function readHostedWebCallbackSigningEnvironment(
